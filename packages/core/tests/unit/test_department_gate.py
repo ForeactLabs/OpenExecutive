@@ -441,6 +441,11 @@ def test_a_newer_reply_on_the_same_thread_replaces_the_one_waiting(team: dict[st
     third = _hold_reply(owner, "Hi Dana, Tuesday's delivery is on.", subject="Re: Delivery window")
     assert ledger.get_decision_instance(second).status == ledger.STATUS_PROPOSED  # type: ignore[union-attr]
     assert ledger.get_decision_instance(third).status == ledger.STATUS_PROPOSED  # type: ignore[union-attr]
+    # Two new mails (no thread, no Re:) that share a subject are two asks.
+    new_a = _hold_reply(owner, "Hi Dana, one question.", subject="Question")
+    new_b = _hold_reply(owner, "Hi Dana, another question.", subject="Question")
+    assert ledger.get_decision_instance(new_a).status == ledger.STATUS_PROPOSED  # type: ignore[union-attr]
+    assert ledger.get_decision_instance(new_b).status == ledger.STATUS_PROPOSED  # type: ignore[union-attr]
     # Someone else's ask on the thread replaces nothing.
     verdict = gate.Verdict(run=False, department="logistics", approver_person_id=owner.id, reason="Careful")
     theirs = gate.hold(team["sam"], _GMAIL, _reply("Hi Dana, Sam here."), verdict, mcp=True, session_id="email:2")
@@ -482,3 +487,14 @@ def test_the_card_an_email_turn_raised_folds_into_the_step_it_held(team: dict[st
     assert folded is not None and folded.status == "dismissed" and folded.superseded_by_alert_id == card.id
     assert alerts_store.get_alert(other).status == "unread"  # type: ignore[arg-type,union-attr]
     assert turn.raised_cards == ()
+    # A held step a teammate approves leaves the owner's card about the mail.
+    owners = alerts_store.insert_alert(
+        source="email", external_id="mail-3", severity=AlertSeverity.MEDIUM.value,
+        headline="Dana asked again", body="Dana asked again.",
+    )
+    turn = Session(session_id="email:3", origin_channel="email", raised_cards=(("email", "mail-3"),))
+    verdict = gate.Verdict(run=False, department="operations", approver_person_id=team["ria"].id, reason="Careful")
+    with set_session(turn):
+        gate.hold(team["owner"], _GMAIL, _reply("Hi Dana, Ria will confirm.", "Re: Other"), verdict,
+                  mcp=True, session_id="email:3")
+    assert alerts_store.get_alert(owners).status == "unread"  # type: ignore[arg-type,union-attr]

@@ -399,12 +399,13 @@ def _note_raised(session: Any, event: Any, *, separate: bool) -> None:
         logger.debug("create_alert: couldn't note the raised card", exc_info=True)
 
 
-def fold_into_held(held_alert_id: int | None, *, db_path: Any = None) -> int:
+def fold_into_held(held_alert_id: int | None, *, reader: int | None, db_path: Any = None) -> int:
     """An email's turn held a step after raising a card about that mail: the
     held step's card is the one the owner answers, so the earlier card folds
     into it (``alerts.store.mark_superseded``) instead of asking twice. A card
     still being written folds in when it is (``alerts.pipeline.defer_fold``).
-    Returns how many folded now.
+    Only a card for the held card's ``reader`` (None = the principal) folds:
+    anyone else's stays, so they are still told. Returns how many folded now.
     Never raises."""
     if held_alert_id is None:
         return 0
@@ -415,18 +416,19 @@ def fold_into_held(held_alert_id: int | None, *, db_path: Any = None) -> int:
         session = current_session.get()
         if getattr(session, "origin_channel", "") != "email":
             return 0
-        from openexecutive.alerts.pipeline import defer_fold
+        from openexecutive.alerts.pipeline import defer_fold, reader_of
 
         folded = 0
         for source, external_id in tuple(getattr(session, "raised_cards", ()) or ()):
             row = store.get_alert_by_external(source, external_id, db_path=db_path)
             row_id = getattr(row, "id", None) if row is not None else None
-            if isinstance(row_id, int):
-                if store.mark_superseded(row_id, held_alert_id, db_path=db_path):
-                    folded += 1
-            else:
+            if not isinstance(row_id, int):
                 # Still being triaged: it folds in as soon as it is written.
-                defer_fold(source, external_id, held_alert_id, db_path=db_path)
+                defer_fold(source, external_id, held_alert_id, reader=reader, db_path=db_path)
+            elif reader_of(getattr(row, "routed_to_person_id", None)) == reader_of(reader) and store.mark_superseded(
+                row_id, held_alert_id, db_path=db_path
+            ):
+                folded += 1
         session.raised_cards = ()
         return folded
     except Exception:  # noqa: BLE001 - a second card is the worst case

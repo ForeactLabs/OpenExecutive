@@ -185,7 +185,9 @@ def test_a_card_written_after_its_turn_held_a_step_folds_into_that_step(monkeypa
     held = alert_store.insert_alert(source="decision_scheduling", external_id="decision_instance:1",
                                     severity="medium", headline="Reply to Dana", body="b", db_path=db)
     assert held is not None
-    pipeline.defer_fold("email", "mail-1", held, db_path=db)
+    pipeline.defer_fold("email", "mail-1", held, reader=None, db_path=db)
+    # A card for someone else than the held card's reader is still theirs.
+    pipeline.defer_fold("email", "mail-2", held, reader=99, db_path=db)
 
     async def runner() -> tuple:
         queue = sse_bus.subscribe()

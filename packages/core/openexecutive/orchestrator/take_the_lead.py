@@ -2145,7 +2145,7 @@ def hold(
         from openexecutive.orchestrator.alert_tools import fold_into_held
 
         # One card per ask: what this email's turn already raised folds in.
-        fold_into_held(alert_id, db_path=db_path)
+        fold_into_held(alert_id, reader=approver, db_path=db_path)
     from openexecutive.orchestrator.session import note_step_held
 
     note_step_held()

@@ -210,7 +210,7 @@ def hold(
 
         # One card per ask: what this turn already raised about the mail,
         # and an older reply to the same thread still waiting, fold into it.
-        fold_into_held(alert_id, db_path=db_path)
+        fold_into_held(alert_id, reader=verdict.approver_person_id, db_path=db_path)
         replace_older_reply(decision_id, alert_id, tool, steps, mcp=mcp,
                             approver=verdict.approver_person_id, requester=person.id, db_path=db_path)
     from openexecutive.orchestrator.session import note_step_held
@@ -251,10 +251,14 @@ def _thread_key(tool: str, steps: list[dict[str, Any]], *, mcp: bool) -> tuple[s
     to = step.get("to")
     addresses = to if isinstance(to, list) else [to] if isinstance(to, str) else []
     recipients = ",".join(sorted({str(a).strip().lower() for a in addresses if str(a).strip()}))
-    subject = _RE_PREFIX.sub("", str(step.get("subject") or "")).strip().lower()
-    if not recipients or not subject:
+    raw_subject = str(step.get("subject") or "")
+    subject = _RE_PREFIX.sub("", raw_subject).strip().lower()
+    thread_id = str(step.get("thread_id") or "").strip()
+    # With no thread, only a reply (Re:) is one: two new mails that share a
+    # subject are two asks.
+    if not recipients or not subject or (not thread_id and not _RE_PREFIX.match(raw_subject)):
         return None
-    return recipients, subject, str(step.get("thread_id") or "").strip()
+    return recipients, subject, thread_id
 
 
 def _waiting_replies(
