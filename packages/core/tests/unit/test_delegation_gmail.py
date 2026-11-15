@@ -1009,3 +1009,13 @@ def test_their_mail_is_the_mailboxs(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     client = gm.DelegateGmail(EMAIL)
     assert client.mailbox == "me@outlook.example"
     assert "authuser=me%40outlook.example" in gm.mailbox_link(EMAIL, thread_id="abc123")
+
+
+def test_the_script_saves_the_mailbox_they_signed_in_to(tmp_path: Path) -> None:
+    script = _script()
+    assert "mailbox" not in script.credential_payload(EMAIL, "r", "c", "s", mailbox=EMAIL.upper())
+    payload = script.credential_payload(EMAIL, "r", "c", "s", mailbox="Olivia.Home@Gmail.com")
+    assert payload["mailbox"] == "olivia.home@gmail.com"
+    assert script.mailbox_field(EMAIL, "x@y.example") == gm.mailbox_field(EMAIL, "x@y.example")
+    script.write_credential(tmp_path, EMAIL, payload)
+    assert gm.mailbox_of(EMAIL, directory=tmp_path) == "olivia.home@gmail.com"
