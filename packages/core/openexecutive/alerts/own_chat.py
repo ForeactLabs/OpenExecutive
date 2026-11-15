@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 from collections.abc import Iterable
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -75,7 +76,7 @@ def note_decision(decision_id: int, session_id: str | None, db_path: Path | None
             owner = _chat_owner(session_id, db_path)
             if owner is None:
                 return
-            with sqlite3.connect(_path(db_path), timeout=10) as conn:
+            with closing(sqlite3.connect(_path(db_path), timeout=10)) as conn, conn:
                 conn.execute(_TABLE)
                 conn.execute(
                     "INSERT OR IGNORE INTO decision_chat_owners (decision_id, person_id) VALUES (?, ?)",
@@ -94,8 +95,12 @@ def _noted(decision_ids: list[int], db_path: Path | None = None) -> dict[int, in
     if not decision_ids or not path.exists():
         return {}
     marks = ",".join("?" for _ in decision_ids)
-    with sqlite3.connect(path) as conn:
-        conn.execute(_TABLE)
+    with closing(sqlite3.connect(path)) as conn:
+        # A read: it never makes the table, which would take the write lock.
+        if conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='decision_chat_owners'"
+        ).fetchone() is None:
+            return {}
         rows = conn.execute(
             f"SELECT decision_id, person_id FROM decision_chat_owners WHERE decision_id IN ({marks})",  # noqa: S608
             decision_ids,
