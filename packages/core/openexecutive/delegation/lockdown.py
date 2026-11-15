@@ -476,7 +476,7 @@ def outside_reach_reason(name: str, tool_input: Any = None) -> str | None:
     # turn has read anything from outside the team (outside_content).
     try:
         if outside_content.read_outside() and outside_content.outside_withholds(name, tool_input):
-            return levels.STRANGER if outside_content.answers_off_team_mail() else levels.OUTSIDE
+            return levels.STRANGER if outside_content.answers_off_team_mail() else levels.outside_reason()
         return None
     except Exception:
         return levels.OUTSIDE

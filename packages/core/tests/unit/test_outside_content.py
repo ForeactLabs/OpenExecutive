@@ -288,7 +288,7 @@ def test_a_write_after_a_read_is_refused_for_the_rest_of_the_turn(audit: list[di
     )
     assert gateway.calls == [READ_DOC]
     assert _card(provider, "tu2")
-    rows = [r for r in audit if r["details"].get("held") == "outside_content"]
+    rows = [r for r in audit if r["details"].get("held") == "outside_read"]
     assert len(rows) == 1 and rows[0]["details"]["tool"] == WRITE_DOC["name"]
     assert rows[0]["details"]["sources"] == [oc.GATEWAY]
 

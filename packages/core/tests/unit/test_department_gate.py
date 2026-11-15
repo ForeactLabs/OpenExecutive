@@ -410,3 +410,56 @@ def test_a_step_that_raises_stops_the_rest(monkeypatch: pytest.MonkeyPatch) -> N
                "held": True, "steps": steps}
     out = json.loads(asyncio.run(ttl.carry_out(payload, by_principal=True)))
     assert out["done"] == 1 and "timed out" in out["error"] and calls == ["f1", "f2"]
+
+
+# ── one card per ask ─────────────────────────────────────────────────────────
+
+_GMAIL = "google_workspace__send_gmail_message"
+
+
+def _reply(body: str, subject: str = "Re: 30 minutes Thursday?") -> dict[str, Any]:
+    return {"to": "dana@northpeak.example", "subject": subject, "body": body}
+
+
+def _hold_reply(owner: Person, body: str, subject: str = "Re: 30 minutes Thursday?") -> int:
+    verdict = gate.Verdict(run=False, department="logistics", approver_person_id=owner.id, reason="Logistics is on Careful")
+    return gate.hold(owner, _GMAIL, _reply(body, subject), verdict, mcp=True, session_id="email:1")
+
+
+def test_a_newer_reply_on_the_same_thread_replaces_the_one_waiting(team: dict[str, Person]) -> None:
+    owner = team["owner"]
+    assert not gate.reply_waiting(_GMAIL, _reply("first"), mcp=True, approver=owner.id)
+    first = _hold_reply(owner, "Hi Dana, nothing is booked yet.")
+    assert gate.reply_waiting(_GMAIL, _reply("second"), mcp=True, approver=owner.id)
+    second = _hold_reply(owner, "Hi Dana, I can't confirm Thursday myself.", subject="RE: 30 minutes thursday?")
+    assert ledger.get_decision_instance(first).status == ledger.STATUS_CLOSED_EXTERNALLY  # type: ignore[union-attr]
+    assert ledger.get_decision_instance(second).status == ledger.STATUS_PROPOSED  # type: ignore[union-attr]
+    live = [a for a in alerts_store.list_alerts(limit=10) if a.status == "unread"]
+    assert [f"decision_instance:{second}" in a.topic_tags for a in live] == [True]
+    # Another thread, or other people, is a reply of its own.
+    third = _hold_reply(owner, "Hi Dana, Tuesday's delivery is on.", subject="Re: Delivery window")
+    assert ledger.get_decision_instance(second).status == ledger.STATUS_PROPOSED  # type: ignore[union-attr]
+    assert ledger.get_decision_instance(third).status == ledger.STATUS_PROPOSED  # type: ignore[union-attr]
+
+
+def test_the_card_an_email_turn_raised_folds_into_the_step_it_held(team: dict[str, Person]) -> None:
+    from openexecutive.alerts.models import AlertSeverity
+    from openexecutive.orchestrator.schedule_tools import set_session
+
+    raised = alerts_store.insert_alert(
+        source="email", external_id="mail-1", severity=AlertSeverity.MEDIUM.value,
+        headline="Dana is waiting on Thursday", body="Dana asked for a call.", routed_to_person_id=team["owner"].id,
+    )
+    other = alerts_store.insert_alert(
+        source="email", external_id="mail-2", severity=AlertSeverity.MEDIUM.value,
+        headline="Something else", body="Unrelated.",
+    )
+    turn = Session(session_id="email:1", origin_channel="email", raised_cards=(("email", "mail-1"),))
+    with set_session(turn):
+        held = _hold_reply(team["owner"], "Hi Dana, nothing is booked yet.")
+    card = alerts_store.get_alert_by_external("decision_scheduling", ledger.decision_alert_external_id(held))
+    assert card is not None
+    folded = alerts_store.get_alert(raised)  # type: ignore[arg-type]
+    assert folded is not None and folded.status == "dismissed" and folded.superseded_by_alert_id == card.id
+    assert alerts_store.get_alert(other).status == "unread"  # type: ignore[arg-type,union-attr]
+    assert turn.raised_cards == ()

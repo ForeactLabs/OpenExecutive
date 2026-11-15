@@ -508,13 +508,16 @@ def _mark_waiting(items: list[ProposalItem]) -> None:
     own card: its class and approver match. Never raises: a card without
     them still shows."""
     from openexecutive.memory.decision_ledger import get_decision_instances
-    from openexecutive.orchestrator import department_gate
+    from openexecutive.orchestrator import department_gate, take_the_lead
 
     booking_tag = "decision_class:meeting_scheduling"
     held_tag = f"decision_class:{department_gate.DECISION_CLASS}"
+    # A teammate's ask a rule of yours held (take_the_lead.hold).
+    rule_tag = f"decision_class:{take_the_lead.DECISION_CLASS}"
     cards = [
         p for p in items
-        if p.decision_instance_id is not None and (booking_tag in p.topic_tags or held_tag in p.topic_tags)
+        if p.decision_instance_id is not None
+        and (booking_tag in p.topic_tags or held_tag in p.topic_tags or rule_tag in p.topic_tags)
     ]
     if not cards:
         return
@@ -535,7 +538,10 @@ def _mark_waiting(items: list[ProposalItem]) -> None:
             continue
         if inst.decision_class == "meeting_scheduling" and booking_tag in p.topic_tags:
             p.waiting_because = str(payload.get("waiting_because") or "").strip()
-        elif inst.decision_class == department_gate.DECISION_CLASS and held_tag in p.topic_tags:
+        elif (
+            (inst.decision_class == department_gate.DECISION_CLASS and held_tag in p.topic_tags)
+            or (inst.decision_class == take_the_lead.DECISION_CLASS and rule_tag in p.topic_tags)
+        ):
             asker = payload.get("requested_by_person_id")
             name = str(payload.get("requested_by") or "").strip()
             # The reader's own ask held for their own OK: nobody else waits.

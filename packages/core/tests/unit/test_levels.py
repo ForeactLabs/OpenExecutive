@@ -236,6 +236,21 @@ def test_hold_many_is_one_card_for_them_all(monkeypatch: pytest.MonkeyPatch) -> 
     assert seen == {"input": steps[0], "more": steps[1:]}
 
 
+def test_an_outside_read_the_check_did_not_flag_is_said_as_it_is() -> None:
+    from openexecutive.orchestrator import outside_content
+
+    state = outside_content.begin_turn(Session(), user_message="answer Dana")
+    try:
+        assert levels.outside_reason() == levels.OUTSIDE_READ
+        assert "instructions" not in levels._WHY[levels.OUTSIDE_READ]
+        state.flags.append((outside_content.MAIL, ("forward_or_share",), ""))
+        assert levels.outside_reason() == levels.OUTSIDE_READ  # the owner's own mail is mail_reason's
+        state.flags.append(("email", ("instructions",), ""))
+        assert levels.outside_reason() == levels.OUTSIDE
+    finally:
+        outside_content.end_turn(state)
+
+
 def test_the_card_says_when_a_mail_read_was_flagged() -> None:
     from openexecutive.orchestrator import outside_content
 

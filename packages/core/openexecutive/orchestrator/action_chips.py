@@ -104,6 +104,19 @@ SIDE_EFFECTING_TOOLS: frozenset[str] = frozenset({
 })
 
 
+def _person_name(person_id: Any) -> str:
+    """The name on People for ``person_id``, or "" (never a raw id on a
+    chip). Never raises."""
+    if not isinstance(person_id, int) or isinstance(person_id, bool):
+        return ""
+    try:
+        from openexecutive.people.store import get_person
+
+        person = get_person(person_id)
+        return str(getattr(person, "full_name", "") or "").strip()[:80] if person is not None else ""
+    except Exception:
+        return ""
+
 def _parse_result(tool_result: str) -> dict[str, Any] | None:
     """Best-effort JSON parse of a tool handler's string result.
 
@@ -419,9 +432,8 @@ def summarize_action(
             payload["decision_id"] = decision_id
     elif tool_name == "message_person":
         pid = tool_input.get("person_id")
-        payload["summary"] = (
-            f"Messaged person #{pid}" if pid is not None else "Messaged a person"
-        )
+        name = _person_name(pid)
+        payload["summary"] = f"Messaged {name}" if name else "Messaged a person"
         payload["target"] = str(pid) if pid is not None else None
         if isinstance(pid, int):
             payload["link"] = f"/people/{pid}"

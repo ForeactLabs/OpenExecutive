@@ -3431,6 +3431,9 @@ def test_today_says_why_a_booking_waits_and_who_waits_on_a_held_ask(
          {"tool": "send_email", "requested_by_person_id": 9, "requested_by": "Sam Okafor"})
     card("Waiting for your OK: save a file", "department_action",
          {"tool": "drive_save", "requested_by_person_id": 5, "requested_by": "Jordan Avery"})
+    # A teammate's ask a rule of yours held names them too.
+    card("Sam Okafor asked: Email Maya Chen", "take_the_lead_action",
+         {"tool": "send_email", "requested_by_person_id": 9, "requested_by": "Sam Okafor"})
 
     by_headline = {p["headline"]: p for p in _make_client().get("/today").json()["proposals"]}
     booking = by_headline["Approve meeting: Pricing review"]
@@ -3439,6 +3442,7 @@ def test_today_says_why_a_booking_waits_and_who_waits_on_a_held_ask(
     assert by_headline["Approve meeting: Older booking"]["waiting_because"] == ""
     assert booking["waiting_on"] == ""
     assert by_headline["Sam Okafor asked the Executive to: email Northgate"]["waiting_on"] == "Sam Okafor"
+    assert by_headline["Sam Okafor asked: Email Maya Chen"]["waiting_on"] == "Sam Okafor"
     own = by_headline["Waiting for your OK: save a file"]
     assert own["waiting_on"] == ""
     assert own["waiting_because"] == ""

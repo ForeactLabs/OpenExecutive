@@ -526,3 +526,17 @@ def test_a_cancelled_meeting_says_so() -> None:
         tool_result=json.dumps({"status": "cancelled", "decision_instance_id": 3}),
     )
     assert chip is not None and chip["summary"] == "Cancelled the meeting"
+
+
+def test_a_message_chip_names_the_person_never_their_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from openexecutive.people import store
+
+    monkeypatch.setattr(store, "get_person", lambda pid: SimpleNamespace(full_name="Sam Rivera") if pid == 1 else None)
+    chip = summarize_action(tool_name="message_person", tool_input={"person_id": 1, "text": "hi"},
+                            tool_result=json.dumps({"ok": True}))
+    assert chip is not None and chip["summary"] == "Messaged Sam Rivera" and "#" not in chip["summary"]
+    chip = summarize_action(tool_name="message_person", tool_input={"person_id": 99, "text": "hi"},
+                            tool_result=json.dumps({"ok": True}))
+    assert chip is not None and chip["summary"] == "Messaged a person"
