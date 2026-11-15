@@ -401,10 +401,11 @@ def _replace(older: _Card, newer: _Card, path: Path) -> None:
             severity = max(
                 (str(new["severity"]), str(old["severity"])), key=lambda sev: SEVERITY_RANK.get(sev, 0),
             )
-            conn.execute(
-                "UPDATE alerts SET body = ?, severity = ? WHERE id = ?",
-                (str(new["body"]) + _THEN + str(old["body"]).split(_THEN, 1)[1], severity, newer.id),
-            )
+            body = str(new["body"])
+            for follow_up in str(old["body"]).split(_THEN)[1:]:
+                if follow_up not in body.split(_THEN)[1:]:
+                    body = _with_then(body, follow_up)
+            conn.execute("UPDATE alerts SET body = ?, severity = ? WHERE id = ?", (body, severity, newer.id))
         conn.execute("UPDATE alerts SET superseded_by_alert_id = ? WHERE superseded_by_alert_id = ?", (newer.id, older.id))
     try:
         from openexecutive.audit import log_event

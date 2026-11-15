@@ -372,3 +372,19 @@ def test_the_poller_links_a_follow_up_only_for_a_sender_the_mailbox_vouched_for(
     # Unproven (t-2) and unprovable (t-3) follow-ups keep their own thread;
     # the vouched one (t-4) joins the latest conversation on that subject.
     assert rows == {"t-1": "t-1", "t-2": "t-2", "t-3": "t-3", "t-4": "t-3"}
+
+
+def test_a_newer_reply_takes_each_follow_up_once_and_stays_within_the_cap(mail_turn: Session) -> None:
+    from openexecutive.alerts.store import _FOLLOW_UP_MAX
+
+    reply = {"to": "dana@northpeak.example", "subject": "Re: Thursday", "body": "a", "thread_id": "thread-1"}
+    with set_turn(session_id="s", turn_id="turn-a"):
+        a, _ = _approve(tool_input=reply)
+        _note("Dana asked for Thursday")
+        _note("x" * _FOLLOW_UP_MAX)
+    with set_turn(session_id="s", turn_id="turn-b"):
+        b, _ = _approve(tool_input={**reply, "body": "b"})
+    body = _get(b).body
+    assert len(body) <= _FOLLOW_UP_MAX
+    follow_ups = body.split("\n\nThen: ")[1:]
+    assert follow_ups and len(follow_ups) == len(set(follow_ups))
