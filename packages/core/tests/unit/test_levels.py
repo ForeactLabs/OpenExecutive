@@ -243,9 +243,8 @@ def test_an_outside_read_the_check_did_not_flag_is_said_as_it_is() -> None:
     try:
         assert levels.outside_reason() == levels.OUTSIDE_READ
         assert "instructions" not in levels._WHY[levels.OUTSIDE_READ]
+        # A flagged email counts too, whoever's mail it was.
         state.flags.append((outside_content.MAIL, ("forward_or_share",), ""))
-        assert levels.outside_reason() == levels.OUTSIDE_READ  # the owner's own mail is mail_reason's
-        state.flags.append(("email", ("instructions",), ""))
         assert levels.outside_reason() == levels.OUTSIDE
     finally:
         outside_content.end_turn(state)

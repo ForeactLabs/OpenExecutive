@@ -195,15 +195,13 @@ def mail_reason() -> str:
 
 def outside_reason() -> str:
     """Why a step waits after the turn read something from outside the
-    company: ``OUTSIDE`` when the content check flagged a read (not the
-    owner's own mail, which is ``mail_reason``), else ``OUTSIDE_READ``.
-    Never raises."""
+    company: ``OUTSIDE`` when the content check flagged any read this turn
+    (an email included), else ``OUTSIDE_READ``. Never raises."""
     try:
         from openexecutive.orchestrator import outside_content
 
         state = outside_content.current()
-        flags = getattr(state, "flags", None) or []
-        if not any(source != outside_content.MAIL for source, _, _ in flags):
+        if not (getattr(state, "flags", None) or []):
             return OUTSIDE_READ
     except Exception:
         logger.debug("levels: couldn't tell whether an outside read was flagged", exc_info=True)
