@@ -119,6 +119,22 @@ def test_idempotent_on_source_external_id(db: Path) -> None:
     assert listed[0].severity == "medium"  # original preserved
 
 
+def test_cards_with_no_upstream_id_are_never_taken_for_a_replay(db: Path) -> None:
+    # Cards raised outside a mail thread carry no id of their own: each one
+    # is a card, not a repeat of the first.
+    ids = [
+        insert_alert(
+            source="executive", external_id="", severity="medium",
+            headline=f"Question {n}", body="", db_path=db,
+        )
+        for n in range(3)
+    ]
+    assert None not in ids and len(set(ids)) == 3
+    listed = list_alerts(db_path=db)
+    assert sorted(a.headline for a in listed) == ["Question 0", "Question 1", "Question 2"]
+    assert all(a.external_id.startswith("card:") for a in listed)
+
+
 def test_status_transitions_and_delete(db: Path) -> None:
     aid = insert_alert(
         source="slack",

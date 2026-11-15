@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import sqlite3
+import uuid
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -185,6 +186,11 @@ def insert_alert(
     (``alerts.one_card.place``): it may join an open card on its topic, and a
     card that joined is closed and never sent (``dispatcher.dispatch_all``)."""
     tags = json.dumps(topic_tags or [])
+    # (source, external_id) names one upstream event, so a replay of it is
+    # skipped. A card with no upstream id (one the Executive raised outside
+    # a mail thread) is no replay of anything: it gets an id of its own, or
+    # every such card after the first from that source would be skipped.
+    external_id = str(external_id or "").strip() or f"card:{uuid.uuid4().hex}"
     with _get_conn(db_path) as conn:
         cursor = conn.execute(
             """
