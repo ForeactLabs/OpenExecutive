@@ -188,6 +188,12 @@ def test_a_card_written_after_its_turn_held_a_step_folds_into_that_step(monkeypa
     pipeline.defer_fold("email", "mail-1", held, reader=None, db_path=db)
     # A card for someone else than the held card's reader is still theirs.
     pipeline.defer_fold("email", "mail-2", held, reader=99, db_path=db)
+    # One whose held card was answered meanwhile stays.
+    answered = alert_store.insert_alert(source="decision_scheduling", external_id="decision_instance:2",
+                                        severity="medium", headline="Reply to Leo", body="b", db_path=db)
+    assert answered is not None
+    alert_store.set_status(answered, "actioned", db_path=db)
+    pipeline.defer_fold("email", "mail-3", answered, reader=None, db_path=db)
 
     async def runner() -> tuple:
         queue = sse_bus.subscribe()
@@ -196,19 +202,23 @@ def test_a_card_written_after_its_turn_held_a_step_folds_into_that_step(monkeypa
                 AlertEvent(source="email", external_id="mail-1", subject="hi", body="b"), db_path=db)
             _, other_id = await pipeline.evaluate_and_dispatch(
                 AlertEvent(source="email", external_id="mail-2", subject="hi", body="b"), db_path=db)
+            _, late_id = await pipeline.evaluate_and_dispatch(
+                AlertEvent(source="email", external_id="mail-3", subject="hi", body="b"), db_path=db)
             sent: list[dict] = []
             while not queue.empty():
                 sent.append(queue.get_nowait())
-            return alert_id, other_id, sent
+            return alert_id, other_id, late_id, sent
         finally:
             sse_bus.unsubscribe(queue)
 
-    alert_id, other_id, sent = asyncio.run(runner())
+    alert_id, other_id, late_id, sent = asyncio.run(runner())
     folded = alert_store.get_alert(alert_id, db_path=db)
     assert folded is not None and folded.status == "dismissed" and folded.superseded_by_alert_id == held
     other = alert_store.get_alert(other_id, db_path=db)
     assert other is not None and other.status == "unread"
-    assert [e.get("alert", {}).get("id") for e in sent if e.get("type") == "alert"] == [other_id]
+    late = alert_store.get_alert(late_id, db_path=db)
+    assert late is not None and late.status == "unread"
+    assert [e.get("alert", {}).get("id") for e in sent if e.get("type") == "alert"] == [other_id, late_id]
 
 
 def test_evaluate_post_mute_suppresses(monkeypatch, db: Path) -> None:

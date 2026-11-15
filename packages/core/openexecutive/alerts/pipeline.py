@@ -408,7 +408,12 @@ async def evaluate_and_dispatch(
         return decision, None
 
     held = _take_late_fold(event.source, event.external_id, path, routed_to)
-    if held is not None and store.mark_superseded(alert_id, held, db_path=path):
+    held_row = store.get_alert(held, db_path=path) if held is not None else None
+    # Only into a card still waiting: one answered meanwhile would hide this.
+    if (
+        held is not None and held_row is not None and held_row.status in ("unread", "read")
+        and store.mark_superseded(alert_id, held, db_path=path)
+    ):
         # A step the same turn held already asks the owner: no second card.
         logger.info("alerts.pipeline folded alert=%d into held alert=%d", alert_id, held)
         return decision, alert_id
