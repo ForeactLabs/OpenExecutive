@@ -403,7 +403,8 @@ def fold_into_held(held_alert_id: int | None, *, db_path: Any = None) -> int:
     """An email's turn held a step after raising a card about that mail: the
     held step's card is the one the owner answers, so the earlier card folds
     into it (``alerts.store.mark_superseded``) instead of asking twice. A card
-    still being written (not on Today yet) stays. Returns how many folded.
+    still being written folds in when it is (``alerts.pipeline.defer_fold``).
+    Returns how many folded now.
     Never raises."""
     if held_alert_id is None:
         return 0
@@ -414,12 +415,18 @@ def fold_into_held(held_alert_id: int | None, *, db_path: Any = None) -> int:
         session = current_session.get()
         if getattr(session, "origin_channel", "") != "email":
             return 0
+        from openexecutive.alerts.pipeline import defer_fold
+
         folded = 0
         for source, external_id in tuple(getattr(session, "raised_cards", ()) or ()):
             row = store.get_alert_by_external(source, external_id, db_path=db_path)
             row_id = getattr(row, "id", None) if row is not None else None
-            if isinstance(row_id, int) and store.mark_superseded(row_id, held_alert_id, db_path=db_path):
-                folded += 1
+            if isinstance(row_id, int):
+                if store.mark_superseded(row_id, held_alert_id, db_path=db_path):
+                    folded += 1
+            else:
+                # Still being triaged: it folds in as soon as it is written.
+                defer_fold(source, external_id, held_alert_id, db_path=db_path)
         session.raised_cards = ()
         return folded
     except Exception:  # noqa: BLE001 - a second card is the worst case

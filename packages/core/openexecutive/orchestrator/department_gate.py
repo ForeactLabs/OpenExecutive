@@ -323,20 +323,26 @@ def replace_older_reply(
             # Only one still waiting: an Approve already under way keeps it.
             if not mark_resolved(older_id, STATUS_CLOSED_EXTERNALLY, db_path=db_path):
                 continue
-            log_event(
-                "department_action_replaced",
-                f"A newer reply on the same thread replaced decision {older_id}",
-                actor="executive",
-                details={"decision_id": older_id, "replaced_by": decision_id},
-                private=True,
-                private_to_person=approver,
-            )
-            row = get_alert_by_external(DECISION_ALERT_SOURCE, decision_alert_external_id(older_id), db_path=db_path)
-            if row is not None and row.id is not None and not mark_superseded(row.id, alert_id, db_path=db_path):
-                # Already opened, so it can't fold: close it too, or its
-                # Approve would point at a decision that is closed.
-                set_status_if_open(row.id, "dismissed", db_path=db_path)
             replaced += 1
+            try:
+                row = get_alert_by_external(DECISION_ALERT_SOURCE, decision_alert_external_id(older_id), db_path=db_path)
+                if row is not None and row.id is not None and not mark_superseded(row.id, alert_id, db_path=db_path):
+                    # Already opened, so it can't fold: close it too, or its
+                    # Approve would point at a decision that is closed.
+                    set_status_if_open(row.id, "dismissed", db_path=db_path)
+            except Exception:  # noqa: BLE001 - its Approve finds the decision closed
+                logger.warning("replace_older_reply: couldn't close card for decision %s", older_id, exc_info=True)
+            try:
+                log_event(
+                    "department_action_replaced",
+                    f"A newer reply on the same thread replaced decision {older_id}",
+                    actor="executive",
+                    details={"decision_id": older_id, "replaced_by": decision_id},
+                    private=True,
+                    private_to_person=approver,
+                )
+            except Exception:  # noqa: BLE001 - audit only
+                logger.debug("replace_older_reply: audit row failed", exc_info=True)
         return replaced
     except Exception:
         logger.warning("department_gate: couldn't replace an older waiting reply", exc_info=True)
