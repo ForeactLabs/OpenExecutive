@@ -5,6 +5,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from openexecutive.api.errors import GENERIC_FAILURE
 from openexecutive.api.routes import health as health_route
 
 
@@ -97,4 +98,6 @@ def test_sdk_error_returns_error(monkeypatch: pytest.MonkeyPatch) -> None:
     body = resp.json()
     assert body["status"] == "error"
     assert body["error_type"] == "RuntimeError"
-    assert "nope" in body["error_msg"]
+    # The exception's own text stays in the log, never in the response.
+    assert "nope" not in body["error_msg"]
+    assert body["error_msg"] == GENERIC_FAILURE

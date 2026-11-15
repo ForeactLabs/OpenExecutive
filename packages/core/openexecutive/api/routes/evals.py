@@ -25,6 +25,7 @@ import yaml
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from openexecutive.api.errors import public_error
 from openexecutive.evals.persistence import (
     append_scenario_result,
     cancel_eval_run,
@@ -345,8 +346,8 @@ async def start_eval_run(request: Request) -> StreamingResponse:
 
         except Exception as exc:
             logger.exception("eval run failed run_id=%s kind=%s", run_id, kind)
-            fail_eval_run(run_id=run_id, error=str(exc))
-            yield _sse({"type": "error", "run_id": run_id, "message": str(exc)})
+            fail_eval_run(run_id=run_id, error=public_error(exc))
+            yield _sse({"type": "error", "run_id": run_id, "message": public_error(exc)})
         finally:
             _active_cancellations.pop(run_id, None)
 
