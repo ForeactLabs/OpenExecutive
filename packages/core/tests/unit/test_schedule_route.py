@@ -194,3 +194,36 @@ def test_department_check_in_names_the_department(db: Path) -> None:
     assert [(i["kind"], i["title"], i["href"]) for i in items] == [
         ("always", f"{dept.config.title} check-in", f"/departments/{dept.config.slug}"),
     ]
+
+
+def test_mixed_time_forms_sort_by_the_moment() -> None:
+    a = schedule_route.ScheduleItem(key="a", kind="always", title="A", at="2026-11-15T09:30:00Z")
+    b = schedule_route.ScheduleItem(key="b", kind="watch", title="B", at="2026-11-15T09:00:00+00:00")
+    c = schedule_route.ScheduleItem(key="c", kind="workflow", title="C", at="2026-11-15T09:15:00")
+    none = schedule_route.ScheduleItem(key="n", kind="watch", title="N")
+    assert [i.key for i in sorted([none, a, c, b], key=schedule_route._sort_key)] == ["b", "c", "a", "n"]
+
+
+def test_no_kinds_lists_nothing(db: Path) -> None:
+    episodic.insert_scheduled_action(run_at=_in(1), channel="slack_dm", channel_ref="U1", intent_text="x")
+    assert episodic.list_scheduled_actions(status="pending", kinds=[]) == []
+    assert len(episodic.list_scheduled_actions(status="pending", kinds=["ad_hoc"])) == 1
+
+
+def test_owner_keeps_their_follow_ups_behind_many_private_ones(db: Path) -> None:
+    """Teammates' own follow-ups due sooner are read past, not counted
+    against the owner's page."""
+    jordan = people_store.upsert_person(full_name="Jordan", is_principal=True, email="jordan@example.com", db_path=db)
+    sam = people_store.upsert_person(full_name="Sam Lee", email="sam@example.com", kind="team", db_path=db)
+    people_registry.invalidate()
+    for n in range(900):
+        episodic.insert_scheduled_action(
+            run_at=_in(1), channel="slack_dm", channel_ref="U2", intent_text=f"Sam's {n}",
+            created_by_person_id=sam,
+        )
+    mine = episodic.insert_scheduled_action(
+        run_at=_in(2), channel="slack_dm", channel_ref="U1", intent_text="Chase the contract",
+        created_by_person_id=jordan,
+    )
+    items = _client().get("/schedule", headers={"x-caller-email": "jordan@example.com"}).json()["items"]
+    assert [i["stop_key"] for i in items if i["kind"] == "follow_up"] == [f"action:{mine}"]

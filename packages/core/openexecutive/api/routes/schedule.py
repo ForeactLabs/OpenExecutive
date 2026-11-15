@@ -22,7 +22,7 @@ can't read leaves its rows out.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, Request
@@ -205,9 +205,19 @@ def _always(*, owner: bool, on_team: bool) -> list[ScheduleItem]:
     return items
 
 
-def _sort_key(item: ScheduleItem) -> tuple[int, str]:
-    # Soonest first; rows with no next time last, in the order they came.
-    return (0, item.at) if item.at else (1, "")
+def _sort_key(item: ScheduleItem) -> tuple[int, float]:
+    # Soonest first, by the moment (the stores don't all write the same ISO
+    # form); rows with no next time, or one that doesn't parse, last, in the
+    # order they came.
+    if not item.at:
+        return (1, 0.0)
+    try:
+        at = datetime.fromisoformat(item.at.replace("Z", "+00:00"))
+    except ValueError:
+        return (1, 0.0)
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=UTC)
+    return (0, at.timestamp())
 
 
 def build_schedule(request: Request) -> ScheduleResponse:
@@ -225,7 +235,9 @@ def build_schedule(request: Request) -> ScheduleResponse:
     try:
         caller = _resolve_caller_person_id(request)
         owner = _caller_is_principal_or_unclaimed(request)
-        on_team = caller_on_team(request)
+        # The owner is on the team; so is everyone on an install with no
+        # owner yet, as everywhere ``_caller_is_principal_or_unclaimed`` is.
+        on_team = owner or caller_on_team(request)
     except Exception:
         logger.warning("schedule: reading the caller failed", exc_info=True)
         return ScheduleResponse(counts={k: 0 for k in KINDS})
