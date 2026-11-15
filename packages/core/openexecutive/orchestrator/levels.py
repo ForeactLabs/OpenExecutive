@@ -80,7 +80,7 @@ REASONS: frozenset[str] = frozenset({
 # What the card says it waited for, in the owner's words.
 _WHY: dict[str, str] = {
     OUTSIDE: "it read something from outside the company that tried to give it instructions",
-    OUTSIDE_READ: "it read something from outside the company first, and Approvals is on Careful",
+    OUTSIDE_READ: "it read something from outside the company first",
     OWN_MAIL: "it read your own mail first",
     MAIL_FLAGGED: "something it read looked like it was trying to give it instructions",
     PRIVATE: "it came from mail that's private to you",
