@@ -2950,11 +2950,13 @@ async def handle_find_alerts(tool_input: dict[str, Any]) -> str:
 
     # A teammate's drafted artifact is theirs alone, the principal's search
     # included.
+    from openexecutive.alerts import own_chat
     from openexecutive.alerts.models import visible_alert
     from openexecutive.orchestrator.artifact_records import current_viewer
 
     viewer = current_viewer()
-    matches = [a for a in matches if visible_alert(a, viewer)]
+    own = own_chat.readers(matches)  # once for the list, not once per card
+    matches = [a for a in matches if visible_alert(a, viewer, own_chat_readers=own)]
 
     found: set[int] = session.found_alert_ids
     trusted: set[int] = session.trusted_alert_ids
