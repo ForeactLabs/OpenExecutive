@@ -68,6 +68,7 @@ def _why_unproven(cause: str, address: str, who: str) -> str:
             f"The mailbox could not prove {who} sent it: {domain} didn't sign it. "
             "This usually means it was sent from another account, such as Gmail's "
             f"“Send mail as”, or that {domain} has no email signing set up. "
+            "It may also be forged. "
         )
     if cause == fc.DMARC_FAILED:
         return (
@@ -78,7 +79,8 @@ def _why_unproven(cause: str, address: str, who: str) -> str:
     if cause == fc.VIA_LIST:
         return (
             f"The mailbox could not prove {who} sent it: it came through a mailing list "
-            "or group, which resends mail under its own name. "
+            "or group, which resends mail under its own name, or claims to. "
+            "It may also be forged. "
         )
     return ""
 

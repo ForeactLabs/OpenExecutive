@@ -174,6 +174,8 @@ class TestWhyUnproven:
         assert "example.com didn't sign it" in card.body
         assert "Send mail as" in card.body
         assert "Ann Teammate sends from the example.com mailbox itself" in card.body
+        # A domain with no DMARC record can be spoofed the same way.
+        assert "may also be forged" in card.body
         assert card.suggested_action == "Check with Ann Teammate."
 
     def test_a_failed_dmarc_check_says_it_may_be_forged(self, people: SimpleNamespace) -> None:
@@ -191,6 +193,30 @@ class TestWhyUnproven:
 
         assert "mailing list or group" in card.body
         assert "directly, not through the group" in card.body
+
+    def test_list_headers_never_hide_a_failed_check(self, people: SimpleNamespace) -> None:
+        # The sender writes List-Id; Gmail's failed verdict is what counts.
+        card = self._file(people, _raw_mime(
+            "dmarc=fail (p=none) header.from=example.com", "List-Id: <x.example.net>"
+        ))
+
+        assert "failed example.com's own sender check (DMARC)" in card.body
+        assert "mailing list" not in card.body
+
+    def test_list_headers_under_an_untrusted_stamp_say_nothing(self, people: SimpleNamespace) -> None:
+        raw = _raw_mime("dmarc=pass header.from=example.com", "List-Id: <x.example.net>")
+        card = self._file(people, raw.replace("mx.google.com", "mx.evil.test"))
+
+        assert "mailing list" not in card.body
+        assert "To fix it" not in card.body
+
+    def test_mail_the_domain_did_sign_is_not_called_unsigned(self, people: SimpleNamespace) -> None:
+        # The check failed for another reason (an unreadable first read, say).
+        card = self._file(people, _raw_mime(
+            "dkim=pass header.i=@example.com header.s=s1 header.b=abc; dmarc=none header.from=example.com"
+        ))
+
+        assert "didn't sign it" not in card.body
 
     def test_the_principals_address_is_spoken_to_them(self, people: SimpleNamespace) -> None:
         card = self._file(people, _raw_mime(
