@@ -1606,6 +1606,8 @@ export interface StandingFact {
   decision?: boolean;
   department?: string;
   outcome?: string;
+  /** Set on a decision only this person sees (made in their own chat, not shared). */
+  private_to_person_id?: number | null;
 }
 
 export interface StandingFactsPage {
@@ -1615,6 +1617,10 @@ export interface StandingFactsPage {
   retirable_ids: number[];
   /** The principal: approves teammates' proposals and sets who needs approval. */
   can_review: boolean;
+  /** Your own private decisions: you can share them with the team. */
+  shareable_ids?: number[];
+  /** Shared decisions you recorded: you can make them private again. */
+  unshareable_ids?: number[];
 }
 
 /** One teammate and whether the principal approves their facts first. */
@@ -1649,6 +1655,35 @@ export async function editStandingFact(id: number, statement: string): Promise<S
   });
   if (!res.ok) throw new Error(res.status === 403 ? "You can't change this fact" : "Couldn't save that change");
   return res.json();
+}
+
+// Share your own private decision with the team, or make one you shared
+// private again.
+export async function shareDecision(id: number, shared: boolean): Promise<void> {
+  const res = await fetch(`${API_BASE}/memories/decisions/${id}/share`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ shared }),
+  });
+  if (!res.ok) {
+    const detail = await res.json().then((b) => b?.detail).catch(() => null);
+    throw new Error(typeof detail === "string" && res.status === 409 ? detail : "Couldn't change who sees it");
+  }
+}
+
+// Change or remove your own private decision (a shared one is the principal's).
+export async function editOwnDecision(id: number, summary: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/memories/decisions/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ summary }),
+  });
+  if (!res.ok) throw new Error("Couldn't save that change");
+}
+
+export async function removeOwnDecision(id: number): Promise<void> {
+  const res = await fetch(`${API_BASE}/memories/decisions/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to remove the decision");
 }
 
 export async function reviewStandingFact(

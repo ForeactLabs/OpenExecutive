@@ -182,11 +182,14 @@ def list_live_alerts(
     # sweeps) freshly-expired rows are interleaved with live ones, so a
     # `limit`-sized page could come back short.
     rows = list_alerts(status="unread", limit=max(limit * 3, limit + 50), db_path=db_path)
+    from openexecutive.alerts import own_chat
+
+    own = own_chat.readers(rows)
     live = [
         a for a in rows
         if not is_expired(a, now, monitoring_days=monitoring_days, action_days=action_days)
         and not _is_snoozed(a, now)
-        and visible_alert(a, viewer, chat_reader=chat_reader)
+        and visible_alert(a, viewer, chat_reader=chat_reader, own_chat_readers=own)
     ]
     return live[:limit]
 

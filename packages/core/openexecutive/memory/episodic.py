@@ -896,13 +896,16 @@ def get_recent_advice(
 def get_recent_decisions(
     limit: int = 10,
     db_path: Path | None = None,
+    *,
+    reader: int | None = None,
 ) -> list[Decision]:
-    """The newest decisions (decision facts), newest first."""
+    """The newest decisions (decision facts), newest first: the team's, and
+    with ``reader`` that person's private ones too (``facts._seen_by``)."""
     from openexecutive.memory import facts
 
     if not _resolve_db_path(db_path).exists():
         return []
-    return [_as_decision(f) for f in facts.decision_rows(limit=limit, db_path=db_path)]
+    return [_as_decision(f) for f in facts.decision_rows(limit=limit, reader=reader, db_path=db_path)]
 
 
 def has_department_decision_since(
@@ -925,6 +928,7 @@ def decisions_since(
     *,
     limit: int = 20,
     db_path: Path | None = None,
+    reader: int | None = None,
 ) -> list[Decision]:
     """Decisions made after ``since``, newest first (the weekly review's
     "this week's decisions")."""
@@ -932,7 +936,7 @@ def decisions_since(
 
     if not _resolve_db_path(db_path).exists():
         return []
-    return [_as_decision(f) for f in facts.decision_rows(since=since, limit=limit, db_path=db_path)]
+    return [_as_decision(f) for f in facts.decision_rows(since=since, limit=limit, reader=reader, db_path=db_path)]
 
 
 def decisions_awaiting_outcome(
@@ -940,6 +944,7 @@ def decisions_awaiting_outcome(
     *,
     limit: int = 3,
     db_path: Path | None = None,
+    reader: int | None = None,
 ) -> list[Decision]:
     """Decisions made before ``older_than`` with no outcome recorded yet,
     newest first — the weekly review asks "how did this turn out?" about
@@ -949,7 +954,9 @@ def decisions_awaiting_outcome(
 
     if not _resolve_db_path(db_path).exists():
         return []
-    rows = facts.decision_rows(before=older_than, awaiting_outcome=True, limit=limit, db_path=db_path)
+    rows = facts.decision_rows(
+        before=older_than, awaiting_outcome=True, limit=limit, reader=reader, db_path=db_path
+    )
     return [_as_decision(f) for f in rows]
 
 
@@ -983,12 +990,12 @@ def get_recent_initiatives(
     return [Initiative(**dict(row)) for row in rows]
 
 
-def list_decisions(db_path: Path | None = None) -> list[Decision]:
+def list_decisions(db_path: Path | None = None, *, reader: int | None = None) -> list[Decision]:
     from openexecutive.memory import facts
 
     if not _resolve_db_path(db_path).exists():
         return []
-    return [_as_decision(f) for f in facts.decision_rows(limit=1000, db_path=db_path)]
+    return [_as_decision(f) for f in facts.decision_rows(limit=1000, reader=reader, db_path=db_path)]
 
 
 def list_initiatives(db_path: Path | None = None) -> list[Initiative]:
@@ -1013,14 +1020,19 @@ def list_advice(db_path: Path | None = None) -> list[Advice]:
     return [Advice(**dict(row)) for row in rows]
 
 
-def get_decision(decision_id: int, db_path: Path | None = None) -> Decision | None:
-    """The active decision fact ``decision_id``, else None."""
+def get_decision(
+    decision_id: int, db_path: Path | None = None, *, reader: int | None = None
+) -> Decision | None:
+    """The active decision fact ``decision_id`` when ``reader`` may read it
+    (the team's, or private to them), else None."""
     from openexecutive.memory import facts
 
     if not _resolve_db_path(db_path).exists():
         return None
     fact = facts.get_fact(decision_id, db_path=db_path)
-    return _as_decision(fact) if fact is not None and fact.decision and fact.status == "active" else None
+    if fact is None or not fact.decision or fact.status != "active" or not facts.readable(fact, reader):
+        return None
+    return _as_decision(fact)
 
 
 def get_initiative(initiative_id: int, db_path: Path | None = None) -> Initiative | None:
@@ -1045,9 +1057,12 @@ def get_advice(advice_id: int, db_path: Path | None = None) -> Advice | None:
     return Advice(**dict(row)) if row else None
 
 
-def current_decision(decision_id: int, db_path: Path | None = None) -> Decision | None:
+def current_decision(
+    decision_id: int, db_path: Path | None = None, *, reader: int | None = None
+) -> Decision | None:
     """The decision as it stands now: ``decision_id``, or the edit that
-    replaced it (an edit is a new fact, ``superseded_by``)."""
+    replaced it (an edit is a new fact, ``superseded_by``). None for one
+    ``reader`` may not read."""
     from openexecutive.memory import facts
 
     seen: set[int] = set()
@@ -1055,7 +1070,7 @@ def current_decision(decision_id: int, db_path: Path | None = None) -> Decision 
     while fact_id is not None and fact_id not in seen:
         seen.add(fact_id)
         fact = facts.get_fact(fact_id, db_path=db_path)
-        if fact is None or not fact.decision:
+        if fact is None or not fact.decision or not facts.readable(fact, reader):
             return None
         if fact.status == "active":
             return _as_decision(fact)
@@ -1072,26 +1087,42 @@ def update_decision(
     outcome: str | None = None,
     tags: str | None = None,
     db_path: Path | None = None,
+    reader: int | None = None,
+    own_only: bool = False,
 ) -> bool:
     """Change a decision: ``outcome`` in place; a new ``summary`` or a
     ``rationale`` (added after the summary, which already holds any earlier
     reason) as an edit that replaces the fact, keeping it a decision with its
     department and outcome. ``domain`` and ``tags`` are no longer kept. False
-    when it is no active decision."""
+    when it is no active decision, or, with ``own_only``, when it is not
+    ``reader``'s own private one as read here (it may have been shared since
+    the caller checked)."""
     from openexecutive.memory import facts
 
-    current = get_decision(decision_id, db_path)
+    current = get_decision(decision_id, db_path, reader=reader)
     if current is None:
         return False
+    if own_only:
+        mine = facts.get_fact(decision_id, db_path=db_path)
+        if mine is None or reader is None or mine.private_to_person_id != reader:
+            return False
     base = summary if summary is not None and " ".join(summary.split()) else current.summary
     statement = " ".join(f"{base} {rationale or ''}".split())
     if statement != " ".join(current.summary.split()):
         old = facts.get_fact(decision_id, db_path=db_path)
+        # A private decision stays its person's own row: who recorded it is
+        # carried over, so sharing it later follows their approval rule.
+        own = old is not None and old.private_to_person_id is not None
+        if own_only and not own:
+            return False
         new, _ = facts.record_fact(
             subject=old.subject if old is not None else statement[: facts.SUBJECT_MAX],
             statement=statement, source_quote="", kind="correction",
             previous_statement=current.summary, replaces_fact_id=decision_id,
             session_id=current.session_id or None, db_path=db_path,
+            recorded_by_person_id=old.recorded_by_person_id if own and old is not None else None,
+            recorded_by_role=old.recorded_by_role if own and old is not None else "principal",
+            recorded_by_name=old.recorded_by_name if own and old is not None else "",
         )
         decision_id = new.id
     if outcome is not None:
@@ -1188,11 +1219,13 @@ def update_advice(
         return cursor.rowcount > 0
 
 
-def delete_decision(decision_id: int, db_path: Path | None = None) -> bool:
+def delete_decision(
+    decision_id: int, db_path: Path | None = None, *, reader: int | None = None
+) -> bool:
     """Retire a decision fact so it stops rendering anywhere."""
     from openexecutive.memory import facts
 
-    current = current_decision(decision_id, db_path)
+    current = current_decision(decision_id, db_path, reader=reader)
     if current is None or current.id is None:
         return False
     return facts.retire_fact(current.id, reason="removed from memory", db_path=db_path) is not None
@@ -1531,7 +1564,7 @@ def count_activity_by_day(
         # counts, so an edit (a new row) or a removal doesn't add one.
         ("facts",
          "SELECT substr(created_at, 1, 10) AS day FROM facts"
-         " WHERE decision = 1 AND status = 'active'"
+         " WHERE decision = 1 AND status = 'active' AND private_to_person_id IS NULL"
          " AND substr(created_at, 1, 10) >= ?"),
         ("advice_given",
          "SELECT substr(timestamp, 1, 10) AS day FROM advice_given"

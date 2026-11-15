@@ -516,7 +516,7 @@ async def _find_memories(request: Any) -> list[Item]:
 
     items = [
         Item(id=f"decision:{d.id}", title=d.summary[:120], detail="decision")
-        for d in await _call(episodic.get_decisions)
+        for d in await _call(episodic.get_decisions, request)
     ]
     items += [
         Item(id=f"initiative:{i.id}", title=i.title[:120], detail=f"initiative, {i.status}")
@@ -560,6 +560,35 @@ async def _delete_memory(request: Any, ref: str, value: str) -> str:
     else:
         await _call(episodic.remove_initiative, mid)
     return f"Deleted the {kind} from memory"
+
+
+async def _find_decisions(request: Any) -> list[Item]:
+    """The decisions the speaker can share or take back: their own."""
+    from openexecutive.api.routes import episodic
+
+    return [
+        Item(
+            id=str(d.id), title=d.summary[:120],
+            detail="private to you" if d.private else "shared with the team",
+        )
+        for d in await _call(episodic.get_decisions, request)
+        if d.can_share or d.can_make_private
+    ]
+
+
+async def _share_decision(request: Any, item_id: str, shared: bool) -> str:
+    from openexecutive.api.routes import episodic
+
+    if not item_id.isdigit():
+        raise Refused("That isn't a decision id. Look it up with find_in_app.")
+    out = await _call(
+        episodic.share_decision_route, int(item_id), episodic.DecisionShare(shared=shared), request
+    )
+    if not shared:
+        return "Made the decision private: only they see it now"
+    if out.waiting_for_approval:
+        return "Sent the decision for approval: the team sees it once the principal approves it"
+    return "Shared the decision with the team"
 
 
 async def _find_suggested_facts(request: Any) -> list[Item]:
@@ -996,6 +1025,7 @@ _KINDS = (
     Kind("workflow_run", "workflow run", _find_runs),
     Kind("memory", "memory (decision, initiative or advice)", _find_memories, principal_only=True),
     Kind("suggested_fact", "suggested fact", _find_suggested_facts, principal_only=True),
+    Kind("decision", "decision you made (private to you, or one you shared)", _find_decisions),
     Kind("department", "department", _find_departments),
     Kind("new_department", "new department", _nothing, no_item=True),
     Kind("skill", "skill", _find_skills),
@@ -1066,6 +1096,10 @@ _ACTIONS = (
            value="what it should say now"),
     Action("delete_memory", "memory", "Delete a past decision, initiative or advice from memory", _delete_memory,
            confirm=True, card="Delete from memory: {title}"),
+    Action("share_decision", "decision", "Share a decision that is private to the speaker with the team",
+           _fixed(_share_decision, True), confirm=True, card="Share with the team: {title}"),
+    Action("unshare_decision", "decision", "Make a decision the speaker shared private to them again",
+           _fixed(_share_decision, False)),
     Action("approve_fact", "suggested_fact", "Approve a fact a teammate suggested", _fixed(_review_fact, True)),
     Action("decline_fact", "suggested_fact", "Decline a fact a teammate suggested", _fixed(_review_fact, False)),
     # Departments

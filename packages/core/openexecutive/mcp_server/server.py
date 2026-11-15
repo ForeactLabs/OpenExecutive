@@ -386,9 +386,14 @@ async def departments_state() -> str:
 async def memory_decisions() -> str:
     from openexecutive.memory.episodic import list_decisions
 
-    # Standing facts every conversation reads: the whole team's.
-    await _require_person()
-    rows = await asyncio.to_thread(list_decisions)
+    # The team's, and the caller's own private ones.
+    who = await _require_person()
+    reader = who.person_id
+    if reader is None and who.is_principal:
+        from openexecutive.api.routes.today import principal_id
+
+        reader = await asyncio.to_thread(principal_id)
+    rows = await asyncio.to_thread(list_decisions, reader=reader)
     return _json([r.model_dump(mode="json") for r in rows])
 
 

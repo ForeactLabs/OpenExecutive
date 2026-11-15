@@ -44,7 +44,13 @@ def artifact_visible_to(
 PERSONAL_SOURCES: frozenset[str] = frozenset({"browser_handover"})
 
 
-def visible_alert(alert: object, viewer: object | None, *, chat_reader: int | None = None) -> bool:
+def visible_alert(
+    alert: object,
+    viewer: object | None,
+    *,
+    chat_reader: int | None = None,
+    own_chat_readers: dict[int, frozenset[int]] | None = None,
+) -> bool:
     """Whether ``alert`` may be shown to ``viewer`` (anything with
     ``person_id`` and ``is_principal``, e.g. ``artifact_records.Viewer``).
     Every alert but a drafted artifact, a personal card or a card from
@@ -53,11 +59,15 @@ def visible_alert(alert: object, viewer: object | None, *, chat_reader: int | No
     step raised from one person's own chat only to them and its approver
     (``alerts.own_chat``), and none of them to anyone when there is no viewer
     (a surface shared by everyone). ``chat_reader`` names whose own-chat
-    cards a build with no viewer keeps (the principal's own brief)."""
+    cards a build with no viewer keeps (the principal's own brief). A caller
+    filtering a whole list passes ``own_chat_readers`` (``own_chat.readers``
+    of that list) so the lookup runs once, not per card."""
     from openexecutive.alerts import own_chat
 
     reader = getattr(viewer, "person_id", None) if viewer is not None else chat_reader
-    if not own_chat.alert_shown_to(alert, reader):
+    if own_chat_readers is None:
+        own_chat_readers = own_chat.readers([alert])
+    if not own_chat.shown_to(alert, reader, own_chat_readers):
         return False
     source = getattr(alert, "source", None)
     if source in PERSONAL_SOURCES:

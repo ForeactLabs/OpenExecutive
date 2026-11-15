@@ -1777,7 +1777,7 @@ def _build_activity(
             at=action.created_at,
         ))
 
-    for decision in get_recent_decisions(limit=pool):
+    for decision in get_recent_decisions(limit=pool, reader=None if everyone else viewer):
         if not _theirs(owners.of_session(decision.session_id, department=decision.department or None)):
             continue
         items.append(ActivityItem(
@@ -2375,7 +2375,14 @@ def _header_context(
         raise_lines, raise_older, leave_out = brief_requests.raise_split(tz)
         # What they cleared from Right now today stays out of the next one.
         dismissed = right_now.dismissed(narrative_cache.DEFAULT_SCOPE, narrative_cache.local_today())
-    standing_facts = render_facts_for_prompt()
+    # A person's own header reads their private decisions too; the whole
+    # company's reads the team's alone.
+    facts_reader = (
+        principal_id() if own
+        else getattr(reader, "viewer", None) if scope != narrative_cache.COMPANY_SCOPE
+        else None
+    )
+    standing_facts = render_facts_for_prompt(reader=facts_reader)
 
     def render(activity: list[dict[str, Any]]) -> HeaderContext:
         return render_header_context(

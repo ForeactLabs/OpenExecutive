@@ -7,7 +7,10 @@ import {
   listFactApprovalRules,
   listStandingFacts,
   retireStandingFact,
+  editOwnDecision,
+  removeOwnDecision,
   reviewStandingFact,
+  shareDecision,
   setFactApprovalRule,
   type FactApprovalRule,
   type StandingFact,
@@ -57,6 +60,8 @@ function channelLabel(channel: string): string {
 export default function CorrectionsTab({ onCount }: { onCount: (n: number) => void }) {
   const [facts, setFacts] = useState<StandingFact[]>([]);
   const [retirable, setRetirable] = useState<Set<number>>(new Set());
+  const [shareable, setShareable] = useState<Set<number>>(new Set());
+  const [unshareable, setUnshareable] = useState<Set<number>>(new Set());
   const [canReview, setCanReview] = useState(false);
   const [rules, setRules] = useState<FactApprovalRule[]>([]);
   const [loading, setLoading] = useState(true);
@@ -69,6 +74,8 @@ export default function CorrectionsTab({ onCount }: { onCount: (n: number) => vo
       const page = await listStandingFacts();
       setFacts(page.facts);
       setRetirable(new Set(page.retirable_ids ?? []));
+      setShareable(new Set(page.shareable_ids ?? []));
+      setUnshareable(new Set(page.unshareable_ids ?? []));
       setCanReview(page.can_review ?? false);
       setFailed(false);
       onCount(page.facts.filter((f) => f.status === "active").length);
@@ -91,7 +98,10 @@ export default function CorrectionsTab({ onCount }: { onCount: (n: number) => vo
     async (fact: StandingFact) => {
       if (!window.confirm(`Stop using this everywhere?\n\n${fact.statement}`)) return;
       try {
-        await retireStandingFact(fact.id);
+        // A private decision is its person's own: its own routes, open to
+        // every teammate.
+        if (fact.private_to_person_id != null) await removeOwnDecision(fact.id);
+        else await retireStandingFact(fact.id);
       } catch {
         window.alert("Failed to retire.");
         return;
@@ -103,7 +113,21 @@ export default function CorrectionsTab({ onCount }: { onCount: (n: number) => vo
 
   const handleEdit = useCallback(
     async (fact: StandingFact, statement: string) => {
-      await editStandingFact(fact.id, statement);
+      if (fact.private_to_person_id != null) await editOwnDecision(fact.id, statement);
+      else await editStandingFact(fact.id, statement);
+      void refresh();
+    },
+    [refresh],
+  );
+
+  const handleShare = useCallback(
+    async (fact: StandingFact, shared: boolean) => {
+      try {
+        await shareDecision(fact.id, shared);
+      } catch (err) {
+        window.alert(err instanceof Error ? err.message : "Couldn't change who sees it");
+        return;
+      }
       void refresh();
     },
     [refresh],
@@ -161,6 +185,7 @@ export default function CorrectionsTab({ onCount }: { onCount: (n: number) => vo
                 replaces={f.replaces_fact_id ? byId.get(f.replaces_fact_id) : undefined}
                 onApprove={canReview ? () => handleReview(f, "approve") : undefined}
                 onDecline={canReview ? () => handleReview(f, "decline") : undefined}
+                onMakePrivate={unshareable.has(f.id) ? () => handleShare(f, false) : undefined}
               />
             ))}
           </div>
@@ -177,6 +202,8 @@ export default function CorrectionsTab({ onCount }: { onCount: (n: number) => vo
                 fact={f}
                 onRetire={retirable.has(f.id) && f.kind !== "profile" ? () => handleRetire(f) : undefined}
                 onEdit={retirable.has(f.id) && f.kind !== "profile" ? (text) => handleEdit(f, text) : undefined}
+                onShare={shareable.has(f.id) ? () => handleShare(f, true) : undefined}
+                onMakePrivate={unshareable.has(f.id) ? () => handleShare(f, false) : undefined}
               />
             ))}
           </div>
@@ -234,6 +261,8 @@ function FactRow({
   onEdit,
   onApprove,
   onDecline,
+  onShare,
+  onMakePrivate,
   replacedBy,
   replaces,
 }: {
@@ -242,6 +271,8 @@ function FactRow({
   onEdit?: (statement: string) => Promise<void>;
   onApprove?: () => void;
   onDecline?: () => void;
+  onShare?: () => void;
+  onMakePrivate?: () => void;
   replacedBy?: StandingFact;
   replaces?: StandingFact;
 }) {
@@ -264,6 +295,7 @@ function FactRow({
   };
   const menu = [
     ...(onEdit ? [{ label: "Edit", onSelect: () => { setDraft(fact.statement); setEditing(true); } }] : []),
+    ...(onMakePrivate ? [{ label: "Make private", onSelect: onMakePrivate }] : []),
     ...(onRetire ? [{ label: "Retire (stop using it)", danger: true, onSelect: onRetire }] : []),
   ];
   return (
@@ -278,7 +310,15 @@ function FactRow({
           {fact.recorded_by_role === "teammate" && (
             <span className="text-fg">· per {fact.recorded_by_name || "a teammate"}</span>
           )}
+          {fact.private_to_person_id != null && (
+            <span className="px-2 py-0.5 rounded border border-line font-medium text-fg">Only you</span>
+          )}
         </div>
+        {onShare && !editing && (
+          <Button variant="secondary" size="sm" className="shrink-0 !h-10" onClick={onShare}>
+            Share with team
+          </Button>
+        )}
         {(onApprove || onDecline) && (
           <div className="shrink-0 flex gap-2">
             {onApprove && (

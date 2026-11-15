@@ -125,6 +125,7 @@ from openexecutive.orchestrator.document_tools import (
 from openexecutive.orchestrator.fact_tools import (
     FACT_TOOL_HANDLERS,
     FACT_TOOLS,
+    own_chat_person,
 )
 from openexecutive.orchestrator.figure_tools import (
     WORKED_OUT_TOOL_HANDLERS,
@@ -1649,7 +1650,9 @@ class Executive:
             if standing_facts is None:
                 # A SQLite read: off the event loop, like the other context.
                 standing_facts = await asyncio.to_thread(
-                    render_facts_for_prompt, query=_lookup_text(memory_text, user_message)
+                    render_facts_for_prompt, query=_lookup_text(memory_text, user_message),
+                    # Their own private decisions, in their own chat only.
+                    reader=own_chat_person(session),
                 )
             messages = self._build_messages(
                 session,
@@ -2068,7 +2071,8 @@ class Executive:
         )
         if standing_facts is None:
             standing_facts = await asyncio.to_thread(
-                render_facts_for_prompt, query=_lookup_text(memory_text, user_message)
+                render_facts_for_prompt, query=_lookup_text(memory_text, user_message),
+                reader=own_chat_person(session),
             )
         messages = self._build_messages(
             session,

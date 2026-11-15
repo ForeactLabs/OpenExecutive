@@ -396,9 +396,10 @@ def quiet_projects(now: datetime, *, days: int = QUIET_PROJECT_DAYS) -> list[dic
 def weeks_decisions(now: datetime) -> list[Decision]:
     """Decisions logged in the last seven days, newest first."""
     from openexecutive.memory.episodic import decisions_since
+    from openexecutive.memory.facts import brief_reader
 
     try:
-        return decisions_since(now - timedelta(days=7), limit=_MAX_LISTED)
+        return decisions_since(now - timedelta(days=7), limit=_MAX_LISTED, reader=brief_reader())
     except Exception:
         logger.warning("weekly_review: decisions unreadable", exc_info=True)
         return []
@@ -408,10 +409,11 @@ def decisions_to_revisit(now: datetime) -> list[Decision]:
     """At most ``REVISIT_MAX`` decisions older than ``REVISIT_AFTER_DAYS``
     days with no outcome recorded, newest first."""
     from openexecutive.memory.episodic import decisions_awaiting_outcome
+    from openexecutive.memory.facts import brief_reader
 
     try:
         return decisions_awaiting_outcome(
-            now - timedelta(days=REVISIT_AFTER_DAYS), limit=REVISIT_MAX
+            now - timedelta(days=REVISIT_AFTER_DAYS), limit=REVISIT_MAX, reader=brief_reader()
         )
     except Exception:
         logger.warning("weekly_review: decisions unreadable", exc_info=True)
@@ -509,7 +511,7 @@ async def _next_weeks_top_three(body: str, period: str) -> str:
     that follows the weekly-review playbook. "" on any failure."""
     from openexecutive.agents.utility_fast import get_fast_model
     from openexecutive.audit.usage import log_model_usage
-    from openexecutive.memory.facts import with_standing_facts
+    from openexecutive.memory.facts import brief_reader, with_standing_facts
     from openexecutive.providers import get_provider
     from openexecutive.workflows.playbooks import load_playbook, playbook_clause
 
@@ -518,6 +520,7 @@ async def _next_weeks_top_three(body: str, period: str) -> str:
         with_standing_facts,
         f"WEEKLY REVIEW — {period}\n\n{body}"
         + playbook_clause(playbook, "Choose the three following this playbook"),
+        reader=brief_reader(),
     )
     # The principal's lessons that bear on the week (memory.lessons), only
     # when the review goes to them alone: a run a teammate starts reads none.

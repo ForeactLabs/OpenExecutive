@@ -51,9 +51,11 @@ def _facts(person_id: int, principal: bool, since: str, session_id: str | None,
 
     where = (
         "created_at > ? AND status IN ('active', 'proposed') AND kind != 'profile' "
-        "AND (recorded_by_person_id = ? OR (? AND recorded_by_role = 'principal'))"
+        "AND (recorded_by_person_id = ? OR (? AND recorded_by_role = 'principal')) "
+        # Never someone else's private decision (memory.facts).
+        "AND (private_to_person_id IS NULL OR private_to_person_id = ?)"
     )
-    params: list[Any] = [since, person_id, 1 if principal else 0]
+    params: list[Any] = [since, person_id, 1 if principal else 0, person_id]
     if session_id:
         where += " AND session_id = ?"
         params.append(session_id)

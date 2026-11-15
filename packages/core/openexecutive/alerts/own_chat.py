@@ -67,19 +67,26 @@ def _chat_owner(session_id: str | None, db_path: Path | None = None) -> int | No
 def note_decision(decision_id: int, session_id: str | None, db_path: Path | None = None) -> None:
     """Write down whose chat held step ``decision_id`` came from, as it is
     held. Never raises: a decision with nothing written is read from its
-    conversation instead (``decision_readers``)."""
-    try:
-        owner = _chat_owner(session_id, db_path)
-        if owner is None:
+    conversation instead (``decision_readers``). A failed write is tried
+    once more, since nothing else keeps the card with its person after the
+    conversation is deleted."""
+    for attempt in (1, 2):
+        try:
+            owner = _chat_owner(session_id, db_path)
+            if owner is None:
+                return
+            with sqlite3.connect(_path(db_path), timeout=10) as conn:
+                conn.execute(_TABLE)
+                conn.execute(
+                    "INSERT OR IGNORE INTO decision_chat_owners (decision_id, person_id) VALUES (?, ?)",
+                    (decision_id, owner),
+                )
             return
-        with sqlite3.connect(_path(db_path)) as conn:
-            conn.execute(_TABLE)
-            conn.execute(
-                "INSERT OR IGNORE INTO decision_chat_owners (decision_id, person_id) VALUES (?, ?)",
-                (decision_id, owner),
-            )
-    except Exception:
-        logger.warning("own_chat: couldn't note whose chat a held step came from", exc_info=True)
+        except Exception:
+            if attempt == 2:
+                logger.error(
+                    "own_chat: couldn't note whose chat held step %s came from", decision_id, exc_info=True
+                )
 
 
 def _noted(decision_ids: list[int], db_path: Path | None = None) -> dict[int, int]:

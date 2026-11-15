@@ -83,7 +83,10 @@ REMEMBER_FACT_TOOL: dict[str, Any] = {
         "update_company_profile instead (open_tools group memory). A decision "
         "the speaker states they made ('we're going with the Q1 hire', 'we "
         "won't renew Acme') is kept the same way with decision: true, so the "
-        "weekly review can ask later how it turned out."
+        "weekly review can ask later how it turned out. A decision made in the "
+        "speaker's own private conversation is kept private to them (the "
+        "result says so): tell them, and that they can share it with the team "
+        "by asking (do_in_app share_decision) or on the Memory page."
     ),
     "input_schema": {
         "type": "object",
@@ -593,6 +596,53 @@ def _provenance(session: Any) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 
+def own_chat_person(session: Any) -> int | None:
+    """The person whose own conversation this turn is: the verified speaker
+    of a chat only they read (``delegation.settings.private_conversation``:
+    the web chat not shared with teammates, their own DM). None for a shared
+    chat or channel, a meeting, an email, a run nobody is watching, or when
+    it can't be told. A decision made there is private to them
+    (``memory.facts``), and their private decisions are read back there."""
+    try:
+        from openexecutive.delegation.settings import private_conversation
+        from openexecutive.orchestrator.people_tools import (
+            is_principal_on_verified_surface,
+            teammate_on_verified_surface,
+        )
+
+        if (
+            session is None
+            or getattr(session, "unattended", False)
+            or getattr(session, "meeting_call", False)
+            or getattr(session, "email_from", "")
+            or not private_conversation(session)
+        ):
+            return None
+        if is_principal_on_verified_surface(session):
+            from openexecutive.people import registry as people_registry
+
+            principal = people_registry.get_principal()
+            return principal.id if principal is not None else None
+        teammate = teammate_on_verified_surface(session)
+        return teammate.id if teammate is not None else None
+    except Exception:  # noqa: BLE001 - nobody's: the team's facts only.
+        logger.warning("fact_tools: couldn't tell whose conversation this is", exc_info=True)
+        return None
+
+
+def _private_decision_owner(session: Any) -> int | None:
+    """Who a decision recorded this turn is private to: ``own_chat_person``
+    on a team install. A solo install has nobody to keep it from."""
+    try:
+        from openexecutive.memory.workspace_settings import effective_workspace_mode
+
+        if effective_workspace_mode(session) == "solo":
+            return None
+    except Exception:  # noqa: BLE001 - unknown mode: treat as a team.
+        logger.warning("fact_tools: workspace mode unreadable", exc_info=True)
+    return own_chat_person(session)
+
+
 def _remember_fact(tool_input: dict[str, Any]) -> str | _Hold:
     from openexecutive.memory import facts
 
@@ -639,7 +689,11 @@ def _remember_fact(tool_input: dict[str, Any]) -> str | _Hold:
         return _bad(tool, "replaces_fact_id must be the N of a listed '[fact N]'")
     if replaces is not None:
         existing = facts.get_fact(replaces)
-        if existing is None or existing.status != "active" or existing.kind == "profile":
+        if (
+            existing is None or existing.status != "active" or existing.kind == "profile"
+            # Someone else's private decision does not exist for this speaker.
+            or not facts.readable(existing, own_chat_person(session))
+        ):
             return _bad(tool, f"no standing fact {replaces}. Check the '[fact N]' ids and call again.")
 
     decision = tool_input.get("decision") is True
@@ -649,6 +703,9 @@ def _remember_fact(tool_input: dict[str, Any]) -> str | _Hold:
         # Left out (None), an edit of a decision stays one (record_fact).
         "decision": True if decision else None,
         "department": _department(tool_input) if decision else None,
+        # A decision made in the speaker's own chat is theirs until they
+        # share it. Not one held for an emailed confirmation (never a chat).
+        "private_to_person_id": _private_decision_owner(session) if decision and not held else None,
     }
     provenance = _provenance(session)
     if teammate is not None:
@@ -697,6 +754,7 @@ def _apply_remember(args: dict[str, Any], provenance: dict[str, Any]) -> str:
         # A fact held for an emailed confirmation before decisions were facts
         # carries neither key.
         "decision": args.get("decision"), "department": args.get("department"),
+        "private_to_person_id": args.get("private_to_person_id"),
         **provenance,
     }
     try:
@@ -719,7 +777,9 @@ def _apply_remember(args: dict[str, Any], provenance: dict[str, Any]) -> str:
                      "recorded; do not retry the same call unchanged."
         })
 
-    if fact.status == "active" and fact.decision and fact.department:
+    private = fact.private_to_person_id is not None
+    # A private decision is not the department's to remember.
+    if fact.status == "active" and fact.decision and fact.department and not private:
         from openexecutive.memory.episodic import _mirror_to_dept_honcho
 
         try:
@@ -731,12 +791,18 @@ def _apply_remember(args: dict[str, Any], provenance: dict[str, Any]) -> str:
             logger.warning("remember_fact: department mirror failed", exc_info=True)
     _audit(
         tool, True,
-        f"remember_fact {fact.id} ({fact.status}): {subject[:60]} — {statement[:80]}",
+        f"remember_fact {fact.id} (private decision)" if fact.private_to_person_id is not None
+        else f"remember_fact {fact.id} ({fact.status}): {subject[:60]} — {statement[:80]}",
         {
             "fact_id": fact.id, "kind": fact.kind, "status": fact.status,
             "decision": fact.decision, "department": fact.department,
-            "recorded_by_role": fact.recorded_by_role, "subject": subject,
-            "statement": statement, "previous": fact.previous_statement[:300],
+            "recorded_by_role": fact.recorded_by_role,
+            # Not what a private decision says: the audit page is read by
+            # the principal, and it is its person's alone.
+            **({"private_to_person_id": fact.private_to_person_id} if private else {
+                "subject": subject, "statement": statement,
+                "previous": fact.previous_statement[:300],
+            }),
             "superseded_ids": [f.id for f in superseded],
             **({"outranked_by": outranked.id} if outranked is not None else {}),
         },
@@ -767,6 +833,14 @@ def _apply_remember(args: dict[str, Any], provenance: dict[str, Any]) -> str:
         "statement": fact.statement,
         "replaced": [{"fact_id": f.id, "statement": f.statement} for f in superseded],
         **({"attributed_to": fact.recorded_by_name} if fact.recorded_by_role == "teammate" else {}),
+        **({
+            "private": True,
+            "message": (
+                "Kept as their own decision: only they see it, in their chats, briefs "
+                "and Memory page. Tell them that in a few words, and that they can "
+                "share it with the team by asking you or on the Memory page."
+            ),
+        } if private else {}),
     })
 
 
@@ -791,7 +865,7 @@ def _forget_fact(tool_input: dict[str, Any]) -> str | _Hold:
     if quote_error:
         return _bad(tool, quote_error, fact_id=fact_id)
     existing = facts.get_fact(fact_id)
-    if existing is None or existing.kind == "profile":
+    if existing is None or existing.kind == "profile" or not facts.readable(existing, own_chat_person(session)):
         return _bad(tool, f"no standing fact {fact_id}")
     if existing.status != "active":
         return _bad(tool, f"fact {fact_id} is not active (already replaced or forgotten)")
