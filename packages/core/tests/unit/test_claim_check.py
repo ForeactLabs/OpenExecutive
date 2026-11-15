@@ -115,7 +115,10 @@ def test_unbacked_claim_gets_one_more_round_with_the_nudge() -> None:
     second = provider.calls[1]["messages"]
     assert second[-2] == {"role": "assistant", "content": [{"type": "text", "text": "Done."}]}
     nudge = second[-1]["content"][0]["text"]
-    assert "“Done”" in nudge and "no tool call" in nudge
+    assert "“Done”" in nudge and "no tool call" in nudge and "write your whole reply again" in nudge
+    # The retry replaces the first reply wherever it is read, web and phone
+    # included: they drop what streamed on ``rewrite``.
+    assert {"type": "rewrite"} in items
     # The break between the two replies comes from the next round's text
     # (test_reply_rounds.py); the retry itself streams nothing of its own.
     assert "\n\n" not in items
@@ -204,3 +207,23 @@ def test_the_check_sees_what_each_call_was_given() -> None:
     assert len(long) < claim_check.CALL_INPUT_CHARS + 40
     rendered = claim_check.render_calls([(label, "Successfully updated range 'A9:B10'")])
     assert "=SUM(B2:B9)" in rendered
+
+
+def test_every_call_of_a_long_turn_is_shown() -> None:
+    """A save early in a long turn still backs "I saved it": no call is cut,
+    the lines get shorter instead."""
+    calls = [("save_file {\"name\": \"Logistics pack\"}", "Saved to Documents")]
+    calls += [(f"update_department_plan {{\"step_id\": {i}}}", "ok " * 200) for i in range(40)]
+    rendered = claim_check.render_calls(calls)
+    lines = rendered.splitlines()
+    assert len(lines) == 41 and "Logistics pack" in lines[0] and "Saved to Documents" in lines[0]
+    assert all(len(line) <= max(claim_check.CALL_MIN_CHARS, claim_check.CALLS_BUDGET_CHARS // 41) for line in lines)
+
+
+def test_a_claim_about_before_this_reply_is_never_unbacked() -> None:
+    reply = "Earlier today I also sent Sam approval cards for the other quotes. I sent the quote just now."
+    earlier = {"unbacked": True, "claim": "Earlier today I also sent Sam approval cards for the other quotes."}
+    assert claim_check.accept_claim(earlier, reply) is None
+    assert claim_check.accept_claim({"unbacked": True, "claim": "I sent the quote just now."}, reply) == (
+        "I sent the quote just now."
+    )

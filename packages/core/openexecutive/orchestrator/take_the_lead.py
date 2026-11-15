@@ -2235,6 +2235,21 @@ def _careful() -> bool:
         return True
 
 
+def _careful_turn() -> bool:
+    """Whether the turn in progress runs at Careful (its person's own level
+    where they have one). Never raises: an error holds."""
+    try:
+        from openexecutive.orchestrator import levels, outside_mode
+        from openexecutive.orchestrator.schedule_tools import current_session
+
+        session = current_session.get()
+        level = levels.turn_level(session) if session is not None else outside_mode.get_mode()
+        return level == outside_mode.ASK
+    except Exception:
+        logger.warning("take_the_lead: couldn't read the turn's level — holding the step", exc_info=True)
+        return True
+
+
 def _hit(name: str, tool_input: dict[str, Any], *, mcp: bool) -> tuple[Hit | None, Allowed | Rule | None]:
     """Why this call waits (and what let it go, when an allowance or a Goes
     rule did): the owner's Waits rules, then Careful, then In training, then
@@ -2450,14 +2465,16 @@ def gated_call_tool(call_tool: _Handler, *, source: str) -> _Handler:
 # --------------------------------------------------------------------------- #
 # Approvals (orchestrator.levels) decides first on every turn. On a turn
 # someone is in, what it lets run still meets the owner's Waits rules, then
-# In training, as an unattended run's steps do (``_hit``). The owner's own ask
-# is the yes: their turns skip both. Unattended runs go through ``_gated``.
+# Careful, then In training, as an unattended run's steps do (``_hit``). The
+# owner's own ask is the yes, except on Careful, which asks before anything
+# goes: their turns meet Careful alone. Unattended runs go through ``_gated``.
 
 
 def asked_checks_apply(session: Any) -> bool:
-    """Whether this turn's steps meet Your rules and In training here: a
+    """Whether this turn's steps meet the checks here (``_asked_hit``): a
     turn someone is in (a teammate, a contact's mail, a shared chat) that is
-    not the owner's own ask. Fails closed: no session, or an error, is yes."""
+    not the owner's own ask, or any turn on Careful. Fails closed: no
+    session, or an error, is yes."""
     if session is None:
         return True
     if getattr(session, "unattended", False) is True:
@@ -2465,16 +2482,24 @@ def asked_checks_apply(session: Any) -> bool:
     try:
         from openexecutive.orchestrator.content_trust import principal_speaking
 
-        return not principal_speaking(session)
+        return not principal_speaking(session) or _careful_turn()
     except Exception:
         logger.warning("take_the_lead: couldn't tell who asked — checking the rules", exc_info=True)
         return True
 
 
 def _asked_hit(name: str, tool_input: dict[str, Any], *, mcp: bool) -> Hit | None:
-    """Why an asked-for step waits: a Waits rule, then In training. Never
-    raises: an error holds."""
+    """Why an asked-for step waits: a Waits rule, then Careful (it asks
+    before anything goes, even what the person asked for), then In
+    training. The owner's own ask meets Careful alone. Never raises: an
+    error holds."""
     try:
+        from openexecutive.orchestrator.content_trust import principal_speaking
+        from openexecutive.orchestrator.schedule_tools import current_session
+
+        session = current_session.get()
+        if session is not None and principal_speaking(session):
+            return Hit("level", "Approvals is on Careful") if _careful_turn() else None
         lead = get(SCOPE_EXECUTIVE)
         rules = list_rules([SCOPE_COMPANY])
         addresses, names = _rule_targets(name, tool_input)
@@ -2486,6 +2511,8 @@ def _asked_hit(name: str, tool_input: dict[str, Any], *, mcp: bool) -> Hit | Non
         rule = _rule_hit(rules, text, recipients)
         if rule is not None:
             return rule
+        if _careful_turn():
+            return Hit("level", "Approvals is on Careful")
         if lead.training:
             grant = allowance(name, tool_input, mcp=mcp)
             if (find_allowed(grant[0]) if grant is not None else None) is None:

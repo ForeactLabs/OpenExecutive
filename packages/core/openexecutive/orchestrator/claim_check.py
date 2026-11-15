@@ -15,8 +15,9 @@ its last reply is checked against the tool calls the turn made:
    put up for approval) is not one.
 3. When it finds one, the claim must appear word for word in the reply (code
    check), or it is ignored. The loop then gets one more round with
-   ``nudge(claim)``: do it now with the right tool, or tell the person
-   plainly it couldn't be done. Once a turn, so a loop can't form.
+   ``nudge(claim)``: do it now with the right tool, or say plainly it couldn't
+   be done, in a whole new reply that replaces the first. Once a turn, so a
+   loop can't form.
 
 Never raises and never blocks a reply: a failure, a timeout or a missing
 setting ends the turn as before. ``CLAIM_CHECK_ENABLED`` turns it off.
@@ -43,7 +44,11 @@ CLAIM_RE = re.compile(
 
 MAX_REPLY_CHARS = 3000
 MAX_MESSAGE_CHARS = 2000
-MAX_CALLS = 20
+# Every call the turn made is shown, never only the last few: a save early
+# in a long turn backs "I saved it" as much as one at the end. A long turn's
+# lines get shorter instead, down to CALL_MIN_CHARS each.
+CALLS_BUDGET_CHARS = 16000
+CALL_MIN_CHARS = 160
 CALL_RESULT_CHARS = 400
 # What each call was asked to do, shown next to its name: "moved the total
 # to row 10" is in what a sheet write was given, not in its one-line result.
@@ -126,12 +131,16 @@ def call_label(name: str, tool_input: Any) -> str:
 
 
 def render_calls(calls: list[tuple[str, str]]) -> str:
+    """Every call, one line each: what it was given and the start of its
+    result, each line cut to its share of ``CALLS_BUDGET_CHARS``."""
     if not calls:
         return "(no tool calls)"
+    width = max(CALL_MIN_CHARS, CALLS_BUDGET_CHARS // len(calls))
     lines = []
-    for name, result in calls[-MAX_CALLS:]:
+    for name, result in calls:
         preview = " ".join(str(result or "").split())[:CALL_RESULT_CHARS]
-        lines.append(f"- {name}: {preview}")
+        line = f"- {name}: {preview}"
+        lines.append(line if len(line) <= width else line[: width - 1] + "…")
     return "\n".join(lines)
 
 
@@ -147,15 +156,28 @@ def _normalize(text: str) -> str:
     return " ".join(text.replace("’", "'").split()).lower()
 
 
+# A claim that says it happened before this reply ("Earlier today I sent…",
+# "I already booked it") is about another turn, which this one's calls can't
+# back: never an unbacked claim, whatever the model said.
+EARLIER_RE = re.compile(
+    r"\b(?:earlier|already|before (?:this|now)|previously|yesterday|last (?:week|time|night)|"
+    r"this morning|(?:a|an|\d+) (?:minutes?|hours?|days?) ago)\b",
+    re.IGNORECASE,
+)
+
+
 def accept_claim(payload: dict[str, Any], reply: str) -> str | None:
-    """The model's claim when it reported one and it is in the reply word
-    for word (whitespace, case and curly quotes aside); None otherwise."""
+    """The model's claim when it reported one, it is in the reply word for
+    word (whitespace, case and curly quotes aside) and it doesn't place
+    itself before this reply (``EARLIER_RE``); None otherwise."""
     if payload.get("unbacked") is not True:
         return None
     claim = " ".join(str(payload.get("claim") or "").split())
     if not claim or len(claim) > CLAIM_MAX_CHARS:
         return None
     if _normalize(claim) not in _normalize(reply):
+        return None
+    if EARLIER_RE.search(claim):
         return None
     return claim
 
@@ -197,23 +219,17 @@ async def unbacked_claim(message: str, reply: str, calls: list[tuple[str, str]])
     return accept_claim(payload, reply)
 
 
-def nudge(claim: str, *, rewrite: bool = False) -> str:
-    """The user-turn note for the extra round (never a cached block).
-    ``rewrite``: the reply is read whole, so the round writes it
-    again in full, correct, in place of the first."""
-    if rewrite:
-        return (
-            "[Check before you finish] Your reply says “" + claim + "”, but no "
-            "tool call in this reply made that change. Make it now with the right "
-            "tool if you can. Then write your whole reply again, start to finish, "
-            "saying only what is true: it replaces the one above, which the person "
-            "will never see. No note about a correction."
-        )
+def nudge(claim: str) -> str:
+    """The user-turn note for the extra round (never a cached block). The
+    round writes the reply again in full, correct, and it replaces the first
+    wherever the person reads it: on a chat app or in an email the first is
+    never sent, and the web and phone chats swap it out (``rewrite``)."""
     return (
         "[Check before you finish] Your reply says “" + claim + "”, but no "
         "tool call in this reply made that change. Make it now with the right "
-        "tool and say so in one short line, or, if you can't, tell the person "
-        "plainly that it isn't done and why. Don't repeat the rest of your reply."
+        "tool if you can. Then write your whole reply again, start to finish, "
+        "saying only what is true: it replaces the one above, which the person "
+        "will never see. No note about a correction."
     )
 
 

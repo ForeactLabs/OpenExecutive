@@ -230,10 +230,6 @@ from openexecutive.workflows.python_job import PYTHON_JOB_TOOL_HANDLERS, PYTHON_
 
 logger = logging.getLogger(__name__)
 
-# Set while ``Executive.chat`` collects a reply whole (an email or a chat
-# app's answer), so a claim-check retry rewrites it instead of adding a
-# correction after it.
-_COLLECTING: ContextVar[bool] = ContextVar("executive_collecting", default=False)
 
 # Bound by ``Executive.chat`` to a list that a round the model refused
 # (stop_reason "refusal") appends to, so the collected reply never sends what
@@ -2930,14 +2926,14 @@ class Executive:
                     private=private_turn,
                 )
                 current_messages.append({"role": "assistant", "content": response_content})
-                # A collected reply (an email, a chat app) is read whole, so
-                # the retry writes the whole reply again and it replaces the
-                # first instead of trailing it as a correction.
-                rewrite = _COLLECTING.get()
-                if rewrite:
-                    yield {"type": "rewrite"}
+                # The retry writes the whole reply again and it replaces the
+                # first, never trailing it as a correction: a collected reply
+                # (an email, a chat app) drops it before it is sent, and the
+                # web chat swaps it out on ``rewrite``.
+                yield {"type": "rewrite"}
+                streamed_tail = ""
                 nudge: list[dict[str, Any]] = [
-                    {"type": "text", "text": claim_check.nudge(claim, rewrite=rewrite)}
+                    {"type": "text", "text": claim_check.nudge(claim)}
                 ]
                 # The retry is the last round, which runs no tool: say so,
                 # so it says it can't rather than try a call it won't get.
@@ -4186,7 +4182,6 @@ class Executive:
         rewritten, before = False, ""
         refused: list[int] = []
         refusing = _REFUSED.set(refused)
-        collecting = _COLLECTING.set(True)
         try:
             with turn_files.bind(offered or None) if offered else contextlib.nullcontext():
                 async for chunk in stream:
@@ -4200,7 +4195,6 @@ class Executive:
                         if isinstance(decision_id, int) and not isinstance(decision_id, bool) and decision_id not in cards:
                             cards.append(decision_id)
         finally:
-            _COLLECTING.reset(collecting)
             _REFUSED.reset(refusing)
         if rewritten:
             # A retry that wrote nothing keeps the first reply.

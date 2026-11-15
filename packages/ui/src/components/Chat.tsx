@@ -707,6 +707,11 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
           setIsConsulting(false);
           setActivityLabel(null);
           setStreamingContent(accumulated);
+        } else if (item.type === "rewrite") {
+          // Written again whole: the next chunks replace what came so far.
+          accumulated = "";
+          roundText = 0;
+          setStreamingContent("");
         } else if (item.type === "activity") {
           // Arrives immediately before `thinking`, so the label is in place
           // before the indicator turns on. Deliberately not cleared by

@@ -87,6 +87,9 @@ export interface Activity {
 export interface ChatChunk {
   type:
     | "chunk"
+    // The reply is written again whole (a check found it said something
+    // untrue): drop what streamed so far; the next chunks replace it.
+    | "rewrite"
     | "done"
     | "error"
     | "thinking"
@@ -1362,6 +1365,7 @@ export type LiveChatEvent =
       content: string;
     }
   | { type: "chunk"; turn_key: string; content: string }
+  | { type: "rewrite"; turn_key: string }
   | { type: "thinking"; turn_key: string }
   | { type: "activity"; turn_key: string; label: string }
   | ({ turn_key: string } & ActionTaken)

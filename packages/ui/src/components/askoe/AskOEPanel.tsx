@@ -177,6 +177,10 @@ export default function AskOEPanel() {
             content += item.content;
             setActivityLabel(null);
             setStreamingContent(content);
+          } else if (item.type === "rewrite") {
+            // Written again whole: the next chunks replace what came so far.
+            content = "";
+            setStreamingContent("");
           } else if (item.type === "activity") {
             setActivityLabel(item.label);
           } else if (item.type === "form_patch") {

@@ -339,7 +339,7 @@ class _StreamStep(NamedTuple):
 _SSE_KEEPALIVE = ": keepalive\n\n"
 # The steps of a reply the other pages of a shared chat follow live
 # (``chat_live.turn_event``), besides its text and the thinking pings.
-_LIVE_STEPS = frozenset({"activity", "action_taken", "phase"})
+_LIVE_STEPS = frozenset({"activity", "action_taken", "phase", "rewrite"})
 
 
 async def _cancel_stream_step(anext_task: asyncio.Task[Any], turn_id: str) -> None:
@@ -1789,6 +1789,11 @@ async def _run_chat_turn(
                                 # A draft written again in this reply replaces
                                 # the earlier one's chip and card.
                                 action_chips[:] = drop_replaced([*action_chips, item])
+                            elif isinstance(item, dict) and item.get("type") == "rewrite":
+                                # The reply is written again whole: what
+                                # streamed so far is dropped here (the saved
+                                # reply) and by every page showing it.
+                                full_response = ""
                             if (
                                 live_turn
                                 and isinstance(item, dict)
