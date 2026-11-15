@@ -175,6 +175,49 @@ def why_not_authenticated(raw: str, from_addr: str) -> str:
     return f"authserv={authserv!r} trusted={trusted} dmarc={verdict.group(1) if verdict else None}"
 
 
+UNSIGNED = "unsigned"
+DMARC_FAILED = "dmarc_failed"
+VIA_LIST = "via_list"
+
+
+def unproven_cause(raw: str, from_addr: str) -> str:
+    """Why the mailbox could not prove a message's sender, in terms a person
+    can act on: ``UNSIGNED`` (the From domain publishes no DMARC record and
+    did not sign it: mail sent from another account, such as Gmail's "Send
+    mail as"), ``DMARC_FAILED`` (the domain's own check failed), ``VIA_LIST``
+    (a list or group resent it), or "" when the headers don't say. Reads only
+    the topmost Authentication-Results of a trusted authserv, as
+    ``authenticated_by_gmail`` does. Never raises."""
+    try:
+        headers = _raw_headers(raw)
+        if headers is None:
+            return ""
+        _name, raw_from = parseaddr(str(headers.get("From", "")))
+        if raw_from.strip().lower() != from_addr.strip().lower():
+            return ""
+        results = headers.get_all("Authentication-Results") or []
+        if not results:
+            return ""
+        if _relayed_by_a_list(headers):
+            return VIA_LIST
+        newest = _strip_quotes_and_comments(" ".join(str(results[0]).split()).lower())
+        if newest is None:
+            return ""
+        authserv, _sep, rest = newest.partition(";")
+        if authserv.strip() != _GMAIL_AUTHSERV:
+            return ""
+        verdicts = [c.strip() for c in rest.split(";") if c.strip().startswith("dmarc=")]
+        if len(verdicts) > 1:
+            return ""
+        if not verdicts or _DMARC_NONE.fullmatch(verdicts[0]):
+            return UNSIGNED
+        if re.match(r"dmarc=(fail|quarantine|reject)\b", verdicts[0]):
+            return DMARC_FAILED
+    except Exception:  # noqa: BLE001 - a card's wording only
+        logger.warning("fact_confirmation: could not read why a sender is unproven", exc_info=True)
+    return ""
+
+
 def headers_authenticated(headers: Message, from_addr: str) -> bool:
     """``authenticated_by_gmail`` over a message's parsed headers, in the
     order the message carries them (the Gmail API's own header list, say)."""

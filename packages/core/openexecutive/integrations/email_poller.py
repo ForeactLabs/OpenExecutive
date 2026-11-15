@@ -68,6 +68,12 @@ _MAX_ATTEMPTS = 3
 _DEFAULT_TURN_TIMEOUT_S = 300.0
 # The wait before the sender check is tried a second time (_prove).
 _PROVE_RETRY_S = 2.0
+# Why each recent message's sender was left unproven
+# (``fact_confirmation.unproven_cause``), for its card's wording
+# (``integrations.unanswered_mail``). Taken once by ``_note_reply_outcome``;
+# the cap only bounds what an unanswered message leaves behind.
+_UNPROVEN_CAUSES: dict[str, str] = {}
+_UNPROVEN_CAUSES_MAX = 200
 
 _SKIP_SENDERS = ("noreply", "no-reply", "mailer-daemon", "postmaster", "do-not-reply")
 
@@ -499,6 +505,11 @@ def _log_unconfirmed(message_id: str, raw: str, from_addr: str) -> None:
     except Exception:  # noqa: BLE001 - a diagnostic only
         why = "unreadable"
     logger.info("sender not confirmed for message=%s: %s", message_id, why)
+    cause = fact_confirmation.unproven_cause(raw, from_addr)
+    if cause and message_id:
+        while len(_UNPROVEN_CAUSES) >= _UNPROVEN_CAUSES_MAX:
+            _UNPROVEN_CAUSES.pop(next(iter(_UNPROVEN_CAUSES)))
+        _UNPROVEN_CAUSES[message_id] = cause
 
 
 async def _handle_one_email(
@@ -1649,6 +1660,7 @@ def _note_reply_outcome(
     try:
         addresses = {sender, *(a.strip().lower() for a in [person.email, *person.email_aliases] if a)}
         if addresses & session.mail_sent_to or (message_id and message_id in session.mail_replied_ids):
+            _UNPROVEN_CAUSES.pop(message_id, None)
             unanswered_mail.close_card(thread_key)
             unanswered_mail.record_reply(thread_key, sender, getattr(session, "session_id", None))
             return
@@ -1664,12 +1676,15 @@ def _note_reply_outcome(
             header, _body, _attachments = _split_gmail_content(raw_email)
             line = next((ln for ln in header if ln.lower().startswith("subject:")), "")
             subject = line[len("subject:"):].strip()
+        cause = _UNPROVEN_CAUSES.pop(message_id, "") if message_id else ""
         unanswered_mail.file_card(
             thread_key=thread_key,
             message_id=message_id,
             sender_name=str(getattr(person, "full_name", "") or from_addr),
             from_principal=from_principal,
             verified=verified,
+            sender_address=sender,
+            cause="" if verified else cause,
             principal_address=getattr(person, "is_principal", False) is True,
             subject=subject,
             answer=response if from_principal and isinstance(response, str) else "",
