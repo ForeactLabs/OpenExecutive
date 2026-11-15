@@ -44,12 +44,14 @@ from openexecutive.memory.workspace_settings import (
 from openexecutive.orchestrator import (
     app_control_catalog,  # noqa: F401  (fills the app tools' catalog)
     claim_check,
+    content_scan,
     extensions,
     levels,
     outside_content,
     reply_card_tools,
     take_the_lead,
     tool_groups,
+    tool_images,
     turn_progress,
 )
 from openexecutive.orchestrator import pushback as pushback_mod
@@ -89,6 +91,7 @@ from openexecutive.orchestrator.chat_search_tools import (
     CHAT_SEARCH_TOOL_HANDLERS,
     CHAT_SEARCH_TOOL_NAMES,
     CHAT_SEARCH_TOOLS,
+    recent_chats_block,
     search_person,
 )
 from openexecutive.orchestrator.content_trust import (
@@ -217,6 +220,7 @@ from openexecutive.orchestrator.workflow_run_tools import (
 )
 from openexecutive.prompts.cache_manager import build_system_blocks
 from openexecutive.providers import get_provider
+from openexecutive.providers.registry import sees_images
 from openexecutive.providers.translator import reasoning_replay_block
 from openexecutive.workflows import python_job, step_script, turn_files
 from openexecutive.workflows.action_step import looks_like_error
@@ -1425,6 +1429,15 @@ class Executive:
         if drive_memory:
             user_content_parts.append(
                 {"type": "text", "text": f"<drive_memory>\n{drive_memory}\n</drive_memory>"}
+            )
+        # The speaker's own chats from the last two days, titles only
+        # (chat_search_tools.recent_chats_block), so "we did it earlier"
+        # reaches search_past_chats. Only where that tool is offered; per
+        # turn, so the user turn.
+        recent_chats = recent_chats_block(session)
+        if recent_chats:
+            user_content_parts.append(
+                {"type": "text", "text": f"<recent_chats>\n{recent_chats}\n</recent_chats>"}
             )
         # The follow-ups this speaker scheduled that haven't gone out
         # (correction_tools.pending_followups_block), so a turn about the
@@ -3947,6 +3960,17 @@ class Executive:
                 for evt in debug_collector._events[event_cursor:]:
                     yield debug_collector.to_sse_dict(evt)
 
+            # A picture a tool held (the browser's screenshot) comes off its
+            # answer first. The model sees it only when it can see images and
+            # the check below can read it too (text in a picture is outside
+            # content like any other); otherwise it gets the text alone.
+            images_by_id: dict[str, dict[str, Any]] = {}
+            for tu in tool_uses:
+                bare, image = tool_images.take(results_by_id.get(tu["id"]))
+                if image is not None:
+                    results_by_id[tu["id"]] = bare
+                    images_by_id[tu["id"]] = image
+            sees = bool(images_by_id) and sees_images(stream_model) and sees_images(content_scan.scan_model())
             # What this round read from outside reaches the model with its
             # results: from the next round on the turn is held.
             # The check sees each read's result first (orchestrator.content_scan):
@@ -3957,7 +3981,12 @@ class Executive:
             ]:
                 if tu["id"] not in held_ids and tu not in withheld_uses:
                     notice = await outside_content.mark_read(
-                        source, tu["input"], results_by_id.get(tu["id"], ""), self._mcp_gateway
+                        source,
+                        tu["input"],
+                        tool_images.content(
+                            results_by_id.get(tu["id"], ""), images_by_id.get(tu["id"]), sees=sees
+                        ),
+                        self._mcp_gateway,
                     )
                     if notice:
                         results_by_id[tu["id"]] = _with_notice(results_by_id.get(tu["id"], ""), notice)
@@ -4004,6 +4033,7 @@ class Executive:
                     results_by_id.get(tu["id"], f"Unknown tool: {tu['name']}"),
                     tu["id"],
                 )
+                content = tool_images.content(content, images_by_id.get(tu["id"]), sees=sees)
                 tool_results.append({"type": "tool_result", "tool_use_id": tu["id"], "content": content})
             # Messages the person sent since the last round ride in this
             # round's user message, after the tool results (which must come
@@ -4036,6 +4066,10 @@ class Executive:
                 yield {"type": "handing_over"}
             if iteration == max_iterations - 1 and not handing_over:
                 tool_results.append({"type": "text", "text": LAST_ROUND_NOTE})
+            if sees:
+                # Only the newest screenshots ride along: older ones would be
+                # sent again every round.
+                tool_images.drop_older(current_messages)
             if not tool_results:
                 logger.warning(
                     "round %d ended on %s with no tool call to answer; blocks=%s",

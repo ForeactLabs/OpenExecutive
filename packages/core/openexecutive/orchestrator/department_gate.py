@@ -286,21 +286,6 @@ def _waiting_replies(
     return found
 
 
-def reply_waiting(
-    tool: str, tool_input: dict[str, Any], *, mcp: bool, approver: int | None, requester: int | None,
-    db_path: Path | None = None,
-) -> bool:
-    """Whether a reply to the same people on the same thread already waits
-    for ``approver``: the person was told it's with the owner then. Never
-    raises: an error is no."""
-    try:
-        key = _thread_key(tool, [tool_input], mcp=mcp)
-        return key is not None and bool(_waiting_replies(key, approver, requester, besides=None, db_path=db_path))
-    except Exception:
-        logger.debug("department_gate: couldn't look for a waiting reply", exc_info=True)
-        return False
-
-
 def replace_older_reply(
     decision_id: int,
     alert_id: int,

@@ -228,8 +228,8 @@ def test_approving_does_the_exact_call_once(
 ) -> None:
     done: list[dict[str, Any]] = []
 
-    async def carry_out(payload: dict[str, Any], *, by_principal: bool) -> str:
-        done.append(payload)
+    async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bool = False) -> str:
+        done.append({**payload, "own_card": own_card})
         return json.dumps({"status": "sent"})
 
     monkeypatch.setattr(ttl, "carry_out", carry_out)
@@ -239,6 +239,9 @@ def test_approving_does_the_exact_call_once(
     assert response.status_code == 200, response.text
     assert response.json()["status"] == ledger.STATUS_APPROVED_UNCHANGED
     assert [(p["tool"], p["input"]) for p in done] == [("send_slack_dm", _send())]
+    # Sam asked and Sam approved: their own card (carry_out decides what that
+    # may relax: only a step that runs on their own device).
+    assert done[0]["own_card"] is True
     assert client.post(f"/decisions/{decision_id}/approve", json={}, headers=headers).status_code == 409
     [card] = alerts_store.list_alerts(limit=10, status="ack")
     assert card.external_id == f"decision:{decision_id}"
@@ -428,9 +431,7 @@ def _hold_reply(owner: Person, body: str, subject: str = "Re: 30 minutes Thursda
 
 def test_a_newer_reply_on_the_same_thread_replaces_the_one_waiting(team: dict[str, Person]) -> None:
     owner = team["owner"]
-    assert not gate.reply_waiting(_GMAIL, _reply("first"), mcp=True, approver=owner.id, requester=owner.id)
     first = _hold_reply(owner, "Hi Dana, nothing is booked yet.")
-    assert gate.reply_waiting(_GMAIL, _reply("second"), mcp=True, approver=owner.id, requester=owner.id)
     second = _hold_reply(owner, "Hi Dana, I can't confirm Thursday myself.", subject="RE: 30 minutes thursday?")
     assert ledger.get_decision_instance(first).status == ledger.STATUS_CLOSED_EXTERNALLY  # type: ignore[union-attr]
     assert ledger.get_decision_instance(second).status == ledger.STATUS_PROPOSED  # type: ignore[union-attr]
@@ -440,9 +441,11 @@ def test_a_newer_reply_on_the_same_thread_replaces_the_one_waiting(team: dict[st
     third = _hold_reply(owner, "Hi Dana, Tuesday's delivery is on.", subject="Re: Delivery window")
     assert ledger.get_decision_instance(second).status == ledger.STATUS_PROPOSED  # type: ignore[union-attr]
     assert ledger.get_decision_instance(third).status == ledger.STATUS_PROPOSED  # type: ignore[union-attr]
-    # No approver, or someone else's ask, replaces nothing.
-    assert not gate.reply_waiting(_GMAIL, _reply("x"), mcp=True, approver=None, requester=owner.id)
-    assert not gate.reply_waiting(_GMAIL, _reply("x"), mcp=True, approver=owner.id, requester=team["sam"].id)
+    # Someone else's ask on the thread replaces nothing.
+    verdict = gate.Verdict(run=False, department="logistics", approver_person_id=owner.id, reason="Careful")
+    theirs = gate.hold(team["sam"], _GMAIL, _reply("Hi Dana, Sam here."), verdict, mcp=True, session_id="email:2")
+    assert ledger.get_decision_instance(second).status == ledger.STATUS_PROPOSED  # type: ignore[union-attr]
+    assert ledger.get_decision_instance(theirs).status == ledger.STATUS_PROPOSED  # type: ignore[union-attr]
 
 
 def test_the_card_an_email_turn_raised_folds_into_the_step_it_held(team: dict[str, Person]) -> None:
