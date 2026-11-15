@@ -24,6 +24,7 @@ Never raises: a card left unfiled costs the card, never the email.
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 
 logger = logging.getLogger(__name__)
@@ -51,13 +52,20 @@ def _one_line(text: str, limit: int) -> str:
     return flat if len(flat) <= limit else flat[: limit - 1].rstrip() + "…"
 
 
+_HOSTNAME = re.compile(r"[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?")
+
+
 def _domain(address: str) -> str:
-    return address.strip().lower().rpartition("@")[2]
+    """The address's domain when it is a plain hostname, else "" (and the
+    card keeps its plain wording)."""
+    domain = address.strip().lower().rpartition("@")[2]
+    return domain if "." in domain and _HOSTNAME.fullmatch(domain) else ""
 
 
 def _why_unproven(cause: str, address: str, who: str) -> str:
     """One or two sentences on why the mailbox could not prove ``who`` sent
-    it, or "" when the cause is unknown. ``who`` is a name, or "you"."""
+    it, or "" when the cause is unknown. ``who`` is a name, or "you". The
+    headers can't tell a forgery from the benign case, so each says both."""
     from openexecutive.integrations import fact_confirmation as fc
 
     domain = _domain(address)
@@ -66,14 +74,13 @@ def _why_unproven(cause: str, address: str, who: str) -> str:
     if cause == fc.UNSIGNED:
         return (
             f"The mailbox could not prove {who} sent it: {domain} didn't sign it. "
-            "This usually means it was sent from another account, such as Gmail's "
-            f"“Send mail as”, or that {domain} has no email signing set up. "
-            "It may also be forged. "
+            "It may be forged, or sent from another account, such as Gmail's "
+            f"“Send mail as”, with no {domain} signature. "
         )
     if cause == fc.DMARC_FAILED:
         return (
             f"The mailbox could not prove {who} sent it: it failed {domain}'s own "
-            f"sender check (DMARC), so it may be forged, or sent through a service "
+            f"sender check (DMARC). It may be forged, or sent through a service "
             f"{domain} hasn't approved. "
         )
     if cause == fc.VIA_LIST:
@@ -86,26 +93,29 @@ def _why_unproven(cause: str, address: str, who: str) -> str:
 
 
 def _fix(cause: str, address: str, who: str) -> str:
-    """What makes the next email from that address provable, or ""."""
+    """What makes the next email from that address provable, if it really is
+    theirs, or ""."""
     from openexecutive.integrations import fact_confirmation as fc
 
     domain = _domain(address)
-    sends = "send" if who == "you" else "sends"
     if not domain:
         return ""
+    if_sent = "If you sent it: " if who == "you" else f"If {who} sent it: "
     if cause == fc.UNSIGNED:
-        return (
-            f"\n\nTo fix it: {who} {sends} from the {domain} mailbox itself, or whoever "
-            f"manages {domain} turns on DKIM signing there."
+        step = (
+            f"send from the {domain} mailbox itself, or have whoever manages {domain} "
+            "turn on DKIM signing there."
         )
-    if cause == fc.DMARC_FAILED:
-        return (
-            f"\n\nIf {who} did send it: {who} {sends} from the {domain} mailbox itself, or "
-            f"whoever manages {domain} adds the sending service to its SPF or DKIM setup."
+    elif cause == fc.DMARC_FAILED:
+        step = (
+            f"send from the {domain} mailbox itself, or have whoever manages {domain} "
+            "add the sending service to its SPF or DKIM setup."
         )
-    if cause == fc.VIA_LIST:
-        return f"\n\nTo fix it: {who} {sends} to the Executive directly, not through the group."
-    return ""
+    elif cause == fc.VIA_LIST:
+        step = "send to the Executive directly, not through the group."
+    else:
+        return ""
+    return f"\n\n{if_sent}{step}"
 
 
 def file_card(

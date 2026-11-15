@@ -173,9 +173,9 @@ class TestWhyUnproven:
 
         assert "example.com didn't sign it" in card.body
         assert "Send mail as" in card.body
-        assert "Ann Teammate sends from the example.com mailbox itself" in card.body
+        assert "If Ann Teammate sent it: send from the example.com mailbox itself" in card.body
         # A domain with no DMARC record can be spoofed the same way.
-        assert "may also be forged" in card.body
+        assert "It may be forged" in card.body
         assert card.suggested_action == "Check with Ann Teammate."
 
     def test_a_failed_dmarc_check_says_it_may_be_forged(self, people: SimpleNamespace) -> None:
@@ -192,7 +192,7 @@ class TestWhyUnproven:
         ))
 
         assert "mailing list or group" in card.body
-        assert "directly, not through the group" in card.body
+        assert "send to the Executive directly, not through the group" in card.body
 
     def test_list_headers_never_hide_a_failed_check(self, people: SimpleNamespace) -> None:
         # The sender writes List-Id; Gmail's failed verdict is what counts.
@@ -225,8 +225,13 @@ class TestWhyUnproven:
 
         assert card.headline == "An email from your address got no reply"
         assert "could not prove you sent it: example.com didn't sign it" in card.body
-        assert "you send from the example.com mailbox itself" in card.body
+        assert "If you sent it: send from the example.com mailbox itself" in card.body
         assert "John Principal" not in card.body
+
+    def test_a_domain_that_isnt_a_hostname_keeps_the_plain_wording(self) -> None:
+        assert unanswered_mail._domain("ann@example.com") == "example.com"
+        assert unanswered_mail._domain("ann@**click here**") == ""
+        assert unanswered_mail._domain("ann@" + "a" * 300 + ".com") == ""
 
     def test_a_cause_the_headers_dont_give_keeps_the_plain_wording(
         self, people: SimpleNamespace
