@@ -359,7 +359,7 @@ async def watches() -> str:
     name="Approvals",
     description=(
         "What the Executive may do on its own for the person signed in, and "
-        "what waits on a card: their Approvals level, Handle it for me, Your "
+        "what waits on a card: their Approvals level, As you, Your "
         "rules and In training, as the What it may do page shows them."
     ),
     mime_type="application/json",

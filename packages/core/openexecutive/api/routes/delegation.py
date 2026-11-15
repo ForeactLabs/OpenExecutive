@@ -148,6 +148,7 @@ from openexecutive.delegation.gmail import (
     credential_provider,
     gmail_for,
     gmail_status,
+    mailbox_of,
 )
 from openexecutive.delegation.settings import (
     can_delegate,
@@ -729,7 +730,7 @@ async def _state(person: Person) -> DelegationOut:
         gmail=GmailConnection(
             status=status,
             message=STATUS_MESSAGES[status],
-            email=person.email,
+            email=mailbox_of(person.email),
             connect_command=_connect_command(person.email),
             outlook_connect_command=_outlook_connect_command(person.email),
             provider=credential_provider(person.email or ""),

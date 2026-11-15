@@ -24,6 +24,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
 from openexecutive.api import caller as api_caller
+from openexecutive.utils.public_errors import public_error
 from openexecutive.workflows import (
     get_workflow,
     list_workflows,
@@ -870,8 +871,8 @@ async def start_workflow_run(name: str, request: Request) -> StreamingResponse:
             # ordinary as the client disconnecting while we yield the frame.
             # The run is safely parked; only the stream broke.
             if not paused:
-                fail_run(run_id=run_id, error=str(exc))
-            yield _sse({"type": "error", "run_id": run_id, "message": str(exc)})
+                fail_run(run_id=run_id, error=public_error(exc))
+            yield _sse({"type": "error", "run_id": run_id, "message": public_error(exc)})
         finally:
             logger.info(
                 "workflow.run_complete run_id=%s workflow=%s duration_s=%.2f",
