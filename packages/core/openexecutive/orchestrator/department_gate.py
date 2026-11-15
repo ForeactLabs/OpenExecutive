@@ -305,7 +305,11 @@ def replace_older_reply(
         key = _thread_key(tool, steps, mcp=mcp)
         if key is None:
             return 0
-        from openexecutive.alerts.store import get_alert_by_external, mark_superseded
+        from openexecutive.alerts.store import (
+            get_alert_by_external,
+            mark_superseded,
+            set_status_if_open,
+        )
         from openexecutive.audit import log_event
         from openexecutive.memory.decision_ledger import (
             DECISION_ALERT_SOURCE,
@@ -328,8 +332,10 @@ def replace_older_reply(
                 private_to_person=approver,
             )
             row = get_alert_by_external(DECISION_ALERT_SOURCE, decision_alert_external_id(older_id), db_path=db_path)
-            if row is not None and row.id is not None:
-                mark_superseded(row.id, alert_id, db_path=db_path)
+            if row is not None and row.id is not None and not mark_superseded(row.id, alert_id, db_path=db_path):
+                # Already opened, so it can't fold: close it too, or its
+                # Approve would point at a decision that is closed.
+                set_status_if_open(row.id, "dismissed", db_path=db_path)
             replaced += 1
         return replaced
     except Exception:

@@ -448,6 +448,19 @@ def test_a_newer_reply_on_the_same_thread_replaces_the_one_waiting(team: dict[st
     assert ledger.get_decision_instance(theirs).status == ledger.STATUS_PROPOSED  # type: ignore[union-attr]
 
 
+def test_a_replaced_reply_whose_card_was_opened_closes_with_it(team: dict[str, Person]) -> None:
+    owner = team["owner"]
+    first = _hold_reply(owner, "Hi Dana, nothing is booked yet.")
+    card = alerts_store.get_alert_by_external("decision_scheduling", ledger.decision_alert_external_id(first))
+    assert card is not None and card.id is not None
+    alerts_store.set_status(card.id, "read")
+    second = _hold_reply(owner, "Hi Dana, I can't confirm Thursday myself.")
+    assert ledger.get_decision_instance(first).status == ledger.STATUS_CLOSED_EXTERNALLY  # type: ignore[union-attr]
+    assert alerts_store.get_alert(card.id).status == "dismissed"  # type: ignore[union-attr]
+    live = [a for a in alerts_store.list_alerts(limit=10) if a.status in ("unread", "read")]
+    assert [f"decision_instance:{second}" in a.topic_tags for a in live] == [True]
+
+
 def test_the_card_an_email_turn_raised_folds_into_the_step_it_held(team: dict[str, Person]) -> None:
     from openexecutive.alerts.models import AlertSeverity
     from openexecutive.orchestrator.schedule_tools import set_session

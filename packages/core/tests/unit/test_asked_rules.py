@@ -237,10 +237,17 @@ def test_a_send_a_later_check_put_on_a_card_is_not_done(owner: Any, monkeypatch:
         # A result naming no real card is a step that ran.
         asyncio.run(asked({"name": SEND, "arguments": {"to": DANA, "subject": "Hours", "body": "9 to 5."}}))
         assert len([d for d in ttl.done([ttl.SCOPE_EXECUTIVE], days=1) if d.status == "done"]) == 1
-        monkeypatch.setattr(decision_ledger, "get_decision_instance", lambda i, db_path=None: object())
+        # A card already answered, or one for another tool, is no card for it.
+        for status, tool in (("approved", SEND), ("proposed", "google_workspace__create_event")):
+            monkeypatch.setattr(decision_ledger, "get_decision_instance", lambda i, db_path=None, s=status, t=tool: (
+                SimpleNamespace(status=s, proposed_payload_json=json.dumps({"tool": t}))))
+            asyncio.run(asked({"name": SEND, "arguments": {"to": DANA, "subject": f"Hours {status}", "body": "9 to 5."}}))
+        assert len([d for d in ttl.done([ttl.SCOPE_EXECUTIVE], days=1) if d.status == "done"]) == 3
+        monkeypatch.setattr(decision_ledger, "get_decision_instance", lambda i, db_path=None: SimpleNamespace(
+            status="proposed", proposed_payload_json=json.dumps({"tool": SEND})))
         result = asyncio.run(asked({"name": SEND, "arguments": {"to": DANA, "subject": "Paying early", "body": "Fine."}}))
     finally:
         current_session.reset(token)
     assert "waiting_for_approval" in result
-    assert len([d for d in ttl.done([ttl.SCOPE_EXECUTIVE], days=1) if d.status == "done"]) == 1
+    assert len([d for d in ttl.done([ttl.SCOPE_EXECUTIVE], days=1) if d.status == "done"]) == 3
 

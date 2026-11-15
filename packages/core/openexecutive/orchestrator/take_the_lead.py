@@ -2297,7 +2297,7 @@ async def _gated(name: str, inner: _Handler, tool_input: dict[str, Any], *, sour
         })
     result = await inner(tool_input)
     text = result if isinstance(result, str) else json.dumps(result) if isinstance(result, dict) else str(result)
-    if result_waiting(text):
+    if result_waiting(text, name):
         # A check below the rules put it on a card: nothing was done yet.
         return text
     failed = result_failed(text)
@@ -2326,10 +2326,11 @@ def result_failed(text: str) -> bool:
     return isinstance(parsed, dict) and "error" in parsed
 
 
-def result_waiting(text: str) -> bool:
+def result_waiting(text: str, name: str | None = None) -> bool:
     """Whether a tool's result says the step waits on an Approve card (a
     check below the rules held it, ``levels.hold``): nothing was done yet,
-    so it is no step that went on its own."""
+    so it is no step that went on its own. The card must still be waiting
+    and, given ``name``, hold that same tool."""
     try:
         parsed = json.loads(text)
     except (TypeError, ValueError):
@@ -2341,10 +2342,16 @@ def result_waiting(text: str) -> bool:
         return False
     # Only a card that really exists: a connected app's own result can't
     # make a step that ran look held.
-    from openexecutive.memory.decision_ledger import get_decision_instance
+    from openexecutive.memory.decision_ledger import STATUS_PROPOSED, get_decision_instance
 
     try:
-        return get_decision_instance(decision_id) is not None
+        instance = get_decision_instance(decision_id)
+        if instance is None or instance.status != STATUS_PROPOSED:
+            return False
+        if name is None:
+            return True
+        payload = json.loads(instance.proposed_payload_json or "{}")
+        return isinstance(payload, dict) and payload.get("tool") == name
     except Exception:
         return False
 
@@ -2470,7 +2477,7 @@ def _went_on_its_own(name: str, tool_input: dict[str, Any], result: Any, *, mcp:
     without a yes, so Done for you and the counts show it. Best effort."""
     try:
         text = result if isinstance(result, str) else json.dumps(result) if isinstance(result, dict) else str(result)
-        if result_failed(text) or result_waiting(text):
+        if result_failed(text) or result_waiting(text, name):
             return
         from openexecutive.orchestrator import levels
         from openexecutive.orchestrator.schedule_tools import current_session
