@@ -31,6 +31,7 @@ import {
   shouldSwitchToTeam,
 } from "@/lib/peopleKinds";
 import {
+  addFormKind,
   CONTACTS_PREVIEW,
   contactLine,
   contactsByRecent,
@@ -594,7 +595,7 @@ export default function PeoplePage() {
     <div className="flex flex-col h-full bg-surface">
       {showAdd && (
         <AddPersonModal
-          initialKind="team"
+          initialKind={addFormKind({ mode, seesContacts: viewerIsPrincipal })}
           canAddContacts={viewerIsPrincipal}
           canBePrincipal={canClaimPrincipal(people, loading || error !== null)}
           onCreated={(p) => {

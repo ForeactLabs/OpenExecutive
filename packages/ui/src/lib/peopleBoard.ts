@@ -119,3 +119,12 @@ export function teamInOrder<P extends BoardPerson>(team: P[]): P[] {
   );
 }
 
+
+/**
+ * What Add starts on. Someone using Open Executive just for themselves
+ * mostly adds contacts, so Add starts there (a team member would switch to
+ * team mode). Otherwise it starts on a team member.
+ */
+export function addFormKind(v: { mode: "solo" | "team"; seesContacts: boolean }): "team" | "contact" {
+  return v.seesContacts && v.mode === "solo" ? "contact" : "team";
+}

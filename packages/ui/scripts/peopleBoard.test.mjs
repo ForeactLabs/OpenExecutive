@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  addFormKind,
   contactLine,
   contactsByRecent,
   detailsLine,
@@ -69,4 +70,10 @@ test("contacts by last in touch, then name; the team owner first", () => {
   const people = [person({ id: 1, full_name: "Zed" }), person({ id: 2, full_name: "Bea" }), person({ id: 3, full_name: "Al" }), person({ id: 4, full_name: "Cy" })];
   assert.deepEqual(contactsByRecent(people, last).map((p) => p.id), [2, 3, 4, 1]);
   assert.deepEqual(teamInOrder([person({ id: 1, full_name: "Al" }), person({ id: 2, full_name: "Zed", is_principal: true })]).map((p) => p.id), [2, 1]);
+});
+
+test("Add starts on a contact for someone on their own, else a team member", () => {
+  assert.equal(addFormKind({ mode: "solo", seesContacts: true }), "contact");
+  assert.equal(addFormKind({ mode: "team", seesContacts: true }), "team");
+  assert.equal(addFormKind({ mode: "solo", seesContacts: false }), "team");
 });
