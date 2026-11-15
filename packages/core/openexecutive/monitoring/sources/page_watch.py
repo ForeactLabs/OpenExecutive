@@ -81,6 +81,8 @@ _MAX_DIFF_WORDS = 8_000
 # Bounds on the change summary written into the alert / persisted payload.
 _SUMMARY_SNIPPET_CHARS = 160
 _ADDED_TEXT_CHARS = 1_000
+# Each side of a "was … now …" line, so the whole line fits a summary.
+_CHANGE_SIDE_CHARS = 60
 # Headline links: an anchor counts when its text reads like a title (at
 # least this many words and characters), which leaves out menus, buttons
 # and "Read more". Bounded per page and per change.
@@ -504,6 +506,9 @@ def _diff(old: str, new: str) -> tuple[int, str, str]:
         now = " ".join(new_words[j1:j2])
         if tag in ("insert", "replace") and now:
             chunks.append(now)
+        # Each side is cut on its own, so a long passage never pushes the
+        # other side off a line that is cut later.
+        was, now = _side(was), _side(now)
         if tag == "replace":
             changes.append(f'was "{was}" now "{now}"')
         elif tag == "delete" and was:
@@ -511,6 +516,10 @@ def _diff(old: str, new: str) -> tuple[int, str, str]:
         elif tag == "insert" and now:
             changes.append(f'added "{now}"')
     return pct, " … ".join(chunks), "\n".join(changes)
+
+
+def _side(text: str) -> str:
+    return text if len(text) <= _CHANGE_SIDE_CHARS else text[: _CHANGE_SIDE_CHARS - 1].rstrip() + "…"
 
 
 def _host_label(url: str) -> str:

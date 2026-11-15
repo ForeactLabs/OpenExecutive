@@ -245,7 +245,7 @@ def test_a_digest_says_what_a_rewrite_replaced_and_what_was_only_added() -> None
 
     rewrite = row(2, {"added_text": "without needing permission.",
                       "changes": 'was "only with written permission." now "without needing permission."'})
-    signal, _ = mp._digest_signal(item, [row(1, {"added_text": "Holiday sale"}), rewrite])
+    signal, _ = mp._digest_signal(item, [rewrite, row(3, {"added_text": "Holiday sale"})])
     assert 'changes: was "only with written permission." now "without needing permission."' in signal.normalized_summary
     # A row from before both sides were kept, or one that only added, reads as new text.
     signal, _ = mp._digest_signal(item, [row(1, {"added_text": "Holiday sale"})])

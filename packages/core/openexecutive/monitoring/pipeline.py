@@ -473,7 +473,9 @@ def _digest_signal(item: WatchlistItem, held: list[dict]) -> tuple[Signal, dict 
         more = len(links) - 3
         detail = f"new: {titles}" + (f" (+{more} more)" if more > 0 else "")
     else:
-        detail = _without_links(texts[0])[:180] if texts else "new text: see the page"
+        # A rewrite says more than an addition, whichever row came last.
+        pick = next((t for t in texts if t.startswith("changes: ")), texts[0] if texts else "")
+        detail = _without_links(pick)[:180] if pick else "new text: see the page"
     summary = f"[{label}] {len(held)} changes since {first_seen} — {detail}"
     readable = "\n".join(
         f"- {_without_links(str(link.get('text') or ''))} ({_safe_url(str(link.get('url') or ''))})"

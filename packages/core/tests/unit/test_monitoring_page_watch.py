@@ -94,6 +94,10 @@ def test_diff_says_what_a_rewrite_replaced() -> None:
     assert changes == 'was "only with written permission from us." now "without needing permission."'
     assert _diff("a b c", "a c")[2] == 'removed "b"'
     assert _diff("a c", "a b c")[2] == 'added "b"'
+    # A long passage is cut on its own side; the other side stays whole.
+    long_old = "word " * 40
+    line = _diff(f"x {long_old}y", "x short y")[2]
+    assert line.endswith('now "short"') and "…" in line
 
 
 @pytest.mark.asyncio
