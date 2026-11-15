@@ -200,7 +200,10 @@ class PageWatchSource:
             more = len(new_links) - 3
             summary_detail = f"new: {titles}" + (f" (+{more} more)" if more > 0 else "")
         elif rewrote:
-            first = _without_links(changes.splitlines()[0])[:_SUMMARY_SNIPPET_CHARS]
+            lines = changes.splitlines()
+            # The rewrite, not an addition that happens to come first.
+            pick = next((line for line in lines if not line.startswith("added ")), lines[0])
+            first = _without_links(pick)[:_SUMMARY_SNIPPET_CHARS]
             summary_detail = f"changed: {first}"
         elif snippet:
             summary_detail = f"new text: {snippet}"

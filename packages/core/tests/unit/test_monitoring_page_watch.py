@@ -96,6 +96,20 @@ def test_diff_says_what_a_rewrite_replaced() -> None:
     assert _diff("a c", "a b c")[2] == 'added "b"'
 
 
+@pytest.mark.asyncio
+async def test_the_summary_names_the_rewrite_not_an_addition_before_it(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _Page(b"<html><body><p>Terms: use only with written permission.</p></body></html>")
+    _install(monkeypatch, page)
+    src = PageWatchSource()
+    item = _make_item(config={"label": "Terms"})
+    await src.poll(item, db_path=db)
+    page.body = b"<html><body><p>Holiday sale! Terms: use without needing permission.</p></body></html>"
+    [sig] = await src.poll(item, db_path=db)
+    assert 'changed: was "only with written" now "without needing"' in sig.normalized_summary
+
+
 # --------------------------------------------------------------------- #
 # poll() lifecycle
 # --------------------------------------------------------------------- #
