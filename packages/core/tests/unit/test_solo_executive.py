@@ -72,7 +72,7 @@ def _careful_holds_no_asked_step(monkeypatch: pytest.MonkeyPatch) -> None:
     """The suite pins Approvals to Careful (tests/conftest.py), which holds
     every acting step a turn asks for (take_the_lead._asked_hit); these
     tests are about other checks, so that hold stays out."""
-    monkeypatch.setattr("openexecutive.orchestrator.take_the_lead._careful_turn", lambda: False)
+    monkeypatch.setattr("openexecutive.orchestrator.take_the_lead._careful_turn", lambda: None)
 
 
 @pytest.fixture(autouse=True)

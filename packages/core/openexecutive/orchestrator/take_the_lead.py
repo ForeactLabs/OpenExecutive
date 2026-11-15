@@ -2237,19 +2237,20 @@ def _careful() -> bool:
         return True
 
 
-def _careful_turn() -> bool:
-    """Whether the turn in progress runs at Careful (its person's own level
-    where they have one). Never raises: an error holds."""
+def _careful_turn() -> str | None:
+    """Why the turn in progress waits on its level: it runs at Careful (its
+    person's own level where they have one), or the level couldn't be read.
+    None when it doesn't. Never raises: an error holds, and says so."""
     try:
         from openexecutive.orchestrator import levels, outside_mode
         from openexecutive.orchestrator.schedule_tools import current_session
 
         session = current_session.get()
         level = levels.turn_level(session) if session is not None else outside_mode.get_mode()
-        return level == outside_mode.ASK
+        return "Approvals is on Careful" if level == outside_mode.ASK else None
     except Exception:
         logger.warning("take_the_lead: couldn't read the turn's level — holding the step", exc_info=True)
-        return True
+        return "your Approvals level couldn't be read"
 
 
 def _hit(name: str, tool_input: dict[str, Any], *, mcp: bool) -> tuple[Hit | None, Allowed | Rule | None]:
@@ -2484,7 +2485,7 @@ def asked_checks_apply(session: Any) -> bool:
     try:
         from openexecutive.orchestrator.content_trust import principal_speaking
 
-        return not principal_speaking(session) or _careful_turn()
+        return not principal_speaking(session) or _careful_turn() is not None
     except Exception:
         logger.warning("take_the_lead: couldn't tell who asked — checking the rules", exc_info=True)
         return True
@@ -2501,7 +2502,8 @@ def _asked_hit(name: str, tool_input: dict[str, Any], *, mcp: bool) -> Hit | Non
 
         session = current_session.get()
         if session is not None and principal_speaking(session):
-            return Hit("level", "Approvals is on Careful") if _careful_turn() else None
+            careful = _careful_turn()
+            return Hit("level", careful) if careful else None
         lead = get(SCOPE_EXECUTIVE)
         rules = list_rules([SCOPE_COMPANY])
         addresses, names = _rule_targets(name, tool_input)
@@ -2513,8 +2515,9 @@ def _asked_hit(name: str, tool_input: dict[str, Any], *, mcp: bool) -> Hit | Non
         rule = _rule_hit(rules, text, recipients)
         if rule is not None:
             return rule
-        if _careful_turn():
-            return Hit("level", "Approvals is on Careful")
+        careful = _careful_turn()
+        if careful:
+            return Hit("level", careful)
         if lead.training:
             grant = allowance(name, tool_input, mcp=mcp)
             if (find_allowed(grant[0]) if grant is not None else None) is None:

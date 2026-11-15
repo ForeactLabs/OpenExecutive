@@ -38,7 +38,7 @@ def _principals_own_turn(monkeypatch: pytest.MonkeyPatch) -> None:
     # The suite pins Approvals to Careful (tests/conftest.py), which holds
     # every acting step a turn asks for; these tests are about scripts, so
     # Careful's hold on asked steps (take_the_lead._asked_hit) stays out.
-    monkeypatch.setattr("openexecutive.orchestrator.take_the_lead._careful_turn", lambda: False)
+    monkeypatch.setattr("openexecutive.orchestrator.take_the_lead._careful_turn", lambda: None)
 
 
 class _TextBlock:

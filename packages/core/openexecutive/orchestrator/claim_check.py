@@ -130,16 +130,46 @@ def call_label(name: str, tool_input: Any) -> str:
     return f"{name} {given}" if given not in ("", "null", "{}") else name
 
 
+def _reads(label: str) -> bool:
+    """Whether a call only read: its tool name starts with a read verb, by
+    the same test the gate uses for connected tools. Anything else may have
+    changed something and backs a claim."""
+    from openexecutive.orchestrator.take_the_lead import mcp_tool_acts
+
+    try:
+        return not mcp_tool_acts(label.split(" ", 1)[0])
+    except Exception:
+        return False
+
+
+def _fit(calls: list[tuple[str, str]], most: int) -> list[tuple[str, str]]:
+    """At most ``most`` lines for a very long turn. Reads go first, from the
+    middle out, so every call that may have changed something stays; past
+    that the middle goes. One line says how many were left out."""
+    room = most - 1
+    keep = [i for i, (label, _) in enumerate(calls) if not _reads(label)]
+    if len(keep) > room:
+        keep = [*keep[: room // 2], *keep[len(keep) - (room - room // 2):]]
+    else:
+        reads = [i for i in range(len(calls)) if i not in set(keep)]
+        spare = room - len(keep)
+        keep += [*reads[: spare // 2], *reads[len(reads) - (spare - spare // 2):]] if spare else []
+    kept = sorted(set(keep))
+    left_out = len(calls) - len(kept)
+    gap = next((n for n, i in enumerate(kept) if i != n), len(kept))
+    out = [calls[i] for i in kept]
+    out.insert(gap, ("…", f"{left_out} more calls left out"))
+    return out
+
+
 def render_calls(calls: list[tuple[str, str]]) -> str:
     """Every call, one line each: what it was given and the start of its
     result, each line cut to its share of ``CALLS_BUDGET_CHARS``."""
     if not calls:
         return "(no tool calls)"
-    # Past the floor, the middle of a very long turn goes, never its start.
     most = CALLS_BUDGET_CHARS // CALL_MIN_CHARS
-    left_out = len(calls) - most if len(calls) > most else 0
-    if left_out:
-        calls = [*calls[: most // 2], ("…", f"{left_out} more calls left out"), *calls[-(most - most // 2):]]
+    if len(calls) > most:
+        calls = _fit(calls, most)
     width = max(CALL_MIN_CHARS, CALLS_BUDGET_CHARS // len(calls))
     lines = []
     for name, result in calls:
@@ -174,7 +204,7 @@ EARLIER_RE = re.compile(
 def accept_claim(payload: dict[str, Any], reply: str) -> str | None:
     """The model's claim when it reported one, it is in the reply word for
     word (whitespace, case and curly quotes aside) and it doesn't place
-    itself before this reply (``EARLIER_RE``); None otherwise."""
+    itself before this reply (``said_earlier``); None otherwise."""
     if payload.get("unbacked") is not True:
         return None
     claim = " ".join(str(payload.get("claim") or "").split())
@@ -182,9 +212,24 @@ def accept_claim(payload: dict[str, Any], reply: str) -> str | None:
         return None
     if _normalize(claim) not in _normalize(reply):
         return None
-    if EARLIER_RE.search(claim):
+    if said_earlier(claim):
         return None
     return claim
+
+
+# "moved it to this morning", "booked the slot for yesterday": a time after
+# one of these words is what the step set, not when it happened.
+_TARGET_WORDS = frozenset({"to", "for", "until", "till", "by", "at", "on", "from", "into", "after"})
+
+
+def said_earlier(claim: str) -> bool:
+    """Whether the claim says it happened before this reply: a time phrase
+    (``EARLIER_RE``) that isn't the target of the step."""
+    for match in EARLIER_RE.finditer(claim):
+        before = claim[: match.start()].split()
+        if not before or before[-1].lower().strip(",;:") not in _TARGET_WORDS:
+            return True
+    return False
 
 
 async def _call_model(model: str, turn: str) -> dict[str, Any]:

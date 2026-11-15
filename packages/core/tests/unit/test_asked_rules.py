@@ -315,3 +315,14 @@ def test_a_send_a_later_check_put_on_a_card_is_not_done(owner: Any, monkeypatch:
     assert "waiting_for_approval" in result
     assert len([d for d in ttl.done([ttl.SCOPE_EXECUTIVE], days=1) if d.status == "done"]) == 3
 
+
+
+def test_a_level_that_cant_be_read_holds_and_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.orchestrator import levels, outside_mode
+
+    def _broken(*_: object) -> str:
+        raise RuntimeError("settings unreadable")
+
+    monkeypatch.setattr(levels, "turn_level", _broken)
+    monkeypatch.setattr(outside_mode, "get_mode", _broken)
+    assert ttl._careful_turn() == "your Approvals level couldn't be read"

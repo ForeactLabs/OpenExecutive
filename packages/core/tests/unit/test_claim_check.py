@@ -230,14 +230,35 @@ def test_a_claim_about_before_this_reply_is_never_unbacked() -> None:
 
 
 def test_a_very_long_turn_drops_its_middle_calls() -> None:
-    """Past the budget, the middle goes, never the start or the end."""
+    """Past the budget, with no reads to drop, the middle goes, never the
+    start or the end."""
     calls = [("save_file {\"name\": \"Logistics pack\"}", "Saved to Documents")]
-    calls += [(f"step {i}", "ok " * 200) for i in range(500)]
+    calls += [(f"update_step {{\"id\": {i}}}", "ok " * 200) for i in range(500)]
     calls += [("send_email {\"to\": \"sam@example.com\"}", "sent")]
     rendered = claim_check.render_calls(calls)
     lines = rendered.splitlines()
     most = claim_check.CALLS_BUDGET_CHARS // claim_check.CALL_MIN_CHARS
-    assert len(lines) == most + 1
+    assert len(lines) == most
     assert "Logistics pack" in lines[0] and "sam@example.com" in lines[-1]
-    assert any(f"{len(calls) - most} more calls left out" in line for line in lines)
+    assert any(f"{len(calls) - most + 1} more calls left out" in line for line in lines)
     assert len(rendered) <= claim_check.CALLS_BUDGET_CHARS + 2 * claim_check.CALL_MIN_CHARS + len(lines)
+
+
+def test_a_long_turn_drops_reads_before_any_change() -> None:
+    """A save in the middle of 150 calls still backs "I saved it": the reads
+    go first."""
+    calls = [(f"list_open_loops {{\"page\": {i}}}", "x " * 100) for i in range(150)]
+    calls.insert(60, ("save_file {\"name\": \"Dock door plan\"}", "Saved to Documents"))
+    rendered = claim_check.render_calls(calls)
+    lines = rendered.splitlines()
+    assert len(lines) == claim_check.CALLS_BUDGET_CHARS // claim_check.CALL_MIN_CHARS
+    assert "Dock door plan" in rendered and "Saved to Documents" in rendered
+    assert sum("more calls left out" in line for line in lines) == 1
+
+
+def test_a_time_the_step_set_is_still_checked() -> None:
+    """ "to this morning" is what the step did, not when: still checked."""
+    for claim in ("I moved the meeting to this morning.", "I booked the 3pm slot for yesterday."):
+        assert claim_check.accept_claim({"unbacked": True, "claim": claim}, claim) == claim
+    assert claim_check.said_earlier("I sent Sam the quote 2 hours ago.")
+    assert claim_check.said_earlier("Earlier today I emailed Leo.")
