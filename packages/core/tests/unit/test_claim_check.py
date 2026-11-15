@@ -227,3 +227,17 @@ def test_a_claim_about_before_this_reply_is_never_unbacked() -> None:
     assert claim_check.accept_claim({"unbacked": True, "claim": "I sent the quote just now."}, reply) == (
         "I sent the quote just now."
     )
+
+
+def test_a_very_long_turn_drops_its_middle_calls() -> None:
+    """Past the budget, the middle goes, never the start or the end."""
+    calls = [("save_file {\"name\": \"Logistics pack\"}", "Saved to Documents")]
+    calls += [(f"step {i}", "ok " * 200) for i in range(500)]
+    calls += [("send_email {\"to\": \"sam@example.com\"}", "sent")]
+    rendered = claim_check.render_calls(calls)
+    lines = rendered.splitlines()
+    most = claim_check.CALLS_BUDGET_CHARS // claim_check.CALL_MIN_CHARS
+    assert len(lines) == most + 1
+    assert "Logistics pack" in lines[0] and "sam@example.com" in lines[-1]
+    assert any(f"{len(calls) - most} more calls left out" in line for line in lines)
+    assert len(rendered) <= claim_check.CALLS_BUDGET_CHARS + 2 * claim_check.CALL_MIN_CHARS + len(lines)

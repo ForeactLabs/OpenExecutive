@@ -135,6 +135,11 @@ def render_calls(calls: list[tuple[str, str]]) -> str:
     result, each line cut to its share of ``CALLS_BUDGET_CHARS``."""
     if not calls:
         return "(no tool calls)"
+    # Past the floor, the middle of a very long turn goes, never its start.
+    most = CALLS_BUDGET_CHARS // CALL_MIN_CHARS
+    left_out = len(calls) - most if len(calls) > most else 0
+    if left_out:
+        calls = [*calls[: most // 2], ("…", f"{left_out} more calls left out"), *calls[-(most - most // 2):]]
     width = max(CALL_MIN_CHARS, CALLS_BUDGET_CHARS // len(calls))
     lines = []
     for name, result in calls:
