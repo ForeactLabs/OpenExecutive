@@ -25,11 +25,12 @@ Design notes
   or an operator, is the principal; a service (signed callers on, no
   assertion) is no one. Episodic memory, the activity feed, the briefing and
   the roster go to a rostered caller, as the web app gives them to anyone on
-  the team, the briefing narrowed as ``GET /today`` narrows it; Needs you,
-  Done for you, tasks and Approvals are read through the web app's own
-  routes with the same request, so they follow its rules exactly; the
-  company profile, departments, watches, specialists, knowledge and the
-  workflow catalog go to anyone who reached ``/mcp``.
+  the team, the briefing narrowed as ``GET /today`` narrows it, and so do
+  the watches, which name the companies and people being watched; Needs
+  you, Done for you, tasks and Approvals are read through the web app's
+  own routes with the same request, so they follow its rules exactly; the
+  company profile, departments, specialists, knowledge and the workflow
+  catalog go to anyone who reached ``/mcp``.
 
 * **An AI app is the person signed in to it.** ``ask_executive``,
   ``run_workflow`` and ``answer_card`` each run one Executive turn marked
@@ -349,6 +350,7 @@ async def tasks() -> str:
 async def watches() -> str:
     from openexecutive.api.routes.watchlist import list_watchlist
 
+    await _require_person()
     rows = await asyncio.to_thread(list_watchlist)
     return _json([r.model_dump(mode="json") for r in rows])
 

@@ -221,7 +221,9 @@ async def test_needs_you_is_homes_cards_for_the_caller() -> None:
 
 @pytest.mark.asyncio
 async def test_watches_list_the_watchlist() -> None:
-    with patch(
+    with patch.object(
+        mcp_server, "_require_person", AsyncMock(return_value=mcp_server.McpCaller(1, True))
+    ), patch(
         "openexecutive.api.routes.watchlist.list_watchlist", return_value=[_Dumpable({"slug": "acme"})]
     ):
         assert json.loads(await mcp_server.watches()) == [{"slug": "acme"}]
@@ -389,6 +391,15 @@ def test_a_teammate_reads_them_but_a_service_does_not(
     for nobody in (Caller("service"), Caller("user", "stranger@else.example")):
         with pytest.raises(mcp_server.CallerRefused):
             _read(name, nobody)
+
+
+def test_a_service_reads_no_watches(roster: dict[str, int]) -> None:
+    rows = [_Dumpable({"slug": "acme"})]
+    with patch("openexecutive.api.routes.watchlist.list_watchlist", return_value=rows):
+        assert json.loads(_read("watches", Caller("user", TEAMMATE))) == [{"slug": "acme"}]
+        for nobody in (Caller("service"), Caller("user", "stranger@else.example")):
+            with pytest.raises(mcp_server.CallerRefused):
+                _read("watches", nobody)
 
 
 def test_anyone_reads_the_departments(roster: dict[str, int]) -> None:

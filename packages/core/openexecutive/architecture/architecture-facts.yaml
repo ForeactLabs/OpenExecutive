@@ -10160,7 +10160,9 @@ integrations:
         / Hands-off, DepartmentConfig.approvals, from the level that applies:
         departments.authority.department_level, read once in the store). The
         warm ChromaDB store is handed to handlers via mcp_server.set_store()
-        from the lifespan.
+        from the lifespan. oe://watches names the companies and people
+        watched, so it goes only to someone on the roster
+        (mcp_server._require_person), as the briefing and the roster do.
       Tools: consult_specialist (orchestrator.router.route_to_specialist,
         stateless, the specialist enum is a Literal pinned to
         SPECIALIST_REGISTRY by a unit test), search_knowledge

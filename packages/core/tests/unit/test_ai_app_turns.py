@@ -368,20 +368,23 @@ def test_an_answer_card_turn_may_touch_that_card_only(roster: SimpleNamespace) -
     assert "isn't among" in (refusal(session, 7, "approve", "yes approve 7") or "")
 
 
-def test_answer_card_needs_an_open_card_the_caller_sees() -> None:
+def test_answer_card_needs_an_open_card_the_caller_sees(tmp_path: Any) -> None:
     from fastapi import HTTPException
 
     from openexecutive.alerts import store as alert_store
 
+    cards = tmp_path / "alerts.db"
+    alert_store.initialize_db(cards)
     card_id = alert_store.insert_alert(
         source="triage", external_id="c1", severity="high", headline="Book the venue", body="x",
+        db_path=cards,
     )
     assert card_id is not None
-    shown = lambda alert_id, request: alert_store.get_alert(alert_id)  # noqa: E731
+    shown = lambda alert_id, request: alert_store.get_alert(alert_id, db_path=cards)  # noqa: E731
     with patch.object(mcp_server, "_http_request", return_value=object()):
         with patch("openexecutive.api.routes.alerts._visible_alert", new=shown):
             asyncio.run(mcp_server._open_card(card_id))
-            alert_store.set_status(card_id, "dismissed")
+            alert_store.set_status(card_id, "dismissed", db_path=cards)
             with pytest.raises(ValueError, match="No open card"):
                 asyncio.run(mcp_server._open_card(card_id))
         hidden = Mock(side_effect=HTTPException(status_code=404, detail="Alert not found"))
