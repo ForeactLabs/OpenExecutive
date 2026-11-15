@@ -28,7 +28,9 @@ How two cards on one topic become one:
   joined is never sent on its own (``dispatcher.dispatch_all``).
 
 The same person on a different matter (another turn, another thread, or the
-model said so) keeps a card of its own.
+model said so) keeps a card of its own. A reply ("Re: ...") from the same
+person to a subject they wrote before is the same thread, even where the
+mailbox filed it as a new one (:func:`note_mail`).
 
 What the check reads about the turn comes from the turn itself (the audit
 turn id, the session's sender or speaker, the mail thread). Never raises: a
@@ -68,6 +70,14 @@ CREATE TABLE IF NOT EXISTS card_topics (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_card_topics_reader ON card_topics(reader, created_at);
+CREATE TABLE IF NOT EXISTS mail_conversations (
+    thread_id TEXT PRIMARY KEY,
+    sender TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    conversation TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mail_conversations_sender ON mail_conversations(sender, subject);
 """
 
 # What the code writing a card knows that the turn doesn't: the thread a held
@@ -156,6 +166,56 @@ def mail_thread(thread_id: str) -> str:
     """The topic of one mail thread."""
     thread_id = str(thread_id or "").strip()
     return f"mail:{thread_id}" if thread_id else ""
+
+
+def _subject_key(subject: str) -> str:
+    return " ".join(_RE_PREFIX.sub("", str(subject or "")).split()).lower()
+
+
+def note_mail(thread_id: str, sender: str, subject: str, *, db_path: Path | None = None) -> None:
+    """Note which conversation the mail thread ``thread_id`` belongs to. A
+    reply (``Re:``) from ``sender`` to a subject they wrote before belongs to
+    that earlier conversation, whatever thread the mailbox filed it in; any
+    other mail starts its own (two new mails that share a subject are two
+    asks). Never raises."""
+    thread_id = str(thread_id or "").strip()
+    sender = str(sender or "").strip().lower()
+    if not thread_id or not sender:
+        return
+    try:
+        from openexecutive.alerts import store
+
+        path = store._resolve_db_path(db_path)
+        key = _subject_key(subject)
+        with contextlib.closing(_conn(path)) as conn, conn:
+            if conn.execute("SELECT 1 FROM mail_conversations WHERE thread_id = ?", (thread_id,)).fetchone():
+                return
+            conversation = thread_id
+            if key and _RE_PREFIX.match(str(subject or "")):
+                earlier = conn.execute(
+                    "SELECT conversation FROM mail_conversations WHERE sender = ? AND subject = ? "
+                    "ORDER BY created_at LIMIT 1",
+                    (sender, key),
+                ).fetchone()
+                if earlier is not None:
+                    conversation = str(earlier["conversation"])
+            conn.execute(
+                "INSERT OR IGNORE INTO mail_conversations (thread_id, sender, subject, conversation, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (thread_id, sender, key, conversation, _now()),
+            )
+    except Exception:  # noqa: BLE001 - a second card is the worst case
+        logger.warning("one_card: couldn't note mail thread %s", thread_id, exc_info=True)
+
+
+def _conversation(conn: sqlite3.Connection, thread: str) -> str:
+    """``thread`` as the conversation it belongs to (:func:`note_mail`)."""
+    if not thread.startswith("mail:"):
+        return thread
+    row = conn.execute(
+        "SELECT conversation FROM mail_conversations WHERE thread_id = ?", (thread[len("mail:"):],)
+    ).fetchone()
+    return mail_thread(str(row["conversation"])) if row is not None else thread
 
 
 def _turn_thread(session: Any) -> str:
@@ -285,6 +345,7 @@ def _replace(older: _Card, newer: _Card, path: Path) -> None:
     """A newer held step replaces ``older`` on the same thread: its decision
     closes (only while it still waits) and its card goes with it. Runs after
     the check's own write, since the decision is in the same database."""
+    from openexecutive.alerts.models import SEVERITY_RANK
     from openexecutive.memory.decision_ledger import STATUS_CLOSED_EXTERNALLY, mark_resolved
 
     if older.decision_id is None or not mark_resolved(older.decision_id, STATUS_CLOSED_EXTERNALLY, db_path=path):
@@ -296,6 +357,18 @@ def _replace(older: _Card, newer: _Card, path: Path) -> None:
             f"WHERE id = ? AND status IN ({','.join('?' * len(_OPEN))})",
             (newer.id, older.id, *_OPEN),
         )
+        # What had joined the older card moves to the newer one with it.
+        old = conn.execute("SELECT body, severity FROM alerts WHERE id = ?", (older.id,)).fetchone()
+        new = conn.execute("SELECT body, severity FROM alerts WHERE id = ?", (newer.id,)).fetchone()
+        if old is not None and new is not None and _THEN in str(old["body"]):
+            severity = max(
+                (str(new["severity"]), str(old["severity"])), key=lambda sev: SEVERITY_RANK.get(sev, 0),
+            )
+            conn.execute(
+                "UPDATE alerts SET body = ?, severity = ? WHERE id = ?",
+                (str(new["body"]) + _THEN + str(old["body"]).split(_THEN, 1)[1], severity, newer.id),
+            )
+        conn.execute("UPDATE alerts SET superseded_by_alert_id = ? WHERE superseded_by_alert_id = ?", (newer.id, older.id))
     try:
         from openexecutive.audit import log_event
 
@@ -364,7 +437,8 @@ def _place(alert_id: int, db_path: Path | None) -> int:
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 alert_id, _reader(row.routed_to_person_id, tags), person_key(session), _turn_id(),
-                str(given.get("thread") or "") or _turn_thread(session), str(given.get("step") or ""),
+                _conversation(conn, str(given.get("thread") or "") or _turn_thread(session)),
+                str(given.get("step") or ""),
                 _decision_of(tags), _now(),
             ),
         )
@@ -429,7 +503,7 @@ def approve_waiting(thread: str, *, reader: str, step: str, db_path: Path | None
             row = conn.execute(
                 _SELECT + f"WHERE t.reader = ? AND t.thread = ? AND t.step = ? AND t.decision_id IS NOT NULL "
                 f"AND a.status IN ({','.join('?' * len(_OPEN))}) LIMIT 1",
-                (reader, thread, step, *_OPEN),
+                (reader, _conversation(conn, thread), step, *_OPEN),
             ).fetchone()
         return row is not None
     except Exception:  # noqa: BLE001

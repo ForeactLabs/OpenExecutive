@@ -343,6 +343,12 @@ def _attribution_end(body: list[str], i: int) -> tuple[int, bool] | None:
     return None
 
 
+def _header_subject(raw_email: str) -> str:
+    """The Subject: line of a fetched message, or ''."""
+    header, _body, _attachments = _split_gmail_content(raw_email)
+    return next((ln.split(":", 1)[1].strip() for ln in header if ln.lower().startswith("subject:")), "")
+
+
 def _retrieval_query(raw_email: str) -> str:
     """What to search Knowledge for on an email turn: its subject and what
     the sender wrote, not the raw mail (whose first lines are headers), cut
@@ -1369,6 +1375,9 @@ async def _run_executive(
         prove = prove_sender or _gmail_proof
         session.email_from = from_addr.strip().lower()
         session.email_thread_id = str(thread_id or "")
+        from openexecutive.alerts import one_card
+
+        one_card.note_mail(thread_id, from_addr, _header_subject(raw_email))
         try:
             principal = await asyncio.to_thread(principal_address)
         except Exception:  # noqa: BLE001 - optional step; must not lose the email.
