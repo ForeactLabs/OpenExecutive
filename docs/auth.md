@@ -306,13 +306,18 @@ It prints two lines. Put `CALLER_ASSERTION_PRIVATE_KEY` on the **UI** only and
 `CALLER_ASSERTION_PUBLIC_KEYS` on the **API** only, then restart both, UI first. The UI
 keeps sending `x-caller-email` as well, so it works against an API without the keys.
 
+Without the keys, the shared secret is the sign-in. Whoever holds it, an AI app connected
+to `/mcp` included, runs turns as the owner, or as whoever its `x-caller-email` names,
+under that person's Approvals. On Hands-off those turns can send on their own. Give the
+secret only to what you would let act as you, or set the keys.
+
 With the keys set:
 
 - **Each assertion covers one request.** It holds only for the method and the exact path
   and query it was signed for, expires within 30 seconds, and works once.
 - **No caller header at all is a service.** A script, `curl` with only `x-api-key`, or an
   MCP client can still use the API, but it is **never the owner**. For MCP,
-  `ask_executive` asks as no one, and the owner's memory and activity, the
+  `ask_executive`, `answer_card` and `run_workflow` ask as no one, and the owner's memory and activity, the
   briefing and the roster are refused. `/mcp` reads the caller the gate
   verified, so a sign-in in front of it that sends a signed assertion gets
   that person's answers.

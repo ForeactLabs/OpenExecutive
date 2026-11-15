@@ -672,7 +672,8 @@ async def answer_card(card_id: int, answer: CardAnswer, reply: str = "") -> str:
 
     Does what the card's own button or reply box does on Home: approve
     carries it out, skip drops it, reply answers a card that asks something
-    (or tells it what to change). Only the person a card is for can answer it.
+    (or tells it what to change). Only the person a card is for can approve
+    or answer it, as on Home (``card_answers``).
 
     Args:
         card_id: The card's ``alert_id`` from the Needs you resource.
