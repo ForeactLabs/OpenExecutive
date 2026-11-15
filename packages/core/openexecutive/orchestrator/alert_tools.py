@@ -385,6 +385,57 @@ def _step_already_on_card(session: Any) -> bool:
         return False
 
 
+def _note_raised(session: Any, event: Any, *, separate: bool) -> None:
+    """Remember a card an email's turn raised (not one it raised as about
+    something else), so a step it holds later folds it in. Never raises."""
+    try:
+        if separate or getattr(session, "origin_channel", "") != "email" or event.raised_by:
+            return
+        if not str(event.external_id or "").strip():
+            # An empty id could name another card's row: never folded.
+            return
+        session.raised_cards = (*tuple(getattr(session, "raised_cards", ()) or ()), (event.source, event.external_id))
+    except Exception:  # noqa: BLE001 - bookkeeping only
+        logger.debug("create_alert: couldn't note the raised card", exc_info=True)
+
+
+def fold_into_held(held_alert_id: int | None, *, reader: int | None, db_path: Any = None) -> int:
+    """An email's turn held a step after raising a card about that mail: the
+    held step's card is the one the owner answers, so the earlier card folds
+    into it (``alerts.store.mark_superseded``) instead of asking twice. A card
+    still being written folds in when it is (``alerts.pipeline.defer_fold``).
+    Only a card for the held card's ``reader`` (None = the principal) folds:
+    anyone else's stays, so they are still told. Returns how many folded now.
+    Never raises."""
+    if held_alert_id is None:
+        return 0
+    try:
+        from openexecutive.alerts import store
+        from openexecutive.orchestrator.schedule_tools import current_session
+
+        session = current_session.get()
+        if getattr(session, "origin_channel", "") != "email":
+            return 0
+        from openexecutive.alerts.pipeline import defer_fold, reader_of
+
+        folded = 0
+        for source, external_id in tuple(getattr(session, "raised_cards", ()) or ()):
+            row = store.get_alert_by_external(source, external_id, db_path=db_path)
+            row_id = getattr(row, "id", None) if row is not None else None
+            if not isinstance(row_id, int):
+                # Still being triaged: it folds in as soon as it is written.
+                defer_fold(source, external_id, held_alert_id, reader=reader, db_path=db_path)
+            elif reader_of(getattr(row, "routed_to_person_id", None)) == reader_of(reader) and store.mark_superseded(
+                row_id, held_alert_id, db_path=db_path
+            ):
+                folded += 1
+        session.raised_cards = ()
+        return folded
+    except Exception:  # noqa: BLE001 - a second card is the worst case
+        logger.warning("create_alert: couldn't fold the turn's card into the held one", exc_info=True)
+        return 0
+
+
 _UTC_ASIDE = re.compile(r"\s*\((?:\d{1,2}(?::\d{2})?\s*(?:[ap]\.?m\.?)?\s*)?(?:UTC|GMT|Z)\)", re.IGNORECASE)
 
 
@@ -493,6 +544,7 @@ async def handle_create_alert(tool_input: dict[str, Any], *, as_written: bool = 
                 return ask_first
         event.external_id = _fresh_external_id(event.source, event.external_id, folds=event.follow_up)
         schedule_evaluation(event)
+        _note_raised(current_session.get(), event, separate=separate_turn is not None)
         if separate_turn is not None:
             separate_turn.separate_cards = int(getattr(separate_turn, "separate_cards", 0) or 0) + 1
         logger.info("create_alert: scheduled subject=%r", tool_input["subject"])

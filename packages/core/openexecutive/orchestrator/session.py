@@ -234,6 +234,10 @@ class Session:
     # How many cards such a turn raised anyway as about something else
     # ('separate'): at most one, since the mail itself can ask for more.
     separate_cards: int = 0
+    # The cards such a turn raised before it held a step, as (source,
+    # external_id): the held step's card then stands for them, so they fold
+    # into it (``alert_tools.fold_into_held``). One card per email.
+    raised_cards: tuple[tuple[str, str], ...] = ()
     # Act as me for the turn in progress (``delegation.settings.TurnDelegation``),
     # pinned at its start by ``pin_turn_delegation``: whether the speaker has
     # it on, whether ``ghostwrite_email`` is offered, and whether the turn has

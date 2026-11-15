@@ -1896,6 +1896,23 @@ def _asker_id() -> int | None:
         return None
 
 
+def _teammate_asking() -> Any:
+    """The teammate (on People, not the owner) whose own turn this is, or
+    None. Never raises."""
+    try:
+        pid = _asker_id()
+        if pid is None:
+            return None
+        from openexecutive.people.store import get_person
+
+        person = get_person(pid)
+        if person is None or person.is_principal or person.archived or person.kind != "team" or not person.full_name:
+            return None
+        return person
+    except Exception:
+        return None
+
+
 def _principal_id() -> int | None:
     from openexecutive.people.registry import get_principal
 
@@ -2065,6 +2082,9 @@ def hold(
         # Someone asked for it on their own turn: the owner's rule holds it
         # for the owner, never for the one who asked.
         approver = _principal_id()
+    # A teammate's own ask: the card says they asked (web and phone show
+    # "<name> asked"), not that the Executive wants to.
+    asker = _teammate_asking() if source == "chat" else None
     private = _is_principal(approver)
     # What it would say quotes the Executive's context: on a card that sits
     # on the team's Today only the plain line shows; the approver reads the
@@ -2080,6 +2100,7 @@ def hold(
         "details": card_details(tool, tool_input, mcp=mcp),
         "fields": editable_fields(tool, tool_input, mcp=mcp),
         **({"allow": {"key": grant[0], "label": grant[1]}} if grant is not None else {}),
+        **({"requested_by_person_id": asker.id, "requested_by": asker.full_name} if asker is not None else {}),
     }
     decision_id = create_decision_instance(
         decision_class=DECISION_CLASS,
@@ -2093,12 +2114,16 @@ def hold(
         db_path=db_path,
     )
     external_id = decision_alert_external_id(decision_id)
+    alert_id: int | None = None
     try:
-        insert_alert(
+        alert_id = insert_alert(
             source=DECISION_ALERT_SOURCE,
             external_id=external_id,
             severity="medium",
-            headline=f"The Executive wants to: {shown}"[:160],
+            headline=(
+                f"{asker.full_name} asked: {payload['headline']}" if asker is not None
+                else f"The Executive wants to: {shown}"
+            )[:160],
             body=f"{shown}\n\nIt waited because {hit.reason}."
             + (f" Tick Do this on its own next time to let it do this from now on: {grant[1]}." if grant is not None else ""),
             suggested_action=shown,
@@ -2116,6 +2141,11 @@ def hold(
         )
     except Exception:
         logger.exception("take_the_lead: couldn't put decision %d on Today", decision_id)
+    if alert_id is not None:
+        from openexecutive.orchestrator.alert_tools import fold_into_held
+
+        # One card per ask: what this email's turn already raised folds in.
+        fold_into_held(alert_id, reader=approver, db_path=db_path)
     from openexecutive.orchestrator.session import note_step_held
 
     note_step_held()
@@ -2267,6 +2297,9 @@ async def _gated(name: str, inner: _Handler, tool_input: dict[str, Any], *, sour
         })
     result = await inner(tool_input)
     text = result if isinstance(result, str) else json.dumps(result) if isinstance(result, dict) else str(result)
+    if result_waiting(text, name):
+        # A check below the rules put it on a card: nothing was done yet.
+        return text
     failed = result_failed(text)
     why = _SOURCE_WHY.get(source, "")
     if isinstance(allowed, Rule):
@@ -2291,6 +2324,36 @@ def result_failed(text: str) -> bool:
     except (TypeError, ValueError):
         return False
     return isinstance(parsed, dict) and "error" in parsed
+
+
+def result_waiting(text: str, name: str | None = None) -> bool:
+    """Whether a tool's result says the step waits on an Approve card (a
+    check below the rules held it, ``levels.hold``): nothing was done yet,
+    so it is no step that went on its own. The card must still be waiting
+    and, given ``name``, hold that same tool."""
+    try:
+        parsed = json.loads(text)
+    except (TypeError, ValueError):
+        return False
+    if not isinstance(parsed, dict) or parsed.get("status") != "waiting_for_approval":
+        return False
+    decision_id = parsed.get("decision_instance_id")
+    if not isinstance(decision_id, int) or isinstance(decision_id, bool):
+        return False
+    # Only a card that really exists: a connected app's own result can't
+    # make a step that ran look held.
+    from openexecutive.memory.decision_ledger import STATUS_PROPOSED, get_decision_instance
+
+    try:
+        instance = get_decision_instance(decision_id)
+        if instance is None or instance.status != STATUS_PROPOSED:
+            return False
+        if name is None:
+            return True
+        payload = json.loads(instance.proposed_payload_json or "{}")
+        return isinstance(payload, dict) and payload.get("tool") == name
+    except Exception:
+        return False
 
 
 _SOURCE_WHY: dict[str, str] = {
@@ -2414,7 +2477,7 @@ def _went_on_its_own(name: str, tool_input: dict[str, Any], result: Any, *, mcp:
     without a yes, so Done for you and the counts show it. Best effort."""
     try:
         text = result if isinstance(result, str) else json.dumps(result) if isinstance(result, dict) else str(result)
-        if result_failed(text):
+        if result_failed(text) or result_waiting(text, name):
             return
         from openexecutive.orchestrator import levels
         from openexecutive.orchestrator.schedule_tools import current_session

@@ -562,6 +562,13 @@ _GMAIL_RECIPIENT_FIELDS = ("to", "cc", "bcc")
 #     sees or writes, so nothing it could otherwise put in `body`. Replies
 #     still work via thread_id + an explicit, roster-checked `to` (with
 #     quote_original, the quoted text goes only to that roster address).
+# The send's own fields that move recipients or inbox content past the roster
+# check: refused by ``_check_gmail_recipients`` and put on the owner's card.
+# Any other unknown field is a slip and goes back to the model.
+_GMAIL_GATED_OWN_KEYS = frozenset({
+    "reply_all", "forward_message_id", "include_forwarded_attachments",
+    "additional_headers", "headers", "raw", "mime", "raw_mime", "custom_headers",
+})
 _GMAIL_ALLOWED_ARG_KEYS = frozenset({
     "user_google_email",
     "to",
@@ -4010,6 +4017,22 @@ class MCPGateway:
                     return levels.card_or(blocked, tool_name, arguments, reason=levels.FILE_PLACE)
         if tool_name in _GATED_GMAIL_TOOLS:
             if not relaxed:
+                # A field the send doesn't have at all ("why") is a slip in
+                # how the call was written, not a step for anyone to approve:
+                # it goes back to be written again. The send's own fields
+                # that skip the roster check (reply_all, a forward) still
+                # come to the owner below.
+                stray = next(
+                    (k for k in arguments if k not in _GMAIL_ALLOWED_ARG_KEYS and k not in _GMAIL_GATED_OWN_KEYS),
+                    None,
+                )
+                if stray is not None:
+                    logger.warning("gmail send with a stray field: tool=%s field=%.60s", tool_name, stray)
+                    return json.dumps({"error": (
+                        f"argument {str(stray)[:60]!r} is not permitted on {tool_name}, so nothing was sent. "  # input-safety
+                        "Call it again with only its own fields (to, cc, bcc, subject, body and the threading "
+                        "ones); say why in your reply, not in the call."
+                    )})
                 blocked = _check_gmail_recipients(tool_name, arguments)
                 if blocked is not None:
                     return levels.card_or(blocked, tool_name, arguments, reason=levels.NEW_PERSON)

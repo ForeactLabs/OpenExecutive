@@ -190,6 +190,15 @@ def test_the_one_who_asked_never_approves_their_own_held_step(
     chat_row, other_row = get_decision_instance(chat), get_decision_instance(unattended)
     assert chat_row is not None and chat_row.approver_person_id == owner.id
     assert other_row is not None and other_row.approver_person_id == mate
+    # The card says who asked: "Bob Mate asked", on web and phone alike.
+    from openexecutive.alerts import store as alerts_store
+    from openexecutive.memory.decision_ledger import decision_alert_external_id
+
+    card = alerts_store.get_alert_by_external("decision_scheduling", decision_alert_external_id(chat))
+    assert card is not None and card.headline.startswith("Bob Mate asked: ")
+    assert json.loads(chat_row.proposed_payload_json)["requested_by"] == "Bob Mate"
+    other = alerts_store.get_alert_by_external("decision_scheduling", decision_alert_external_id(unattended))
+    assert other is not None and other.headline.startswith("The Executive wants to")
 
 
 def test_an_asked_send_that_went_on_its_own_is_logged_with_why(owner: Any) -> None:
@@ -212,3 +221,33 @@ def test_an_asked_send_that_went_on_its_own_is_logged_with_why(owner: Any) -> No
     # Mail only to the owner isn't something it did on its own.
     asyncio.run(asked({"name": SEND, "arguments": {"to": OWNER, "body": "Hi"}}))
     assert len([d for d in ttl.done([ttl.SCOPE_EXECUTIVE], days=1) if d.status == "done"]) == 1
+
+
+def test_a_send_a_later_check_put_on_a_card_is_not_done(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The gateway held the send on an Approve card: Done for you must not
+    say it was sent."""
+    async def call_tool(tool_input: dict[str, Any]) -> str:
+        return json.dumps({"status": "waiting_for_approval", "decision_instance_id": 9, "message": "Not done yet"})
+
+    from openexecutive.memory import decision_ledger
+
+    asked = ttl.asked_call_tool(call_tool)
+    token = current_session.set(SimpleNamespace(email_from=DANA, unattended=False))
+    try:
+        # A result naming no real card is a step that ran.
+        asyncio.run(asked({"name": SEND, "arguments": {"to": DANA, "subject": "Hours", "body": "9 to 5."}}))
+        assert len([d for d in ttl.done([ttl.SCOPE_EXECUTIVE], days=1) if d.status == "done"]) == 1
+        # A card already answered, or one for another tool, is no card for it.
+        for status, tool in (("approved", SEND), ("proposed", "google_workspace__create_event")):
+            monkeypatch.setattr(decision_ledger, "get_decision_instance", lambda i, db_path=None, s=status, t=tool: (
+                SimpleNamespace(status=s, proposed_payload_json=json.dumps({"tool": t}))))
+            asyncio.run(asked({"name": SEND, "arguments": {"to": DANA, "subject": f"Hours {status}", "body": "9 to 5."}}))
+        assert len([d for d in ttl.done([ttl.SCOPE_EXECUTIVE], days=1) if d.status == "done"]) == 3
+        monkeypatch.setattr(decision_ledger, "get_decision_instance", lambda i, db_path=None: SimpleNamespace(
+            status="proposed", proposed_payload_json=json.dumps({"tool": SEND})))
+        result = asyncio.run(asked({"name": SEND, "arguments": {"to": DANA, "subject": "Paying early", "body": "Fine."}}))
+    finally:
+        current_session.reset(token)
+    assert "waiting_for_approval" in result
+    assert len([d for d in ttl.done([ttl.SCOPE_EXECUTIVE], days=1) if d.status == "done"]) == 3
+

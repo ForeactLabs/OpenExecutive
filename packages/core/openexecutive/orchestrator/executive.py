@@ -3134,7 +3134,7 @@ class Executive:
             for tu in mail_touched_uses:
                 noticed.setdefault(tu["id"], (tu, mail_why))
             for tu in outside_uses:
-                noticed.setdefault(tu["id"], (tu, levels.STRANGER if stranger else levels.OUTSIDE))
+                noticed.setdefault(tu["id"], (tu, levels.STRANGER if stranger else levels.outside_reason()))
             held_uses = [
                 (tu, reason) for tu, reason in noticed.values()
                 if levels.decide(reason, mode=turn_level) == levels.CARD
@@ -3701,7 +3701,7 @@ class Executive:
                         probe_name, probe_input
                     ):
                         script_reason = (
-                            levels.STRANGER if outside_content.answers_off_team_mail() else levels.OUTSIDE
+                            levels.STRANGER if outside_content.answers_off_team_mail() else levels.outside_reason()
                         )
                     elif pinned_delegation is not None and mail_turn_withholds(
                         probe_name, probe_input, pinned=pinned_delegation

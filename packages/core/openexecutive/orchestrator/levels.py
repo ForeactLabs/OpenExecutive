@@ -52,6 +52,9 @@ CARD = "card"
 # Why a step was noticed. Each is detected where it always was; only
 # ``decide`` turns it into run or card.
 OUTSIDE = "outside_content"
+# Careful waits after any read from outside the company: one the check didn't
+# flag is said as it is, never as an attempt to give instructions.
+OUTSIDE_READ = "outside_read"
 OWN_MAIL = "mail_touched"
 # The owner's own mail was read this turn and the content check flagged some
 # of what it read: Balanced holds then too, and the card says why.
@@ -70,13 +73,14 @@ SCRIPT = "apps_script"
 # (``browser.tools``), where it can send a message.
 SEND_SITE = "send_site"
 REASONS: frozenset[str] = frozenset({
-    OUTSIDE, OWN_MAIL, MAIL_FLAGGED, PRIVATE, SHARED, AI_APP, NOT_OWNER, UNATTENDED, STRANGER, NEW_PERSON,
-    FILE_PLACE, URL_FETCH, SCRIPT, SEND_SITE,
+    OUTSIDE, OUTSIDE_READ, OWN_MAIL, MAIL_FLAGGED, PRIVATE, SHARED, AI_APP, NOT_OWNER, UNATTENDED, STRANGER,
+    NEW_PERSON, FILE_PLACE, URL_FETCH, SCRIPT, SEND_SITE,
 })
 
 # What the card says it waited for, in the owner's words.
 _WHY: dict[str, str] = {
     OUTSIDE: "it read something from outside the company that tried to give it instructions",
+    OUTSIDE_READ: "it read something from outside the company first",
     OWN_MAIL: "it read your own mail first",
     MAIL_FLAGGED: "something it read looked like it was trying to give it instructions",
     PRIVATE: "it came from mail that's private to you",
@@ -202,6 +206,21 @@ def mail_reason() -> str:
     except Exception:
         logger.debug("levels: couldn't tell whether a mail read was flagged", exc_info=True)
     return OWN_MAIL
+
+
+def outside_reason() -> str:
+    """Why a step waits after the turn read something from outside the
+    company: ``OUTSIDE`` when the content check flagged any read this turn
+    (an email included), else ``OUTSIDE_READ``. Never raises."""
+    try:
+        from openexecutive.orchestrator import outside_content
+
+        state = outside_content.current()
+        if not (getattr(state, "flags", None) or []):
+            return OUTSIDE_READ
+    except Exception:
+        logger.debug("levels: couldn't tell whether an outside read was flagged", exc_info=True)
+    return OUTSIDE
 
 
 def decide(reason: str, *, mode: str | None = None) -> str:
