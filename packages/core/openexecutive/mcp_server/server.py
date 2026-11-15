@@ -61,7 +61,6 @@ import asyncio
 import inspect
 import json
 import logging
-import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -576,10 +575,30 @@ async def list_workflows() -> str:
     return _json([w.meta().model_dump(mode="json") for w in workflows])
 
 
-async def _executive_turn(message: str) -> str:
+async def _open_card(card_id: int) -> None:
+    """Refuse a card the caller can't see on Home or that is already answered,
+    by the alerts route's own visibility rule, before any model call."""
+    from fastapi import HTTPException
+
+    from openexecutive.api.routes.alerts import _visible_alert
+    from openexecutive.orchestrator.schedule_tools import _FIND_ALERTS_ACKABLE_STATUSES
+
+    request = _http_request()
+    if request is None:
+        raise CallerRefused(ROSTER_ONLY)
+    try:
+        alert = await asyncio.to_thread(_visible_alert, card_id, request)
+    except HTTPException:
+        alert = None
+    if alert is None or alert.status not in _FIND_ALERTS_ACKABLE_STATUSES:
+        raise ValueError(f"No open card {card_id}. Pick one from the Needs you resource.")
+
+
+async def _executive_turn(message: str, card_id: int | None = None) -> str:
     """One Executive turn for the verified caller, as the web chat runs it:
-    their live board shown (what answer_card may answer), Approvals deciding
-    each step, and every row it writes naming the app."""
+    their live board shown, Approvals deciding each step, and every row it
+    writes naming the app. With ``card_id`` the turn may answer that card
+    and no other: it is the only trusted id, and ``find_alerts`` adds none."""
     from openexecutive.audit import via_app
     from openexecutive.briefing.context import render_and_trust
     from openexecutive.onboarding.profile_builder import load_or_create_profile
@@ -612,6 +631,12 @@ async def _executive_turn(message: str) -> str:
     briefing_context = (
         await asyncio.to_thread(render_and_trust, session) if person_id is not None else ""
     )
+    if card_id is not None:
+        if person_id is None:
+            raise CallerRefused(ROSTER_ONLY)
+        await _open_card(card_id)
+        session.trusted_alert_ids = {card_id}
+        session.answering_card = card_id
     with via_app(client_name()):
         return await executive.chat(
             user_message=message, session=session, person_id=person_id,
@@ -637,7 +662,6 @@ async def ask_executive(message: str) -> str:
 
 
 CardAnswer = Literal["approve", "skip", "reply"]
-_CARD_NAMED = re.compile(r"\bcards?\s*#?\s*(\d+)", re.IGNORECASE)
 
 
 @mcp.tool(title="Answer a card", annotations=_ACTS)
@@ -661,11 +685,11 @@ async def answer_card(card_id: int, answer: CardAnswer, reply: str = "") -> str:
         words = " ".join(reply.split())
         if not words:
             raise ValueError("Give the person's words in `reply`.")
-        if any(int(n) != card_id for n in _CARD_NAMED.findall(words)):
-            # The reply is for this card only: it can't answer another.
-            raise ValueError(f"The reply names another card. Answer that one on its own; this reply is for card {card_id}.")
         message = f"About card {card_id}: {words}"
-    return await _executive_turn(message)
+    return await _executive_turn(message, card_id=card_id)
+
+
+_MAX_WORKFLOW_INPUTS = 20_000
 
 
 @mcp.tool(title="Run a workflow", annotations=_ACTS)
@@ -679,13 +703,24 @@ async def run_workflow(workflow: str, inputs: dict[str, Any] | None = None) -> s
         workflow: The workflow's ``name`` from list_workflows.
         inputs: Its input fields, matching that workflow's input schema.
     """
+    from pydantic import ValidationError
+
     from openexecutive.workflows import list_workflows as _list
 
     name = " ".join(workflow.split())
-    known = {w.name for w in await asyncio.to_thread(_list)}
+    known = {w.name: w for w in await asyncio.to_thread(_list)}
     if name not in known:
         raise ValueError("No workflow by that name. Pick one from list_workflows.")
-    fields = _json(inputs or {})
+    # The inputs are the workflow's own fields, checked against its input
+    # schema as its run is, and no longer than a person would type.
+    try:
+        checked = known[name].input_model().model_validate(inputs or {})
+    except ValidationError as exc:
+        wrong = ", ".join(str(e["loc"][0]) for e in exc.errors() if e.get("loc")) or "inputs"
+        raise ValueError(f"These inputs don't fit the workflow: {wrong}. See its input_schema in list_workflows.") from exc
+    fields = _json(checked.model_dump(mode="json"))
+    if len(fields) > _MAX_WORKFLOW_INPUTS:
+        raise ValueError(f"The inputs are too long; keep them under {_MAX_WORKFLOW_INPUTS} characters.")
     return await _executive_turn(f"Run the {name} workflow with these inputs: {fields}")
 
 

@@ -10122,11 +10122,16 @@ integrations:
     learned from an AI app's text. answer_card sends the words the chat's
     card answers read ("Yes, approve card N.", "No, drop card N.", "About
     card N: ..."), so card_answers' checks (said_yes, said_no, the card
-    named) decide. run_workflow sends "Run the <name> workflow with these
+    named) decide. Before any model call it checks the card is open and
+    one the caller sees on Home (mcp_server._open_card, the alerts route's
+    _visible_alert), then the turn trusts that card only
+    (Session.answering_card; find_alerts widens nothing), so it can answer
+    no other card. run_workflow sends "Run the <name> workflow with these
     inputs: <json>", so the chat's run_workflow tool and its gates decide
-    and the run is followed like one started in chat. A reply that names
-    another card, or a workflow not on list_workflows, is refused before
-    the turn. The Act as me tools need a sign-in, as on the web chat:
+    and the run is followed like one started in chat. It takes only a
+    workflow on list_workflows, with inputs validated against that
+    workflow's input_model (unknown fields dropped) and capped at 20,000
+    characters. The Act as me tools need a sign-in, as on the web chat:
     Session.web_caller_signed_in is set when the request names someone,
     never for one that only holds the shared secret
     (delegation.settings.speaker_surface_ok). oe://departments/state gives

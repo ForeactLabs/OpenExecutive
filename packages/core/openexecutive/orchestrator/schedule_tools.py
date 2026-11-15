@@ -2789,6 +2789,7 @@ def _may_search_alerts(session: Any) -> bool:
     return bool(
         session is not None
         and getattr(session, "principal_board_shown", False)
+        and getattr(session, "answering_card", None) is None
         and not getattr(session, "unattended", False)
         and not getattr(session, "email_from", "")
         and is_principal_on_verified_surface(session)

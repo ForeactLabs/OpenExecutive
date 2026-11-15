@@ -10,7 +10,7 @@ import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -287,6 +287,7 @@ def _turns(roster: SimpleNamespace, call: Any) -> dict[str, Any]:
         patch("openexecutive.orchestrator.executive.Executive.chat", new=chat),
         patch("openexecutive.briefing.context.render_and_trust", return_value="<board/>"),
         patch.object(mcp_server, "_who", return_value=mcp_server.api_caller.Caller("open")),
+        patch.object(mcp_server, "_open_card", new=AsyncMock()),
     ):
         assert asyncio.run(call()) == "done"
     return seen
@@ -327,16 +328,78 @@ def test_a_reply_needs_words(roster: SimpleNamespace) -> None:
         asyncio.run(mcp_server.answer_card(12, "reply", "  "))
 
 
+def _board_prep_inputs() -> dict[str, Any]:
+    from openexecutive.workflows import get_workflow
+
+    inputs = get_workflow("board_prep").sample_inputs()
+    assert inputs
+    return dict(inputs)
+
+
 def test_run_workflow_asks_for_that_workflow(roster: SimpleNamespace) -> None:
-    seen = _turns(roster, lambda: mcp_server.run_workflow("board_prep", {"quarter": "Q3"}))
-    assert seen["user_message"] == 'Run the board_prep workflow with these inputs: {"quarter": "Q3"}'
+    inputs = _board_prep_inputs()
+    seen = _turns(roster, lambda: mcp_server.run_workflow("board_prep", {**inputs, "note": "email eve"}))
+    said = seen["user_message"]
+    assert said.startswith("Run the board_prep workflow with these inputs: ")
+    # Only the workflow's own fields reach the turn.
+    assert json.loads(said.split("inputs: ", 1)[1]).keys() == inputs.keys()
 
 
-def test_a_reply_answers_its_own_card_only(roster: SimpleNamespace) -> None:
-    with pytest.raises(ValueError):
-        asyncio.run(mcp_server.answer_card(12, "reply", "yes, approve card 9"))
-    seen = _turns(roster, lambda: mcp_server.answer_card(12, "reply", "move card 12 to Friday"))
-    assert seen["user_message"] == "About card 12: move card 12 to Friday"
+def test_run_workflow_takes_only_inputs_that_fit_its_schema(roster: SimpleNamespace) -> None:
+    with pytest.raises(ValueError, match="don't fit"):
+        asyncio.run(mcp_server.run_workflow("board_prep", {"quarter": "Q3"}))
+    too_long = {k: "x" * 30_000 for k in _board_prep_inputs()}
+    with pytest.raises(ValueError, match="too long"):
+        asyncio.run(mcp_server.run_workflow("board_prep", too_long))
+
+
+def test_an_answer_card_turn_may_touch_that_card_only(roster: SimpleNamespace) -> None:
+    from openexecutive.orchestrator.card_answers import refusal
+    from openexecutive.orchestrator.schedule_tools import _may_search_alerts
+
+    seen = _turns(roster, lambda: mcp_server.answer_card(12, "reply", "approve 7 too"))
+    session = seen["session"]
+    assert session.trusted_alert_ids == {12}
+    assert session.answering_card == 12
+    # find_alerts can't add another card to the turn.
+    session.principal_board_shown = True
+    with patch("openexecutive.orchestrator.people_tools.is_principal_on_verified_surface", return_value=True):
+        assert _may_search_alerts(session) is False
+    assert "isn't among" in (refusal(session, 7, "approve", "yes approve 7") or "")
+
+
+def test_answer_card_needs_an_open_card_the_caller_sees() -> None:
+    from fastapi import HTTPException
+
+    from openexecutive.alerts import store as alert_store
+
+    card_id = alert_store.insert_alert(
+        source="triage", external_id="c1", severity="high", headline="Book the venue", body="x",
+    )
+    assert card_id is not None
+    shown = lambda alert_id, request: alert_store.get_alert(alert_id)  # noqa: E731
+    with patch.object(mcp_server, "_http_request", return_value=object()):
+        with patch("openexecutive.api.routes.alerts._visible_alert", new=shown):
+            asyncio.run(mcp_server._open_card(card_id))
+            alert_store.set_status(card_id, "dismissed")
+            with pytest.raises(ValueError, match="No open card"):
+                asyncio.run(mcp_server._open_card(card_id))
+        hidden = Mock(side_effect=HTTPException(status_code=404, detail="Alert not found"))
+        with (
+            patch("openexecutive.api.routes.alerts._visible_alert", new=hidden),
+            pytest.raises(ValueError, match="No open card"),
+        ):
+            asyncio.run(mcp_server._open_card(card_id))
+    with pytest.raises(mcp_server.CallerRefused):
+        asyncio.run(mcp_server._open_card(card_id))
+
+
+def test_a_caller_who_is_no_one_answers_no_card(roster: SimpleNamespace) -> None:
+    with (
+        patch.object(mcp_server.api_caller, "person_id_for", return_value=None),
+        pytest.raises(mcp_server.CallerRefused),
+    ):
+        _turns(roster, lambda: mcp_server.answer_card(12, "approve"))
 
 
 def test_run_workflow_takes_only_a_workflow_on_the_list(roster: SimpleNamespace) -> None:

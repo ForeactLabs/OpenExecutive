@@ -139,6 +139,10 @@ class Session:
     # calls (`schedule_tools._FIND_ALERTS_MAX_PER_TURN`). Reset per turn with
     # the trusted set.
     found_alert_ids: set[int] = field(default_factory=set)
+    # An AI app's answer_card turn: the one card it may touch, set by the
+    # server before the turn (``mcp_server.server.answer_card``). The trusted
+    # set holds only that card, and ``find_alerts`` widens nothing.
+    answering_card: int | None = None
     # Pending roster requests ("who is this new sender?") the server showed
     # this turn in its <roster_requests> block — the principal's own verified
     # turn only (`briefing.context.render_and_trust`). `resolve_roster_request`
