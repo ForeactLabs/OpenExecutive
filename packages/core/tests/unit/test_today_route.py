@@ -3083,7 +3083,12 @@ def test_done_for_you_names_an_approved_card_by_its_plan(
         source="system", external_id="a-bare", severity="medium",
         headline="Renew the domain", body="...", db_path=db,
     )
-    chats = {"chat-1": [{"role": "assistant", "content": "I added it to a new press log. Link: x"}]}
+    # What came of it is the chat's first answer, not a later ask in it.
+    chats = {"chat-1": [
+        {"role": "assistant", "content": "I added it to a new press log. Link: x"},
+        {"role": "user", "content": "Thanks, now draft the follow-up."},
+        {"role": "assistant", "content": "Here's a draft."},
+    ]}
     monkeypatch.setattr(session_store, "load_messages", lambda sid, *a, **k: chats.get(sid, []))
     for alert in alert_store.list_alerts(db_path=db):
         claimed = approvals.claim(alert.id, approved_by_person_id=None, db_path=db)

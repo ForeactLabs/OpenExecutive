@@ -3046,9 +3046,10 @@ def _done_for_you(request: Request, caller: int | None, now: datetime) -> list[D
 
 
 def _chat_said(session_id: str | None) -> str:
-    """The first sentence of a chat's last answer ("I checked the coverage
-    and added it to a new press log."), for a card's row in Done for you.
-    "" when there is none. Never raises."""
+    """The first sentence of a card's chat's first answer, the one that did
+    the card ("I checked the coverage and added it to a new press log."),
+    for its row in Done for you: the chat is new for the card, and anything
+    said after is another ask. "" when there is none. Never raises."""
     from openexecutive.memory.session_store import load_messages
     from openexecutive.workflows.run_outcome import first_sentence
 
@@ -3056,7 +3057,7 @@ def _chat_said(session_id: str | None) -> str:
         return ""
     try:
         answers = [m for m in load_messages(session_id) if m.get("role") == "assistant"]
-        return (first_sentence(str(answers[-1].get("content") or "")) or "") if answers else ""
+        return (first_sentence(str(answers[0].get("content") or "")) or "") if answers else ""
     except Exception:
         logger.warning("today: couldn't read what a card's chat did", exc_info=True)
         return ""
