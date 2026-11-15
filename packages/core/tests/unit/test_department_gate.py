@@ -193,7 +193,7 @@ def test_a_teammates_held_step_is_their_own_card(
     assert len(alerts_store.list_alerts(limit=10)) == 1
 
 
-@pytest.mark.parametrize("reason", [levels.STRANGER, levels.NOT_OWNER, levels.AI_APP])
+@pytest.mark.parametrize("reason", [levels.STRANGER, levels.NOT_OWNER, levels.READ_ONLY])
 def test_what_only_the_owner_may_allow_goes_to_the_owner(team: dict[str, Person], reason: str) -> None:
     instance = ledger.get_decision_instance(_hold_as(team["sam"], reason)["decision_instance_id"])
     assert instance is not None and instance.approver_person_id == team["owner"].id

@@ -19,7 +19,7 @@ from openexecutive.audit import logger as audit_logger
 from openexecutive.audit.logger import AuditLogger
 from openexecutive.memory import episodic, session_store
 from openexecutive.orchestrator.schedule_tools import (
-    MCP_CLIENT_WITHHELD_TOOLS,
+    READ_ONLY_WITHHELD_TOOLS,
     SHARED_CHAT_WITHHELD_TOOLS,
     current_session,
     shared_chat_withholds,
@@ -28,7 +28,7 @@ from openexecutive.orchestrator.session import Session
 from openexecutive.people import registry as people_registry
 from openexecutive.people import store as people_store
 from tests.unit.test_chat_live import RIYA, SABIN, client  # noqa: F401 — fixture
-from tests.unit.test_mcp_client_turns import _gateway, _results, _run_loop
+from tests.unit.test_read_only_turns import _gateway, _results, _run_loop
 
 ALEX_HDR = {"x-caller-email": "alex@example.com"}
 
@@ -155,7 +155,7 @@ def test_every_withheld_name_is_a_real_tool() -> None:
 
     assert {t["name"] for t in _ALL_SKILL_TOOLS} >= SHARED_CHAT_WITHHELD_TOOLS
     # Each one is something another AI app's turn is denied too.
-    assert MCP_CLIENT_WITHHELD_TOOLS | {"resolve_roster_request"} >= SHARED_CHAT_WITHHELD_TOOLS
+    assert READ_ONLY_WITHHELD_TOOLS | {"resolve_roster_request"} >= SHARED_CHAT_WITHHELD_TOOLS
 
 
 def _held(result: str) -> bool:

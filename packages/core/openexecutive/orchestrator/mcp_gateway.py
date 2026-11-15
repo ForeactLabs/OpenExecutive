@@ -3906,32 +3906,27 @@ class MCPGateway:
         )
         if refused is not None:
             return refused
-        # A turn another AI app asked over Open Executive's MCP server runs
-        # gateway reads only (schedule_tools.MCP_CLIENT_MCP_TOOLS), whether or
-        # not it may act, plus mail only to the owner (levels.only_to_owner):
-        # anything else goes on an approval card. The
-        # chat loop already refuses anything else; this holds for any other
-        # path.
+        # A turn that may only read and advise (schedule_tools.read_only_turn)
+        # runs gateway reads only (schedule_tools.READ_ONLY_MCP_TOOLS), plus
+        # mail only to the owner (levels.only_to_owner): anything else goes on
+        # an approval card. The chat loop already does; this holds for any
+        # other path.
         from openexecutive.orchestrator.schedule_tools import (
             current_session,
-            mcp_client_acting,
-            mcp_client_withheld_error,
-            mcp_client_withholds,
-            mcp_rules_turn,
+            read_only_turn,
+            read_only_withheld_error,
+            read_only_withholds,
         )
 
         turn_session = current_session.get()
         if (
             not relaxed
-            and mcp_rules_turn(turn_session)
-            and mcp_client_withholds("call_tool", tool_input)
+            and read_only_turn(turn_session)
+            and read_only_withholds("call_tool", tool_input)
             and not levels.only_to_owner("call_tool", tool_input)
         ):
-            # A card for the owner, as the chat loop does (levels.AI_APP).
-            blocked_call = mcp_client_withheld_error(
-                str(tool_input.get("name") or "call_tool")[:200],
-                acting=mcp_client_acting(turn_session),
-            )
+            # A card for the owner, as the chat loop does (levels.READ_ONLY).
+            blocked_call = read_only_withheld_error(str(tool_input.get("name") or "call_tool")[:200])
             held_args = tool_input.get("arguments", {})
             if isinstance(held_args, str):
                 try:
@@ -3941,7 +3936,7 @@ class MCPGateway:
             if not isinstance(held_args, dict):
                 held_args = {}
             return levels.card_or(
-                blocked_call, str(tool_input.get("name") or "call_tool"), held_args, reason=levels.AI_APP
+                blocked_call, str(tool_input.get("name") or "call_tool"), held_args, reason=levels.READ_ONLY
             )
         session = self._require_session()
         arguments = tool_input.get("arguments", {})

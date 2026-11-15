@@ -230,8 +230,7 @@ def channel_of(session: Any) -> str | None:
 
 def _someone_else(session: Any) -> bool:
     """Whether the turn's words may come from someone not in People: mail
-    from someone not in People, a page in another app, or another AI app
-    that isn't the owner's own (``owners_ai_app``). The level belongs to
+    from someone not in People or a page in another app. The level belongs to
     whoever asks, and they have none: Hands-off never covers them. Nor a
     Google Chat space, where anyone may have written last (a speaker on no
     People entry waits on the owner's card anyway:
@@ -242,36 +241,13 @@ def _someone_else(session: Any) -> bool:
         return True
     if getattr(session, "from_host", False) is True:
         return True
-    if (
+    # A Google Chat space turns no one away, so its last words may be from
+    # someone not in People.
+    return (
         getattr(session, "origin_channel", "") == "google_chat"
         and getattr(session, "shared_chat", False) is True
         and getattr(session, "others_spoke_last", False) is True
-    ):
-        # A Google Chat space turns no one away, so its last words may be
-        # from someone not in People.
-        return True
-    if getattr(session, "from_mcp_client", False) is True:
-        # The owner's own AI app, signed in as them and allowed to act, is
-        # them: their level applies as in the web app. Any other is not.
-        return not owners_ai_app(session)
-    return False
-
-
-def owners_ai_app(session: Any) -> bool:
-    """Whether ``session`` is another AI app's turn that the owner is signed
-    in to and allowed to act (``Session.mcp_client_may_act``), with the owner
-    as its verified caller. Never raises: an error is no."""
-    try:
-        if getattr(session, "from_mcp_client", False) is not True:
-            return False
-        if getattr(session, "mcp_client_may_act", False) is not True:
-            return False
-        from openexecutive.orchestrator.people_tools import is_principal_on_verified_surface
-
-        return is_principal_on_verified_surface(session)
-    except Exception:
-        logger.warning("outside_mode: couldn't tell whose AI app this is — treating it as someone else's", exc_info=True)
-        return False
+    )
 
 
 def for_turn(session: Any) -> str:

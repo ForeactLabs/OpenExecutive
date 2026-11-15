@@ -306,7 +306,8 @@ _DM_SESSION_PREFIXES = {"slack": "slack:dm:", "discord": "discord:dm:"}
 
 def private_conversation(session: Any) -> bool:
     """Whether only the speaker (and the Executive) can read this
-    conversation: the web chat, a Slack or Discord DM, a Telegram chat
+    conversation: the web chat, an AI app's (``mcp_server``), a Slack or
+    Discord DM, a Telegram chat
     (``is_principal_on_verified_surface`` already accepts only a private one),
     or one a channel adapter marked so (``Session.private_chat``) for a
     sender it verified (``Session.speaker_verified``).
@@ -316,6 +317,9 @@ def private_conversation(session: Any) -> bool:
     so it isn't."""
     if getattr(session, "from_web_chat", False) is True:
         return getattr(session, "shared_chat", False) is not True
+    if getattr(session, "from_mcp_client", False) is True:
+        # Another AI app's conversation is the signed-in person's alone.
+        return True
     if getattr(session, "private_chat", False) is True:
         # Whose conversation it is matters to callers that ask nothing else
         # (``correction_tools._scheduled_by``).
@@ -352,7 +356,8 @@ def speaker_surface_ok(session: Any, person: Person | None) -> bool:
         return False
     if not private_conversation(session):
         return False
-    if getattr(session, "from_web_chat", False) is True:
+    if getattr(session, "from_web_chat", False) is True or getattr(session, "from_mcp_client", False) is True:
+        # A request that only holds the shared secret is not a sign-in.
         return getattr(session, "web_caller_signed_in", False) is True or local_login()
     return True
 
@@ -369,9 +374,6 @@ def _offered(session: Any, person: Person | None, enabled: bool) -> bool:
     ):
         return False
     if getattr(session, "private_to_principal", False) is True:
-        return False
-    # Another AI app asking over the MCP server: nobody is here to approve.
-    if getattr(session, "from_mcp_client", False) is True:
         return False
     # A host origin's turn (Session.from_host) only reads and advises.
     if getattr(session, "from_host", False) is True:

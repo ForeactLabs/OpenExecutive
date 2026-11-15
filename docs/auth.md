@@ -427,7 +427,7 @@ API reads it from the verified assertion only, and the header must agree with it
 otherwise); without them it reads the header, as it does `x-caller-email`. A chat turn on
 that surface (`Session.from_host`) only reads and advises: it is offered the specialists,
 the read tools and the gateway's reads, never anything that sends, posts, books,
-schedules, runs or changes stored state (`MCP_CLIENT_WITHHELD_TOOLS`), the principal-only
+schedules, runs or changes stored state (`READ_ONLY_WITHHELD_TOOLS`), the principal-only
 tools, Act as me, `recall_history`, scripts or extension tools. A call the model makes
 anyway is refused, telling the person to start a new chat in Open Executive itself. Its
 words are never taken as the person's own: no memory extraction, open loop, working
