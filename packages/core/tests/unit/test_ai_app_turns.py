@@ -348,9 +348,17 @@ def test_run_workflow_asks_for_that_workflow(roster: SimpleNamespace) -> None:
 def test_run_workflow_takes_only_inputs_that_fit_its_schema(roster: SimpleNamespace) -> None:
     with pytest.raises(ValueError, match="don't fit"):
         asyncio.run(mcp_server.run_workflow("board_prep", {"quarter": "Q3"}))
-    too_long = {k: "x" * 30_000 for k in _board_prep_inputs()}
+
+
+def test_every_turn_takes_at_most_one_chat_message(roster: SimpleNamespace) -> None:
+    long = "x" * (mcp_server.MAX_MESSAGE + 1)
     with pytest.raises(ValueError, match="too long"):
-        asyncio.run(mcp_server.run_workflow("board_prep", too_long))
+        _turns(roster, lambda: mcp_server.answer_card(12, "reply", long))
+    with pytest.raises(ValueError, match="too long"):
+        _turns(roster, lambda: mcp_server.ask_executive(long))
+    too_long = {k: "x" * 40_000 for k in _board_prep_inputs()}
+    with pytest.raises(ValueError, match="too long"):
+        _turns(roster, lambda: mcp_server.run_workflow("board_prep", too_long))
 
 
 def test_an_answer_card_turn_may_touch_that_card_only(roster: SimpleNamespace) -> None:

@@ -10130,8 +10130,8 @@ integrations:
     inputs: <json>", so the chat's run_workflow tool and its gates decide
     and the run is followed like one started in chat. It takes only a
     workflow on list_workflows, with inputs validated against that
-    workflow's input_model (unknown fields dropped) and capped at 20,000
-    characters. The Act as me tools need a sign-in, as on the web chat:
+    workflow's input_model (unknown fields dropped). Every turn here takes
+    at most the web chat's 32,000 characters (mcp_server.MAX_MESSAGE). The Act as me tools need a sign-in, as on the web chat:
     Session.web_caller_signed_in is set when the request names someone,
     never for one that only holds the shared secret
     (delegation.settings.speaker_surface_ok). oe://departments/state gives

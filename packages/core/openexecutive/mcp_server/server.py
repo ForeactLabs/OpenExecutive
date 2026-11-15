@@ -596,6 +596,10 @@ async def _open_card(card_id: int) -> None:
         raise ValueError(f"No open card {card_id}. Pick one from the Needs you resource.")
 
 
+# The web chat's own cap on one message (``POST /chat``), for every turn here.
+MAX_MESSAGE = 32_000
+
+
 async def _executive_turn(message: str, card_id: int | None = None) -> str:
     """One Executive turn for the verified caller, as the web chat runs it:
     their live board shown, Approvals deciding each step, and every row it
@@ -608,6 +612,9 @@ async def _executive_turn(message: str, card_id: int | None = None) -> str:
     from openexecutive.orchestrator.executive import Executive
     from openexecutive.orchestrator.mcp_gateway import get_active_gateway
     from openexecutive.orchestrator.session import Session
+
+    if len(message) > MAX_MESSAGE:
+        raise ValueError(f"That is too long for one message; keep it under {MAX_MESSAGE:,} characters.")
 
     # Who is asking comes from the verified request, never from the message:
     # a signed-in person, the principal for a request that names no one in
@@ -692,9 +699,6 @@ async def answer_card(card_id: int, answer: CardAnswer, reply: str = "") -> str:
     return await _executive_turn(message, card_id=card_id)
 
 
-_MAX_WORKFLOW_INPUTS = 20_000
-
-
 @mcp.tool(title="Run a workflow", annotations=_ACTS)
 async def run_workflow(workflow: str, inputs: dict[str, Any] | None = None) -> str:
     """Run one of the workflows from list_workflows, as the person signed in.
@@ -722,8 +726,6 @@ async def run_workflow(workflow: str, inputs: dict[str, Any] | None = None) -> s
         wrong = ", ".join(str(e["loc"][0]) for e in exc.errors() if e.get("loc")) or "inputs"
         raise ValueError(f"These inputs don't fit the workflow: {wrong}. See its input_schema in list_workflows.") from exc
     fields = _json(checked.model_dump(mode="json"))
-    if len(fields) > _MAX_WORKFLOW_INPUTS:
-        raise ValueError(f"The inputs are too long; keep them under {_MAX_WORKFLOW_INPUTS} characters.")
     return await _executive_turn(f"Run the {name} workflow with these inputs: {fields}")
 
 
