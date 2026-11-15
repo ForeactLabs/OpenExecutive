@@ -22,6 +22,8 @@ A walkthrough of Open Executive in action — [watch on YouTube](https://youtu.b
 
 Developed by [ForeAct Labs](https://foreactlabs.com), Open Executive provides a single coherent executive voice backed by nine specialist AI agents, plus a triage agent that sorts incoming work:
 
+<p align="center"><img src="docs/assets/specialists-ring.svg" width="440" alt="The Executive at the center, with nine specialists around it: strategy, finance, people, legal, operations, marketing, product, sales and board"></p>
+
 - **Chief Strategy Officer** — competitive analysis, M&A, market positioning, OKRs
 - **Chief Financial Officer** — financial modeling, fundraising, unit economics, cash flow
 - **Chief HR/People Officer** — hiring, compensation, performance, culture
@@ -50,7 +52,7 @@ The Executive can also **use your web browser** to get things done on websites f
 ```
 User message
     ↓
-Executive Orchestrator (claude-sonnet-5-5)
+Executive Orchestrator
     ↓ tool use → parallel specialist calls
 CSO / CFO / CHRO / GC / COO / CMO / CPO / Sales / Board
     ↓ each specialist retrieves relevant context from ChromaDB
@@ -73,12 +75,11 @@ See [docs/architecture.md](docs/architecture.md) for the full design.
 
 ## Tech Stack
 
+**Bring your own model.** Open Executive runs on Claude, on any model OpenRouter offers (GPT, Gemini, Llama, DeepSeek, Grok and more), or on models you host yourself with Ollama, LM Studio, vLLM or any OpenAI-compatible server. You can mix them: keep the Executive on one model and move any specialist to another in the Agent Council. Out of the box it uses Claude; see [Configuration](#configuration) and [Running on Local Models](#running-on-local-models) to change that.
+
 | Layer | Choice |
 |---|---|
-| LLM backbone | Anthropic Claude API |
-| Default model | `claude-sonnet-5-5` (Executive + most specialists) |
-| Deep reasoning | `DEEP_REASONING_MODEL` (CSO, CFO, GC, Board — with adaptive thinking; `claude-sonnet-5-5` by default, `claude-opus-5-5` for the most depth) |
-| Other models | Pick any agent's model in the Agent Council, including `claude-fable-5-1` |
+| Models | Your choice, per agent (see above) |
 | Backend | Python 3.11 + FastAPI |
 | Package manager | `uv` |
 | Vector store | ChromaDB (local, embedded) |
