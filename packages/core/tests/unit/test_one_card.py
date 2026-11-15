@@ -307,3 +307,37 @@ def test_the_subject_a_follow_up_is_matched_on_comes_from_the_header() -> None:
 
     assert _header_subject("From: dana@x.example\nSUBJECT: Re: Labels\n\nSubject: not this") == "Re: Labels"
     assert _header_subject("From: dana@x.example\n\nSubject: in the body") == ""
+
+
+def test_a_forward_on_the_same_subject_starts_its_own_conversation() -> None:
+    one_card.note_mail("t-1", "dana@northpeak.example", "Pallet labels")
+    assert not one_card.continues("t-2", "dana@northpeak.example", "Fwd: Pallet labels")
+    assert one_card.continues("t-2", "dana@northpeak.example", "AW: Pallet labels")
+
+
+def test_a_reply_waits_on_the_card_of_the_conversation_its_thread_joined(mail_turn: Session) -> None:
+    one_card.note_mail("thread-1", "dana@northpeak.example", "Thursday")
+    one_card.note_mail("thread-9", "dana@northpeak.example", "Re: Thursday", proven=True)
+    reply = {"to": "dana@northpeak.example", "subject": "Re: Thursday", "body": "x", "thread_id": "thread-1"}
+    _approve(tool_input=reply)
+    thread, step = one_card.held_topic("google_workspace__send_gmail_message", [reply], mcp=True)
+    owner = one_card.reader_for(OWNER, private=False)
+    assert one_card.approve_waiting("mail:thread-9", reader=owner, step=step)
+    assert not one_card.approve_waiting("mail:thread-5", reader=owner, step=step)
+
+
+def test_each_newer_reply_takes_everything_the_one_it_replaced_held(mail_turn: Session) -> None:
+    reply = {"to": "dana@northpeak.example", "subject": "Re: Thursday", "body": "a", "thread_id": "thread-1"}
+    with set_turn(session_id="s", turn_id="turn-a"):
+        a, _ = _approve(tool_input=reply)
+        first = _note("Dana asked for Thursday", severity="high")
+    with set_turn(session_id="s", turn_id="turn-b"):
+        b, _ = _approve(tool_input={**reply, "body": "b"})
+        second = _note("Dana asked again")
+    with set_turn(session_id="s", turn_id="turn-c"):
+        c, _ = _approve(tool_input={**reply, "body": "c"})
+    kept = _get(c)
+    assert _get(a).status == _get(b).status == "dismissed"
+    assert kept.severity == "high"
+    assert "Dana asked for Thursday" in kept.body and "Dana asked again" in kept.body
+    assert _get(first).superseded_by_alert_id == _get(second).superseded_by_alert_id == c

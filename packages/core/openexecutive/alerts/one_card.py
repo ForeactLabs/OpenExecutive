@@ -172,6 +172,8 @@ def _subject_key(subject: str) -> str:
     return " ".join(_RE_PREFIX.sub("", str(subject or "")).split()).lower()
 
 
+# A reply, not a forward: a forward carries someone else's mail.
+_REPLY = re.compile(r"^\s*(re|aw)\s*:", re.IGNORECASE)
 # How long a mail thread is remembered for joining a follow-up to it.
 _CONVERSATION_DAYS = 90
 
@@ -180,7 +182,7 @@ def _earlier(conn: sqlite3.Connection, thread_id: str, sender: str, subject: str
     """The conversation a new thread ``thread_id`` from ``sender`` would join:
     their latest one on this subject, when ``subject`` is a reply."""
     key = _subject_key(subject)
-    if not key or not _RE_PREFIX.match(str(subject or "")):
+    if not key or not _REPLY.match(str(subject or "")):
         return ""
     if conn.execute("SELECT 1 FROM mail_conversations WHERE thread_id = ?", (thread_id,)).fetchone():
         return ""
