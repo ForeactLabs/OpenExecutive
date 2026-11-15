@@ -1375,9 +1375,20 @@ async def _run_executive(
         prove = prove_sender or _gmail_proof
         session.email_from = from_addr.strip().lower()
         session.email_thread_id = str(thread_id or "")
+        # A follow-up the mailbox filed as a new thread joins the sender's
+        # earlier conversation (one card per topic) only once the mailbox
+        # vouches for the sender: anyone can write a From: line.
         from openexecutive.alerts import one_card
 
-        one_card.note_mail(thread_id, from_addr, _header_subject(raw_email))
+        subject_line = _header_subject(raw_email)
+        try:
+            proven = await asyncio.to_thread(
+                one_card.continues, thread_id, from_addr, subject_line
+            ) and await prove()
+        except Exception:  # noqa: BLE001 - optional step; must not lose the email.
+            logger.warning("couldn't check a follow-up's sender; it keeps its own thread", exc_info=True)
+            proven = False
+        await asyncio.to_thread(one_card.note_mail, thread_id, from_addr, subject_line, proven=proven)
         try:
             principal = await asyncio.to_thread(principal_address)
         except Exception:  # noqa: BLE001 - optional step; must not lose the email.

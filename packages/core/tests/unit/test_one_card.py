@@ -247,9 +247,13 @@ def test_open_cards_from_lists_earlier_turns_only() -> None:
 
 def test_a_reply_the_mailbox_filed_as_a_new_thread_is_the_same_conversation(mail_turn: Session) -> None:
     one_card.note_mail("thread-1", "dana@northpeak.example", "Pallet labels for January")
-    one_card.note_mail("thread-9", "dana@northpeak.example", "Re: Pallet labels for January")
-    one_card.note_mail("thread-7", "dana@northpeak.example", "Pallet labels for January")  # a new ask
-    one_card.note_mail("thread-8", "leo@northpeak.example", "Re: Pallet labels for January")
+    assert one_card.continues("thread-9", "dana@northpeak.example", "Re: Pallet labels for January")
+    assert not one_card.continues("thread-7", "dana@northpeak.example", "Pallet labels for January")
+    one_card.note_mail("thread-9", "dana@northpeak.example", "Re: Pallet labels for January", proven=True)
+    one_card.note_mail("thread-7", "dana@northpeak.example", "Pallet labels for January", proven=True)  # a new ask
+    one_card.note_mail("thread-8", "leo@northpeak.example", "Re: Pallet labels for January", proven=True)
+    # A From: line the mailbox didn't vouch for starts its own thread.
+    one_card.note_mail("thread-6", "dana@northpeak.example", "Re: Pallet labels for January")
     reply = {"to": "dana@northpeak.example", "subject": "Re: Pallet labels for January", "body": "x"}
     with set_turn(session_id="s", turn_id="turn-1"):
         old_card, old = _approve(tool_input={**reply, "thread_id": "thread-1"})
@@ -263,7 +267,10 @@ def test_a_reply_the_mailbox_filed_as_a_new_thread_is_the_same_conversation(mail
     assert ledger.get_decision_instance(old).status == ledger.STATUS_CLOSED_EXTERNALLY  # type: ignore[union-attr]
     assert _get(new_card).status == "unread"
     # The same subject written fresh, or from someone else, is its own matter.
-    for thread, sender in (("thread-7", "dana@northpeak.example"), ("thread-8", "leo@northpeak.example")):
+    for thread, sender in (
+        ("thread-7", "dana@northpeak.example"), ("thread-8", "leo@northpeak.example"),
+        ("thread-6", "dana@northpeak.example"),
+    ):
         mail_turn.email_thread_id, mail_turn.email_from = thread, sender
         with set_turn(session_id="s", turn_id=f"turn-{thread}"):
             assert _get(_note(f"From {thread}")).status == "unread"

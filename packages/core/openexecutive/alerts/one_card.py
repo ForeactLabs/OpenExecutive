@@ -172,12 +172,47 @@ def _subject_key(subject: str) -> str:
     return " ".join(_RE_PREFIX.sub("", str(subject or "")).split()).lower()
 
 
-def note_mail(thread_id: str, sender: str, subject: str, *, db_path: Path | None = None) -> None:
+def _earlier(conn: sqlite3.Connection, thread_id: str, sender: str, subject: str) -> str:
+    """The conversation a new thread ``thread_id`` from ``sender`` would join:
+    an earlier one of theirs on this subject, when ``subject`` is a reply."""
+    key = _subject_key(subject)
+    if not key or not _RE_PREFIX.match(str(subject or "")):
+        return ""
+    if conn.execute("SELECT 1 FROM mail_conversations WHERE thread_id = ?", (thread_id,)).fetchone():
+        return ""
+    row = conn.execute(
+        "SELECT conversation FROM mail_conversations WHERE sender = ? AND subject = ? ORDER BY created_at LIMIT 1",
+        (sender, key),
+    ).fetchone()
+    return str(row["conversation"]) if row is not None else ""
+
+
+def continues(thread_id: str, sender: str, subject: str, *, db_path: Path | None = None) -> bool:
+    """Whether mail on the new thread ``thread_id`` would join an earlier
+    conversation of ``sender``'s (:func:`note_mail`): the caller proves the
+    sender first, since anyone can write a From: line. Never raises."""
+    thread_id, sender = str(thread_id or "").strip(), str(sender or "").strip().lower()
+    if not thread_id or not sender:
+        return False
+    try:
+        from openexecutive.alerts import store
+
+        with contextlib.closing(_conn(store._resolve_db_path(db_path))) as conn:
+            return bool(_earlier(conn, thread_id, sender, subject))
+    except Exception:  # noqa: BLE001
+        logger.debug("one_card: couldn't look for an earlier conversation", exc_info=True)
+        return False
+
+
+def note_mail(
+    thread_id: str, sender: str, subject: str, *, proven: bool = False, db_path: Path | None = None,
+) -> None:
     """Note which conversation the mail thread ``thread_id`` belongs to. A
     reply (``Re:``) from ``sender`` to a subject they wrote before belongs to
-    that earlier conversation, whatever thread the mailbox filed it in; any
-    other mail starts its own (two new mails that share a subject are two
-    asks). Never raises."""
+    that earlier conversation, whatever thread the mailbox filed it in, when
+    the mailbox ``proven`` the sender (a forged From: line starts its own);
+    any other mail starts its own (two new mails that share a subject are
+    two asks). Never raises."""
     thread_id = str(thread_id or "").strip()
     sender = str(sender or "").strip().lower()
     if not thread_id or not sender:
@@ -186,23 +221,14 @@ def note_mail(thread_id: str, sender: str, subject: str, *, db_path: Path | None
         from openexecutive.alerts import store
 
         path = store._resolve_db_path(db_path)
-        key = _subject_key(subject)
         with contextlib.closing(_conn(path)) as conn, conn:
             if conn.execute("SELECT 1 FROM mail_conversations WHERE thread_id = ?", (thread_id,)).fetchone():
                 return
-            conversation = thread_id
-            if key and _RE_PREFIX.match(str(subject or "")):
-                earlier = conn.execute(
-                    "SELECT conversation FROM mail_conversations WHERE sender = ? AND subject = ? "
-                    "ORDER BY created_at LIMIT 1",
-                    (sender, key),
-                ).fetchone()
-                if earlier is not None:
-                    conversation = str(earlier["conversation"])
+            conversation = (_earlier(conn, thread_id, sender, subject) if proven else "") or thread_id
             conn.execute(
                 "INSERT OR IGNORE INTO mail_conversations (thread_id, sender, subject, conversation, created_at) "
                 "VALUES (?, ?, ?, ?, ?)",
-                (thread_id, sender, key, conversation, _now()),
+                (thread_id, sender, _subject_key(subject), conversation, _now()),
             )
     except Exception:  # noqa: BLE001 - a second card is the worst case
         logger.warning("one_card: couldn't note mail thread %s", thread_id, exc_info=True)
