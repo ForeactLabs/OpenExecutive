@@ -26,7 +26,7 @@ import {
   type SteerResult,
   type Today,
 } from "@/lib/api";
-import { greeting, homeHeadline } from "@/lib/briefingSummary";
+import { greeting, homeHeadline, waitingOnTeam } from "@/lib/briefingSummary";
 import { cardFromSearch } from "@/lib/cardMentions";
 import { FIRST_RUN_LINKS } from "@/lib/firstRun";
 import { principalIdOf } from "@/lib/dueSoon";
@@ -630,8 +630,8 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
         tiles.push({ key: "people", panel: "people", text: peopleText(people.length, busy) });
       }
     }
-    if (otherProposals.length > 0)
-      tiles.push({ key: "team", panel: "team", text: `${otherProposals.length} waiting on teammates` });
+    const waitingOn = waitingOnTeam(otherProposals, today?.people ?? []);
+    if (waitingOn) tiles.push({ key: "team", panel: "team", text: waitingOn.line });
     if (inFlight.length > 0)
       tiles.push({ key: "inFlight", panel: "inFlight", text: `${inFlight.length} under way` });
     if (practiceClients.length > 0)

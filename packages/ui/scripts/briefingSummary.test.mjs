@@ -8,6 +8,7 @@ import {
   handAsks,
   homeHeadline,
   proposalStatusChip,
+  waitingOnTeam,
 } from "../src/lib/briefingSummary.ts";
 
 // Local-time constructors, so the labels hold in any test-runner time zone.
@@ -119,4 +120,38 @@ test("hand me something has no rows when there are no asks to show", () => {
   for (const nothing of [undefined, null, [], "Plan my week", { prompts: ["a"] }, ["", "   "]]) {
     assert.deepEqual(handAsks(nothing), []);
   }
+});
+
+const roster = [
+  { id: 1, full_name: "Jordan Lee" },
+  { id: 2, full_name: "Alex Cohen" },
+  { id: 3, full_name: "Dana Ruiz" },
+  { id: 4, full_name: "Sam Park" },
+];
+const item = (headline, routed_to_person_id) => ({ headline, routed_to_person_id });
+
+test("the teammates row says who it waits on and what", () => {
+  assert.equal(waitingOnTeam([], roster), null);
+  assert.deepEqual(waitingOnTeam([item("Sign off on the launch post", 2)], roster), {
+    title: "Waiting on Alex",
+    detail: "Sign off on the launch post",
+    line: "Waiting on Alex: Sign off on the launch post",
+  });
+  assert.deepEqual(waitingOnTeam([item("Sign off on the launch post", 2), item("Renew the lease", 2), item("Pick a venue", 3)], roster), {
+    title: "Waiting on Alex and Dana",
+    detail: "Sign off on the launch post, and 2 more",
+    line: "3 waiting on Alex and Dana",
+  });
+  assert.equal(
+    waitingOnTeam([item("a", 2), item("b", 3), item("c", 4), item("d", 1)], roster).title,
+    "Waiting on Alex, Dana and 2 others",
+  );
+  assert.equal(waitingOnTeam([item("a", 2), item("b", 3), item("c", 4)], roster).title, "Waiting on Alex, Dana and 1 other");
+});
+
+test("the teammates row still reads when it can't tell who", () => {
+  assert.equal(waitingOnTeam([item("Pick a venue", 99)], roster).title, "Waiting on someone else");
+  assert.equal(waitingOnTeam([item("a", null), item("b", 99)], roster).title, "Waiting on teammates");
+  assert.equal(waitingOnTeam([item("a", null), item("b", 3)], roster).title, "Waiting on Dana");
+  assert.deepEqual(waitingOnTeam([item("  ", 2)], roster), { title: "Waiting on Alex", detail: "", line: "Waiting on Alex" });
 });

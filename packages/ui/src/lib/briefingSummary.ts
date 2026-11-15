@@ -153,3 +153,42 @@ export function handAsks(prompts: unknown, max: number = HAND_ASKS_MAX): string[
   }
   return asks.slice(0, max);
 }
+
+/** The first word of a name, as Home says it ("Waiting on Alex"). */
+function firstName(full: string): string {
+  return full.trim().split(/\s+/)[0] ?? "";
+}
+
+/** Home's line for what waits on teammates: who (first names, in the order
+ *  their items come, two named and the rest counted) and what (the first
+ *  item, and how many more). `line` is the same in one line, for the web's
+ *  at-a-glance row. Null when nothing waits on anyone else. */
+export function waitingOnTeam(
+  team: { headline: string; routed_to_person_id?: number | null }[],
+  people: { id: number; full_name: string }[],
+): { title: string; detail: string; line: string } | null {
+  if (team.length === 0) return null;
+  const names: string[] = [];
+  for (const p of team) {
+    const who = people.find((x) => x.id === p.routed_to_person_id);
+    const name = who ? firstName(who.full_name) : "";
+    if (name && !names.includes(name)) names.push(name);
+  }
+  const others = names.length - 2;
+  const whom =
+    names.length === 0
+      ? team.length === 1
+        ? "someone else"
+        : "teammates"
+      : names.length === 1
+        ? names[0]
+        : names.length === 2
+          ? `${names[0]} and ${names[1]}`
+          : `${names[0]}, ${names[1]} and ${others} ${others === 1 ? "other" : "others"}`;
+  const title = `Waiting on ${whom}`;
+  const first = (team[0]?.headline ?? "").trim();
+  const more = team.length - 1;
+  const detail = more > 0 ? (first ? `${first}, and ${more} more` : `${team.length} things`) : first;
+  const line = team.length === 1 ? (first ? `${title}: ${first}` : title) : `${team.length} waiting on ${whom}`;
+  return { title, detail, line };
+}
