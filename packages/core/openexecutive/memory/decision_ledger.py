@@ -164,7 +164,13 @@ def create_decision_instance(
             json.dumps(proposed_payload), idempotency_key, gate_mode,
             approver_person_id, confidence, STATUS_PROPOSED,
         ))
-        return cur.lastrowid  # type: ignore[return-value]
+        instance_id: int = cur.lastrowid  # type: ignore[assignment]
+    # Whose chat it came from, kept apart from the conversation so deleting
+    # that later doesn't hand the card to the team (alerts.own_chat).
+    from openexecutive.alerts import own_chat
+
+    own_chat.note_decision(instance_id, originating_session_id, db_path or _db_path())
+    return instance_id
 
 
 def get_decision_instance(

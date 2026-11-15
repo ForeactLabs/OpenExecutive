@@ -44,13 +44,21 @@ def artifact_visible_to(
 PERSONAL_SOURCES: frozenset[str] = frozenset({"browser_handover"})
 
 
-def visible_alert(alert: object, viewer: object | None) -> bool:
+def visible_alert(alert: object, viewer: object | None, *, chat_reader: int | None = None) -> bool:
     """Whether ``alert`` may be shown to ``viewer`` (anything with
     ``person_id`` and ``is_principal``, e.g. ``artifact_records.Viewer``).
-    Every alert but a drafted artifact or a personal card may; an artifact
-    only to its owner, a personal card (``PERSONAL_SOURCES``) only to the
-    person it is routed to, and neither to anyone when there is no viewer (a
-    surface shared by everyone)."""
+    Every alert but a drafted artifact, a personal card or a card from
+    someone's own chat may; an artifact only to its owner, a personal card
+    (``PERSONAL_SOURCES``) only to the person it is routed to, a card a held
+    step raised from one person's own chat only to them and its approver
+    (``alerts.own_chat``), and none of them to anyone when there is no viewer
+    (a surface shared by everyone). ``chat_reader`` names whose own-chat
+    cards a build with no viewer keeps (the principal's own brief)."""
+    from openexecutive.alerts import own_chat
+
+    reader = getattr(viewer, "person_id", None) if viewer is not None else chat_reader
+    if not own_chat.alert_shown_to(alert, reader):
+        return False
     source = getattr(alert, "source", None)
     if source in PERSONAL_SOURCES:
         routed = getattr(alert, "routed_to_person_id", None)

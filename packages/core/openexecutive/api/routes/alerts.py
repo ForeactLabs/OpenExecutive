@@ -25,8 +25,9 @@ logger = logging.getLogger(__name__)
 
 def _visible_alert(alert_id: int, request: Request) -> Alert:
     """The alert, or 404 — also for one private to the principal when the
-    caller is someone else, and for a drafted artifact that isn't the
-    caller's, so its existence is not revealed either."""
+    caller is someone else, for a drafted artifact that isn't the caller's
+    and for a card from someone else's own chat, so its existence is not
+    revealed either."""
     existing = store.get_alert(alert_id)
     if (
         existing is None

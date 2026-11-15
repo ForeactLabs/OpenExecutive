@@ -1000,8 +1000,14 @@ def _build_today(
     *,
     include_private: bool = False,
     viewer: Any = None,
+    chat_reader: int | None = None,
 ) -> TodayResponse:
     """Assemble the live dashboard snapshot.
+
+    A card from one person's own chat (``alerts.own_chat``) is kept for that
+    person and its approver: the ``viewer``, or with none (a brief, a digest)
+    ``chat_reader``, else the principal when ``include_private`` says the
+    build is theirs. A build for nobody in particular has none of them.
 
     Stays synchronous so the deprecated /morning-brief alias and the
     morning_brief workflow (which call this directly) need no changes; the LLM
@@ -1207,8 +1213,10 @@ def _build_today(
     # A drafted artifact's card only for its owner (`viewer`, the caller of
     # GET /today); every other build (the brief, the digest, the reflection,
     # a cached narrative) leaves them all out.
+    if viewer is None and chat_reader is None and include_private:
+        chat_reader = principal_id()
     raw_alerts = list_live_alerts(
-        limit=lifecycle_module.BOARD_LIMIT, now=now, viewer=viewer
+        limit=lifecycle_module.BOARD_LIMIT, now=now, viewer=viewer, chat_reader=chat_reader,
     )
     if not include_private:
         # Alerts private to the principal (mail from one of their contacts,
@@ -2689,7 +2697,11 @@ async def _regen_briefing_narrative_locked(
     pointed: dict[str, dict[str, Any]] = {}
     try:
         mode = get_workspace().mode
-        snapshot = _build_today(include_private=expected_scope == narrative_cache.DEFAULT_SCOPE)
+        snapshot = _build_today(
+            include_private=expected_scope == narrative_cache.DEFAULT_SCOPE,
+            # Never into the header every unresolved caller shares.
+            chat_reader=caller_person_id if expected_scope != narrative_cache.COMPANY_SCOPE else None,
+        )
         scope, today_data, viewer_desc, viewer = _narrative_inputs(
             snapshot, caller_person_id
         )

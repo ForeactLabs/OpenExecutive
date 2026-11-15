@@ -249,13 +249,28 @@ def _caller_is_approver(instance: DecisionInstance, request: Request) -> bool:
     return caller is not None and caller == instance.approver_person_id
 
 
+def _own_chat_ok(instance: DecisionInstance, request: Request) -> bool:
+    """A step held from one person's own chat is theirs and its approver's
+    (``alerts.own_chat``): nobody else on the team sees or decides it, the
+    principal included. Fails closed."""
+    from openexecutive.alerts import own_chat
+    from openexecutive.api.routes.chat import _resolve_caller_person_id
+
+    try:
+        caller = _resolve_caller_person_id(request)
+    except Exception:
+        logger.exception("decisions: caller lookup failed — treating them as someone else")
+        caller = None
+    return own_chat.decision_shown_to(instance, caller)
+
+
 def _visible_instance(instance_id: int, request: Request) -> DecisionInstance:
     """The instance, or 404 — also for a private one when the caller is not
     the principal, and for one only its approver may see when the caller is
     anyone else (the principal included), so its existence (and the contact
     or mail on it) is not revealed."""
     instance = get_decision_instance(instance_id)
-    if instance is None:
+    if instance is None or not _own_chat_ok(instance, request):
         raise HTTPException(status_code=404, detail="Decision instance not found")
     if _approver_only(instance):
         if not _caller_is_approver(instance, request):
@@ -283,7 +298,9 @@ def _resolver(instance: DecisionInstance, request: Request) -> int | None:
     from openexecutive.api.routes.chat import _resolve_caller_person_id
 
     caller = _resolve_caller_person_id(request)
-    if _approver_only(instance):
+    if not _own_chat_ok(instance, request):
+        pass  # from someone else's own chat: the 403 below
+    elif _approver_only(instance):
         if caller is not None and caller == instance.approver_person_id:
             return caller
     elif _approver_is_principal(request):
@@ -377,12 +394,15 @@ def get_decisions(
         instances = list_instances(decision_class, status=status, limit=500)
         return [_served(i) for i in instances if i.approver_person_id == caller][:limit]
     if _approver_is_principal(request):
-        return [_served(i) for i in list_instances(decision_class, status=status, limit=limit)]
+        return [
+            _served(i) for i in list_instances(decision_class, status=status, limit=limit)
+            if _own_chat_ok(i, request)
+        ]
     spec = DECISION_CLASSES.get(decision_class)
     if spec is not None and spec.principal_only:
         return []
     instances = list_instances(decision_class, status=status, limit=limit)
-    return [_served(i) for i in instances if not _is_private(i)]
+    return [_served(i) for i in instances if not _is_private(i) and _own_chat_ok(i, request)]
 
 
 @router.get("/decisions/{instance_id}", response_model=DecisionInstance)
@@ -1118,6 +1138,11 @@ async def resolve_in_chat(
         allowed = person.id == instance.approver_person_id
     else:
         allowed = is_principal or (person.id == instance.approver_person_id and not _is_private(instance))
+    if allowed:
+        # A step held from someone else's own chat isn't theirs either.
+        from openexecutive.alerts import own_chat
+
+        allowed = own_chat.decision_shown_to(instance, person.id)
     if not allowed:
         # As the routes: a card that isn't theirs is not there.
         raise HTTPException(status_code=404, detail="This card is no longer there.")

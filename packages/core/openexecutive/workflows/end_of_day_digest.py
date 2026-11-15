@@ -548,7 +548,10 @@ class EndOfDayDigestWorkflow(Workflow):
         mode = effective_workspace_mode(current_session.get())
 
         try:
-            today_response = today_route._build_today()
+            today_response = today_route._build_today(
+                # The principal's own chat cards only on their own delivery.
+                chat_reader=today_route.principal_id() if _delivered_to_principal() else None,
+            )
             today_data = today_response.model_dump()
             # Same exclusion as the morning brief: monitoring noise is not
             # "still pending" — it lives in the Monitoring lane on /today.
