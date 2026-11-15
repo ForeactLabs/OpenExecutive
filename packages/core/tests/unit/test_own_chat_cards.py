@@ -237,3 +237,22 @@ def test_readers_leaves_team_cards_out(team: dict[str, int]) -> None:
     assert found is not None
     assert own_chat.readers([found]) == {}
     assert own_chat.keep_for([found], None) == [found]
+
+
+def test_a_page_of_other_peoples_held_steps_does_not_hide_the_teams(team: dict[str, int]) -> None:
+    from openexecutive.api.routes.decisions import router as decisions_router
+
+    _card("Ops check-in wants an OK", session=None, approver=team["mate"], routed=team["mate"],
+          department="ops")
+    for n in (12, 13):
+        _card(f"Refund order {n}", session="s-mate", approver=team["mate"], routed=team["mate"])
+    app = FastAPI()
+    app.include_router(decisions_router)
+    client = TestClient(app, client=("203.0.113.5", 50000))
+    r = client.get(
+        "/decisions", params={"decision_class": "department_action", "limit": 1},
+        headers={"x-api-key": _SECRET, "x-caller-email": OWNER},
+    )
+    assert r.status_code == 200, r.text
+    # The two newest are from Sam's own chat; the team's older one still lists.
+    assert [d["id"] for d in r.json()] == [1]

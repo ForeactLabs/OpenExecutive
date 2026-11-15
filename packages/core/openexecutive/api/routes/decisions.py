@@ -413,15 +413,15 @@ def get_decisions(
         instances = list_instances(decision_class, status=status, limit=500)
         return [_served(i) for i in instances if i.approver_person_id == caller][:limit]
     if _approver_is_principal(request):
-        return [
-            _served(i)
-            for i in _own_chat_kept(list_instances(decision_class, status=status, limit=limit), request)
-        ]
+        # Read past ``limit``: steps held from other people's own chats drop
+        # out below, and a page of them must not hide the rest.
+        kept = _own_chat_kept(list_instances(decision_class, status=status, limit=500), request)
+        return [_served(i) for i in kept[:limit]]
     spec = DECISION_CLASSES.get(decision_class)
     if spec is not None and spec.principal_only:
         return []
-    instances = list_instances(decision_class, status=status, limit=limit)
-    return [_served(i) for i in _own_chat_kept(instances, request) if not _is_private(i)]
+    instances = list_instances(decision_class, status=status, limit=500)
+    return [_served(i) for i in _own_chat_kept(instances, request) if not _is_private(i)][:limit]
 
 
 @router.get("/decisions/{instance_id}", response_model=DecisionInstance)
