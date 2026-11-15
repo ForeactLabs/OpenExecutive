@@ -5,7 +5,7 @@ import {
   briefingSummary,
   daysUntil,
   greeting,
-  homeSummary,
+  homeHeadline,
   proposalStatusChip,
 } from "../src/lib/briefingSummary.ts";
 
@@ -91,8 +91,15 @@ test("a collapsed card keeps one status chip: deadline, then stale, then age", (
   assert.equal(proposalStatusChip({ created_at: "" }, now), null);
 });
 
-test("Home's line says only what needs you", () => {
-  assert.deepEqual(homeSummary(0), []);
-  assert.deepEqual(homeSummary(2).map((p) => [p.text, p.target.kind]), [["2 things need you", "needsYou"]]);
-  assert.deepEqual(homeSummary(1).map((p) => p.text), ["1 thing needs you"]);
+test("Home's headline says what needs you, then what it handled and watches", () => {
+  assert.deepEqual(homeHeadline(1, 6, 2), {
+    lead: "One thing needs you.",
+    rest: "I handled 6 since yesterday and I'm watching 2 for you.",
+    clear: false,
+  });
+  assert.deepEqual(homeHeadline(3, 4, 0), { lead: "3 things need you.", rest: "I handled 4 since yesterday.", clear: false });
+  assert.deepEqual(homeHeadline(2, 0, 0), { lead: "2 things need you.", rest: "", clear: false });
+  assert.deepEqual(homeHeadline(0, 0, 0), { lead: "All clear.", rest: "Nothing needs you.", clear: true });
+  assert.equal(homeHeadline(0, 0, 2).rest, "Nothing needs you. I'm watching 2 things for you.");
+  assert.equal(homeHeadline(0, 0, 1).rest, "Nothing needs you. I'm watching 1 thing for you.");
 });

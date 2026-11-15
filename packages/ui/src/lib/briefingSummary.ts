@@ -122,15 +122,20 @@ export function proposalStatusChip(
   return age ? { label: `${age} old`, tone: "neutral" } : null;
 }
 
-/** Home's summary: what needs you. Done for you has its own list right
- *  below, so the line doesn't repeat it. The phrase opens Needs you; an
- *  empty list means all clear. */
-export function homeSummary(needsYou: number): SummaryPart[] {
-  if (needsYou <= 0) return [];
-  return [
-    {
-      text: `${needsYou} ${plural(needsYou, "thing needs", "things need")} you`,
-      target: { kind: "needsYou" },
-    },
-  ];
+/** Home's headline, in the Executive's words: what needs you first, then
+ *  what it handled in the last day and what it's watching. `lead` is the
+ *  part Home colors (and, when something needs you, the link to Needs you);
+ *  `clear` says nothing needs you. */
+export function homeHeadline(needsYou: number, done: number, watching: number): { lead: string; rest: string; clear: boolean } {
+  const clear = needsYou <= 0;
+  const lead = clear ? "All clear." : needsYou === 1 ? "One thing needs you." : `${needsYou} things need you.`;
+  const did =
+    done > 0 && watching > 0
+      ? `I handled ${done} since yesterday and I'm watching ${watching} for you.`
+      : done > 0
+        ? `I handled ${done} since yesterday.`
+        : watching > 0
+          ? `I'm watching ${watching} ${plural(watching, "thing", "things")} for you.`
+          : "";
+  return { lead, rest: [clear ? "Nothing needs you." : "", did].filter(Boolean).join(" "), clear };
 }

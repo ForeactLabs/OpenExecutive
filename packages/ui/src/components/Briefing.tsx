@@ -26,7 +26,7 @@ import {
   type SteerResult,
   type Today,
 } from "@/lib/api";
-import { greeting, homeSummary, type SummaryPart } from "@/lib/briefingSummary";
+import { greeting, homeHeadline } from "@/lib/briefingSummary";
 import { cardFromSearch } from "@/lib/cardMentions";
 import { FIRST_RUN_LINKS } from "@/lib/firstRun";
 import { principalIdOf } from "@/lib/dueSoon";
@@ -70,6 +70,7 @@ import FirstWeekCard from "./briefing/FirstWeekCard";
 import { useGlance } from "./briefing/Glance";
 import { RightNowItem } from "./briefing/RightNow";
 import WaitingElsewhereRow from "./briefing/WaitingElsewhere";
+import HandMeSomething from "./briefing/HandMeSomething";
 import WatchingNext from "./briefing/WatchingNext";
 import { isHeldAction } from "./briefing/HeldActionCard";
 import { isLeadCard } from "./briefing/LeadTrainingCard";
@@ -495,16 +496,6 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
   // What waits on other pages (watch suggestions, …): one Needs you row each.
   const elsewhere = today?.waiting_elsewhere ?? [];
 
-  const isQuiet =
-    today !== null &&
-    elsewhere.length === 0 &&
-    today.proposals.length === 0 &&
-    replies.cards.length === 0 &&
-    actionCards.cards.length === 0 &&
-    inviteCards.cards.length === 0 &&
-    activeDepts.every((d) => d.at_risk_count === 0 && d.off_track_count === 0 && d.awaiting_count === 0) &&
-    today.people.every((p) => p.awaiting_count === 0);
-
   const showPeople = !solo && (today?.people.length ?? 0) > 1;
 
   // Bucket proposals once so the summary line, the queue and the tiles work
@@ -557,10 +548,15 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
   const needsYouCount =
     rightNowRows.length + mineProposals.length + replies.cards.length + inviteCards.cards.length +
     actionCards.cards.length + elsewhere.length;
-  // Home's summary says only what needs you (Done for you is its own list
-  // right below); the rest (people, departments, under way, monitoring) is
-  // one quiet line at the bottom.
-  const summary: SummaryPart[] = today ? homeSummary(needsYouCount) : [];
+  // Home's headline, in the Executive's words: what needs you, what it
+  // handled in the last day (what's still running isn't handled yet) and
+  // what it's watching. The rest (people, departments, under way,
+  // monitoring) is one quiet line at the bottom.
+  const headline = homeHeadline(
+    needsYouCount,
+    doneRows.filter((r) => r.status !== "working").length,
+    (today?.watching ?? []).length,
+  );
 
   // At a glance — one quiet line, only the items with something to show,
   // what's yours first. Each item reads on its own: the line has no headings.
@@ -829,28 +825,15 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
     return () => ctrl.abort();
   }, [firstWeek]);
 
-  // In the first week the first-week card says what to start on, so the day
-  // isn't "quiet" even with nothing on the board yet.
-  const quietBanner =
-    isQuiet && activeDepts.length > 0 && !firstWeekCard ? (
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-emerald-500/25 bg-emerald-500/5 px-4 py-3">
-        <span className={`text-[15px] ${TONE_TEXT.emerald}`}>Quiet day — nothing needs your attention.</span>
-        {!solo && (
-          <Link href="/departments" className="text-sm font-medium text-accent hover:underline">
-            Set up a check-in →
-          </Link>
-        )}
-      </div>
-    ) : null;
-  const bannerSlot = banner ?? quietBanner;
+  // The headline says when the day is quiet, so there is no banner for it.
+  const bannerSlot = banner;
 
-  const onSummaryPart = (part: SummaryPart) => {
-    if (part.target.kind === "needsYou") {
-      document.getElementById(NEEDS_YOU_ID)?.scrollIntoView({ behavior: "smooth", block: "start" });
-    } else if (part.target.kind === "panel") {
-      setOpenPanel(part.target.panel);
-    }
-  };
+  // In the first week, with nothing waiting, the line under the greeting
+  // points at the first-week card; otherwise the headline says how the day
+  // stands.
+  const startLine = needsYouCount === 0 && firstWeekCard ? "Your first week. Start below." : null;
+  const showHeadline = Boolean(today) && !startLine;
+  const hello = showHeader ? greeting(firstName) : "Today";
 
   const panelFooterLink = (href: string, label: string) => (
     <Link href={href} className={buttonClass("secondary", "md", "w-full sm:w-auto")}>
@@ -863,36 +846,30 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
       <main className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
           <header className="mb-6">
-            <p className="text-sm font-medium text-fg-muted">{dateLabel}</p>
+            <p className="text-sm font-medium text-fg-muted">{showHeadline ? `${hello} · ${dateLabel}` : dateLabel}</p>
             <h1 className="mt-1 text-2xl sm:text-3xl font-bold tracking-tight text-fg">
-              {showHeader ? greeting(firstName) : "Today"}
+              {showHeadline ? (
+                <>
+                  {headline.clear ? (
+                    <span className={TONE_TEXT.emerald}>{headline.lead}</span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        document.getElementById(NEEDS_YOU_ID)?.scrollIntoView({ behavior: "smooth", block: "start" })
+                      }
+                      className="cursor-pointer text-left font-bold tracking-tight text-accent hover:underline underline-offset-4"
+                    >
+                      {headline.lead}
+                    </button>
+                  )}
+                  {headline.rest ? ` ${headline.rest}` : ""}
+                </>
+              ) : (
+                hello
+              )}
             </h1>
-            {today && (
-              <p className="mt-2 text-base sm:text-lg text-fg-muted leading-snug">
-                {summary.length === 0
-                  ? firstWeekCard
-                    ? "Your first week. Start below."
-                    : "Nothing needs you right now."
-                  : summary.map((part, i) => (
-                      <span key={part.text}>
-                        {part.target.kind === "href" ? (
-                          <Link href={part.target.href} className="hover:text-fg hover:underline underline-offset-4">
-                            {part.text}
-                          </Link>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => onSummaryPart(part)}
-                            className="cursor-pointer text-left hover:text-fg hover:underline underline-offset-4"
-                          >
-                            {part.text}
-                          </button>
-                        )}
-                        {i < summary.length - 1 ? ". " : "."}
-                      </span>
-                    ))}
-              </p>
-            )}
+            {today && startLine && <p className="mt-2 text-base sm:text-lg text-fg-muted leading-snug">{startLine}</p>}
           </header>
 
           {onContinue && (
@@ -1049,6 +1026,8 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
               />
 
               <WatchingNext items={today?.watching ?? []} />
+
+              {needsYouCount === 0 && onContinue && <HandMeSomething onPick={onContinue} />}
 
               {/* Everything else, one quiet line: each opens its panel or page. */}
               {tiles.length > 0 && (
