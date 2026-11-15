@@ -211,7 +211,7 @@ STATUS_MESSAGES: dict[str, str] = {
     "error": "Couldn't reach your mailbox. It tries again shortly.",
     "not_configured": "Paused: your mailbox isn't connected.",
     "needs_reconnect": "Paused: connect your mailbox again.",
-    "mismatch": "Paused: the connected mailbox isn't the address on your People entry.",
+    "mismatch": "Paused: the saved sign-in now opens a different mailbox. Connect it again.",
     "no_email": "Paused: your People entry has no email address.",
     "shared_mailbox": "Paused: your address is the Executive's own mailbox.",
 }
