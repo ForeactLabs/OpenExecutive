@@ -6,16 +6,15 @@
 // there are none.
 import { useEffect, useState } from "react";
 import { getSuggestedPrompts } from "@/lib/api";
+import { handAsks } from "@/lib/briefingSummary";
 import Icon from "@/components/Icon";
-
-const MAX = 4;
 
 export default function HandMeSomething({ onPick }: { onPick: (text: string) => void }) {
   const [asks, setAsks] = useState<string[]>([]);
   useEffect(() => {
     const ctrl = new AbortController();
     getSuggestedPrompts(ctrl.signal)
-      .then((r) => setAsks((r.prompts ?? []).filter((p) => typeof p === "string" && p.trim()).slice(0, MAX)))
+      .then((r) => setAsks(handAsks(r.prompts)))
       .catch(() => undefined);
     return () => ctrl.abort();
   }, []);

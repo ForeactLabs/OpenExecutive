@@ -139,3 +139,17 @@ export function homeHeadline(needsYou: number, done: number, watching: number): 
           : "";
   return { lead, rest: [clear ? "Nothing needs you." : "", did].filter(Boolean).join(" "), clear };
 }
+
+/** Hand me something's rows: the suggested asks that have words, trimmed,
+ *  each once, the first few. Anything else the server sends (not a list, a
+ *  blank, a non-string) yields no row. */
+export const HAND_ASKS_MAX = 4;
+export function handAsks(prompts: unknown, max: number = HAND_ASKS_MAX): string[] {
+  if (!Array.isArray(prompts)) return [];
+  const asks: string[] = [];
+  for (const p of prompts) {
+    const text = typeof p === "string" ? p.trim() : "";
+    if (text && !asks.includes(text)) asks.push(text);
+  }
+  return asks.slice(0, max);
+}

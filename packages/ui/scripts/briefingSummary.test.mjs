@@ -5,6 +5,7 @@ import {
   briefingSummary,
   daysUntil,
   greeting,
+  handAsks,
   homeHeadline,
   proposalStatusChip,
 } from "../src/lib/briefingSummary.ts";
@@ -103,4 +104,19 @@ test("Home's headline says what needs you, then what it handled and watches", ()
   assert.equal(homeHeadline(0, 0, 2).rest, "Nothing needs you. I'm watching 2 things for you.");
   assert.equal(homeHeadline(0, 0, 1).rest, "Nothing needs you. I'm watching 1 thing for you.");
   assert.equal(homeHeadline(0, 3, 0).rest, "Nothing needs you. I handled 3 since yesterday.");
+});
+
+test("hand me something lists the asks with words, each once, four at most", () => {
+  assert.deepEqual(handAsks(["Plan my week", "  ", "", 7, null, " Draft the board update ", "Plan my week"]), [
+    "Plan my week",
+    "Draft the board update",
+  ]);
+  assert.deepEqual(handAsks(["a", "b", "c", "d", "e", "f"]), ["a", "b", "c", "d"]);
+  assert.deepEqual(handAsks(["a", "b", "c"], 2), ["a", "b"]);
+});
+
+test("hand me something has no rows when there are no asks to show", () => {
+  for (const nothing of [undefined, null, [], "Plan my week", { prompts: ["a"] }, ["", "   "]]) {
+    assert.deepEqual(handAsks(nothing), []);
+  }
 });
