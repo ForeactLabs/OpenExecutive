@@ -356,9 +356,10 @@ def _join(conn: sqlite3.Connection, card: _Card, into: _Card) -> None:
     severity = max(
         (str(survivor["severity"]), str(joining["severity"])), key=lambda sev: SEVERITY_RANK.get(sev, 0),
     )
+    # Text the reader hasn't seen makes an opened card new again.
     conn.execute(
         "UPDATE alerts SET body = ?, severity = ?, occurrence_count = COALESCE(occurrence_count, 1) + 1, "
-        "last_seen_at = ? WHERE id = ?",
+        "last_seen_at = ?, status = CASE WHEN status = 'read' THEN 'unread' ELSE status END WHERE id = ?",
         (body, severity, _now(), into.id),
     )
     if not into.approve and card.needs in ("answer", "choice") and str(survivor["needs"] or "") not in ("answer", "choice"):
