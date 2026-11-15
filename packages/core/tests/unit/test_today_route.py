@@ -3283,8 +3283,9 @@ def test_held_back_page_lines_are_the_principals_alone(
 def test_done_for_you_says_how_why_and_what_came_of_what_it_did_as_me(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A row As me did reads "By email, as me · When <what woke it> ·
-    Sent"; a step for a standing job names the job instead; a message to
+    """A row As me did reads "When <what woke it>", tagged with whose name
+    it went out in ("Sent as …" for an email or message, "Done as …"
+    otherwise); a step for a standing job names the job instead; a message to
     someone who has answered says when."""
     from openexecutive.orchestrator import take_the_lead
 
@@ -3315,14 +3316,16 @@ def test_done_for_you_says_how_why_and_what_came_of_what_it_did_as_me(
     episodic.mark_outbound_context_consumed(context_id)
 
     client = _make_client()
-    rows = {
-        r["title"]: r["detail"]
-        for r in client.get("/today", headers={"x-caller-email": "jordan@example.com"}).json()["done_for_you"]
+    done = [
+        r for r in client.get("/today", headers={"x-caller-email": "jordan@example.com"}).json()["done_for_you"]
         if r["kind"] == "took_the_lead"
-    }
-    assert rows["Emailed Riley Park: Cell warranty terms"] == (
-        "By email, as me · When the goal “Ramp gate” slipped · Sent"
-    )
+    ]
+    rows = {r["title"]: r["detail"] for r in done}
+    # An email's title already says it went; whose name is the row's tag.
+    assert rows["Emailed Riley Park: Cell warranty terms"] == "When the goal “Ramp gate” slipped · Sent"
+    tags = {r["title"]: r["as_tag"] for r in done}
+    assert tags["Emailed Riley Park: Cell warranty terms"].startswith("Sent as ")
+    assert tags["Messaged Riley Park"].startswith("Sent as ")
     line = rows["Messaged Riley Park"]
     assert "For your standing job: Keep the dealer onboarding moving" in line
     assert "Riley answered at" in line
@@ -3409,7 +3412,7 @@ def test_watching_next_lists_follow_ups_and_standing_jobs_and_stop_ends_one(
     assert [(w["key"], w["kind"]) for w in lines] == [
         (f"action:{owners}", "follow_up"), (f"action:{sams}", "follow_up"), (f"job:{job.id}", "standing_job"),
     ]
-    assert lines[0]["detail"] == "I follow up with Priya Nair" and lines[0]["at"] == soon
+    assert lines[0]["detail"] == "I'll follow up with Priya Nair" and lines[0]["at"] == soon
     assert lines[2]["title"] == "Chase overdue tasks every morning"
 
     teammate = {"x-caller-email": "sam@example.com"}

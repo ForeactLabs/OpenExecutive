@@ -5,7 +5,7 @@ import { useState } from "react";
 import { stopWatching, type WatchingItem } from "@/lib/api";
 import { watchingLine } from "@/lib/watchingNext";
 
-// Watching next on Home, under Done for you: what the Executive is keeping
+// Following up on Home, under Done for you: what the Executive is keeping
 // an eye on for you and when it acts next (GET /today `watching`): the
 // follow-ups it will send, then your standing jobs. Stop ends that one thing
 // only (POST /today/watching/stop). What it left for you stays in Needs you.
@@ -33,7 +33,7 @@ export default function WatchingNext({ items }: { items: WatchingItem[] }) {
   return (
     <section aria-labelledby="sec-watching-next" className="mb-8">
       <h2 id="sec-watching-next" className="mb-3 text-lg font-semibold text-fg">
-        Watching next
+        Following up
       </h2>
       <ul className="rounded-2xl border border-line bg-surface-elevated px-4 sm:px-5">
         {shown.map((item) => {
