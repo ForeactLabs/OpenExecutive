@@ -152,6 +152,8 @@ test("the teammates row says who it waits on and what", () => {
 test("the teammates row still reads when it can't tell who", () => {
   assert.equal(waitingOnTeam([item("Pick a venue", 99)], roster).title, "Waiting on someone else");
   assert.equal(waitingOnTeam([item("a", null), item("b", 99)], roster).title, "Waiting on teammates");
-  assert.equal(waitingOnTeam([item("a", null), item("b", 3)], roster).title, "Waiting on Dana");
+  assert.equal(waitingOnTeam([item("a", null), item("b", 3)], roster).title, "Waiting on Dana and others");
+  assert.equal(waitingOnTeam([item("a", 2), item("b", 3), item("c", 99)], roster).title, "Waiting on Alex, Dana and others");
+  assert.equal(waitingOnTeam([item("a", 2), item("b", 3), item("c", 4), item("d", 99)], roster).title, "Waiting on Alex, Dana and others");
   assert.deepEqual(waitingOnTeam([item("  ", 2)], roster), { title: "Waiting on Alex", detail: "", line: "Waiting on Alex" });
 });

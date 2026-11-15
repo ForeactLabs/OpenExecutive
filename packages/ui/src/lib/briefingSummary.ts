@@ -169,22 +169,26 @@ export function waitingOnTeam(
 ): { title: string; detail: string; line: string } | null {
   if (team.length === 0) return null;
   const names: string[] = [];
+  // An item whose person isn't on the list still waits on someone.
+  let unnamed = false;
   for (const p of team) {
     const who = people.find((x) => x.id === p.routed_to_person_id);
     const name = who ? firstName(who.full_name) : "";
-    if (name && !names.includes(name)) names.push(name);
+    if (!name) unnamed = true;
+    else if (!names.includes(name)) names.push(name);
   }
   const others = names.length - 2;
+  // Who is left after the names it says: a count when it knows them all.
+  const rest = unnamed ? "others" : others > 0 ? `${others} ${others === 1 ? "other" : "others"}` : "";
+  const named = names.slice(0, 2);
   const whom =
     names.length === 0
       ? team.length === 1
         ? "someone else"
         : "teammates"
-      : names.length === 1
-        ? names[0]
-        : names.length === 2
-          ? `${names[0]} and ${names[1]}`
-          : `${names[0]}, ${names[1]} and ${others} ${others === 1 ? "other" : "others"}`;
+      : rest
+        ? `${named.join(", ")} and ${rest}`
+        : named.join(" and ");
   const title = `Waiting on ${whom}`;
   const first = (team[0]?.headline ?? "").trim();
   const more = team.length - 1;
