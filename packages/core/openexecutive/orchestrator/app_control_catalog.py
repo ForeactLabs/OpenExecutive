@@ -246,7 +246,7 @@ async def _ungroup_area(request: Any, area: str, value: str) -> str:
 
 
 # --------------------------------------------------------------------------- #
-# Documents (the Documents page) and uploaded files
+# Made for you (the /artifacts page) and uploaded files
 # --------------------------------------------------------------------------- #
 
 
@@ -1158,7 +1158,7 @@ _SCREENS = (
     ("departments", "/departments", "Departments"),
     ("goals", "/goals", "Goals"),
     ("watchlist", "/watchlist", "Watch list"),
-    ("documents", "/artifacts", "Documents"),
+    ("documents", "/artifacts", "Work, Made for you"),
     ("knowledge", "/knowledge", "Knowledge (uploaded files)"),
     ("memories", "/memories", "Memory"),
     ("skills", "/skills", "Skills"),
