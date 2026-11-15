@@ -223,18 +223,24 @@ def test_an_asked_send_that_went_on_its_own_is_logged_with_why(owner: Any) -> No
     assert len([d for d in ttl.done([ttl.SCOPE_EXECUTIVE], days=1) if d.status == "done"]) == 1
 
 
-def test_a_send_a_later_check_put_on_a_card_is_not_done(owner: Any) -> None:
+def test_a_send_a_later_check_put_on_a_card_is_not_done(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """The gateway held the send on an Approve card: Done for you must not
     say it was sent."""
     async def call_tool(tool_input: dict[str, Any]) -> str:
         return json.dumps({"status": "waiting_for_approval", "decision_instance_id": 9, "message": "Not done yet"})
 
+    from openexecutive.memory import decision_ledger
+
     asked = ttl.asked_call_tool(call_tool)
     token = current_session.set(SimpleNamespace(email_from=DANA, unattended=False))
     try:
+        # A result naming no real card is a step that ran.
+        asyncio.run(asked({"name": SEND, "arguments": {"to": DANA, "subject": "Hours", "body": "9 to 5."}}))
+        assert len([d for d in ttl.done([ttl.SCOPE_EXECUTIVE], days=1) if d.status == "done"]) == 1
+        monkeypatch.setattr(decision_ledger, "get_decision_instance", lambda i, db_path=None: object())
         result = asyncio.run(asked({"name": SEND, "arguments": {"to": DANA, "subject": "Paying early", "body": "Fine."}}))
     finally:
         current_session.reset(token)
     assert "waiting_for_approval" in result
-    assert [d for d in ttl.done([ttl.SCOPE_EXECUTIVE], days=1) if d.status == "done"] == []
+    assert len([d for d in ttl.done([ttl.SCOPE_EXECUTIVE], days=1) if d.status == "done"]) == 1
 

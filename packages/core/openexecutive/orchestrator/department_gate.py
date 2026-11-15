@@ -212,7 +212,7 @@ def hold(
         # and an older reply to the same thread still waiting, fold into it.
         fold_into_held(alert_id, db_path=db_path)
         replace_older_reply(decision_id, alert_id, tool, steps, mcp=mcp,
-                            approver=verdict.approver_person_id, db_path=db_path)
+                            approver=verdict.approver_person_id, requester=person.id, db_path=db_path)
     from openexecutive.orchestrator.session import note_step_held
 
     note_step_held()
@@ -242,9 +242,9 @@ _MAIL_SENDS = frozenset({"google_workspace__send_gmail_message", "ms365__send_ma
 _RE_PREFIX = re.compile(r"^\s*((re|fwd?|aw)\s*:\s*)+", re.IGNORECASE)
 
 
-def _thread_key(tool: str, steps: list[dict[str, Any]], *, mcp: bool) -> tuple[str, str] | None:
-    """(recipients, subject without Re:) of a single held mail send, else
-    None: what makes two waiting replies the same reply."""
+def _thread_key(tool: str, steps: list[dict[str, Any]], *, mcp: bool) -> tuple[str, str, str] | None:
+    """(recipients, subject without Re:, thread id) of a single held mail
+    send, else None: what makes two waiting replies the same reply."""
     if not mcp or tool not in _MAIL_SENDS or len(steps) != 1 or not isinstance(steps[0], dict):
         return None
     step = steps[0]
@@ -254,17 +254,21 @@ def _thread_key(tool: str, steps: list[dict[str, Any]], *, mcp: bool) -> tuple[s
     subject = _RE_PREFIX.sub("", str(step.get("subject") or "")).strip().lower()
     if not recipients or not subject:
         return None
-    return recipients, subject
+    return recipients, subject, str(step.get("thread_id") or "").strip()
 
 
 def _waiting_replies(
-    key: tuple[str, str], approver: int | None, *, besides: int | None, db_path: Path | None,
+    key: tuple[str, str, str], approver: int | None, requester: int | None, *,
+    besides: int | None, db_path: Path | None,
 ) -> list[int]:
-    """Ids of the held replies with thread ``key`` still waiting for
-    ``approver``, other than ``besides``."""
+    """Ids of the held replies with thread ``key``, asked for by the same
+    ``requester``, still waiting for ``approver`` (never when there is no
+    approver), other than ``besides``."""
     from openexecutive.memory.decision_ledger import list_instances
 
     found: list[int] = []
+    if approver is None:
+        return found
     for older in list_instances(
         DECISION_CLASS, status="proposed", approver_person_id=approver, limit=50, db_path=db_path,
     ):
@@ -275,20 +279,23 @@ def _waiting_replies(
         except (TypeError, ValueError):
             continue
         older_steps = payload.get("steps") or [payload.get("input") or {}]
+        if payload.get("requested_by_person_id") != requester:
+            continue
         if _thread_key(str(payload.get("tool") or ""), older_steps, mcp=payload.get("mcp") is True) == key:
             found.append(older.id)
     return found
 
 
 def reply_waiting(
-    tool: str, tool_input: dict[str, Any], *, mcp: bool, approver: int | None, db_path: Path | None = None,
+    tool: str, tool_input: dict[str, Any], *, mcp: bool, approver: int | None, requester: int | None,
+    db_path: Path | None = None,
 ) -> bool:
     """Whether a reply to the same people on the same thread already waits
     for ``approver``: the person was told it's with the owner then. Never
     raises: an error is no."""
     try:
         key = _thread_key(tool, [tool_input], mcp=mcp)
-        return key is not None and bool(_waiting_replies(key, approver, besides=None, db_path=db_path))
+        return key is not None and bool(_waiting_replies(key, approver, requester, besides=None, db_path=db_path))
     except Exception:
         logger.debug("department_gate: couldn't look for a waiting reply", exc_info=True)
         return False
@@ -302,6 +309,7 @@ def replace_older_reply(
     *,
     mcp: bool,
     approver: int | None,
+    requester: int | None,
     db_path: Path | None = None,
 ) -> int:
     """A newer reply to the same people on the same thread replaces the one
@@ -313,16 +321,27 @@ def replace_older_reply(
         if key is None:
             return 0
         from openexecutive.alerts.store import get_alert_by_external, mark_superseded
+        from openexecutive.audit import log_event
         from openexecutive.memory.decision_ledger import (
             DECISION_ALERT_SOURCE,
-            close_externally,
+            STATUS_CLOSED_EXTERNALLY,
             decision_alert_external_id,
+            mark_resolved,
         )
 
         replaced = 0
-        for older_id in _waiting_replies(key, approver, besides=decision_id, db_path=db_path):
-            if not close_externally(older_id, reason="replaced", db_path=db_path):
+        for older_id in _waiting_replies(key, approver, requester, besides=decision_id, db_path=db_path):
+            # Only one still waiting: an Approve already under way keeps it.
+            if not mark_resolved(older_id, STATUS_CLOSED_EXTERNALLY, db_path=db_path):
                 continue
+            log_event(
+                "department_action_replaced",
+                f"A newer reply on the same thread replaced decision {older_id}",
+                actor="executive",
+                details={"decision_id": older_id, "replaced_by": decision_id},
+                private=True,
+                private_to_person=approver,
+            )
             row = get_alert_by_external(DECISION_ALERT_SOURCE, decision_alert_external_id(older_id), db_path=db_path)
             if row is not None and row.id is not None:
                 mark_superseded(row.id, alert_id, db_path=db_path)

@@ -2309,7 +2309,19 @@ def result_waiting(text: str) -> bool:
         parsed = json.loads(text)
     except (TypeError, ValueError):
         return False
-    return isinstance(parsed, dict) and parsed.get("status") == "waiting_for_approval"
+    if not isinstance(parsed, dict) or parsed.get("status") != "waiting_for_approval":
+        return False
+    decision_id = parsed.get("decision_instance_id")
+    if not isinstance(decision_id, int) or isinstance(decision_id, bool):
+        return False
+    # Only a card that really exists: a connected app's own result can't
+    # make a step that ran look held.
+    from openexecutive.memory.decision_ledger import get_decision_instance
+
+    try:
+        return get_decision_instance(decision_id) is not None
+    except Exception:
+        return False
 
 
 _SOURCE_WHY: dict[str, str] = {

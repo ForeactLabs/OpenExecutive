@@ -428,9 +428,9 @@ def _hold_reply(owner: Person, body: str, subject: str = "Re: 30 minutes Thursda
 
 def test_a_newer_reply_on_the_same_thread_replaces_the_one_waiting(team: dict[str, Person]) -> None:
     owner = team["owner"]
-    assert not gate.reply_waiting(_GMAIL, _reply("first"), mcp=True, approver=owner.id)
+    assert not gate.reply_waiting(_GMAIL, _reply("first"), mcp=True, approver=owner.id, requester=owner.id)
     first = _hold_reply(owner, "Hi Dana, nothing is booked yet.")
-    assert gate.reply_waiting(_GMAIL, _reply("second"), mcp=True, approver=owner.id)
+    assert gate.reply_waiting(_GMAIL, _reply("second"), mcp=True, approver=owner.id, requester=owner.id)
     second = _hold_reply(owner, "Hi Dana, I can't confirm Thursday myself.", subject="RE: 30 minutes thursday?")
     assert ledger.get_decision_instance(first).status == ledger.STATUS_CLOSED_EXTERNALLY  # type: ignore[union-attr]
     assert ledger.get_decision_instance(second).status == ledger.STATUS_PROPOSED  # type: ignore[union-attr]
@@ -440,6 +440,9 @@ def test_a_newer_reply_on_the_same_thread_replaces_the_one_waiting(team: dict[st
     third = _hold_reply(owner, "Hi Dana, Tuesday's delivery is on.", subject="Re: Delivery window")
     assert ledger.get_decision_instance(second).status == ledger.STATUS_PROPOSED  # type: ignore[union-attr]
     assert ledger.get_decision_instance(third).status == ledger.STATUS_PROPOSED  # type: ignore[union-attr]
+    # No approver, or someone else's ask, replaces nothing.
+    assert not gate.reply_waiting(_GMAIL, _reply("x"), mcp=True, approver=None, requester=owner.id)
+    assert not gate.reply_waiting(_GMAIL, _reply("x"), mcp=True, approver=owner.id, requester=team["sam"].id)
 
 
 def test_the_card_an_email_turn_raised_folds_into_the_step_it_held(team: dict[str, Person]) -> None:

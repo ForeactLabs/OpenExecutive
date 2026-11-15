@@ -391,6 +391,9 @@ def _note_raised(session: Any, event: Any, *, separate: bool) -> None:
     try:
         if separate or getattr(session, "origin_channel", "") != "email" or event.raised_by:
             return
+        if not str(event.external_id or "").strip():
+            # An empty id could name another card's row: never folded.
+            return
         session.raised_cards = (*tuple(getattr(session, "raised_cards", ()) or ()), (event.source, event.external_id))
     except Exception:  # noqa: BLE001 - bookkeeping only
         logger.debug("create_alert: couldn't note the raised card", exc_info=True)
