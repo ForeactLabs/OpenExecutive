@@ -92,6 +92,40 @@ class EmailTurnTimeout(Exception):
         self.timeout_s = timeout_s
 
 
+class TurnNotRun(Exception):
+    """The AI service refused the email's turn (busy, or out of credit) before
+    it sent anything: the message stays unread, so a later poll runs it
+    again, and a card says so if it never gets through."""
+
+    def __init__(self, *, sender: str, sender_name: str, thread_id: str, subject: str) -> None:
+        super().__init__(f"the AI service refused the turn for mail from {sender}")
+        self.sender = sender
+        self.sender_name = sender_name
+        self.thread_id = thread_id
+        self.subject = subject
+
+
+def _refused(exc: BaseException) -> bool:
+    """Whether ``exc`` is the AI service turning the call away (busy, rate
+    limited or out of credit: HTTP 402, 429 or 529, anywhere in its chain),
+    not a fault in the turn itself."""
+    seen: set[int] = set()
+    pending: list[BaseException | None] = [exc]
+    while pending:
+        current = pending.pop()
+        if current is None or id(current) in seen:
+            continue
+        seen.add(id(current))
+        response = getattr(current, "response", None)
+        status = getattr(current, "status_code", None) or getattr(response, "status_code", None)
+        if status in (402, 429, 529):
+            return True
+        pending += [current.__cause__, current.__context__]
+        if isinstance(current, BaseExceptionGroup):
+            pending += list(current.exceptions)
+    return False
+
+
 def _turn_timeout_s() -> float:
     """``EMAIL_TURN_TIMEOUT_S``, through this module's `get_settings` (tests
     patch it with a stub that may not carry it)."""
@@ -428,7 +462,7 @@ async def poll_once(gateway: MCPGateway, provider: MailProvider | None = None) -
             await _handle_email(gateway, mid, ref.thread_id, user_email, provider=provider)
             _processed_ids.add(mid)
             _failed_attempts.pop(mid, None)
-        except Exception:
+        except Exception as exc:
             attempts = _failed_attempts.get(mid, 0) + 1
             if attempts < _MAX_ATTEMPTS:
                 _failed_attempts[mid] = attempts
@@ -446,6 +480,26 @@ async def poll_once(gateway: MCPGateway, provider: MailProvider | None = None) -
                 await _mark_read(gateway, mid, user_email, provider=provider)
             except Exception:
                 logger.warning("could not mark message=%s read", mid, exc_info=True)
+            if isinstance(exc, TurnNotRun):
+                # Nobody answered it: the owner is told, not left to find it.
+                _card_for_unanswered(exc, mid)
+
+
+def _card_for_unanswered(refused: TurnNotRun, message_id: str) -> None:
+    """A card for mail the AI service never let the Executive answer. Never
+    raises."""
+    try:
+        from openexecutive.integrations import unanswered_mail
+
+        unanswered_mail.file_card(
+            thread_key=refused.thread_id or refused.sender,
+            message_id=message_id,
+            sender_name=refused.sender_name,
+            from_principal=False,
+            sender_address=refused.sender,
+        )
+    except Exception:  # noqa: BLE001 - the mail is still in the inbox
+        logger.warning("could not raise the unanswered-mail card for message=%s", message_id, exc_info=True)
 
 
 async def _handle_email(
@@ -577,7 +631,11 @@ async def handle_inbound(mail: InboundMail, gateway: MCPGateway | None = None) -
         gateway = get_active_gateway()
     # One message, one turn, as in `_handle_email`.
     with set_session(None):
-        return await _handle_mail(mail, gateway, mailbox=None)
+        try:
+            return await _handle_mail(mail, gateway, mailbox=None)
+        except TurnNotRun:
+            # Nothing went out: the source hands it over again later.
+            return PAUSED
 
 
 _SKIPPED = "skipped"
@@ -893,6 +951,10 @@ async def _handle_mail(
                 private=private,
             )
             outcome = "turn timed out"
+        except TurnNotRun:
+            # Not marked read: a later poll runs it again (``poll_once``).
+            logger.warning("the AI service refused the turn for message=%s; it stays unread", message_id)
+            raise
         except Exception:
             logger.exception("Executive raised for message=%s", message_id)
 
@@ -1306,6 +1368,7 @@ async def _run_executive(
 
         prove = prove_sender or _gmail_proof
         session.email_from = from_addr.strip().lower()
+        session.email_thread_id = str(thread_id or "")
         try:
             principal = await asyncio.to_thread(principal_address)
         except Exception:  # noqa: BLE001 - optional step; must not lose the email.
@@ -1599,9 +1662,15 @@ async def _run_executive(
                 # An unrostered sender has no peer to record into, so skip the parse.
                 memory_text=_email_memory_text(raw_email) if person_id is not None else None,
             )
-    except TimeoutError as exc:
-        if deadline.expired():
+    except Exception as exc:
+        if isinstance(exc, TimeoutError) and deadline.expired():
             raise EmailTurnTimeout(timeout_s) from exc
+        if _refused(exc) and not (session.mail_sent_to or session.mail_replied_ids or session.steps_held):
+            # Nothing went out or waits on a card: running it again can't do it twice.
+            raise TurnNotRun(
+                sender=from_addr, sender_name=(person.full_name if person is not None else "") or from_addr,
+                thread_id=thread_id, subject="",
+            ) from exc
         raise
     if source is None:
         _note_reply_outcome(session, person, raw_email, message_id, thread_id, from_addr, response)

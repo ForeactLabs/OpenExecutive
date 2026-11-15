@@ -306,6 +306,9 @@ async def dispatch_all(
     """
     attempted: list[str] = []
     delivered: list[str] = []
+    if alert.superseded_by_alert_id is not None:
+        # It joined another card (alerts.one_card): that card is what's told.
+        return attempted, delivered
     for ch in channels:
         attempted.append(ch.value)
         ok = False

@@ -88,8 +88,7 @@ def test_a_held_action_takes_no_answer(client: TestClient, db: Path) -> None:  #
 
 def test_the_same_mail_handled_again_gets_its_own_card(db: Path) -> None:  # noqa: F811
     aid = _insert(db, "Asked", source="email", external_id="m1")
-    assert alert_tools._fresh_external_id("email", "m1") == "m1"  # open: the pipeline folds or drops
-    assert alert_tools._fresh_external_id("email", "m1", folds=True).startswith("m1:")
+    assert alert_tools._fresh_external_id("email", "m1") == "m1"  # open: the pipeline drops the replay
     alert_store.set_status(aid, "read", db_path=db)  # opened, still open
     assert alert_tools._fresh_external_id("email", "m1") == "m1"
     alert_store.set_status(aid, "dismissed", db_path=db)
@@ -102,7 +101,7 @@ def test_the_event_carries_the_ask_to_the_card(monkeypatch: pytest.MonkeyPatch) 
     seen: list[AlertEvent] = []
     monkeypatch.setattr("openexecutive.alerts.pipeline.schedule_evaluation", seen.append)
     monkeypatch.setattr("openexecutive.audit.log_event", lambda *a, **k: None)
-    monkeypatch.setattr(alert_tools, "_fresh_external_id", lambda s, e, folds=False: e)
+    monkeypatch.setattr(alert_tools, "_fresh_external_id", lambda s, e: e)
     out = json.loads(asyncio.run(alert_tools.handle_create_alert({
         "subject": "Domain", "body": "Which one?", "needs": "choice", "question": "Which domain?",
         "choices": ["openexecutive.com", "openexecutive.ai"],

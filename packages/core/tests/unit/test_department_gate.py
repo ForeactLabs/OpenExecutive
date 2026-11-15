@@ -448,7 +448,10 @@ def test_a_newer_reply_on_the_same_thread_replaces_the_one_waiting(team: dict[st
     assert ledger.get_decision_instance(new_b).status == ledger.STATUS_PROPOSED  # type: ignore[union-attr]
     # Someone else's ask on the thread replaces nothing.
     verdict = gate.Verdict(run=False, department="logistics", approver_person_id=owner.id, reason="Careful")
-    theirs = gate.hold(team["sam"], _GMAIL, _reply("Hi Dana, Sam here."), verdict, mcp=True, session_id="email:2")
+    from openexecutive.orchestrator.schedule_tools import set_session
+
+    with set_session(Session(session_id="chat:sam", caller_person_id=team["sam"].id)):
+        theirs = gate.hold(team["sam"], _GMAIL, _reply("Hi Dana, Sam here."), verdict, mcp=True, session_id="email:2")
     assert ledger.get_decision_instance(second).status == ledger.STATUS_PROPOSED  # type: ignore[union-attr]
     assert ledger.get_decision_instance(theirs).status == ledger.STATUS_PROPOSED  # type: ignore[union-attr]
 
@@ -466,35 +469,3 @@ def test_a_replaced_reply_whose_card_was_opened_closes_with_it(team: dict[str, P
     assert [f"decision_instance:{second}" in a.topic_tags for a in live] == [True]
 
 
-def test_the_card_an_email_turn_raised_folds_into_the_step_it_held(team: dict[str, Person]) -> None:
-    from openexecutive.alerts.models import AlertSeverity
-    from openexecutive.orchestrator.schedule_tools import set_session
-
-    raised = alerts_store.insert_alert(
-        source="email", external_id="mail-1", severity=AlertSeverity.MEDIUM.value,
-        headline="Dana is waiting on Thursday", body="Dana asked for a call.", routed_to_person_id=team["owner"].id,
-    )
-    other = alerts_store.insert_alert(
-        source="email", external_id="mail-2", severity=AlertSeverity.MEDIUM.value,
-        headline="Something else", body="Unrelated.",
-    )
-    turn = Session(session_id="email:1", origin_channel="email", raised_cards=(("email", "mail-1"),))
-    with set_session(turn):
-        held = _hold_reply(team["owner"], "Hi Dana, nothing is booked yet.")
-    card = alerts_store.get_alert_by_external("decision_scheduling", ledger.decision_alert_external_id(held))
-    assert card is not None
-    folded = alerts_store.get_alert(raised)  # type: ignore[arg-type]
-    assert folded is not None and folded.status == "dismissed" and folded.superseded_by_alert_id == card.id
-    assert alerts_store.get_alert(other).status == "unread"  # type: ignore[arg-type,union-attr]
-    assert turn.raised_cards == ()
-    # A held step a teammate approves leaves the owner's card about the mail.
-    owners = alerts_store.insert_alert(
-        source="email", external_id="mail-3", severity=AlertSeverity.MEDIUM.value,
-        headline="Dana asked again", body="Dana asked again.",
-    )
-    turn = Session(session_id="email:3", origin_channel="email", raised_cards=(("email", "mail-3"),))
-    verdict = gate.Verdict(run=False, department="operations", approver_person_id=team["ria"].id, reason="Careful")
-    with set_session(turn):
-        gate.hold(team["owner"], _GMAIL, _reply("Hi Dana, Ria will confirm.", "Re: Other"), verdict,
-                  mcp=True, session_id="email:3")
-    assert alerts_store.get_alert(owners).status == "unread"  # type: ignore[arg-type,union-attr]

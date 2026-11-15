@@ -117,7 +117,7 @@ KIND_LABELS: dict[str, str] = {
 }
 # One line under each switch saying what it catches, in the words check() uses.
 KIND_HINTS: dict[str, str] = {
-    MONEY: "Anything about payments, invoices, prices, budgets or an amount of money.",
+    MONEY: "Anything with an amount of money in it, such as a payment, an invoice, a price or a budget.",
     CONTRACTS: "Contracts, agreements, signatures, terms and other legal matters.",
     PEOPLE_DECISIONS: "Hiring, firing, pay, promotions and performance reviews.",
     DELETE_SHARE: "Deleting or cancelling something, or sharing a file or access.",
@@ -178,11 +178,6 @@ _MCP_FIRST_WORD_RE = re.compile(r"[a-z]+|[A-Z][a-z]*")
 _MCP_BATCH_READ_RE = re.compile(r"[_-]?batch$", re.IGNORECASE)
 _MCP_DELETE_RE = re.compile(r"(delete|remove|trash|cancel|share|permission|clear|archive)", re.IGNORECASE)
 
-_MONEY_RE = re.compile(
-    r"\b(invoices?|payments?|pay|paid|refunds?|pricing|price|quotes?|discounts?|budgets?|wire|bank|"
-    r"purchase|spend|fees?|costs?)\b|[$€£¥]\s?\d|\b\d[\d,.]*\s?(usd|eur|gbp|dollars|euros|pounds)\b",
-    re.IGNORECASE,
-)
 _CONTRACTS_RE = re.compile(
     r"\b(contracts?|agreements?|sign|signed|signature|nda|terms|legal|lawyers?|liabilit\w*|lawsuit)\b",
     re.IGNORECASE,
@@ -966,6 +961,45 @@ def _bare_money(text: str) -> bool:
     return False
 
 
+# An amount, however it is written: a number with a currency (a sign, a
+# three-letter code or a currency word, either side), a scaled number ("15k",
+# "2 million", "five hundred thousand"), or a share off a price ("30%
+# discount"); and where money would go (bank details), which moves money
+# whatever the amount.
+_NUMBER = r"(?:\d[\d,.]*|a|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|few|several)"
+_CURRENCY_WORD = r"(?:dollars?|euros?|pounds?|bucks|cents?|yen|rupees?|francs?|kronor|krona|crowns?)"
+_ANY_CODE = r"(?:usd|eur|gbp|chf|jpy|cad|aud|inr|cny|sek|nok|dkk|nzd|sgd|hkd|mxn|brl|zar|krw|pln|czk|aed|ils)"
+_CODE_AMOUNT_RE = re.compile(
+    rf"\b\d[\d,.]*\s?(?:{_ANY_CODE}|{_CURRENCY_WORD})\b|\b{_ANY_CODE}\s?\d[\d,.]*\b", re.IGNORECASE,
+)
+_SCALED_RE = re.compile(
+    rf"\b{_NUMBER}(?:[\s-]+{_NUMBER})*\s?(?:k|mn|bn|thousand|million|billion|grand|lakhs?|crores?)\b",
+    re.IGNORECASE,
+)
+_WORD_CURRENCY_RE = re.compile(rf"\b{_NUMBER}(?:[\s-]+{_NUMBER})*\s+{_CURRENCY_WORD}\b", re.IGNORECASE)
+_PRICE_SHARE_RE = re.compile(
+    r"\d\s?%\s*(?:off|discount|markup|increase|raise|refund)|\b(?:discount|markup|refund|price)\w*\W+(?:\w+\W+){0,3}\d+\s?%",
+    re.IGNORECASE,
+)
+_PAYMENT_DETAILS_RE = re.compile(
+    r"\b(?:iban|swift|bic|sort code|routing number|account number|bank details|bank account|wire instructions)\b",
+    re.IGNORECASE,
+)
+
+
+def mentions_money(text: str) -> bool:
+    """Whether ``text`` has an amount of money in it ("$250", "1,200 USD",
+    "25,000 SEK", "pay 1200", "wire 15k", "two million dollars", "30%
+    discount") or says where money should go (bank details). A money word
+    with no amount ("spend", "budget", "cost per drop") isn't money: the
+    money check needs an amount."""
+    return bool(
+        amounts(text) or _AMOUNT_SIGN_RE.search(text) or _SPELLED_MONEY_RE.search(text) or _bare_money(text)
+        or _CODE_AMOUNT_RE.search(text) or _SCALED_RE.search(text) or _WORD_CURRENCY_RE.search(text)
+        or _PRICE_SHARE_RE.search(text) or _PAYMENT_DETAILS_RE.search(text)
+    )
+
+
 def _all_parsed(text: str, found: list[float]) -> bool:
     """Whether ``amounts`` read every amount in ``text`` right: no
     percentage, no spelled-out or unknown-scale amount, every number next to
@@ -1044,7 +1078,7 @@ def check(
          "it deletes, cancels or shares something"),
         (BIG_SEND, tool in _BROADCAST_TOOLS or len(recipients) > BIG_SEND_RECIPIENTS,
          "it goes to a lot of people"),
-        (MONEY, bool(_MONEY_RE.search(text) or amounts(text)), "it's about money"),
+        (MONEY, mentions_money(text), "it's about money"),
         (CONTRACTS, bool(_CONTRACTS_RE.search(text)), "it's about a contract or legal matter"),
         (PEOPLE_DECISIONS, bool(_PEOPLE_RE.search(text)), "it's about hiring or a people decision"),
         (SOMEONE_NEW, any(not _known(r) for r in recipients), "it goes to someone new"),
@@ -2114,38 +2148,38 @@ def hold(
         db_path=db_path,
     )
     external_id = decision_alert_external_id(decision_id)
-    alert_id: int | None = None
+    from openexecutive.alerts import one_card
+
     try:
-        alert_id = insert_alert(
-            source=DECISION_ALERT_SOURCE,
-            external_id=external_id,
-            severity="medium",
-            headline=(
-                f"{asker.full_name} asked: {payload['headline']}" if asker is not None
-                else f"The Executive wants to: {shown}"
-            )[:160],
-            body=f"{shown}\n\nIt waited because {hit.reason}."
-            + (f" Tick Do this on its own next time to let it do this from now on: {grant[1]}." if grant is not None else ""),
-            suggested_action=shown,
-            topic_tags=[
-                decision_instance_tag(decision_id),
-                f"decision_class:{DECISION_CLASS}",
-                # For the principal, theirs alone. One that went to a
-                # teammate for their area is on the team's Today like any
-                # department approval (authority.propose_via_alert).
-                *([PRIVATE_ALERT_TAG] if private else []),
-                *([TRAINING_TAG] if training else []),
-            ],
-            dedup_key=external_id,
-            routed_to_person_id=approver,
-        )
+        # One card per topic (alerts.one_card): what this turn already
+        # raised joins it, and it replaces an older reply on the same thread.
+        thread, step = one_card.held_topic(tool, [tool_input], mcp=mcp)
+        with one_card.about(thread=thread, step=step):
+            insert_alert(
+                source=DECISION_ALERT_SOURCE,
+                external_id=external_id,
+                severity="medium",
+                headline=(
+                    f"{asker.full_name} asked: {payload['headline']}" if asker is not None
+                    else f"The Executive wants to: {shown}"
+                )[:160],
+                body=f"{shown}\n\nIt waited because {hit.reason}."
+                + (f" Tick Do this on its own next time to let it do this from now on: {grant[1]}." if grant is not None else ""),
+                suggested_action=shown,
+                topic_tags=[
+                    decision_instance_tag(decision_id),
+                    f"decision_class:{DECISION_CLASS}",
+                    # For the principal, theirs alone. One that went to a
+                    # teammate for their area is on the team's Today like any
+                    # department approval (authority.propose_via_alert).
+                    *([PRIVATE_ALERT_TAG] if private else []),
+                    *([TRAINING_TAG] if training else []),
+                ],
+                dedup_key=external_id,
+                routed_to_person_id=approver,
+            )
     except Exception:
         logger.exception("take_the_lead: couldn't put decision %d on Today", decision_id)
-    if alert_id is not None:
-        from openexecutive.orchestrator.alert_tools import fold_into_held
-
-        # One card per ask: what this email's turn already raised folds in.
-        fold_into_held(alert_id, reader=approver, db_path=db_path)
     from openexecutive.orchestrator.session import note_step_held
 
     note_step_held()

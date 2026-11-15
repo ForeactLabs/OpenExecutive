@@ -140,9 +140,12 @@ class AlertEvent(BaseModel):
     dedup_hint: str = ""
     # With ``dedup_hint``: a later event folds into the open card by adding
     # its words under the earlier ones ("Then: ..."), not replacing them, so
-    # a follow-up never erases what was first asked (one card per sender's
-    # mail, see ``orchestrator.alert_tools``).
+    # a follow-up never erases what was first asked.
     follow_up: bool = False
+    # The open card the turn said this is the same matter as
+    # (``create_alert``'s ``joins_card``): it joins that card when it goes to
+    # the same reader (``alerts.one_card``).
+    joins_alert_id: int | None = None
     # Person the alert should be routed to (assigned_to_person_id from the
     # Executive's create_alert tool). Lands on the row so the "principal
     # owns unrouted" rule stops sweeping every triage-born alert to them.

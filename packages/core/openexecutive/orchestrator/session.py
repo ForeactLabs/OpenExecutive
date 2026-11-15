@@ -228,16 +228,10 @@ class Session:
     # Hands-off its replies wait on a card. Set by the email poller only.
     sender_gave_orders: bool = False
     # How many steps this turn put on an Approve card (``note_step_held``).
-    # An email turn whose step already waits on a card raises no second
-    # card about the same mail (``alert_tools.handle_create_alert``).
     steps_held: int = 0
-    # How many cards such a turn raised anyway as about something else
-    # ('separate'): at most one, since the mail itself can ask for more.
-    separate_cards: int = 0
-    # The cards such a turn raised before it held a step, as (source,
-    # external_id): the held step's card then stands for them, so they fold
-    # into it (``alert_tools.fold_into_held``). One card per email.
-    raised_cards: tuple[tuple[str, str], ...] = ()
+    # The thread of the inbound email this turn answers: its cards are about
+    # that thread (``alerts.one_card``). Set by the email poller only.
+    email_thread_id: str = ""
     # Act as me for the turn in progress (``delegation.settings.TurnDelegation``),
     # pinned at its start by ``pin_turn_delegation``: whether the speaker has
     # it on, whether ``ghostwrite_email`` is offered, and whether the turn has

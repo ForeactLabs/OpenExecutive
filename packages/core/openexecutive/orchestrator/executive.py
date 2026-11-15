@@ -43,6 +43,7 @@ from openexecutive.memory.workspace_settings import (
 )
 from openexecutive.orchestrator import (
     app_control_catalog,  # noqa: F401  (fills the app tools' catalog)
+    app_links,
     claim_check,
     content_scan,
     extensions,
@@ -4034,7 +4035,7 @@ class Executive:
                 content = reading_budget.cap(
                     tu["name"],
                     tu["input"],
-                    results_by_id.get(tu["id"], f"Unknown tool: {tu['name']}"),
+                    app_links.for_model(results_by_id.get(tu["id"], f"Unknown tool: {tu['name']}")),
                     tu["id"],
                 )
                 content = tool_images.content(content, images_by_id.get(tu["id"]), sees=sees)

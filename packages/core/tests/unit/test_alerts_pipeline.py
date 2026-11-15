@@ -170,57 +170,6 @@ def test_evaluate_and_dispatch_persists_alert_and_publishes(monkeypatch, db: Pat
     assert any(e.get("type") == "alert" for e in received)
 
 
-def test_a_card_written_after_its_turn_held_a_step_folds_into_that_step(monkeypatch, db: Path) -> None:
-    """The email turn's card was still being triaged when a later step was
-    held: it folds into the held step's card when written, and isn't sent."""
-    from openexecutive.agents import triage as triage_module
-    from openexecutive.alerts import pipeline, sse_bus
-
-    async def fake_triage(self, event, **kwargs):  # noqa: ARG001 - signature match
-        return TriageDecision(alert=True, severity=AlertSeverity.HIGH,
-                              channels=[AlertChannel.WEB, AlertChannel.PERSISTED],
-                              headline="Dana is waiting on Thursday", body="b", dedup_key=event.external_id)
-
-    monkeypatch.setattr(triage_module.TriageAgent, "triage", fake_triage)
-    held = alert_store.insert_alert(source="decision_scheduling", external_id="decision_instance:1",
-                                    severity="medium", headline="Reply to Dana", body="b", db_path=db)
-    assert held is not None
-    pipeline.defer_fold("email", "mail-1", held, reader=None, db_path=db)
-    # A card for someone else than the held card's reader is still theirs.
-    pipeline.defer_fold("email", "mail-2", held, reader=99, db_path=db)
-    # One whose held card was answered meanwhile stays.
-    answered = alert_store.insert_alert(source="decision_scheduling", external_id="decision_instance:2",
-                                        severity="medium", headline="Reply to Leo", body="b", db_path=db)
-    assert answered is not None
-    alert_store.set_status(answered, "actioned", db_path=db)
-    pipeline.defer_fold("email", "mail-3", answered, reader=None, db_path=db)
-
-    async def runner() -> tuple:
-        queue = sse_bus.subscribe()
-        try:
-            _, alert_id = await pipeline.evaluate_and_dispatch(
-                AlertEvent(source="email", external_id="mail-1", subject="hi", body="b"), db_path=db)
-            _, other_id = await pipeline.evaluate_and_dispatch(
-                AlertEvent(source="email", external_id="mail-2", subject="hi", body="b"), db_path=db)
-            _, late_id = await pipeline.evaluate_and_dispatch(
-                AlertEvent(source="email", external_id="mail-3", subject="hi", body="b"), db_path=db)
-            sent: list[dict] = []
-            while not queue.empty():
-                sent.append(queue.get_nowait())
-            return alert_id, other_id, late_id, sent
-        finally:
-            sse_bus.unsubscribe(queue)
-
-    alert_id, other_id, late_id, sent = asyncio.run(runner())
-    folded = alert_store.get_alert(alert_id, db_path=db)
-    assert folded is not None and folded.status == "dismissed" and folded.superseded_by_alert_id == held
-    other = alert_store.get_alert(other_id, db_path=db)
-    assert other is not None and other.status == "unread"
-    late = alert_store.get_alert(late_id, db_path=db)
-    assert late is not None and late.status == "unread"
-    assert [e.get("alert", {}).get("id") for e in sent if e.get("type") == "alert"] == [other_id, late_id]
-
-
 def test_evaluate_post_mute_suppresses(monkeypatch, db: Path) -> None:
     """A muted topic produced by the LLM is suppressed after the call."""
     from openexecutive.agents import triage as triage_module
@@ -552,24 +501,6 @@ def test_grounded_triage_text_is_stored_unchanged(monkeypatch, db: Path) -> None
     assert (stored.headline, stored.body, stored.suggested_action) == (
         "Dana Whitfield: renew 48 units", "Renewal of 48 units due Friday.", "Reply to Dana",
     )
-
-
-def test_open_alerts_keyed_lists_one_senders_open_cards(db: Path) -> None:
-    for n, key in enumerate([
-        "email-from:casey@example.com",
-        "email-from:casey@example.com#ab12cd34",
-        "email-from:casey@example.com:person:7",
-        "email-from:casey@example.comx",
-        "private:email-from:casey@example.com",
-    ]):
-        alert_store.insert_alert(
-            source="email", external_id=str(n), severity="medium", headline=f"h{n}", body="b",
-            dedup_key=key, db_path=db,
-        )
-    cards = alert_store.open_alerts_keyed("email", "email-from:casey@example.com", db_path=db)
-    assert [c.dedup_key for c in cards] == [
-        "email-from:casey@example.com", "email-from:casey@example.com#ab12cd34",
-    ]
 
 
 def test_as_written_message_skips_triage_and_keeps_its_words(monkeypatch, db: Path) -> None:

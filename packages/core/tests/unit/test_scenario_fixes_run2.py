@@ -9,15 +9,12 @@ import asyncio
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
 from openexecutive.integrations import email_repeats
-from openexecutive.orchestrator import alert_tools
 from openexecutive.orchestrator import take_the_lead as ttl
-from openexecutive.orchestrator.schedule_tools import current_session
-from openexecutive.orchestrator.session import Session, note_step_held
+from openexecutive.orchestrator.session import Session
 from openexecutive.people import store as people_store
 
 from . import test_delegation_inbox as _inbox_tests
@@ -93,36 +90,6 @@ def test_an_email_is_noted_as_answered_only_when_the_sender_got_something() -> N
     assert note(session) == [("k", "m1")]
     session.email_sender_authenticated = False  # nobody vouched for the sender
     assert note(session, answered=True) == []
-
-
-def test_an_email_turn_with_a_held_step_raises_no_second_card() -> None:
-    session = Session(session_id="email:t1")
-    session.origin_channel = "email"
-    token = current_session.set(session)
-    try:
-        assert alert_tools._step_already_on_card(session) is False
-        note_step_held()
-        assert session.steps_held == 1 and alert_tools._step_already_on_card(session) is True
-        out = asyncio.run(alert_tools.handle_create_alert({"subject": "Leo wants a yes", "body": "Order"}))
-        assert out == alert_tools.HELD_STEP_CARD
-        assert json.loads(out)["status"] == "step_already_on_card"
-        # One card about something else goes; the mail can't ask for more.
-        other = {"subject": "Possible fraud", "body": "New bank details", "separate": True}
-        # A call that isn't raised (a missing field) doesn't use it up.
-        bad = json.loads(asyncio.run(alert_tools.handle_create_alert({**other, "body": ""})))
-        assert "error" in bad and session.separate_cards == 0
-        with (
-            patch("openexecutive.alerts.pipeline.schedule_evaluation"),
-            patch("openexecutive.audit.log_event", new=lambda *_a, **_k: None),
-        ):
-            first = asyncio.run(alert_tools.handle_create_alert(other))
-        assert first != alert_tools.SEPARATE_CARD_RAISED and session.separate_cards == 1
-        assert asyncio.run(alert_tools.handle_create_alert(other)) == alert_tools.SEPARATE_CARD_RAISED
-    finally:
-        current_session.reset(token)
-    # In the app, a card can still be raised.
-    chat = SimpleNamespace(origin_channel="web", steps_held=2)
-    assert alert_tools._step_already_on_card(chat) is False
 
 
 def test_an_email_to_one_person_can_be_allowed_next_time(owner: Any) -> None:

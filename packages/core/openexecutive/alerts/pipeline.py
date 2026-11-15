@@ -26,54 +26,6 @@ logger = logging.getLogger(__name__)
 # mid-flight (mirrors memory.episodic._background_tasks).
 _background_tasks: set[asyncio.Task[Any]] = set()
 
-# Cards an email's turn raised whose row wasn't written yet when a later step
-# of that turn was held (``orchestrator.alert_tools.fold_into_held``): the
-# row folds into the held step's card the moment it is written, so the owner
-# isn't asked twice. Keyed by database, source and id; small and short-lived.
-_LATE_FOLDS: dict[tuple[str, str, str], tuple[int, int | None, float]] = {}
-_LATE_FOLD_TTL_S = 15 * 60
-_LATE_FOLD_MAX = 256
-
-
-def defer_fold(
-    source: str, external_id: str, held_alert_id: int, *, reader: int | None, db_path: Path | None = None
-) -> None:
-    """Fold the card ``(source, external_id)`` into ``held_alert_id`` once its
-    row is written (it is still being triaged), if it goes to the same
-    ``reader`` as the held card (None = the principal)."""
-    if not str(external_id or "").strip():
-        return
-    now = time.monotonic()
-    for key in [k for k, (*_, at) in _LATE_FOLDS.items() if now - at > _LATE_FOLD_TTL_S]:
-        _LATE_FOLDS.pop(key, None)
-    if len(_LATE_FOLDS) >= _LATE_FOLD_MAX:
-        _LATE_FOLDS.pop(next(iter(_LATE_FOLDS)), None)
-    _LATE_FOLDS[(str(db_path or store.DB_PATH), source, external_id)] = (held_alert_id, reader, now)
-
-
-def reader_of(person_id: int | None) -> int | None:
-    """Who reads a card routed to ``person_id``: that person, or the
-    principal for an unrouted one (None when nobody is the principal)."""
-    if person_id is not None:
-        return person_id
-    from openexecutive.people.registry import get_principal
-
-    try:
-        principal = get_principal()
-    except Exception:  # noqa: BLE001 - no roster yet: nobody to tell apart
-        return None
-    return principal.id if principal is not None else None
-
-
-def _take_late_fold(source: str, external_id: str, path: Path, routed_to: int | None) -> int | None:
-    entry = _LATE_FOLDS.pop((str(path), source, external_id), None)
-    if entry is None or time.monotonic() - entry[2] > _LATE_FOLD_TTL_S:
-        return None
-    held, reader, _ = entry
-    # Another person's card never folds into it: they'd stop being told.
-    return held if reader_of(routed_to) == reader_of(reader) else None
-
-
 # Simple rolling-window rate limiter on event evaluations. Cost guard against
 # runaway cost from a misbehaving integration. Single-process only.
 _RATE_LIMIT_PER_MIN = 60
@@ -382,7 +334,50 @@ async def evaluate_and_dispatch(
         )
         return decision, existing_id
 
-    alert_id = store.insert_alert(
+    from openexecutive.alerts import one_card
+
+    with one_card.about(joins=event.joins_alert_id, raised=not event.as_written):
+        alert_id = _insert(event, decision, topic_tags, dedup_key, routed_to, path)
+    if alert_id is None:
+        logger.info(
+            "alerts.pipeline duplicate suppressed source=%s ext_id=%s",
+            event.source,
+            event.external_id,
+        )
+        return decision, None
+
+    alert = store.get_alert(alert_id, db_path=path)
+    if alert is None:
+        logger.error("alerts.pipeline could not re-read alert id=%s", alert_id)
+        return decision, alert_id
+    if alert.superseded_by_alert_id is not None:
+        # It joined an open card on its topic (alerts.one_card). A grave one
+        # (a fraud warning) still reaches its reader, on the card it joined.
+        logger.info("alerts.pipeline alert=%d joined alert=%d", alert_id, alert.superseded_by_alert_id)
+        survivor = store.get_alert(alert.superseded_by_alert_id, db_path=path)
+        if decision.severity.value not in _REDISPATCH_SEVERITIES or survivor is None:
+            return decision, alert_id
+        alert = survivor
+
+    await dispatcher.dispatch_all(
+        alert,
+        effective_channels,
+        db_path=path,
+        # Shift 3: thread the broadcast-routing context through so the
+        # DEPARTMENT_CHANNEL / COMPANY_BROADCAST dispatchers can resolve
+        # the right room. Empty strings when triage picked per-person
+        # channels only — those dispatchers ignore the kwargs.
+        department_slug=decision.department_slug,
+        broadcast_integration=decision.broadcast_integration,
+    )
+    return decision, alert_id
+
+
+def _insert(
+    event: AlertEvent, decision: TriageDecision, topic_tags: list[str], dedup_key: str,
+    routed_to: int | None, path: Path,
+) -> int | None:
+    return store.insert_alert(
         source=event.source,
         external_id=event.external_id,
         severity=decision.severity.value,
@@ -399,42 +394,6 @@ async def evaluate_and_dispatch(
         choices=event.choices,
         db_path=path,
     )
-    if alert_id is None:
-        logger.info(
-            "alerts.pipeline duplicate suppressed source=%s ext_id=%s",
-            event.source,
-            event.external_id,
-        )
-        return decision, None
-
-    held = _take_late_fold(event.source, event.external_id, path, routed_to)
-    held_row = store.get_alert(held, db_path=path) if held is not None else None
-    # Only into a card still waiting: one answered meanwhile would hide this.
-    if (
-        held is not None and held_row is not None and held_row.status in ("unread", "read")
-        and store.mark_superseded(alert_id, held, db_path=path)
-    ):
-        # A step the same turn held already asks the owner: no second card.
-        logger.info("alerts.pipeline folded alert=%d into held alert=%d", alert_id, held)
-        return decision, alert_id
-
-    alert = store.get_alert(alert_id, db_path=path)
-    if alert is None:
-        logger.error("alerts.pipeline could not re-read alert id=%s", alert_id)
-        return decision, alert_id
-
-    await dispatcher.dispatch_all(
-        alert,
-        effective_channels,
-        db_path=path,
-        # Shift 3: thread the broadcast-routing context through so the
-        # DEPARTMENT_CHANNEL / COMPANY_BROADCAST dispatchers can resolve
-        # the right room. Empty strings when triage picked per-person
-        # channels only — those dispatchers ignore the kwargs.
-        department_slug=decision.department_slug,
-        broadcast_integration=decision.broadcast_integration,
-    )
-    return decision, alert_id
 
 
 def schedule_chat_message_evaluation(

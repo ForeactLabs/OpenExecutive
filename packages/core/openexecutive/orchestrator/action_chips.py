@@ -595,7 +595,7 @@ def summarize_action(
         payload["link"] = "/company-profile"
     elif tool_name == "create_alert":
         # Only an alert handed to review gets a chip: "ask_in_reply" and
-        # "sender_has_open_card" raised nothing. Review may still drop it, so
+        # "person_has_open_card" raised nothing. Review may still drop it, so
         # the chip doesn't promise a card. The tool's title field is
         # "subject" (alert_tools.CREATE_ALERT_TOOL); kept cards land on Home.
         if parsed is not None and parsed.get("status") != "alert_scheduled":

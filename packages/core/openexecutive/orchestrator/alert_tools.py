@@ -28,8 +28,8 @@ CREATE_ALERT_TOOL: dict[str, Any] = {
         "they pick one of 2 to 4 options (give them in 'choices'), 'ok' only when approving "
         "makes you do one exact thing (spell it out in the body), 'fyi' when nothing is "
         "needed. One card asks one thing: put related questions in one 'question'. "
-        "When the sender already has an open card, you're told which; call again with "
-        "'joins_card' set to say whether this is the same matter or a different decision."
+        "When this person already has an open card from earlier, you're told which; call "
+        "again with 'joins_card' set to say whether this is the same matter or a different one."
     ),
     "input_schema": {
         "type": "object",
@@ -82,20 +82,12 @@ CREATE_ALERT_TOOL: dict[str, Any] = {
                 "items": {"type": "string"},
                 "description": "With 'choice': 2 to 4 short options, each a few words.",
             },
-            "separate": {
-                "type": "boolean",
-                "description": (
-                    "Only when told a step from this email already waits on an Approve card: "
-                    "true when this card is about something else (a risk, possible fraud, a "
-                    "separate decision), so it is raised as well."
-                ),
-            },
             "joins_card": {
                 "type": "integer",
                 "description": (
-                    "Only when told the sender already has an open card: that card's id when "
+                    "Only when told this person already has open cards: that card's id when "
                     "this is the same matter (a reminder, more detail, a change to what they "
-                    "asked), so it joins that card; 0 when it is a different decision, so it "
+                    "asked), so it joins that card; 0 when it is a different matter, so it "
                     "gets its own card and its own answer."
                 ),
             },
@@ -224,12 +216,10 @@ def _card_ask(tool_input: dict[str, Any]) -> tuple[str, str, list[str]]:
 _CLOSED_CARD_STATUSES = frozenset({"ack", "dismissed", "expired", "resolved"})
 
 
-def _fresh_external_id(source: str, external_id: str, *, folds: bool = False) -> str:
-    """The card's message id, unless a card already holds it: then a fresh
-    one, so the new ask isn't taken for a replay of that card and dropped.
-    A closed card always gives way (the same mail handled again); an open
-    one only when the new ask folds into it by sender (``folds``), since
-    the pipeline drops a second card for one id before it can fold."""
+def _fresh_external_id(source: str, external_id: str) -> str:
+    """The card's message id, unless a closed card already holds it (the
+    same mail handled again): then a fresh one, so the new ask isn't taken
+    for a replay of that card and dropped."""
     if not external_id:
         return external_id
     try:
@@ -239,49 +229,29 @@ def _fresh_external_id(source: str, external_id: str, *, folds: bool = False) ->
     except Exception:
         logger.warning("create_alert: couldn't check the message id", exc_info=True)
         return external_id
-    if held is None or (held.status not in _CLOSED_CARD_STATUSES and not folds):
+    if held is None or held.status not in _CLOSED_CARD_STATUSES:
         return external_id
     return f"{external_id}:{uuid.uuid4().hex[:8]}"
 
 
-def _one_card_per_sender(event: Any, session: Any) -> None:
-    """A turn answering an email: while a card from that sender is still
-    open, what they write next joins it ("Then: ...") instead of making a
-    second card, so one approval answers them once. Keyed by the address
-    the mail really came from (``Session.email_from``), never what the mail
-    or the model says, and the same for every mail service. A card a team
-    member raised keeps its own key (the pipeline prefixes it). A card routed
-    to one person keys apart from the shared one, and a private card is kept
-    apart by the pipeline (``private:`` prefix)."""
-    if getattr(session, "origin_channel", "") != "email" or event.raised_by:
-        return
-    sender = str(getattr(session, "email_from", "") or "").strip().lower()
-    if not sender:
-        return
-    routed = str(getattr(event, "user", "") or "")
-    routed_part = f":{routed}" if routed.startswith("person:") else ""
-    event.dedup_hint = f"email-from:{sender}{routed_part}"
-    event.follow_up = True
-
-
-def _sender_card_choice(event: Any, joins: Any) -> str | None:
-    """One card per matter, not per sender: a sender's second, unrelated
-    ask never joins the card of their first, where one answer would settle
-    both. While the sender has open cards, the turn says which one this is
-    (``joins_card``): that card's id joins it, 0 starts a card of its own
-    (keyed ``email-from:<sender>#<n>``, so what they write about it next
-    can join it). Returns what to tell the turn when it hasn't said yet,
-    else None with ``event`` keyed to its card. Never raises."""
-    if not event.follow_up or not event.dedup_hint:
+def _matter_choice(event: Any, joins: Any) -> str | None:
+    """One card per matter, not per person: while the person this turn is
+    with has open cards from earlier turns, the turn says whether this is one
+    of those matters (``joins_card``: that card's id) or another one (0), so
+    the card joins it or gets its own (``alerts.one_card``). Returns what to
+    tell the turn when it hasn't said yet, else None with ``event`` set.
+    A message passed on as written is its own card. Never raises."""
+    if event.as_written:
         return None
-    from openexecutive.alerts import store
-
-    base = event.dedup_hint
-    stored = f"private:{base}" if event.private else base
     try:
-        cards = store.open_alerts_keyed(event.source, stored)
+        from openexecutive.alerts import one_card
+        from openexecutive.audit.context import get_active_turn_id
+
+        cards = one_card.open_cards_from(
+            one_card.person_key(), turn=str(get_active_turn_id() or ""), reader=_reader_of(event),
+        )
     except Exception:
-        logger.warning("create_alert: couldn't read the sender's open cards", exc_info=True)
+        logger.warning("create_alert: couldn't read the person's open cards", exc_info=True)
         return None
     if not cards:
         return None
@@ -291,26 +261,38 @@ def _sender_card_choice(event: Any, joins: Any) -> str | None:
             pick = int(joins)
     if pick is None:
         listed = "; ".join(
-            f'card {c.id}: "{c.headline}"' + (f' (asks: "{c.question}")' if c.question else "")
-            for c in cards
+            f'card {cid}: "{headline}"' + (f' (asks: "{question}")' if question else "")
+            for cid, headline, question in cards
         )
         return json.dumps({
-            "status": "sender_has_open_card",
-            "open_cards": [{"id": c.id, "headline": c.headline} for c in cards],
+            "status": "person_has_open_card",
+            "open_cards": [{"id": cid, "headline": headline} for cid, headline, _ in cards],
             "message": (
-                f"Nothing was raised yet. This sender already has open cards: {listed}. "
+                f"Nothing was raised yet. This person already has open cards: {listed}. "
                 "Call create_alert again with the same fields plus 'joins_card': that card's id "
-                "if this is the same matter, or 0 if it is a different decision, so each "
-                "decision gets its own card and answer."
+                "if this is the same matter, or 0 if it is a different one, so each matter "
+                "gets one card and one answer."
             ),
         })
-    match = next((c for c in cards if c.id == pick), None) if pick else None
-    if match is not None:
-        key = str(match.dedup_key or "")
-        event.dedup_hint = key.removeprefix("private:") if event.private else key
-    else:
-        event.dedup_hint = f"{base}#{uuid.uuid4().hex[:8]}"
+    if pick == 0:
+        event.joins_alert_id = 0  # another matter: kept apart even on the same thread
+    elif pick and any(cid == pick for cid, _, _ in cards):
+        event.joins_alert_id = pick
     return None
+
+
+def _reader_of(event: Any) -> str:
+    """Who the card will be for, as the pipeline routes it: a private card
+    goes to the principal (``alerts.pipeline._make_private``)."""
+    from openexecutive.alerts import one_card
+
+    routed = event.routed_to_person_id
+    if event.private:
+        from openexecutive.people.registry import get_principal
+
+        principal = get_principal()
+        routed = principal.id if principal is not None else None
+    return one_card.reader_for(routed, private=bool(event.private))
 
 
 # What create_alert answers when the question is for the person in the chat.
@@ -354,88 +336,6 @@ def _asks_the_speaker(session: Any, tool_input: dict[str, Any]) -> bool:
         return False
 
 
-# What create_alert answers on an email turn whose step already waits on a card.
-HELD_STEP_CARD = json.dumps({
-    "status": "step_already_on_card",
-    "message": (
-        "Nothing was raised yet: a step from this email already waits on an Approve card, "
-        "and that card is what the owner sees. If this card would only ask about that same "
-        "step, don't raise it. If it is about something else (a risk, possible fraud, a "
-        "separate decision), call create_alert again with the same fields plus 'separate': true."
-    ),
-})
-
-
-SEPARATE_CARD_RAISED = json.dumps({
-    "status": "separate_card_already_raised",
-    "message": (
-        "Nothing was raised: this email already has its Approve card and one other card. "
-        "Put anything more in that card's details instead."
-    ),
-})
-
-
-def _step_already_on_card(session: Any) -> bool:
-    """Whether this turn answers an email and already put a step on an
-    Approve card (``session.note_step_held``): that card is the one about
-    this mail, so a second would ask the owner twice. Never raises."""
-    try:
-        return getattr(session, "origin_channel", "") == "email" and int(getattr(session, "steps_held", 0) or 0) > 0
-    except (TypeError, ValueError):
-        return False
-
-
-def _note_raised(session: Any, event: Any, *, separate: bool) -> None:
-    """Remember a card an email's turn raised (not one it raised as about
-    something else), so a step it holds later folds it in. Never raises."""
-    try:
-        if separate or getattr(session, "origin_channel", "") != "email" or event.raised_by:
-            return
-        if not str(event.external_id or "").strip():
-            # An empty id could name another card's row: never folded.
-            return
-        session.raised_cards = (*tuple(getattr(session, "raised_cards", ()) or ()), (event.source, event.external_id))
-    except Exception:  # noqa: BLE001 - bookkeeping only
-        logger.debug("create_alert: couldn't note the raised card", exc_info=True)
-
-
-def fold_into_held(held_alert_id: int | None, *, reader: int | None, db_path: Any = None) -> int:
-    """An email's turn held a step after raising a card about that mail: the
-    held step's card is the one the owner answers, so the earlier card folds
-    into it (``alerts.store.mark_superseded``) instead of asking twice. A card
-    still being written folds in when it is (``alerts.pipeline.defer_fold``).
-    Only a card for the held card's ``reader`` (None = the principal) folds:
-    anyone else's stays, so they are still told. Returns how many folded now.
-    Never raises."""
-    if held_alert_id is None:
-        return 0
-    try:
-        from openexecutive.alerts import store
-        from openexecutive.orchestrator.schedule_tools import current_session
-
-        session = current_session.get()
-        if getattr(session, "origin_channel", "") != "email":
-            return 0
-        from openexecutive.alerts.pipeline import defer_fold, reader_of
-
-        folded = 0
-        for source, external_id in tuple(getattr(session, "raised_cards", ()) or ()):
-            row = store.get_alert_by_external(source, external_id, db_path=db_path)
-            row_id = getattr(row, "id", None) if row is not None else None
-            if not isinstance(row_id, int):
-                # Still being triaged: it folds in as soon as it is written.
-                defer_fold(source, external_id, held_alert_id, reader=reader, db_path=db_path)
-            elif reader_of(getattr(row, "routed_to_person_id", None)) == reader_of(reader) and store.mark_superseded(
-                row_id, held_alert_id, db_path=db_path
-            ):
-                folded += 1
-        session.raised_cards = ()
-        return folded
-    except Exception:  # noqa: BLE001 - a second card is the worst case
-        logger.warning("create_alert: couldn't fold the turn's card into the held one", exc_info=True)
-        return 0
-
-
 _UTC_ASIDE = re.compile(r"\s*\((?:\d{1,2}(?::\d{2})?\s*(?:[ap]\.?m\.?)?\s*)?(?:UTC|GMT|Z)\)", re.IGNORECASE)
 
 
@@ -464,19 +364,6 @@ async def handle_create_alert(tool_input: dict[str, Any], *, as_written: bool = 
     # (orchestrator.outside_content.SENDER).
     from openexecutive.orchestrator.outside_content import answers_off_team_mail
 
-    separate_turn: Any = None
-    if not as_written and _step_already_on_card(current_session.get()):
-        turn = current_session.get()
-        if tool_input.get("separate") is not True:
-            logger.info("create_alert: not raised, this email's step already waits on a card: %.120s",
-                        tool_input.get("subject", ""))
-            return HELD_STEP_CARD
-        if int(getattr(turn, "separate_cards", 0) or 0) >= 1:
-            # The mail this turn reads could ask for card after card.
-            logger.info("create_alert: not raised, this email already has a separate card: %.120s",
-                        tool_input.get("subject", ""))
-            return SEPARATE_CARD_RAISED
-        separate_turn = turn  # counted once the card is raised
     if answers_off_team_mail():
         private = True
         sender = getattr(current_session.get(), "email_from", "") or ""
@@ -538,15 +425,11 @@ async def handle_create_alert(tool_input: dict[str, Any], *, as_written: bool = 
             # a sender's card or another message.
             event.as_written = True
         else:
-            _one_card_per_sender(event, current_session.get())
-            ask_first = _sender_card_choice(event, tool_input.get("joins_card"))
+            ask_first = _matter_choice(event, tool_input.get("joins_card"))
             if ask_first is not None:
                 return ask_first
-        event.external_id = _fresh_external_id(event.source, event.external_id, folds=event.follow_up)
+        event.external_id = _fresh_external_id(event.source, event.external_id)
         schedule_evaluation(event)
-        _note_raised(current_session.get(), event, separate=separate_turn is not None)
-        if separate_turn is not None:
-            separate_turn.separate_cards = int(getattr(separate_turn, "separate_cards", 0) or 0) + 1
         logger.info("create_alert: scheduled subject=%r", tool_input["subject"])
         audit_log(
             "alert",

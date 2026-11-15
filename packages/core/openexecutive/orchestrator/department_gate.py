@@ -12,7 +12,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -185,34 +184,31 @@ def hold(
         db_path=db_path,
     )
     external_id = decision_alert_external_id(decision_id)
-    alert_id: int | None = None
+    from openexecutive.alerts import one_card
+
     try:
-        alert_id = insert_alert(
-            source=DECISION_ALERT_SOURCE,
-            external_id=external_id,
-            severity=AlertSeverity.HIGH.value if escalated else AlertSeverity.MEDIUM.value,
-            headline=_headline(person, who, plain, held=held)[:160],
-            body=f"{listed or shown}\n\nIt waited because {verdict.reason}.",
-            suggested_action=shown,
-            topic_tags=[
-                decision_instance_tag(decision_id),
-                f"decision_class:{DECISION_CLASS}",
-                *([f"department:{verdict.department}"] if verdict.department else []),
-                *([PRIVATE_ALERT_TAG] if private else []),
-            ],
-            dedup_key=external_id,
-            routed_to_person_id=verdict.approver_person_id,
-        )
+        # One card per topic (alerts.one_card): what this turn already
+        # raised joins it, and it replaces an older reply on the same thread.
+        thread, step = one_card.held_topic(tool, steps, mcp=mcp)
+        with one_card.about(thread=thread, step=step):
+            insert_alert(
+                source=DECISION_ALERT_SOURCE,
+                external_id=external_id,
+                severity=AlertSeverity.HIGH.value if escalated else AlertSeverity.MEDIUM.value,
+                headline=_headline(person, who, plain, held=held)[:160],
+                body=f"{listed or shown}\n\nIt waited because {verdict.reason}.",
+                suggested_action=shown,
+                topic_tags=[
+                    decision_instance_tag(decision_id),
+                    f"decision_class:{DECISION_CLASS}",
+                    *([f"department:{verdict.department}"] if verdict.department else []),
+                    *([PRIVATE_ALERT_TAG] if private else []),
+                ],
+                dedup_key=external_id,
+                routed_to_person_id=verdict.approver_person_id,
+            )
     except Exception:
         logger.exception("department_gate: couldn't put decision %d on Today", decision_id)
-    if alert_id is not None:
-        from openexecutive.orchestrator.alert_tools import fold_into_held
-
-        # One card per ask: what this turn already raised about the mail,
-        # and an older reply to the same thread still waiting, fold into it.
-        fold_into_held(alert_id, reader=verdict.approver_person_id, db_path=db_path)
-        replace_older_reply(decision_id, alert_id, tool, steps, mcp=mcp,
-                            approver=verdict.approver_person_id, requester=person.id, db_path=db_path)
     from openexecutive.orchestrator.session import note_step_held
 
     note_step_held()
@@ -236,118 +232,3 @@ def hold(
 
 
 _HOLD_KEY_TRIES = 50
-
-# Mail sends whose waiting reply a newer one to the same thread replaces.
-_MAIL_SENDS = frozenset({"google_workspace__send_gmail_message", "ms365__send_mail"})
-_RE_PREFIX = re.compile(r"^\s*((re|fwd?|aw)\s*:\s*)+", re.IGNORECASE)
-
-
-def _thread_key(tool: str, steps: list[dict[str, Any]], *, mcp: bool) -> tuple[str, str, str] | None:
-    """(recipients, subject without Re:, thread id) of a single held mail
-    send, else None: what makes two waiting replies the same reply."""
-    if not mcp or tool not in _MAIL_SENDS or len(steps) != 1 or not isinstance(steps[0], dict):
-        return None
-    step = steps[0]
-    to = step.get("to")
-    addresses = to if isinstance(to, list) else [to] if isinstance(to, str) else []
-    recipients = ",".join(sorted({str(a).strip().lower() for a in addresses if str(a).strip()}))
-    raw_subject = str(step.get("subject") or "")
-    subject = _RE_PREFIX.sub("", raw_subject).strip().lower()
-    thread_id = str(step.get("thread_id") or "").strip()
-    # With no thread, only a reply (Re:) is one: two new mails that share a
-    # subject are two asks.
-    if not recipients or not subject or (not thread_id and not _RE_PREFIX.match(raw_subject)):
-        return None
-    return recipients, subject, thread_id
-
-
-def _waiting_replies(
-    key: tuple[str, str, str], approver: int | None, requester: int | None, *,
-    besides: int | None, db_path: Path | None,
-) -> list[int]:
-    """Ids of the held replies with thread ``key``, asked for by the same
-    ``requester``, still waiting for ``approver`` (never when there is no
-    approver), other than ``besides``."""
-    from openexecutive.memory.decision_ledger import list_instances
-
-    found: list[int] = []
-    if approver is None:
-        return found
-    for older in list_instances(
-        DECISION_CLASS, status="proposed", approver_person_id=approver, limit=50, db_path=db_path,
-    ):
-        if older.id == besides:
-            continue
-        try:
-            payload = json.loads(older.proposed_payload_json or "{}")
-        except (TypeError, ValueError):
-            continue
-        older_steps = payload.get("steps") or [payload.get("input") or {}]
-        if payload.get("requested_by_person_id") != requester:
-            continue
-        if _thread_key(str(payload.get("tool") or ""), older_steps, mcp=payload.get("mcp") is True) == key:
-            found.append(older.id)
-    return found
-
-
-def replace_older_reply(
-    decision_id: int,
-    alert_id: int,
-    tool: str,
-    steps: list[dict[str, Any]],
-    *,
-    mcp: bool,
-    approver: int | None,
-    requester: int | None,
-    db_path: Path | None = None,
-) -> int:
-    """A newer reply to the same people on the same thread replaces the one
-    still waiting for the same approver: its decision closes (``replaced``)
-    and its card folds into the new one, so the owner approves one reply,
-    the latest. Returns how many it replaced. Never raises."""
-    try:
-        key = _thread_key(tool, steps, mcp=mcp)
-        if key is None:
-            return 0
-        from openexecutive.alerts.store import (
-            get_alert_by_external,
-            mark_superseded,
-            set_status_if_open,
-        )
-        from openexecutive.audit import log_event
-        from openexecutive.memory.decision_ledger import (
-            DECISION_ALERT_SOURCE,
-            STATUS_CLOSED_EXTERNALLY,
-            decision_alert_external_id,
-            mark_resolved,
-        )
-
-        replaced = 0
-        for older_id in _waiting_replies(key, approver, requester, besides=decision_id, db_path=db_path):
-            # Only one still waiting: an Approve already under way keeps it.
-            if not mark_resolved(older_id, STATUS_CLOSED_EXTERNALLY, db_path=db_path):
-                continue
-            replaced += 1
-            try:
-                row = get_alert_by_external(DECISION_ALERT_SOURCE, decision_alert_external_id(older_id), db_path=db_path)
-                if row is not None and row.id is not None and not mark_superseded(row.id, alert_id, db_path=db_path):
-                    # Already opened, so it can't fold: close it too, or its
-                    # Approve would point at a decision that is closed.
-                    set_status_if_open(row.id, "dismissed", db_path=db_path)
-            except Exception:  # noqa: BLE001 - its Approve finds the decision closed
-                logger.warning("replace_older_reply: couldn't close card for decision %s", older_id, exc_info=True)
-            try:
-                log_event(
-                    "department_action_replaced",
-                    f"A newer reply on the same thread replaced decision {older_id}",
-                    actor="executive",
-                    details={"decision_id": older_id, "replaced_by": decision_id},
-                    private=True,
-                    private_to_person=approver,
-                )
-            except Exception:  # noqa: BLE001 - audit only
-                logger.debug("replace_older_reply: audit row failed", exc_info=True)
-        return replaced
-    except Exception:
-        logger.warning("department_gate: couldn't replace an older waiting reply", exc_info=True)
-        return 0

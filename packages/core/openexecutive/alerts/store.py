@@ -180,7 +180,10 @@ def insert_alert(
     choices: list[str] | None = None,
     db_path: Path | None = None,
 ) -> int | None:
-    """Insert a new alert. Returns alert id, or None if a duplicate was skipped."""
+    """Insert a new alert. Returns alert id, or None if a duplicate was skipped.
+    Every card then goes through the one card-per-topic check
+    (``alerts.one_card.place``): it may join an open card on its topic, and a
+    card that joined is closed and never sent (``dispatcher.dispatch_all``)."""
     tags = json.dumps(topic_tags or [])
     with _get_conn(db_path) as conn:
         cursor = conn.execute(
@@ -215,7 +218,13 @@ def insert_alert(
         )
         if cursor.rowcount == 0:
             return None
-        return cursor.lastrowid
+        alert_id = cursor.lastrowid
+    if alert_id is not None:
+        # One card per topic, whatever wrote it (alerts.one_card).
+        from openexecutive.alerts import one_card
+
+        one_card.place(alert_id, db_path=db_path)
+    return alert_id
 
 
 def update_delivery(
@@ -779,21 +788,6 @@ def get_alert_by_external(
             (source, external_id),
         ).fetchone()
     return _row_to_alert(row) if row else None
-
-
-def open_alerts_keyed(source: str, base_key: str, db_path: Path | None = None) -> list[Alert]:
-    """The ``unread`` alerts whose dedup key is ``base_key`` or
-    ``base_key#<n>``, oldest first: one sender's open cards, one per
-    matter (``orchestrator.alert_tools._one_card_per_sender``)."""
-    if not base_key or not _resolve_db_path(db_path).exists():
-        return []
-    with _get_conn(db_path) as conn:
-        rows = conn.execute(
-            "SELECT * FROM alerts WHERE source = ? AND status = 'unread' "
-            "AND (dedup_key = ? OR substr(dedup_key, 1, ?) = ?) ORDER BY created_at, id",
-            (source, base_key, len(base_key) + 1, base_key + "#"),
-        ).fetchall()
-    return [_row_to_alert(r) for r in rows]
 
 
 def has_open_alert(source: str, dedup_key: str, db_path: Path | None = None) -> bool:

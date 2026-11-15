@@ -116,7 +116,7 @@ def test_rules_belong_to_their_scope() -> None:
 
 
 @pytest.mark.parametrize(("tool", "tool_input", "kind"), [
-    ("message_person", {"person_id": 1, "text": "Can you send the invoice for March?"}, "money"),
+    ("message_person", {"person_id": 1, "text": "Can you pay the 1,200 USD invoice for March?"}, "money"),
     ("message_person", {"person_id": 1, "text": "The quote came in at $4,000."}, "money"),
     ("message_person", {"person_id": 1, "text": "Please sign the NDA today."}, "contracts"),
     ("message_person", {"person_id": 1, "text": "We should hire a second engineer."}, "people_decisions"),
@@ -128,6 +128,26 @@ def test_the_base_kinds_wait(owner: Any, tool: str, tool_input: dict[str, Any], 
     hit = ttl.check(tool, tool_input, lead=_lead(), rules=[])
     assert hit is not None and hit.kind == kind
     assert ttl.check(tool, tool_input, lead=_lead(**{kind: False}), rules=[]) is None or kind == "someone_new"
+
+
+@pytest.mark.parametrize("text", [
+    "Can you send the invoice for March?",
+    "Keep spend on the late-deliveries fix low and watch the cost per drop.",
+    "Three weekly numbers: (1) late drops, (2) cost per drop, (3) on-time rate, 91% now.",
+    "Try 3 times, then meet at 3pm on Nov 19 in room 204, within 5 m of the dock.",
+])
+def test_a_money_word_without_an_amount_goes(owner: Any, text: str) -> None:
+    assert ttl.check("message_person", {"person_id": 1, "text": text}, lead=_lead(), rules=[]) is None
+
+
+@pytest.mark.parametrize("text", [
+    "Pay 1200 now", "That's fifty dollars", "Budget is $250", "Wire 2k EUR",
+    "We will pay you ten thousand dollars on signing.", "Approved: wire 15k to the vendor.",
+    "Wire five hundred thousand to the escrow account.", "Budget approved: 25,000 SEK for the campaign.",
+    "Send all future payments to IBAN GB29 NWBK 6016 1331 9268 19.", "We can offer you a 30% discount.",
+])
+def test_an_amount_is_money(text: str) -> None:
+    assert ttl.mentions_money(text)
 
 
 def test_a_plain_message_to_someone_known_goes(owner: Any) -> None:
