@@ -26,7 +26,7 @@ import {
   type SteerResult,
   type Today,
 } from "@/lib/api";
-import { greeting, homeHeadline, waitingOnTeam } from "@/lib/briefingSummary";
+import { greeting, homeHeadline, teamOffTrack, waitingOnTeam } from "@/lib/briefingSummary";
 import { cardFromSearch } from "@/lib/cardMentions";
 import { FIRST_RUN_LINKS } from "@/lib/firstRun";
 import { principalIdOf } from "@/lib/dueSoon";
@@ -556,6 +556,7 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
     needsYouCount,
     doneRows.filter((r) => r.status === "done").length,
     (today?.watching ?? []).length,
+    teamOffTrack(departments, today?.people ?? []),
   );
 
   // At a glance — one quiet line, only the items with something to show,
@@ -852,6 +853,8 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
                 <>
                   {headline.clear ? (
                     <span className={TONE_TEXT.emerald}>{headline.lead}</span>
+                  ) : needsYouCount === 0 ? (
+                    <span>{headline.lead}</span>
                   ) : (
                     <button
                       type="button"

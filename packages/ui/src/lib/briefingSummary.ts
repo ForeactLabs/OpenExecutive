@@ -124,11 +124,25 @@ export function proposalStatusChip(
 
 /** Home's headline, in the Executive's words: what needs you first, then
  *  what it handled in the last day and what it's watching. `lead` is the
- *  part Home colors (and, when something needs you, the link to Needs you);
- *  `clear` says nothing needs you. */
-export function homeHeadline(needsYou: number, done: number, watching: number): { lead: string; rest: string; clear: boolean } {
-  const clear = needsYou <= 0;
-  const lead = clear ? "All clear." : needsYou === 1 ? "One thing needs you." : `${needsYou} things need you.`;
+ *  part Home colors (and, when something needs you, the link to Needs you).
+ *  `clear` says nothing needs you and nothing is off track: with a goal at
+ *  risk or someone waiting on an answer (`offTrack`), it says only that
+ *  nothing needs you, never "All clear". */
+export function homeHeadline(
+  needsYou: number,
+  done: number,
+  watching: number,
+  offTrack: boolean = false,
+): { lead: string; rest: string; clear: boolean } {
+  const none = needsYou <= 0;
+  const clear = none && !offTrack;
+  const lead = clear
+    ? "All clear."
+    : none
+      ? "Nothing needs you."
+      : needsYou === 1
+        ? "One thing needs you."
+        : `${needsYou} things need you.`;
   const did =
     done > 0 && watching > 0
       ? `I handled ${done} since yesterday and I'm watching ${watching} for you.`
@@ -138,6 +152,19 @@ export function homeHeadline(needsYou: number, done: number, watching: number): 
           ? `I'm watching ${watching} ${plural(watching, "thing", "things")} for you.`
           : "";
   return { lead, rest: [clear ? "Nothing needs you." : "", did].filter(Boolean).join(" "), clear };
+}
+
+/** Whether something is off track that isn't an item in Needs you: a
+ *  department with a goal at risk or off track or an answer it waits on, or
+ *  a person waiting on one. Home doesn't say "All clear" then. */
+export function teamOffTrack(
+  departments: { at_risk_count?: number; off_track_count?: number; awaiting_count?: number }[],
+  people: { awaiting_count?: number }[],
+): boolean {
+  return (
+    departments.some((d) => (d.at_risk_count ?? 0) > 0 || (d.off_track_count ?? 0) > 0 || (d.awaiting_count ?? 0) > 0) ||
+    people.some((p) => (p.awaiting_count ?? 0) > 0)
+  );
 }
 
 /** Hand me something's rows: the suggested asks that have words, trimmed,

@@ -8,6 +8,7 @@ import {
   handAsks,
   homeHeadline,
   proposalStatusChip,
+  teamOffTrack,
   waitingOnTeam,
 } from "../src/lib/briefingSummary.ts";
 
@@ -162,4 +163,25 @@ test("the teammates row tells apart two people who share a first name", () => {
   const two = [...roster, { id: 5, full_name: "Alex Moreno" }];
   assert.equal(waitingOnTeam([item("a", 2), item("b", 5)], two).title, "Waiting on Alex Cohen and Alex Moreno");
   assert.equal(waitingOnTeam([item("a", 2), item("b", 2)], two).title, "Waiting on Alex");
+});
+
+test("the headline doesn't say all clear while something is off track", () => {
+  assert.deepEqual(homeHeadline(0, 0, 0, true), { lead: "Nothing needs you.", rest: "", clear: false });
+  assert.deepEqual(homeHeadline(0, 3, 1, true), {
+    lead: "Nothing needs you.",
+    rest: "I handled 3 since yesterday and I'm watching 1 for you.",
+    clear: false,
+  });
+  assert.deepEqual(homeHeadline(2, 0, 0, true), { lead: "2 things need you.", rest: "", clear: false });
+  assert.equal(homeHeadline(0, 0, 0, false).lead, "All clear.");
+});
+
+test("off track is a goal at risk or off track, or an answer someone waits on", () => {
+  const dept = { at_risk_count: 0, off_track_count: 0, awaiting_count: 0 };
+  assert.equal(teamOffTrack([], []), false);
+  assert.equal(teamOffTrack([dept], [{ awaiting_count: 0 }, {}]), false);
+  assert.equal(teamOffTrack([dept, { ...dept, at_risk_count: 2 }], []), true);
+  assert.equal(teamOffTrack([{ ...dept, off_track_count: 1 }], []), true);
+  assert.equal(teamOffTrack([{ ...dept, awaiting_count: 1 }], []), true);
+  assert.equal(teamOffTrack([dept], [{ awaiting_count: 1 }]), true);
 });
