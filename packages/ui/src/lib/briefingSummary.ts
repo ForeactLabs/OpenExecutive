@@ -168,15 +168,20 @@ export function waitingOnTeam(
   people: { id: number; full_name: string }[],
 ): { title: string; detail: string; line: string } | null {
   if (team.length === 0) return null;
-  const names: string[] = [];
+  // Each person once, in the order their items come.
+  const waited: { id: number; full_name: string }[] = [];
   // An item whose person isn't on the list still waits on someone.
   let unnamed = false;
   for (const p of team) {
     const who = people.find((x) => x.id === p.routed_to_person_id);
-    const name = who ? firstName(who.full_name) : "";
-    if (!name) unnamed = true;
-    else if (!names.includes(name)) names.push(name);
+    if (!who || !firstName(who.full_name)) unnamed = true;
+    else if (!waited.some((x) => x.id === who.id)) waited.push(who);
   }
+  // First names, or the whole name for two people who share one.
+  const names = waited.map((w) => {
+    const first = firstName(w.full_name);
+    return waited.some((x) => x.id !== w.id && firstName(x.full_name) === first) ? w.full_name.trim() : first;
+  });
   const others = names.length - 2;
   // Who is left after the names it says: a count when it knows them all.
   const rest = unnamed ? "others" : others > 0 ? `${others} ${others === 1 ? "other" : "others"}` : "";

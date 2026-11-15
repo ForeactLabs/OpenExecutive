@@ -157,3 +157,9 @@ test("the teammates row still reads when it can't tell who", () => {
   assert.equal(waitingOnTeam([item("a", 2), item("b", 3), item("c", 4), item("d", 99)], roster).title, "Waiting on Alex, Dana and others");
   assert.deepEqual(waitingOnTeam([item("  ", 2)], roster), { title: "Waiting on Alex", detail: "", line: "Waiting on Alex" });
 });
+
+test("the teammates row tells apart two people who share a first name", () => {
+  const two = [...roster, { id: 5, full_name: "Alex Moreno" }];
+  assert.equal(waitingOnTeam([item("a", 2), item("b", 5)], two).title, "Waiting on Alex Cohen and Alex Moreno");
+  assert.equal(waitingOnTeam([item("a", 2), item("b", 2)], two).title, "Waiting on Alex");
+});
