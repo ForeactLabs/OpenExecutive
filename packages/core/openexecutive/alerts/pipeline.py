@@ -336,7 +336,11 @@ async def evaluate_and_dispatch(
 
     from openexecutive.alerts import one_card
 
-    with one_card.about(joins=event.joins_alert_id, raised=not event.as_written):
+    # A teammate's own message to someone stays as they wrote it, on a card of
+    # its own. Anything else, a message the Executive or a department writes
+    # included, takes part in the one card per topic check.
+    teammates_message = event.as_written and bool(event.raised_by)
+    with one_card.about(joins=event.joins_alert_id, raised=not teammates_message):
         alert_id = _insert(event, decision, topic_tags, dedup_key, routed_to, path)
     if alert_id is None:
         logger.info(

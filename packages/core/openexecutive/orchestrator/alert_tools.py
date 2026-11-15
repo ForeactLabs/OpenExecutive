@@ -421,8 +421,9 @@ async def handle_create_alert(tool_input: dict[str, Any], *, as_written: bool = 
             event.private = True
         event.needs, event.question, event.choices = _card_ask(tool_input)
         if as_written:
-            # A message for one person is its own card, never folded into
-            # a sender's card or another message.
+            # A message for one person keeps its words. A teammate's own
+            # message is its own card; one the Executive writes joins an open
+            # card on its topic (alerts.pipeline).
             event.as_written = True
         else:
             ask_first = _matter_choice(event, tool_input.get("joins_card"))
