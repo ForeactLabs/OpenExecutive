@@ -3075,7 +3075,7 @@ def _lead_line(row: Any, jobs: dict[int, Any], answers: dict[tuple[int, str], st
         parts = [f"{how}, as me" if how else "As me"]
         job = jobs.get(row.job_id) if row.job_id is not None else None
         if job is not None:
-            parts.append(f"For your standing job: {job.text}")
+            parts.append(f"For your standing work: {job.text}")
         elif row.prompted_by:
             parts.append(row.prompted_by)
         answered = answers.get((row.to_person_id, row.at), "") if row.to_person_id is not None else ""
@@ -3174,14 +3174,42 @@ def _next_look() -> str | None:
         return None
 
 
-def _watching(request: Request, caller: int | None) -> list[WatchingItem]:
+def _watched_actions(request: Request, caller: int | None, *, owner: bool, limit: int) -> list[Any]:
+    """The follow-ups and nudges this reader sees, soonest first, at most
+    ``limit``. The owner's are filtered by ``api.own_rows`` (the rule GET
+    /scheduled uses), read past ``limit`` so other people's rows ahead of
+    theirs can't push theirs off; anyone else's are the ones they asked
+    for, narrowed in the query. Raises on a read failure."""
+    from openexecutive.api import own_rows
+    from openexecutive.memory.episodic import list_pending_scheduled_actions
+
+    if not owner:
+        return [
+            a for a in list_pending_scheduled_actions(
+                limit=limit, kinds=_WATCHING_KINDS, created_by_person_id=caller,
+            ) if a.id is not None
+        ]
+    reader = own_rows.reader_for(request)
+    pool = limit * 4
+    while True:
+        rows = list_pending_scheduled_actions(limit=pool, kinds=_WATCHING_KINDS)
+        kept = [a for a in rows if a.id is not None and reader.sees_action(a)]
+        if len(kept) >= limit or len(rows) < pool:
+            return kept[:limit]
+        pool *= 4
+
+
+def _watching(request: Request, caller: int | None, *, limit: int = _WATCHING_MAX) -> list[WatchingItem]:
     """Watching next for this reader: the follow-ups and nudges it will
-    send (the owner sees all of them, anyone else the ones they asked for),
-    soonest first, then, for the owner while As me is on, the standing
-    jobs with when it looks next. Never raises."""
+    send (the owner sees the team's and their own, never one a teammate
+    asked for in their own chat, ``api.own_rows``; anyone else the ones
+    they asked for),
+    soonest first, at most ``limit`` of them, then, for the owner while As
+    me is on, the standing work with when it looks next. The Schedule page
+    (api/routes/schedule.py) reads the same lines with a higher ``limit``.
+    Never raises."""
     from openexecutive.api.routes.chat import _caller_is_principal_or_unclaimed
     from openexecutive.api.routes.people import caller_is_principal
-    from openexecutive.memory.episodic import list_pending_scheduled_actions
     from openexecutive.orchestrator import take_the_lead
     from openexecutive.people.store import list_people
 
@@ -3197,12 +3225,7 @@ def _watching(request: Request, caller: int | None) -> list[WatchingItem]:
     try:
         names = {p.id: p.full_name for p in list_people(include_archived=True) if p.id is not None}
         lookup = _build_channel_lookup()
-        mine = None if owner else caller
-        for action in list_pending_scheduled_actions(
-            limit=_WATCHING_MAX, kinds=_WATCHING_KINDS, created_by_person_id=mine,
-        ):
-            if action.id is None:
-                continue
+        for action in _watched_actions(request, caller, owner=owner, limit=limit):
             target = names.get(action.assigned_to_person_id) if action.assigned_to_person_id else None
             target = target or _resolve_channel_target(lookup, action.channel, action.channel_ref or "")
             verb = "I nudge" if action.kind == "proactive_nudge" else "I follow up with"
@@ -3215,7 +3238,7 @@ def _watching(request: Request, caller: int | None) -> list[WatchingItem]:
             ))
     except Exception:
         logger.warning("today: reading follow-ups for Watching next failed", exc_info=True)
-    items = items[:_WATCHING_MAX]
+    items = items[:limit]
     if principal:
         try:
             if take_the_lead.executive_on():
@@ -3225,12 +3248,12 @@ def _watching(request: Request, caller: int | None) -> list[WatchingItem]:
                         key=f"job:{job.id}",
                         kind="standing_job",
                         title=job.text,
-                        detail="Standing job · I look again" if look else "Standing job",
+                        detail="Standing work · I look again" if look else "Standing work",
                         at=look,
                     ))
         except Exception:
             logger.warning("today: reading standing jobs for Watching next failed", exc_info=True)
-    return items[: _WATCHING_MAX + take_the_lead.JOBS_MAX]
+    return items[: limit + take_the_lead.JOBS_MAX]
 
 
 def _mail_names(mail_to: str, *, team_only: bool = False) -> str:
@@ -3376,9 +3399,11 @@ class StopWatchingRequest(BaseModel):
 @router.post("/today/watching/stop", tags=["today"])
 async def stop_watching(body: StopWatchingRequest, request: Request) -> dict[str, bool]:
     """Stop one line of Watching next: cancel that follow-up, or stop that
-    standing job. Nothing else changes. The owner may stop any line; anyone
-    else only a follow-up they asked for. 404 when it isn't there (or isn't
+    standing job. Nothing else changes. The owner may stop a standing job
+    or a follow-up they see (the team's and their own); anyone else only a
+    follow-up they asked for. 404 when it isn't there (or isn't
     theirs), 409 when it already ran."""
+    from openexecutive.api import own_rows
     from openexecutive.api.routes.chat import (
         _caller_is_principal_or_unclaimed,
         _resolve_caller_person_id,
@@ -3401,7 +3426,7 @@ async def stop_watching(body: StopWatchingRequest, request: Request) -> dict[str
         if job is None:
             raise HTTPException(status_code=404, detail="That isn't there any more.")
         if job.stopped_at is None:
-            audit_log("take_the_lead_changed", "Standing job stopped from Home", actor="user",
+            audit_log("take_the_lead_changed", "Standing work stopped from Home", actor="user",
                       details={"job_id": item_id})
         return {"stopped": True}
     if kind != "action":
@@ -3410,6 +3435,8 @@ async def stop_watching(body: StopWatchingRequest, request: Request) -> dict[str
     if (
         action is None or action.kind not in _WATCHING_KINDS or action.channel == "__internal__"
         or (not owner and (caller is None or action.created_by_person_id != caller))
+        # The owner stops what Watching next shows them (``api.own_rows``).
+        or (owner and not own_rows.reader_for(request).sees_action(action))
     ):
         raise HTTPException(status_code=404, detail="That isn't there any more.")
     result = cancel_scheduled_action(item_id)

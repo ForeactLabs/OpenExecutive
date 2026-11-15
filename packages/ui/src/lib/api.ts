@@ -1870,22 +1870,6 @@ export async function listScheduledActions(
   return res.json();
 }
 
-export async function cancelScheduledAction(id: number): Promise<ScheduledAction> {
-  const res = await fetch(`${API_BASE}/scheduled/${id}`, { method: "DELETE" });
-  if (res.status === 409) {
-    throw new Error("Action is no longer pending — can't cancel.");
-  }
-  if (res.status === 401 || res.status === 503) {
-    // Signed-in users can cancel once the API and the UI share
-    // BACKEND_SHARED_SECRET (every internet-reachable deploy sets it).
-    throw new Error(
-      "Cancel isn't enabled on this server yet. Ask your administrator to set the same BACKEND_SHARED_SECRET on the API and the UI.",
-    );
-  }
-  if (!res.ok) throw new Error("Failed to cancel scheduled action");
-  return res.json();
-}
-
 // ----------------------------------------------------------------------------
 // Executive pause switch — holds all autonomous work (scheduler, inbox,
 // workflow timers); chat and direct messages keep working.
@@ -5888,7 +5872,7 @@ export interface PointSource {
 // viewer approved (`kind` "approval", one row per card, its status changing
 // in place) or something the Executive did on its own in the last day.
 // One line of Home's Watching next (GET /today `watching`): a follow-up it
-// will send (`action:<id>`) or a standing job (`job:<id>`), what it does
+// will send (`action:<id>`) or standing work (`job:<id>`), what it does
 // next and when. Stop ends that one thing (POST /today/watching/stop).
 export interface WatchingItem {
   key: string;
@@ -5914,6 +5898,37 @@ export async function stopWatching(key: string): Promise<void> {
     }
     throw new Error(message);
   }
+}
+
+// The Schedule page (GET /schedule): everything the Executive does without
+// being asked, soonest first. Follow-ups and standing work stop with
+// stopWatching(stop_key); the rest open `href`, where each is managed.
+export type ScheduleKind = "follow_up" | "standing" | "workflow" | "watch" | "always";
+
+export interface ScheduleItem {
+  key: string;
+  kind: ScheduleKind;
+  title: string;
+  detail: string;
+  /** When it acts next (ISO), or null. */
+  at: string | null;
+  /** A watch: when it last checked (ISO). */
+  last_checked: string | null;
+  /** How often, in words ("every day"); "" for a one-off. */
+  cadence: string;
+  href: string | null;
+  stop_key: string | null;
+}
+
+export interface ScheduleResponse {
+  items: ScheduleItem[];
+  counts: Record<ScheduleKind, number>;
+}
+
+export async function getSchedule(signal?: AbortSignal): Promise<ScheduleResponse> {
+  const res = await fetch(`${API_BASE}/schedule`, { cache: "no-store", signal });
+  if (!res.ok) throw new Error("Couldn't load the schedule.");
+  return res.json();
 }
 
 export interface DoneRow {

@@ -12385,8 +12385,15 @@ delegation:
     whose due time passed, a timed meeting on the cached calendar that
     ended; one wake for all of them. Home's Watching next (GET /today
     watching, POST /today/watching/stop) lists the pending ad_hoc and
-    proactive_nudge follow-ups (all for the owner, only their own for a
-    teammate) and the standing jobs, with Stop on each line.
+    proactive_nudge follow-ups (for the owner the team's and their own by
+    api.own_rows, never one a teammate asked for; only their own for a
+    teammate) and the standing work, with Stop on each line. The Schedule
+    page (GET /schedule, api/routes/schedule.py; Work → Schedule on web and
+    phone) reads the same lines through today._watching (with a higher
+    limit) and adds the scheduled custom workflows, the enabled watches and
+    what it always does (owner's briefs, department check-ins), soonest
+    first, each with where it is managed. Users see "standing work", never
+    "standing jobs"; the table and kinds keep the old names.
   state: |
     delegation_settings, delegation_voice, delegation_voice_history,
     delegation_drafts, delegation_inbox_watch, delegation_inbox_messages,

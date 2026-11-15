@@ -43,7 +43,13 @@ test("solo swaps Company for You, which opens on Goals", () => {
 
 test("team hubs: Work and Company tabs", () => {
   const [work, company] = buildHubs();
-  assert.deepEqual(links(work.tabs), ["Tasks → /tasks", "Workflows → /jobs", "Documents → /artifacts", "Watch list → /watchlist"]);
+  assert.deepEqual(links(work.tabs), [
+    "Tasks → /tasks",
+    "Workflows → /jobs",
+    "Documents → /artifacts",
+    "Watch list → /watchlist",
+    "Schedule → /schedule",
+  ]);
   assert.deepEqual(links(company.tabs), [
     "People → /people",
     "Goals → /goals",
