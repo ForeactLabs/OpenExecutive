@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
+from typing import Any
 
 import click
 from rich.console import Console
@@ -44,18 +46,36 @@ async def _ask(question: str) -> None:
     executive = Executive()
 
     console.print("\n[bold blue]Executive[/bold blue]\n")
-    response = ""
-    async for chunk in executive.stream_chat(
-        user_message=question,
-        session=session,
-        retrieved_context=retrieved,
-        episodic_context=episodic,
-    ):
-        if isinstance(chunk, str) and chunk != Executive._THINKING:
-            response += chunk
-            console.print(chunk, end="", highlight=False)
+    await print_reply(
+        executive.stream_chat(
+            user_message=question,
+            session=session,
+            retrieved_context=retrieved,
+            episodic_context=episodic,
+        )
+    )
 
     console.print("\n")
+
+
+async def print_reply(stream: AsyncIterator[str | dict[str, Any]]) -> str:
+    """Print a streamed reply and return its final text.
+
+    A terminal can't take back printed text, so when the reply is written
+    again (a ``rewrite`` event) the new one is marked as replacing it."""
+    from openexecutive.orchestrator.executive import Executive
+
+    reply = ""
+    async for chunk in stream:
+        if isinstance(chunk, dict):
+            if chunk.get("type") == "rewrite" and reply:
+                reply = ""
+                console.print("\n\n[dim]Corrected reply (replaces the one above):[/dim]\n")
+            continue
+        if chunk != Executive._THINKING:
+            reply += chunk
+            console.print(chunk, end="", highlight=False)
+    return reply
 
 
 @cli.command()
@@ -104,14 +124,14 @@ async def _chat() -> None:
         episodic = format_for_prompt()
 
         console.print("\n[bold blue]Executive[/bold blue]\n")
-        async for chunk in executive.stream_chat(
-            user_message=user_input,
-            session=session,
-            retrieved_context=retrieved,
-            episodic_context=episodic,
-        ):
-            if isinstance(chunk, str) and chunk != Executive._THINKING:
-                console.print(chunk, end="", highlight=False)
+        await print_reply(
+            executive.stream_chat(
+                user_message=user_input,
+                session=session,
+                retrieved_context=retrieved,
+                episodic_context=episodic,
+            )
+        )
 
         console.print("\n")
 
