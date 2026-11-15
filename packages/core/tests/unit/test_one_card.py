@@ -274,3 +274,36 @@ def test_a_reply_the_mailbox_filed_as_a_new_thread_is_the_same_conversation(mail
         mail_turn.email_thread_id, mail_turn.email_from = thread, sender
         with set_turn(session_id="s", turn_id=f"turn-{thread}"):
             assert _get(_note(f"From {thread}")).status == "unread"
+
+
+def test_a_follow_up_joins_the_senders_latest_conversation_on_that_subject() -> None:
+    one_card.note_mail("t-1", "dana@northpeak.example", "Labels")
+    one_card.note_mail("t-7", "dana@northpeak.example", "Labels")
+    one_card.note_mail("t-9", "dana@northpeak.example", "RE: labels", proven=True)
+    one_card.note_mail("t-9", "dana@northpeak.example", "Something else", proven=True)  # noted once
+    one_card.note_mail("", "dana@northpeak.example", "Re: Labels", proven=True)
+    one_card.note_mail("t-5", "", "Re: Labels", proven=True)
+    import sqlite3
+
+    with sqlite3.connect(alerts_store.DB_PATH) as conn:
+        rows = dict(conn.execute("SELECT thread_id, conversation FROM mail_conversations").fetchall())
+    assert rows == {"t-1": "t-1", "t-7": "t-7", "t-9": "t-7"}
+
+
+def test_a_replaced_card_hands_its_graver_joined_card_to_the_newer_one(mail_turn: Session) -> None:
+    reply = {"to": "dana@northpeak.example", "subject": "Re: Thursday", "body": "x", "thread_id": "thread-1"}
+    with set_turn(session_id="s", turn_id="turn-1"):
+        old_card, _ = _approve(tool_input=reply)
+        _note("These bank details look changed", severity="high")
+    with set_turn(session_id="s", turn_id="turn-2"):
+        new_card, _ = _approve(tool_input={**reply, "body": "y"})
+    kept = _get(new_card)
+    assert _get(old_card).status == "dismissed"
+    assert kept.severity == "high" and "These bank details look changed" in kept.body
+
+
+def test_the_subject_a_follow_up_is_matched_on_comes_from_the_header() -> None:
+    from openexecutive.integrations.email_poller import _header_subject
+
+    assert _header_subject("From: dana@x.example\nSUBJECT: Re: Labels\n\nSubject: not this") == "Re: Labels"
+    assert _header_subject("From: dana@x.example\n\nSubject: in the body") == ""

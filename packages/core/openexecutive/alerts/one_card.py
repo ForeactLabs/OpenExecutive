@@ -47,7 +47,7 @@ import sqlite3
 from collections.abc import Iterator
 from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -172,16 +172,21 @@ def _subject_key(subject: str) -> str:
     return " ".join(_RE_PREFIX.sub("", str(subject or "")).split()).lower()
 
 
+# How long a mail thread is remembered for joining a follow-up to it.
+_CONVERSATION_DAYS = 90
+
+
 def _earlier(conn: sqlite3.Connection, thread_id: str, sender: str, subject: str) -> str:
     """The conversation a new thread ``thread_id`` from ``sender`` would join:
-    an earlier one of theirs on this subject, when ``subject`` is a reply."""
+    their latest one on this subject, when ``subject`` is a reply."""
     key = _subject_key(subject)
     if not key or not _RE_PREFIX.match(str(subject or "")):
         return ""
     if conn.execute("SELECT 1 FROM mail_conversations WHERE thread_id = ?", (thread_id,)).fetchone():
         return ""
     row = conn.execute(
-        "SELECT conversation FROM mail_conversations WHERE sender = ? AND subject = ? ORDER BY created_at LIMIT 1",
+        "SELECT conversation FROM mail_conversations WHERE sender = ? AND subject = ? "
+        "ORDER BY created_at DESC LIMIT 1",
         (sender, key),
     ).fetchone()
     return str(row["conversation"]) if row is not None else ""
@@ -225,6 +230,10 @@ def note_mail(
             if conn.execute("SELECT 1 FROM mail_conversations WHERE thread_id = ?", (thread_id,)).fetchone():
                 return
             conversation = (_earlier(conn, thread_id, sender, subject) if proven else "") or thread_id
+            conn.execute(
+                "DELETE FROM mail_conversations WHERE created_at < ?",
+                ((datetime.now(UTC) - timedelta(days=_CONVERSATION_DAYS)).isoformat(),),
+            )
             conn.execute(
                 "INSERT OR IGNORE INTO mail_conversations (thread_id, sender, subject, conversation, created_at) "
                 "VALUES (?, ?, ?, ?, ?)",
