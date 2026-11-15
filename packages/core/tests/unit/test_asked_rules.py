@@ -235,6 +235,12 @@ def test_who_asked_speaks_to_the_owner(owner: Any) -> None:
     assert ttl.who_asked(SimpleNamespace(email_from=me.email)) == "Mail from your address asked."
     assert ttl.who_asked(SimpleNamespace(email_from=DANA)) == "Dana Park asked by email."
     assert ttl.who_asked(SimpleNamespace(email_from="", caller_person_id=None)) == ""
+    # A chat turn names who is in it.
+    from openexecutive.people.store import upsert_person
+
+    mate = upsert_person(full_name="Sam Mate", email="sam@example.com")
+    assert ttl.who_asked(SimpleNamespace(email_from="", caller_person_id=mate)) == "Sam Mate asked in chat."
+    assert ttl.who_asked(SimpleNamespace(email_from="", caller_person_id=me.id)) == "You asked in chat."
 
 
 def test_a_send_a_later_check_put_on_a_card_is_not_done(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
