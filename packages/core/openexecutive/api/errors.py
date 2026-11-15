@@ -5,8 +5,9 @@ or the content being processed, so it never goes back to the caller or into
 a record the caller reads. The route logs the exception with
 ``logger.exception`` and sends :func:`public_error` instead.
 
-Errors raised on purpose with plain, input-free text (an ``HTTPException``
-detail, a validation message) are not "unexpected" and keep their own text.
+An error written for the person on purpose is raised as :class:`PublicError`
+(or a subclass); :func:`public_error` passes its text through. An
+``HTTPException`` detail is written on purpose too and never reaches here.
 """
 
 from __future__ import annotations
@@ -14,7 +15,16 @@ from __future__ import annotations
 GENERIC_FAILURE = "Something went wrong. Try again."
 
 
+class PublicError(Exception):
+    """An error whose text is written for the person and is safe to show."""
+
+
 def public_error(exc: BaseException) -> str:
-    """The text to show a caller for ``exc``. Never the exception's own text."""
-    del exc  # the details belong in the log, not the response
+    """The text to show a caller for ``exc``.
+
+    A :class:`PublicError` keeps its own text; anything else gets the generic
+    line, and its details belong in the log.
+    """
+    if isinstance(exc, PublicError) and str(exc).strip():
+        return str(exc)
     return GENERIC_FAILURE
