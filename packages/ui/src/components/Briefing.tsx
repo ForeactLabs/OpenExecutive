@@ -549,12 +549,12 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
     rightNowRows.length + mineProposals.length + replies.cards.length + inviteCards.cards.length +
     actionCards.cards.length + elsewhere.length;
   // Home's headline, in the Executive's words: what needs you, what it
-  // handled in the last day (what's still running isn't handled yet) and
+  // handled in the last day (what failed or is still running isn't) and
   // what it's watching. The rest (people, departments, under way,
   // monitoring) is one quiet line at the bottom.
   const headline = homeHeadline(
     needsYouCount,
-    doneRows.filter((r) => r.status !== "working").length,
+    doneRows.filter((r) => r.status === "done").length,
     (today?.watching ?? []).length,
   );
 
@@ -1027,7 +1027,7 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
 
               <WatchingNext items={today?.watching ?? []} />
 
-              {needsYouCount === 0 && onContinue && <HandMeSomething onPick={onContinue} />}
+              {showHeadline && needsYouCount === 0 && onContinue && <HandMeSomething onPick={onContinue} />}
 
               {/* Everything else, one quiet line: each opens its panel or page. */}
               {tiles.length > 0 && (

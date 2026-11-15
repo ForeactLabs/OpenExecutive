@@ -102,4 +102,5 @@ test("Home's headline says what needs you, then what it handled and watches", ()
   assert.deepEqual(homeHeadline(0, 0, 0), { lead: "All clear.", rest: "Nothing needs you.", clear: true });
   assert.equal(homeHeadline(0, 0, 2).rest, "Nothing needs you. I'm watching 2 things for you.");
   assert.equal(homeHeadline(0, 0, 1).rest, "Nothing needs you. I'm watching 1 thing for you.");
+  assert.equal(homeHeadline(0, 3, 0).rest, "Nothing needs you. I handled 3 since yesterday.");
 });
