@@ -343,6 +343,24 @@ def _attribution_end(body: list[str], i: int) -> tuple[int, bool] | None:
     return None
 
 
+async def _note_thread(
+    thread_id: str, from_addr: str, subject: str, prove: Callable[[], Awaitable[bool]],
+) -> None:
+    """Note the conversation this mail's thread belongs to (one card per
+    topic): a follow-up the mailbox filed as a new thread joins the sender's
+    earlier conversation only once the mailbox vouches for the sender, since
+    anyone can write a From: line. ``prove`` runs only when the mail would
+    join one. Never raises."""
+    from openexecutive.alerts import one_card
+
+    try:
+        proven = await asyncio.to_thread(one_card.continues, thread_id, from_addr, subject) and await prove()
+    except Exception:  # noqa: BLE001 - optional step; must not lose the email.
+        logger.warning("couldn't check a follow-up's sender; it keeps its own thread", exc_info=True)
+        proven = False
+    await asyncio.to_thread(one_card.note_mail, thread_id, from_addr, subject, proven=proven)
+
+
 def _header_subject(raw_email: str) -> str:
     """The Subject: line of a fetched message, or ''."""
     header, _body, _attachments = _split_gmail_content(raw_email)
@@ -1375,20 +1393,7 @@ async def _run_executive(
         prove = prove_sender or _gmail_proof
         session.email_from = from_addr.strip().lower()
         session.email_thread_id = str(thread_id or "")
-        # A follow-up the mailbox filed as a new thread joins the sender's
-        # earlier conversation (one card per topic) only once the mailbox
-        # vouches for the sender: anyone can write a From: line.
-        from openexecutive.alerts import one_card
-
-        subject_line = _header_subject(raw_email)
-        try:
-            proven = await asyncio.to_thread(
-                one_card.continues, thread_id, from_addr, subject_line
-            ) and await prove()
-        except Exception:  # noqa: BLE001 - optional step; must not lose the email.
-            logger.warning("couldn't check a follow-up's sender; it keeps its own thread", exc_info=True)
-            proven = False
-        await asyncio.to_thread(one_card.note_mail, thread_id, from_addr, subject_line, proven=proven)
+        await _note_thread(thread_id, from_addr, _header_subject(raw_email), prove)
         try:
             principal = await asyncio.to_thread(principal_address)
         except Exception:  # noqa: BLE001 - optional step; must not lose the email.

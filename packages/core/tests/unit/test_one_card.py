@@ -341,3 +341,34 @@ def test_each_newer_reply_takes_everything_the_one_it_replaced_held(mail_turn: S
     assert kept.severity == "high"
     assert "Dana asked for Thursday" in kept.body and "Dana asked again" in kept.body
     assert _get(first).superseded_by_alert_id == _get(second).superseded_by_alert_id == c
+
+
+def test_the_poller_links_a_follow_up_only_for_a_sender_the_mailbox_vouched_for() -> None:
+    import asyncio
+
+    from openexecutive.integrations.email_poller import _note_thread
+
+    calls: list[str] = []
+
+    def prover(result: bool | None) -> Any:
+        async def prove() -> bool:
+            calls.append("prove")
+            if result is None:
+                raise RuntimeError("mailbox down")
+            return result
+        return prove
+
+    dana = "dana@northpeak.example"
+    asyncio.run(_note_thread("t-1", dana, "Labels", prover(True)))
+    assert calls == []  # a fresh mail is never proven: it links to nothing
+    asyncio.run(_note_thread("t-2", dana, "Re: Labels", prover(False)))
+    asyncio.run(_note_thread("t-3", dana, "Re: Labels", prover(None)))
+    asyncio.run(_note_thread("t-4", dana, "Re: Labels", prover(True)))
+    assert calls == ["prove", "prove", "prove"]
+    import sqlite3
+
+    with sqlite3.connect(alerts_store.DB_PATH) as conn:
+        rows = dict(conn.execute("SELECT thread_id, conversation FROM mail_conversations").fetchall())
+    # Unproven (t-2) and unprovable (t-3) follow-ups keep their own thread;
+    # the vouched one (t-4) joins the latest conversation on that subject.
+    assert rows == {"t-1": "t-1", "t-2": "t-2", "t-3": "t-3", "t-4": "t-3"}
