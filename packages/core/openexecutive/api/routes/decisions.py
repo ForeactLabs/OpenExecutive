@@ -264,6 +264,25 @@ def _own_chat_ok(instance: DecisionInstance, request: Request) -> bool:
     return own_chat.decision_shown_to(instance, caller)
 
 
+def _own_chat_kept(instances: list[DecisionInstance], request: Request) -> list[DecisionInstance]:
+    """``instances`` without the ones held from someone else's own chat
+    (``_own_chat_ok``), with the caller and the chats looked up once for the
+    whole list. Fails closed."""
+    from openexecutive.alerts import own_chat
+    from openexecutive.api.routes.chat import _resolve_caller_person_id
+
+    try:
+        caller = _resolve_caller_person_id(request)
+    except Exception:
+        logger.exception("decisions: caller lookup failed — treating them as someone else")
+        caller = None
+    only = own_chat.decision_readers(instances)
+    return [
+        i for i in instances
+        if only.get(int(i.id)) is None or (caller is not None and caller in only[int(i.id)])
+    ]
+
+
 def _visible_instance(instance_id: int, request: Request) -> DecisionInstance:
     """The instance, or 404 — also for a private one when the caller is not
     the principal, and for one only its approver may see when the caller is
@@ -395,14 +414,14 @@ def get_decisions(
         return [_served(i) for i in instances if i.approver_person_id == caller][:limit]
     if _approver_is_principal(request):
         return [
-            _served(i) for i in list_instances(decision_class, status=status, limit=limit)
-            if _own_chat_ok(i, request)
+            _served(i)
+            for i in _own_chat_kept(list_instances(decision_class, status=status, limit=limit), request)
         ]
     spec = DECISION_CLASSES.get(decision_class)
     if spec is not None and spec.principal_only:
         return []
     instances = list_instances(decision_class, status=status, limit=limit)
-    return [_served(i) for i in instances if not _is_private(i) and _own_chat_ok(i, request)]
+    return [_served(i) for i in _own_chat_kept(instances, request) if not _is_private(i)]
 
 
 @router.get("/decisions/{instance_id}", response_model=DecisionInstance)

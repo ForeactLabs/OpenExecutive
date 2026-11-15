@@ -498,3 +498,24 @@ def test_a_teammates_edit_stops_once_their_decision_is_shared(roster: SimpleName
     assert episodic.update_decision(fact_id, summary="x", reader=roster.sam, own_only=True) is False
     [team] = facts.decision_rows()
     assert team.id == fact_id and team.recorded_by_role == "teammate"
+
+
+@pytest.mark.parametrize(("scope", "reads_own"), [("p-sam", True), ("company", False)])
+def test_a_teammates_own_header_reads_their_private_decisions(
+    roster: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, scope: str, reads_own: bool
+) -> None:
+    from openexecutive.api.routes import today
+    from openexecutive.briefing import narrative_cache
+
+    class _Read(Exception):
+        pass
+
+    def render(*, reader: int | None = None, **_: Any) -> str:
+        raise _Read(reader)
+
+    monkeypatch.setattr(today, "_header_live", lambda include_private: ([], None, ""))
+    monkeypatch.setattr(facts, "render_facts_for_prompt", render)
+    scope = narrative_cache.COMPANY_SCOPE if scope == "company" else scope
+    with pytest.raises(_Read) as read:
+        today._header_context({}, SimpleNamespace(id=roster.sam), "day", scope, None)  # type: ignore[arg-type]
+    assert read.value.args == (roster.sam if reads_own else None,)

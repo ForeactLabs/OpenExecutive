@@ -2379,7 +2379,7 @@ def _header_context(
     # company's reads the team's alone.
     facts_reader = (
         principal_id() if own
-        else getattr(reader, "viewer", None) if scope != narrative_cache.COMPANY_SCOPE
+        else viewer.id if viewer is not None and scope != narrative_cache.COMPANY_SCOPE
         else None
     )
     standing_facts = render_facts_for_prompt(reader=facts_reader)
