@@ -7,8 +7,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from openexecutive.api.errors import GENERIC_FAILURE, PublicError, public_error
 from openexecutive.api.routes import evals as evals_route
+from openexecutive.utils.public_errors import GENERIC_FAILURE, PublicError, public_error
 
 
 def test_public_error_never_carries_the_exception_text() -> None:

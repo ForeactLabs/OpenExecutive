@@ -15,7 +15,7 @@ from __future__ import annotations
 GENERIC_FAILURE = "Something went wrong. Try again."
 
 
-class PublicError(Exception):
+class PublicError(RuntimeError):
     """An error whose text is written for the person and is safe to show."""
 
 

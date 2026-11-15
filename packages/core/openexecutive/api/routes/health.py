@@ -5,8 +5,8 @@ from typing import Any
 
 from fastapi import APIRouter, Request
 
-from openexecutive.api.errors import public_error
 from openexecutive.api.models import GatewayHealth, HealthResponse
+from openexecutive.utils.public_errors import public_error
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

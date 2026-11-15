@@ -25,7 +25,6 @@ import yaml
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from openexecutive.api.errors import public_error
 from openexecutive.evals.persistence import (
     append_scenario_result,
     cancel_eval_run,
@@ -50,6 +49,7 @@ from openexecutive.evals.scenarios import (
     scenario_kind,
     validate_scenario_yaml,
 )
+from openexecutive.utils.public_errors import public_error
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

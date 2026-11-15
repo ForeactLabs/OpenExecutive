@@ -5,8 +5,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from openexecutive.api.errors import GENERIC_FAILURE
 from openexecutive.api.routes import health as health_route
+from openexecutive.utils.public_errors import GENERIC_FAILURE
 
 
 @pytest.fixture(autouse=True)

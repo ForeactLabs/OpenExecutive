@@ -24,7 +24,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
 from openexecutive.api import caller as api_caller
-from openexecutive.api.errors import public_error
+from openexecutive.utils.public_errors import public_error
 from openexecutive.workflows import (
     get_workflow,
     list_workflows,

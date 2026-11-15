@@ -887,7 +887,7 @@ def test_an_unexpected_failure_shows_plain_text_not_the_exception(
 ) -> None:
     """The person running a workflow sees a plain message, and the stored
     run says the same; the exception's own text stays in the log."""
-    from openexecutive.api.errors import GENERIC_FAILURE
+    from openexecutive.utils.public_errors import GENERIC_FAILURE
 
     with patch("openexecutive.workflows.persistence.DB_PATH", temp_db), \
          patch("openexecutive.api.routes.workflows.create_run",
@@ -905,3 +905,34 @@ def test_an_unexpected_failure_shows_plain_text_not_the_exception(
     assert run is not None
     assert run["status"] == "error"
     assert run["error"] == GENERIC_FAILURE
+
+
+class _RefusingWorkflow(_GateRouteWorkflow):
+    """A workflow that fails with text written for the person."""
+
+    name = "refusing_route"
+
+    async def run(self, inputs, store):  # noqa: ANN001, ANN201
+        from openexecutive.utils.public_errors import PublicError
+
+        raise PublicError("Add a topic first.")
+        yield  # pragma: no cover - makes this an async generator
+
+
+def test_a_public_error_reaches_the_person_with_its_own_text(
+    temp_db: Path,
+) -> None:
+    with patch("openexecutive.workflows.persistence.DB_PATH", temp_db), \
+         patch("openexecutive.api.routes.workflows.create_run",
+               side_effect=lambda **kw: create_run(db_path=temp_db, **kw)), \
+         patch("openexecutive.api.routes.workflows.get_workflow",
+               lambda name: _RefusingWorkflow()):
+        app = create_app()
+        with TestClient(app) as c:
+            r = c.post("/workflows/refusing_route/runs", json={"topic": "x"})
+
+    errors = [e for e in _sse_events(r.text) if e.get("type") == "error"]
+    assert errors and errors[-1]["message"] == "Add a topic first."
+    run = get_run(errors[-1]["run_id"], db_path=temp_db)
+    assert run is not None
+    assert run["error"] == "Add a topic first."
