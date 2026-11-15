@@ -78,6 +78,11 @@ _SYSTEM = (
     "short phrase). Record your verdict with the tool."
 )
 
+# A claim about work before this reply is about another turn, which this
+# one's calls can't back or disprove: the judge says which it is.
+WHEN_THIS_REPLY = "this reply"
+WHEN_BEFORE = "before this reply"
+
 _TOOL: dict[str, Any] = {
     "name": "record_claim_check",
     "description": "Record whether the reply claims a change no tool call made.",
@@ -92,8 +97,18 @@ _TOOL: dict[str, Any] = {
                 "type": "string",
                 "description": "The claim, copied word for word from the reply. Empty when unbacked is false.",
             },
+            "when": {
+                "type": "string",
+                "enum": [WHEN_THIS_REPLY, WHEN_BEFORE],
+                "description": (
+                    "When the claim says the change happened: during this reply, or before it "
+                    "(an earlier message, earlier today, yesterday). A time the change set "
+                    "('moved it to this morning') or a time in what it names ('the notes from "
+                    "yesterday's call') is not when it happened."
+                ),
+            },
         },
-        "required": ["unbacked", "claim"],
+        "required": ["unbacked", "claim", "when"],
     },
 }
 
@@ -191,20 +206,10 @@ def _normalize(text: str) -> str:
     return " ".join(text.replace("’", "'").split()).lower()
 
 
-# A claim that says it happened before this reply ("Earlier today I sent…",
-# "I already booked it") is about another turn, which this one's calls can't
-# back: never an unbacked claim, whatever the model said.
-EARLIER_RE = re.compile(
-    r"\b(?:earlier|before (?:this|now)|previously|yesterday|last (?:week|time|night)|"
-    r"this morning|(?:a|an|\d+) (?:minutes?|hours?|days?) ago)\b",
-    re.IGNORECASE,
-)
-
-
 def accept_claim(payload: dict[str, Any], reply: str) -> str | None:
     """The model's claim when it reported one, it is in the reply word for
     word (whitespace, case and curly quotes aside) and it doesn't place
-    itself before this reply (``said_earlier``); None otherwise."""
+    itself before this reply (``when``); None otherwise."""
     if payload.get("unbacked") is not True:
         return None
     claim = " ".join(str(payload.get("claim") or "").split())
@@ -212,24 +217,10 @@ def accept_claim(payload: dict[str, Any], reply: str) -> str | None:
         return None
     if _normalize(claim) not in _normalize(reply):
         return None
-    if said_earlier(claim):
+    if payload.get("when") == WHEN_BEFORE:
         return None
     return claim
 
-
-# "moved it to this morning", "booked the slot for yesterday": a time after
-# one of these words is what the step set, not when it happened.
-_TARGET_WORDS = frozenset({"to", "for", "until", "till", "by", "at", "on", "from", "into", "after"})
-
-
-def said_earlier(claim: str) -> bool:
-    """Whether the claim says it happened before this reply: a time phrase
-    (``EARLIER_RE``) that isn't the target of the step."""
-    for match in EARLIER_RE.finditer(claim):
-        before = claim[: match.start()].split()
-        if not before or before[-1].lower().strip(",;:") not in _TARGET_WORDS:
-            return True
-    return False
 
 
 async def _call_model(model: str, turn: str) -> dict[str, Any]:

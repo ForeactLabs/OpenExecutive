@@ -222,11 +222,18 @@ def test_every_call_of_a_long_turn_is_shown() -> None:
 
 def test_a_claim_about_before_this_reply_is_never_unbacked() -> None:
     reply = "Earlier today I also sent Sam approval cards for the other quotes. I sent the quote just now."
-    earlier = {"unbacked": True, "claim": "Earlier today I also sent Sam approval cards for the other quotes."}
+    earlier = {
+        "unbacked": True,
+        "claim": "Earlier today I also sent Sam approval cards for the other quotes.",
+        "when": claim_check.WHEN_BEFORE,
+    }
     assert claim_check.accept_claim(earlier, reply) is None
-    assert claim_check.accept_claim({"unbacked": True, "claim": "I sent the quote just now."}, reply) == (
-        "I sent the quote just now."
-    )
+    now = {"unbacked": True, "claim": "I sent the quote just now.", "when": claim_check.WHEN_THIS_REPLY}
+    assert claim_check.accept_claim(now, reply) == "I sent the quote just now."
+    # The judge must say when; a time word in the claim alone decides nothing.
+    assert claim_check._TOOL["input_schema"]["required"] == ["unbacked", "claim", "when"]
+    noted = {"unbacked": True, "claim": "I saved the notes from yesterday's call.", "when": claim_check.WHEN_THIS_REPLY}
+    assert claim_check.accept_claim(noted, "I saved the notes from yesterday's call.") is not None
 
 
 def test_a_very_long_turn_drops_its_middle_calls() -> None:
@@ -255,10 +262,3 @@ def test_a_long_turn_drops_reads_before_any_change() -> None:
     assert "Dock door plan" in rendered and "Saved to Documents" in rendered
     assert sum("more calls left out" in line for line in lines) == 1
 
-
-def test_a_time_the_step_set_is_still_checked() -> None:
-    """ "to this morning" is what the step did, not when: still checked."""
-    for claim in ("I moved the meeting to this morning.", "I booked the 3pm slot for yesterday."):
-        assert claim_check.accept_claim({"unbacked": True, "claim": claim}, claim) == claim
-    assert claim_check.said_earlier("I sent Sam the quote 2 hours ago.")
-    assert claim_check.said_earlier("Earlier today I emailed Leo.")

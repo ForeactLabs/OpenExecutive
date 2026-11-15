@@ -5432,9 +5432,11 @@ chat:
     iteration, fails open. Why: replies said "Done" or "I'll treat it as
     closed" with no tool call, and the brief kept the item.
     CLAIM_CHECK_ENABLED (default true). Every call of the turn is shown,
-    lines cut shorter on a long turn (render_calls, CALLS_BUDGET_CHARS),
+    lines cut shorter on a long turn (render_calls, CALLS_BUDGET_CHARS;
+    past 100 calls reads go first, then the middle),
     never only the last 20; a claim placed before this reply ("Earlier
-    today I sent…", EARLIER_RE) never counts; the extra round always
+    today I sent…", the judge's required when field) never counts; the
+    extra round always
     writes the whole reply again and it replaces the first everywhere
     (the rewrite event: collected replies, the web chat, the phone,
     chat_live). Why: a simulated week on a test company (11-15) had 5 of 6
