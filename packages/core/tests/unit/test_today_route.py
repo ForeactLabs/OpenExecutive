@@ -3064,11 +3064,45 @@ def test_done_for_you_shows_an_approval_on_an_install_with_no_owner_yet(
     ]
 
 
+def test_done_for_you_names_an_approved_card_by_its_plan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A card they approved reads as what they said yes to, with what its
+    own chat did; a card with no plan keeps its headline."""
+    from openexecutive.alerts import approvals
+    from openexecutive.memory import session_store
+
+    db = tmp_path / "approved_plan.db"
+    _setup_isolated_db(db, monkeypatch)
+    alert_store.insert_alert(
+        source="query", external_id="a-plan", severity="medium",
+        headline="Paper covers the launch", body="...", db_path=db,
+        suggested_action="Check the coverage and add it to the press log. Then tell Alex.",
+    )
+    alert_store.insert_alert(
+        source="system", external_id="a-bare", severity="medium",
+        headline="Renew the domain", body="...", db_path=db,
+    )
+    chats = {"chat-1": [{"role": "assistant", "content": "I added it to a new press log. Link: x"}]}
+    monkeypatch.setattr(session_store, "load_messages", lambda sid, *a, **k: chats.get(sid, []))
+    for alert in alert_store.list_alerts(db_path=db):
+        claimed = approvals.claim(alert.id, approved_by_person_id=None, db_path=db)
+        assert claimed is not None
+        approvals.set_session(claimed.id, "chat-1" if alert.external_id == "a-plan" else "chat-9", db_path=db)
+        approvals.finish(claimed.id, approvals.STATUS_DONE, "Done.", db_path=db)
+    rows = [r for r in _make_client().get("/today").json()["done_for_you"] if r["kind"] == "approval"]
+    assert sorted((r["title"], r["detail"]) for r in rows) == [
+        ("Renew the domain", "Done."),
+        ("You approved: Check the coverage and add it to the press log.", "I added it to a new press log."),
+    ]
+
+
 def test_done_for_you_leaves_out_what_is_not_done_for_them(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Cards raised, advice and decisions noted from their own chats stay out
-    of Done for you; what it did on its own is in."""
+    """Cards raised, advice, decisions noted from their own chats and
+    finished runs (a report: "Not a run day") stay out of Done for you; what
+    it did on its own is in."""
     db = tmp_path / "done_kinds.db"
     _setup_isolated_db(db, monkeypatch)
     now = datetime.now(UTC).isoformat()
@@ -3089,13 +3123,13 @@ def test_done_for_you_leaves_out_what_is_not_done_for_them(
     people_store.upsert_person(full_name="Sam", email="sam@example.com", db_path=db)
     client = _make_client()
     rows = client.get("/today", headers={"x-caller-email": "jordan@example.com"}).json()["done_for_you"]
-    assert sorted(r["title"] for r in rows) == ["Reminded Sam about the invoice", "Wrote the weekly sales report"]
+    assert [r["title"] for r in rows] == ["Reminded Sam about the invoice"]
     # Memory's What it does reads the same rows on their own.
     assert client.get("/today/done", headers={"x-caller-email": "jordan@example.com"}).json() == rows
     # A teammate gets what it did for the team too, less what it sent them
     # (whose items reach whom is _build_activity's, stubbed here).
     theirs = client.get("/today", headers={"x-caller-email": "sam@example.com"}).json()["done_for_you"]
-    assert "Wrote the weekly sales report" in {r["title"] for r in theirs}
+    assert "Wrote the weekly sales report" not in {r["title"] for r in theirs}
     assert "Reminded Sam about the invoice" not in {r["title"] for r in theirs}
     assert client.get("/today/done", headers={"x-caller-email": "sam@example.com"}).json() == theirs
 

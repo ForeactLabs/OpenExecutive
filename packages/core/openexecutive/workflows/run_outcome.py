@@ -103,8 +103,8 @@ def outcome_line(run: dict[str, Any]) -> str | None:
     if name == "department_check_in":
         return _check_in_line(artifact)
     if name == "weekly_review":
-        return _weekly_line(artifact) or _first_sentence(artifact)
-    return _first_sentence(artifact)
+        return _weekly_line(artifact) or first_sentence(artifact)
+    return first_sentence(artifact)
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +180,7 @@ def _weekly_line(artifact: str) -> str | None:
     return None
 
 
-def _first_sentence(artifact: str) -> str | None:
+def first_sentence(artifact: str) -> str | None:
     """The first line of prose in a write-up, without its Markdown."""
     for raw in artifact.splitlines():
         line = raw.strip()

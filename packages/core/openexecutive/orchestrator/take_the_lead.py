@@ -2506,6 +2506,32 @@ def went_on_its_own_why(level: str) -> str:
             else "No rule of yours said to wait")
 
 
+def who_asked(session: Any) -> str:
+    """Who asked for a turn's steps, written to the owner: "Alex Cohen asked
+    by email.", "Dana Price asked in chat.", "You asked by email." only for
+    the owner's mail that proved it was theirs ("Mail from your address
+    asked." otherwise). "" when no one did. Never raises."""
+    from openexecutive.people.store import find_person_by_address, get_person
+
+    try:
+        sender = str(getattr(session, "email_from", "") or "").strip()
+        person = find_person_by_address(sender.lower(), include_contacts=True) if sender else None
+        how = "by email"
+        if person is None and not sender:
+            caller = getattr(session, "caller_person_id", None)
+            person = get_person(caller) if caller is not None else None
+            how = "in chat"
+        if person is not None and person.is_principal:
+            if how == "by email" and getattr(session, "email_authenticated", False) is not True:
+                return "Mail from your address asked."
+            return f"You asked {how}."
+        name = (person.full_name if person is not None else "") or sender
+        return f"{name} asked {how}." if name else ""
+    except Exception:
+        logger.warning("take_the_lead: couldn't tell who asked", exc_info=True)
+        return ""
+
+
 def _went_on_its_own(name: str, tool_input: dict[str, Any], result: Any, *, mcp: bool) -> None:
     """Log a step someone asked for (a contact's mail, a teammate) that went
     without a yes, so Done for you and the counts show it. Best effort."""
@@ -2518,10 +2544,9 @@ def _went_on_its_own(name: str, tool_input: dict[str, Any], result: Any, *, mcp:
 
         session = current_session.get()
         why = went_on_its_own_why(levels.turn_level(session))
-        sender = str(getattr(session, "email_from", "") or "").strip()
-        asked = f"Answering {(_names_of([sender.lower()]) or [sender])[0]}'s email. " if sender else ""
+        asked = who_asked(session)
         record(scope=SCOPE_EXECUTIVE, source="chat", tool=name, summary=summarize(name, tool_input, mcp=mcp, quote=False),
-               status="done", why=f"{asked}Went on its own: {why}.", mail=mail_sent(name, tool_input) if mcp else None,
+               status="done", why=f"{asked} Went on its own: {why}.".strip(), mail=mail_sent(name, tool_input) if mcp else None,
                outcome=outcome_of(name, tool_input, text, mcp=mcp), to_person_id=_message_target(name, tool_input))
     except Exception:
         logger.warning("take_the_lead: couldn't log a step that went on its own", exc_info=True)

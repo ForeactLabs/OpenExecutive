@@ -216,11 +216,25 @@ def test_an_asked_send_that_went_on_its_own_is_logged_with_why(owner: Any) -> No
     assert sent == "Email sent!"
     [row] = [d for d in ttl.done([ttl.SCOPE_EXECUTIVE], days=1) if d.status == "done"]
     assert row.mail_to == DANA and row.mail_subject == "Hours"
-    assert "Went on its own" in row.why and "no rule of yours said to wait" in row.why
+    assert row.why.startswith("Dana Park asked by email. Went on its own")
+    assert "no rule of yours said to wait" in row.why
     assert ttl.went_on_its_own_why(outside_mode.OUTSIDERS).startswith("Approvals is Balanced")
     # Mail only to the owner isn't something it did on its own.
     asyncio.run(asked({"name": SEND, "arguments": {"to": OWNER, "body": "Hi"}}))
     assert len([d for d in ttl.done([ttl.SCOPE_EXECUTIVE], days=1) if d.status == "done"]) == 1
+
+
+def test_who_asked_speaks_to_the_owner(owner: Any) -> None:
+    """The owner's own mail reads "You asked", never their name, and only
+    when it proved it was theirs."""
+    from openexecutive.people.store import find_principal_person
+
+    me = find_principal_person()
+    assert me is not None and me.email
+    assert ttl.who_asked(SimpleNamespace(email_from=me.email, email_authenticated=True)) == "You asked by email."
+    assert ttl.who_asked(SimpleNamespace(email_from=me.email)) == "Mail from your address asked."
+    assert ttl.who_asked(SimpleNamespace(email_from=DANA)) == "Dana Park asked by email."
+    assert ttl.who_asked(SimpleNamespace(email_from="", caller_person_id=None)) == ""
 
 
 def test_a_send_a_later_check_put_on_a_card_is_not_done(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:

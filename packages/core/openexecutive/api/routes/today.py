@@ -2926,8 +2926,10 @@ _DONE_MAX = 8
 # Activity rows that are not something done for the reader: a card raised
 # (that is Needs you's), advice and decisions noted from their own chats,
 # a project started, and the contacts tally.
+# A finished run is a report, not something done: what it sent, changed or
+# made is logged step by step (``take_the_lead``) and shows as its own row.
 _DONE_SKIP_KINDS = frozenset({
-    "alert_raised", "advice_given", "decision_logged", "initiative_started", "contacts_kept",
+    "alert_raised", "advice_given", "decision_logged", "initiative_started", "contacts_kept", "workflow_done",
 })
 
 
@@ -2953,6 +2955,7 @@ def _done_for_you(request: Request, caller: int | None, now: datetime) -> list[D
     from openexecutive.alerts import approvals as alert_approvals
     from openexecutive.alerts.store import get_alert
     from openexecutive.api.routes.chat import _caller_is_principal_or_unclaimed
+    from openexecutive.workflows import run_outcome
 
     since = now - _DONE_WINDOW
     rows: list[DoneRow] = []
@@ -2972,11 +2975,17 @@ def _done_for_you(request: Request, caller: int | None, now: datetime) -> list[D
                     "working" if a.status == alert_approvals.STATUS_RUNNING
                     else "failed" if a.status == alert_approvals.STATUS_FAILED else "done"
                 )
+                # What they said yes to (the card's plan), and what came of
+                # it from their own chat: these rows are theirs alone, so its
+                # words never reach anyone else.
+                plan = (run_outcome.first_sentence(alert.suggested_action) or "") if alert is not None else ""
                 rows.append(DoneRow(
                     key=f"approval:{a.alert_id}",
                     kind="approval",
-                    title=alert.headline if alert is not None else "A card you approved",
-                    detail=a.outcome,
+                    title=f"You approved: {plan}" if plan else (
+                        alert.headline if alert is not None else "A card you approved"
+                    ),
+                    detail=(_chat_said(a.session_id) if a.status == alert_approvals.STATUS_DONE else "") or a.outcome,
                     status=status,
                     at=a.finished_at or a.approved_at,
                     session_id=a.session_id,
@@ -3034,6 +3043,23 @@ def _done_for_you(request: Request, caller: int | None, now: datetime) -> list[D
     rows.sort(key=lambda r: _parse_aware(r.at) or datetime.min.replace(tzinfo=UTC), reverse=True)
     rows.sort(key=lambda r: 0 if r.status == "working" else 1)
     return rows[:_DONE_MAX]
+
+
+def _chat_said(session_id: str | None) -> str:
+    """The first sentence of a chat's last answer ("I checked the coverage
+    and added it to a new press log."), for a card's row in Done for you.
+    "" when there is none. Never raises."""
+    from openexecutive.memory.session_store import load_messages
+    from openexecutive.workflows.run_outcome import first_sentence
+
+    if not session_id:
+        return ""
+    try:
+        answers = [m for m in load_messages(session_id) if m.get("role") == "assistant"]
+        return (first_sentence(str(answers[-1].get("content") or "")) or "") if answers else ""
+    except Exception:
+        logger.warning("today: couldn't read what a card's chat did", exc_info=True)
+        return ""
 
 
 def _lead_line(row: Any, jobs: dict[int, Any], answers: dict[tuple[int, str], str]) -> str:
