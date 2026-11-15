@@ -2105,8 +2105,10 @@ def hold(
     summary = summarize(tool, tool_input, mcp=mcp)
     training = hit.kind == TRAINING
     grant = allowance(tool, tool_input, mcp=mcp) if training else None
-    if training:
-        # Teaching it is the principal's: only they can allow anything.
+    if training or (hit.kind == "level" and source == "chat"):
+        # Teaching it is the principal's: only they can allow anything. So is
+        # a step Careful held on a turn someone is in, the owner's own ask
+        # included: never a delegate's card.
         approver = _principal_id()
     elif _team_only(tool, tool_input):
         approver = _approver_for(hit.kind, "\n".join(_strings(tool_input)), hit.reason)

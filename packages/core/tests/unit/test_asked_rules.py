@@ -159,6 +159,15 @@ def test_careful_holds_even_the_owners_own_ask(owner: Any, monkeypatch: pytest.M
         assert ttl.asked_checks_apply(current_session.get()) is True
         held = json.loads(asyncio.run(asked(step)))
         assert held["status"] == "waiting_for_approval" and "Careful" in held["message"] and seen == []
+        # The owner's card, even when the step's words would route it to a
+        # delegate (a board range): Careful's hold is never someone else's.
+        from openexecutive.memory.decision_ledger import get_decision_instance
+
+        monkeypatch.setattr(ttl, "_team_only", lambda *_a, **_k: True)
+        monkeypatch.setattr(ttl, "_approver_for", lambda *_a, **_k: 999)
+        board = json.loads(asyncio.run(asked({"name": SEND, "arguments": {"to": OWNER, "cc": "x@far.example", "body": "The board"}})))
+        row = get_decision_instance(board["decision_instance_id"])
+        assert row is not None and row.approver_person_id == owner.id
         # Mail only to the owner still goes.
         assert asyncio.run(asked({"name": SEND, "arguments": {"to": OWNER, "body": "Hi"}})) == "Email sent!"
         # A teammate's ask waits on Careful too.

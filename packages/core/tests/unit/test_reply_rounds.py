@@ -148,3 +148,23 @@ def test_a_collected_reply_is_rewritten_not_corrected(monkeypatch: pytest.Monkey
     nudge = provider.calls[1]["messages"][-1]["content"][0]["text"]
     assert "write your whole reply again" in nudge
 
+
+
+def test_a_rewrite_that_writes_nothing_keeps_the_first_reply() -> None:
+    """An empty retry (or a stop before its first word) never leaves a blank
+    reply: the first one streams again, so it is saved and shown."""
+    from openexecutive.orchestrator.executive import _kept_if_unwritten
+
+    async def collect(items: list[Any]) -> list[Any]:
+        async def stream() -> Any:
+            for item in items:
+                yield item
+
+        return [i async for i in _kept_if_unwritten(stream(), Executive._THINKING)]
+
+    rewrite = {"type": "rewrite"}
+    out = asyncio.run(collect(["I sent ", "it.", rewrite, Executive._THINKING]))
+    assert out[-1] == "I sent it."
+    # A retry that wrote something stands as it is.
+    out = asyncio.run(collect(["I sent it.", rewrite, "It waits on approval."]))
+    assert out[-1] == "It waits on approval." and out.count("I sent it.") == 1

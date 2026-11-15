@@ -160,7 +160,7 @@ def _normalize(text: str) -> str:
 # "I already booked it") is about another turn, which this one's calls can't
 # back: never an unbacked claim, whatever the model said.
 EARLIER_RE = re.compile(
-    r"\b(?:earlier|already|before (?:this|now)|previously|yesterday|last (?:week|time|night)|"
+    r"\b(?:earlier|before (?:this|now)|previously|yesterday|last (?:week|time|night)|"
     r"this morning|(?:a|an|\d+) (?:minutes?|hours?|days?) ago)\b",
     re.IGNORECASE,
 )
