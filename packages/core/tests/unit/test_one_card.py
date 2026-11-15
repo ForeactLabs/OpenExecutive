@@ -106,6 +106,15 @@ def test_two_notes_from_one_turn_are_one_card_asking_the_question() -> None:
     assert kept.question == "Which slot?" and kept.choices == ["Mon", "Tue"] and "Pick a slot" in kept.body
 
 
+def test_new_text_on_an_opened_card_makes_it_new_again() -> None:
+    with set_turn(session_id="s", turn_id="turn-1"):
+        first = _note("Dock door 4 on Dec 3?")
+        alerts_store.set_status(first, "read")
+        _note("Dana needs the answer today")
+    kept = _get(first)
+    assert kept.status == "unread" and "Dana needs the answer today" in kept.body
+
+
 def test_cards_for_different_readers_or_privacy_stay_apart() -> None:
     with set_turn(session_id="s", turn_id="turn-1"):
         mine = _note("For the owner")

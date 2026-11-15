@@ -20,7 +20,7 @@ from openexecutive.alerts.preferences import (
     resolve_channels,
     save_preferences,
 )
-from openexecutive.alerts.store import add_mute, initialize_db, list_alerts
+from openexecutive.alerts.store import add_mute, initialize_db, insert_alert, list_alerts
 
 
 @pytest.fixture()
@@ -552,6 +552,41 @@ def test_as_written_same_message_folds_into_open_card(monkeypatch, db: Path) -> 
     assert first is not None
     assert second is None
     assert len(list_alerts(db_path=db)) == 1
+
+
+def test_only_a_teammates_own_message_keeps_to_its_own_card(monkeypatch, db: Path) -> None:
+    """A message the Executive writes to someone joins the open card on its
+    topic (one card per topic); a teammate's own message stays its own card."""
+    from openexecutive.alerts import dispatcher, one_card, pipeline
+    from openexecutive.audit.context import set_turn
+
+    async def fake_dispatch(alert, channels, **kw):  # noqa: ARG001
+        return None
+
+    monkeypatch.setattr(dispatcher, "dispatch_all", fake_dispatch)
+    with set_turn(session_id="s", turn_id="t-dock"):
+        with one_card.about(raised=True):
+            question = insert_alert(
+                source="department", external_id="", severity="medium",
+                headline="Dock door 4 on Dec 3: yes or no?", body="Northpeak needs an answer.",
+                routed_to_person_id=1, db_path=db,
+            )
+        own = AlertEvent(
+            source="executive", external_id="m-own", subject="Dana needs a yes or no on door 4",
+            body="Dana needs a yes or no on door 4 today.", routed_to_person_id=1,
+            user="person:1", as_written=True,
+        )
+        _, joined = asyncio.run(pipeline.evaluate_and_dispatch(own, db_path=db))
+        teammate = AlertEvent(
+            source="executive", external_id="m-jordan", subject="From Jordan: door 4 is free",
+            body="From Jordan: door 4 is free on Dec 3.", routed_to_person_id=1,
+            user="person:1", raised_by="Jordan Lee", as_written=True,
+        )
+        _, kept = asyncio.run(pipeline.evaluate_and_dispatch(teammate, db_path=db))
+    assert question is not None and joined is not None and kept is not None
+    by_id = {a.id: a for a in list_alerts(db_path=db)}
+    assert by_id[joined].superseded_by_alert_id == question
+    assert by_id[kept].superseded_by_alert_id is None and by_id[kept].status == "unread"
 
 
 def test_as_written_same_text_to_two_people_is_two_cards(monkeypatch, db: Path) -> None:
