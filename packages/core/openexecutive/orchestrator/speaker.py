@@ -61,6 +61,14 @@ def own_private_speaker(session: Any = None) -> Any:
     from openexecutive.delegation.settings import private_conversation
 
     session = session if session is not None else _session()
+    if (
+        session is None
+        or getattr(session, "meeting_call", False) is True
+        or bool(getattr(session, "email_from", None))
+    ):
+        # A call with others in it, or mail (which can carry cc's), is never
+        # one person's own conversation.
+        return None
     person = speaker(session)
     if person is None:
         return None
