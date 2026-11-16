@@ -170,6 +170,29 @@ def test_a_teammate_taken_out_while_their_turn_waits_is_refused(
     assert len(seen) == 1
 
 
+def test_a_chat_deleted_while_a_turn_waits_is_not_recreated(
+    client: Any, people: dict[str, int], monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    seen = _capture(monkeypatch)
+    sid = "web-shared-deleted"
+    session_store.create_session(sid, "T", "2026-10-01T09:00:00+00:00", caller_person_id=people["alex"])
+    session_store.save_message(sid, "user", "question", sender_person_id=people["alex"])
+    session_store.save_message(sid, "assistant", "answer")
+    session_store.set_shares(sid, [people["riya"]], people["alex"])
+    real = chat_route._acquire_session_turn
+
+    async def _owner_deletes_meanwhile(key: str, timeout: float) -> Any:
+        # The owner deletes the chat while Riya's turn waits for Alex's.
+        session_store.delete_session(sid)
+        return await real(key, timeout)
+
+    monkeypatch.setattr(chat_route, "_acquire_session_turn", _owner_deletes_meanwhile)
+    r = client.post("/chat", json={"message": "still here", "session_id": sid}, headers=RIYA)
+    assert r.status_code == 404
+    assert seen == []
+    assert session_store.get_session_metadata(sid) is None
+
+
 def test_a_chat_of_one_withholds_nothing(
     client: Any, people: dict[str, int], monkeypatch: pytest.MonkeyPatch  # noqa: F811
 ) -> None:

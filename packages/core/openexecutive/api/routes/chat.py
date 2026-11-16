@@ -1174,14 +1174,15 @@ async def _run_chat_turn(
             _release_stop(client_turn_id, turn_id)
             raise
     try:
-        if requested_id is not None and _turn_access(request, requested_id, caller_person_id)[0] not in (
-            "allowed",
-            "missing",
-        ):
+        if requested_id is not None:
             # Decided again once this turn holds the chat: the owner may have
             # taken them out, deleted it, or someone else's first turn claimed
-            # the id while this one waited.
-            raise HTTPException(status_code=404, detail="Session not found")
+            # the id while this one waited. Only an id that was unused before
+            # the wait may still be unused; a chat that existed and is gone
+            # now was deleted, and must not be recreated under this caller.
+            again = _turn_access(request, requested_id, caller_person_id)[0]
+            if not (again == "allowed" or (again == "missing" and access == "missing")):
+                raise HTTPException(status_code=404, detail="Session not found")
         session = await _get_or_create_session(requested_id, request)
         # A host origin's page writes only in a conversation it started or
         # already wrote in: one line from it holds the conversation read-only
