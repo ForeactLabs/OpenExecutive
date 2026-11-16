@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 from collections.abc import AsyncIterator, Iterator
 from contextvars import ContextVar
 from typing import Any
@@ -25,6 +26,8 @@ from typing import Any
 MAX_LINE_CHARS = 90
 # A run that posts faster than the chat reads keeps only the newest.
 MAX_WAITING = 200
+# Control characters and the marks that reorder text on screen.
+_UNSAFE = re.compile("[\x00-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
 
 _feed: ContextVar[Feed | None] = ContextVar("turn_live_feed", default=None)
 
@@ -71,8 +74,9 @@ class Feed:
         finally:
             if not task.done():
                 task.cancel()
-                with contextlib.suppress(BaseException):
-                    await task
+                # The task's own outcome only: a cancel aimed at the reader
+                # still goes through (gather doesn't swallow it).
+                await asyncio.gather(task, return_exceptions=True)
 
 
 def watching() -> bool:
@@ -82,7 +86,9 @@ def watching() -> bool:
 
 def post(event: dict[str, Any]) -> bool:
     """Send ``event`` to the chat following this call, if one is. Returns
-    whether one was."""
+    whether one was. Lossy: past ``MAX_WAITING`` unread events the oldest
+    is dropped, so post only what the chat can do without (a live line, a
+    picture), never what it must keep."""
     feed = _feed.get()
     if feed is None or not isinstance(event, dict):
         return False
@@ -95,7 +101,8 @@ def say(line: Any) -> bool:
     a round's ``activity`` would. Empty or not text: nothing."""
     if not isinstance(line, str):
         return False
-    text = " ".join(line.split())
+    # Often the model's words: one plain line, no control or direction marks.
+    text = " ".join(_UNSAFE.sub("", " ".join(line.split())).split())
     if not text:
         return False
     if len(text) > MAX_LINE_CHARS:

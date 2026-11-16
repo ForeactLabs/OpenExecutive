@@ -158,7 +158,7 @@ def test_a_long_line_is_cut_to_one_line() -> None:
 
         async def talk() -> None:
             turn_live.say("  Finding\nsailings  " + "x" * 200)
-            turn_live.say("Done.")
+            turn_live.say("Do\u202ene.\x07")
             turn_live.say("   ")
 
         with feed.bound():
