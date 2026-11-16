@@ -2949,7 +2949,7 @@ async def get_today(request: Request, background_tasks: BackgroundTasks) -> Toda
     ]
     response.done_for_you = _done_for_you(request, caller, datetime.now(UTC))
     response.watching = _watching(request, caller)
-    response.to_act_on = _to_act_on(response, caller)
+    response.to_act_on = await asyncio.to_thread(_to_act_on, response, caller)
     return response
 
 
