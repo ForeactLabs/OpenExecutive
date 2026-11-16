@@ -66,8 +66,10 @@ class _FakeStream:
 class _ScriptedProvider:
     def __init__(self, final_msgs: list[_FinalMsg]) -> None:
         self._final_msgs = list(final_msgs)
+        self.calls: list[dict[str, Any]] = []
 
-    def messages_stream(self, **_kwargs: Any) -> _FakeStream:
+    def messages_stream(self, **kwargs: Any) -> _FakeStream:
+        self.calls.append(kwargs)
         return _FakeStream(self._final_msgs.pop(0))
 
 
@@ -90,8 +92,11 @@ async def _workflow(*_a: Any, **_k: Any) -> str:
     return json.dumps({"ok": True, "artifact": "Ship 7: $1,240"})
 
 
+_provider: dict[str, _ScriptedProvider] = {}
+
+
 def _turn() -> list[Any]:
-    provider = _ScriptedProvider([
+    provider = _provider["last"] = _ScriptedProvider([
         _FinalMsg([_ToolUseBlock("tu_1", _RUN, {})], "tool_use"),
         _FinalMsg([_TextBlock("It is $1,240 for two.")], "end_turn"),
     ])
@@ -118,6 +123,14 @@ def test_a_long_tool_shows_what_it_is_doing_while_it_runs() -> None:
     live = [it for it in _turn() if isinstance(it, dict) and it.get("while_running")]
     assert [it["type"] for it in live] == ["activity", "note"]
     assert live[0]["label"] == "Finding sailings for two…"
+
+
+def test_the_tool_result_still_follows_its_call() -> None:
+    """Streaming while the tools run leaves the round's results paired with
+    its calls: the next model call gets the tool's own answer."""
+    _turn()
+    sent = json.dumps(_provider["last"].calls[1]["messages"], default=str)
+    assert "tu_1" in sent and "Ship 7: $1,240" in sent
 
 
 def test_nothing_is_posted_outside_a_chat_turn() -> None:
