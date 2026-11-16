@@ -509,15 +509,12 @@ def record_fact(
         replaced = [_row(r) for r in rows]
         scope = private_to_person_id if kind != "profile" else None
         if scope is None and replaces_fact_id is not None:
-            # An edit of a private row stays private: a private decision (who
-            # may edit it is the caller's check, as before), or any private
-            # row its own person edits. Nobody else's write takes on
-            # someone's private scope.
+            # An edit of a private row stays private to its person, whoever
+            # makes the edit (the principal's has no person id to match).
+            # Who may name a private row is the caller's check: it is
+            # readable by its own person alone (``readable``).
             named_row = next((f for f in replaced if f.id == replaces_fact_id), None)
-            if named_row is not None and named_row.private_to_person_id is not None and (
-                (named_row.decision and decision is None)
-                or named_row.private_to_person_id == recorded_by_person_id
-            ):
+            if named_row is not None and named_row.private_to_person_id is not None:
                 scope = named_row.private_to_person_id
         # Private rows and the team's never replace each other.
         replaced = [f for f in replaced if f.private_to_person_id == scope]

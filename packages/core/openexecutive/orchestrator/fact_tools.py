@@ -691,6 +691,10 @@ def _remember_fact(tool_input: dict[str, Any]) -> str | _Hold:
     about_me = tool_input.get("about_me") is True
     if about_me:
         owner = _speaker_id(teammate)
+        if owner is None:
+            # Kept for them alone or not at all: never the team's by default.
+            return _bad(tool, "couldn't tell who is speaking, so this can't be kept for them alone. "
+                              "Tell them it wasn't saved.")
     elif decision and not held:
         # A decision made in the speaker's own chat is theirs until they
         # share it. Not one held for an emailed confirmation (never a chat).
@@ -723,8 +727,8 @@ def _remember_fact(tool_input: dict[str, Any]) -> str | _Hold:
 
 def _speaker_id(teammate: Any) -> int | None:
     """The People id of the verified speaker ``_gate`` let through: the
-    teammate, else the principal. None when it can't be told (the fact is
-    then the team's)."""
+    teammate, else the principal. None when it can't be told (an about-me
+    fact is then refused)."""
     if teammate is not None:
         return getattr(teammate, "id", None)
     try:
@@ -732,7 +736,7 @@ def _speaker_id(teammate: Any) -> int | None:
 
         principal = people_registry.get_principal()
         return principal.id if principal is not None else None
-    except Exception:  # noqa: BLE001 - nobody's: the team's facts only.
+    except Exception:  # noqa: BLE001 - nobody's: the caller refuses.
         logger.warning("fact_tools: couldn't tell who the principal is", exc_info=True)
         return None
 

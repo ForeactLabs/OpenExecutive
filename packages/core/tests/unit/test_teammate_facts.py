@@ -225,6 +225,30 @@ def test_about_me_keeps_a_fact_for_the_speaker_alone(roster: SimpleNamespace) ->
     assert "Olivia from Northwind" not in facts.render_facts_for_prompt(reader=roster.sam)
 
 
+def test_an_edit_of_an_about_me_fact_stays_private(roster: SimpleNamespace) -> None:
+    """The principal's edit has no person id to match; the row still stays
+    with the person it was about."""
+    mine, _ = facts.record_fact(subject="Sign-off", statement="Olivia signs as Olivia.", source_quote="q",
+                                private_to_person_id=roster.owner)
+    edited, replaced = facts.record_fact(subject="Sign-off", statement="Olivia signs as O. Owner.",
+                                         source_quote="q", kind="correction", replaces_fact_id=mine.id,
+                                         recorded_by_role="principal")
+    assert edited.private_to_person_id == roster.owner and [f.id for f in replaced] == [mine.id]
+    assert facts.render_facts_for_prompt(reader=roster.sam) == ""
+    assert facts.render_facts_for_prompt() == ""
+
+
+def test_about_me_is_refused_when_the_speaker_cant_be_told(
+    roster: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _speak(roster.owner, said="Sign my emails as Olivia from Northwind please")
+    monkeypatch.setattr(fact_tools, "_speaker_id", lambda teammate: None)
+    out = _remember(subject="Sign-off", about_me=True, statement="Olivia signs as Olivia from Northwind.",
+                    source_quote="Sign my emails as Olivia from Northwind")
+    assert "error" in out
+    assert facts.list_facts() == []
+
+
 def _waiting(conn: sqlite3.Connection, **row: Any) -> int:
     cols = {"kind": "fact", "subject": "Cedar Court unit count", "subject_key": "cedar court unit count",
             "statement": "Cedar Court has 38 units.", "created_at": datetime.now(UTC).isoformat(),
