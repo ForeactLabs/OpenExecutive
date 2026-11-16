@@ -795,8 +795,8 @@ ASK_DETAIL = "Do it in your browser, then press Done here or on the bar at the t
 def hand_over_asks(round_work: list[dict[str, Any]], session_id: Any = None) -> list[dict[str, Any]]:
     """The ``hand_over`` stream events for a round's hand-overs, sent before
     they run so the chat the person is typing in asks them there, with Done
-    and Stop (POST /browser/hand-over/{id}). Each reserves the id its
-    hand-over takes (``browser_handover.reserve``), whose card then waits.
+    and Stop (POST /browser/hand-over/{id}). The first reserves the id
+    its hand-over takes (``browser_handover.reserve``), whose card then waits.
     Only in their own chat: anywhere else (a run approved on a card) the
     card goes out at once. The words
     are the server's, so every screen says the same."""
@@ -810,9 +810,7 @@ def hand_over_asks(round_work: list[dict[str, Any]], session_id: Any = None) -> 
     browser_handover.new_round(person_id, chat)
     if not round_work or not browser_relay.on():
         return []
-    # The chat shows one ask at a time: the round's first. Another in the
-    # same round isn't reserved, so its card goes out at once.
-    asks = [tu for tu in round_work if tu.get("name") == "browser_hand_over"][:1]
+    asks = [tu for tu in round_work if tu.get("name") == "browser_hand_over"]
     if not asks:
         return []
     from openexecutive.orchestrator import extensions
@@ -838,6 +836,10 @@ def hand_over_asks(round_work: list[dict[str, Any]], session_id: Any = None) -> 
             "done_label": "Done",
             "stop_label": "Stop",
         })
+        # The chat shows one ask at a time: the round's first it can ask.
+        # Another in the same round isn't reserved, so its card goes out at once.
+        break
+
     return out
 
 

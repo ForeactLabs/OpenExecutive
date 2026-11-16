@@ -685,6 +685,11 @@ def test_only_the_rounds_first_hand_over_is_asked_in_the_chat(chat_turn: None, m
     assert browser_handover.start(7, "sign in", in_chat="s1").id == ask["id"]
     # The second wasn't shown, so it isn't in the chat: its card goes out at once.
     assert not browser_handover.start(7, "sign in", in_chat="s1").in_chat
+    # One with nothing to ask doesn't take the round's ask from the next.
+    (ask,) = browser_tools.hand_over_asks(
+        [{**tu, "id": "c", "input": {"need": ""}}, {**tu, "id": "d", "input": {"need": "enter the code"}}], "s1"
+    )
+    assert ask["text"] == "Waiting on you: enter the code"
 
 
 def test_no_chat_ask_while_the_browser_isnt_connected(chat_turn: None, monkeypatch: pytest.MonkeyPatch) -> None:
