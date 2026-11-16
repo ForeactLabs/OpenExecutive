@@ -594,14 +594,28 @@ def test_done_on_the_bar_after_the_turn_ended_leaves_the_card_for_its_done(alert
     assert alert_store.get_alert(card).status == "unread"  # type: ignore[arg-type,union-attr]
 
 
-def test_a_reservation_is_taken_only_in_the_chat_and_only_while_fresh(monkeypatch: pytest.MonkeyPatch) -> None:
-    hid = browser_handover.reserve(7, "sign in")
+def test_a_reservation_is_taken_only_in_its_chat_and_only_that_round() -> None:
+    hid = browser_handover.reserve(7, "s1", "sign in")
     assert browser_handover.start(7, "sign in").id != hid  # not asked in the chat: a fresh id
-    assert browser_handover.start(7, "sign in", in_chat=True).id == hid
-    stale = browser_handover.reserve(7, "sign in")
-    monkeypatch.setattr(browser_handover, "RESERVED_S", 0.0)
-    late = browser_handover.start(7, "sign in", in_chat=True)
-    assert late.id != stale and not late.in_chat
+    assert browser_handover.start(7, "sign in", in_chat="s2").id != hid  # another chat of theirs
+    assert browser_handover.start(7, "sign in", in_chat="s1").id == hid
+    left = browser_handover.reserve(7, "s1", "sign in")
+    browser_handover.new_round(7, "s1")  # the chat's next round: nothing took it
+    late = browser_handover.start(7, "sign in", in_chat="s1")
+    assert late.id != left and not late.in_chat
+
+
+async def test_the_ask_holds_however_long_the_rounds_other_steps_take(
+    alerts_db: Path, chat_turn: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(browser_relay, "on", lambda: True)
+    monkeypatch.setattr(browser_relay, "connected", lambda _pid: True)
+    (ask,) = browser_tools.hand_over_asks(
+        [{"id": "t1", "name": "browser_hand_over", "input": {"need": "sign in"}}], "s1"
+    )
+    # No clock on it: a slow page load earlier in the round doesn't matter.
+    handover = browser_handover.start(7, "sign in", in_chat=browser_tools._chat_id())
+    assert handover.id == ask["id"] and handover.in_chat
 
 
 def test_same_words_twice_in_a_round_each_get_their_own_id(chat_turn: None, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -609,8 +623,8 @@ def test_same_words_twice_in_a_round_each_get_their_own_id(chat_turn: None, monk
     monkeypatch.setattr(browser_relay, "connected", lambda _pid: True)
     tu = {"name": "browser_hand_over", "input": {"need": "sign in"}}
     first, second = browser_tools.hand_over_asks([{**tu, "id": "a"}, {**tu, "id": "b"}], "s1")
-    assert browser_handover.start(7, "sign in", in_chat=True).id == first["id"]
-    assert browser_handover.start(7, "sign in", in_chat=True).id == second["id"]
+    assert browser_handover.start(7, "sign in", in_chat="s1").id == first["id"]
+    assert browser_handover.start(7, "sign in", in_chat="s1").id == second["id"]
 
 
 def test_no_chat_ask_while_the_browser_isnt_connected(chat_turn: None, monkeypatch: pytest.MonkeyPatch) -> None:

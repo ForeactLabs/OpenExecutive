@@ -105,12 +105,11 @@ class Handover:
 # Read from worker threads too (card_closed): iterate over a copy, never the
 # dict itself, so an insert on the loop thread can't break the loop.
 _open: dict[str, Handover] = {}
-# Ids the chat was already shown with the ask, by (person, need), taken by
-# the hand-over that asks it (``reserve``, ``start``).
-_reserved: dict[tuple[int, str], list[tuple[str, float]]] = {}
-# A reservation is taken by the step that runs right after the chat was
-# shown the ask; one left behind (the turn stopped first) goes stale.
-RESERVED_S = 30.0
+# Ids the chat was already shown with the ask, by (person, chat, need),
+# taken by the hand-over that asks it (``reserve``, ``start``). They last
+# the round they were shown in, however long its other steps take: the
+# chat's next round clears what that one left (``new_round``).
+_reserved: dict[tuple[int, str, str], list[str]] = {}
 
 
 def one_line(text: object, cap: int) -> str:
@@ -194,34 +193,43 @@ def close_leftover_cards() -> int:
     return closed
 
 
-def reserve(person_id: int, need: str) -> str:
-    """The id the hand-over asking ``need`` of ``person_id`` will take, so
-    the chat can show the ask with Done and Stop before it starts. The
-    hand-over then waits ``CARD_AFTER_S`` before its card goes out."""
+def new_round(person_id: int, chat: str) -> None:
+    """Clear what ``person_id``'s chat ``chat`` reserved in an earlier round:
+    every hand-over of that round has run (or the turn stopped first), so
+    none is left to take it."""
+    for key in [k for k in list(_reserved) if k[0] == person_id and k[1] == chat]:
+        _reserved.pop(key, None)
+
+
+def reserve(person_id: int, chat: str, need: str) -> str:
+    """The id the hand-over asking ``need`` of ``person_id`` in their chat
+    ``chat`` will take, so the chat can show the ask with Done and Stop
+    before it starts. The hand-over then waits ``CARD_AFTER_S`` before its
+    card goes out."""
     hid = uuid.uuid4().hex
     # Several with the same words in one round are taken in order.
-    _reserved.setdefault((person_id, one_line(need, MAX_NEED)), []).append((hid, time.monotonic()))
+    _reserved.setdefault((person_id, chat, one_line(need, MAX_NEED)), []).append(hid)
     while len(_reserved) > 64:
         _reserved.pop(next(iter(_reserved)))
     return hid
 
 
-def _take_reserved(person_id: int, need: str) -> str | None:
-    queue = _reserved.get((person_id, need))
+def _take_reserved(person_id: int, chat: str, need: str) -> str | None:
+    queue = _reserved.get((person_id, chat, need))
     if not queue:
         return None
-    hid, at = queue.pop(0)
+    hid = queue.pop(0)
     if not queue:
-        _reserved.pop((person_id, need), None)
-    return hid if time.monotonic() - at < RESERVED_S else None
+        _reserved.pop((person_id, chat, need), None)
+    return hid
 
 
 def start(
-    person_id: int, need: str, *, card_id: int | None = None, workflow_key: str = "", in_chat: bool = False
+    person_id: int, need: str, *, card_id: int | None = None, workflow_key: str = "", in_chat: str = ""
 ) -> Handover:
-    """A new open hand-over for ``person_id``. ``in_chat``: asked in their
-    own chat, so it takes the id the chat was shown (``reserve``), if it was
-    shown one in the last ``RESERVED_S``."""
+    """A new open hand-over for ``person_id``. ``in_chat``: the chat of
+    theirs it was asked in, so it takes the id that chat was shown this
+    round (``reserve``)."""
     _prune()
     mine = sorted((h for h in list(_open.values()) if h.person_id == person_id), key=lambda h: h.created)
     for old in mine[: max(0, len(mine) - MAX_PER_PERSON + 1)]:
@@ -231,7 +239,7 @@ def start(
     except RuntimeError:
         loop = None
     need = one_line(need, MAX_NEED)
-    reserved = _take_reserved(person_id, need) if in_chat and not workflow_key else None
+    reserved = _take_reserved(person_id, in_chat, need) if in_chat and not workflow_key else None
     handover = Handover(
         id=reserved or uuid.uuid4().hex, person_id=person_id, need=need,
         card_id=card_id, workflow_key=workflow_key, in_chat=reserved is not None, loop=loop,

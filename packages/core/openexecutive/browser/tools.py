@@ -485,6 +485,14 @@ def _args(name: str, tool_input: dict[str, Any]) -> tuple[dict[str, Any] | None,
 SIDE_WINDOW = "side"
 
 
+def _chat_id() -> str:
+    """The chat this turn is the person typing in (``_in_chat``), or ""."""
+    from openexecutive.orchestrator.schedule_tools import current_session
+
+    chat = getattr(current_session.get(), "session_id", None)
+    return chat if _in_chat() and isinstance(chat, str) else ""
+
+
 def _in_chat() -> bool:
     """Whether this turn is the person typing in the web chat (not a
     scheduled run or a step approved on a card later)."""
@@ -727,7 +735,9 @@ async def _hand_over(person_id: int, given: dict[str, Any], window: str | None) 
     if not need:
         return json.dumps({"error": "Say what they need to do, like \"sign in to Disney Store\"."})
     task = browser_handover.one_line(given.get("task"), browser_handover.MAX_TASK)
-    handover = browser_handover.start(person_id, need, in_chat=_in_chat() and _speaker() == person_id)
+    handover = browser_handover.start(
+        person_id, need, in_chat=_chat_id() if _speaker() == person_id else ""
+    )
     # Ready for Done before the bar shows: it can come straight away.
     browser_handover.arm(handover)
     args: dict[str, Any] = {"id": handover.id, "need": need}
@@ -785,7 +795,13 @@ def hand_over_asks(round_work: list[dict[str, Any]], session_id: Any = None) -> 
     are the server's, so every screen says the same."""
     from openexecutive.browser import handover as browser_handover
 
-    if not round_work or not browser_relay.on() or not _in_chat():
+    chat = _chat_id()
+    person_id = _speaker()
+    if not chat or person_id is None:
+        return []
+    # What an earlier round showed and nothing took is done with.
+    browser_handover.new_round(person_id, chat)
+    if not round_work or not browser_relay.on():
         return []
     asks = [tu for tu in round_work if tu.get("name") == "browser_hand_over"]
     if not asks:
@@ -794,8 +810,7 @@ def hand_over_asks(round_work: list[dict[str, Any]], session_id: Any = None) -> 
 
     if extensions.in_workflow_step("browser_hand_over"):
         return []
-    person_id = _speaker()
-    if person_id is None or not browser_relay.connected(person_id):
+    if not browser_relay.connected(person_id):
         # Not connected: the step says so instead, and there's nothing to press.
         return []
     out: list[dict[str, Any]] = []
@@ -808,7 +823,7 @@ def hand_over_asks(round_work: list[dict[str, Any]], session_id: Any = None) -> 
         out.append({
             "type": "hand_over",
             "session_id": session_id if isinstance(session_id, str) else None,
-            "id": browser_handover.reserve(person_id, need),
+            "id": browser_handover.reserve(person_id, chat, need),
             "text": f"Waiting on you: {need}",
             "detail": ASK_DETAIL,
             "done_label": "Done",
