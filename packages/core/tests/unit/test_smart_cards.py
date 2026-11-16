@@ -187,3 +187,19 @@ def test_the_lead_gate_makes_no_card_for_an_app_call_naming_no_tool(monkeypatch:
     # A named tool with a hit still waits on a card.
     named = json.loads(asyncio.run(gated({"name": "some_server__do_the_thing", "arguments": {}})))
     assert named["status"] == "waiting_for_approval" and len(held) == 1 and ran == []
+
+
+@pytest.mark.parametrize(("given", "expected"), [({}, "fyi"), ({"needs": "answer", "question": "Which day?"}, "answer")])
+def test_a_message_passed_on_is_for_its_reader_to_know(
+    monkeypatch: pytest.MonkeyPatch, given: dict[str, Any], expected: str,
+) -> None:
+    """A message passed on as written has nothing to approve: its card is
+    For you to know (Got it), unless it says it asks something."""
+    seen: list[AlertEvent] = []
+    monkeypatch.setattr("openexecutive.alerts.pipeline.schedule_evaluation", seen.append)
+    monkeypatch.setattr("openexecutive.audit.log_event", lambda *a, **k: None)
+    out = json.loads(asyncio.run(alert_tools.handle_create_alert(
+        {"subject": "From Sam", "body": "The doc is in the shared drive now.", **given}, as_written=True,
+    )))
+    assert out["status"] == "alert_scheduled"
+    assert seen[0].as_written and seen[0].needs == expected

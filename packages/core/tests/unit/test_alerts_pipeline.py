@@ -608,3 +608,184 @@ def test_as_written_same_text_to_two_people_is_two_cards(monkeypatch, db: Path) 
     assert first is not None and second is not None
     assert {a.routed_to_person_id for a in list_alerts(db_path=db)} == {1, 2}
 
+
+
+class _Chat:
+    """A chat session as ``current_session`` holds one."""
+
+    def __init__(self, session_id: str, speaker: int, *, mail_thread: str = "") -> None:
+        self.session_id = session_id
+        self.caller_person_id = speaker
+        self.origin_channel = "email" if mail_thread else ""
+        self.email_from = "ann@example.com" if mail_thread else ""
+        self.email_thread_id = mail_thread
+
+
+def _pass_on(
+    monkeypatch, db: Path, chat: _Chat, turn: str, ext: str, subject: str, body: str, raised_by: str = "Sam Lee",
+) -> int | None:
+    from openexecutive.alerts import pipeline
+    from openexecutive.audit.context import set_turn
+    from openexecutive.orchestrator.schedule_tools import current_session
+
+    token = current_session.set(chat)
+    try:
+        with set_turn(session_id=chat.session_id, turn_id=turn):
+            event = AlertEvent(
+                source="message", external_id=ext, subject=subject, body=body,
+                routed_to_person_id=1, user="person:1", raised_by=raised_by, as_written=True,
+            )
+            return asyncio.run(pipeline.evaluate_and_dispatch(event, db_path=db))[1]
+    finally:
+        current_session.reset(token)
+
+
+def test_messages_from_one_chat_to_one_person_are_one_card(monkeypatch, db: Path) -> None:
+    """A teammate who sends a note, then a correction, then a fix from the
+    same chat leaves their reader one card, newest last, and each still
+    reaches them: never three cards that read alike and contradict."""
+    from openexecutive.alerts import dispatcher
+
+    sent: list[int | None] = []
+
+    async def fake_dispatch(alert, channels, **kw):  # noqa: ARG001
+        sent.append(alert.id)
+
+    monkeypatch.setattr(dispatcher, "dispatch_all", fake_dispatch)
+    chat = _Chat("chat-sam", 2)
+    first = _pass_on(monkeypatch, db, chat, "t1", "m1", "Sharing one file doesn't work", "Sharing one file doesn't work.")
+    second = _pass_on(monkeypatch, db, chat, "t2", "m2", "Correction: it works now", "Correction: it works now.")
+    third = _pass_on(monkeypatch, db, chat, "t3", "m3", "It works from the shared drive", "It works from the shared drive only.")
+    rows = {a.id: a for a in list_alerts(db_path=db)}
+    assert rows[second].superseded_by_alert_id == first
+    assert rows[third].superseded_by_alert_id == first
+    open_cards = [a for a in rows.values() if a.status == "unread"]
+    assert [a.id for a in open_cards] == [first]
+    body = open_cards[0].body
+    assert body.startswith("Raised by Sam Lee. Sharing one file doesn't work.")
+    assert body.index("Correction: it works now.") < body.index("It works from the shared drive only.")
+    assert body.count("Raised by Sam Lee.") == 1
+    assert sent == [first, first, first]
+
+
+def test_messages_from_another_chat_are_their_own_card(monkeypatch, db: Path) -> None:
+    from openexecutive.alerts import dispatcher
+
+    async def fake_dispatch(alert, channels, **kw):  # noqa: ARG001
+        return None
+
+    monkeypatch.setattr(dispatcher, "dispatch_all", fake_dispatch)
+    first = _pass_on(monkeypatch, db, _Chat("chat-a", 2), "t1", "m1", "Launch moved", "Launch moved to Friday.")
+    second = _pass_on(monkeypatch, db, _Chat("chat-b", 2), "t2", "m2", "Invoice paid", "The invoice is paid.")
+    rows = {a.id: a for a in list_alerts(db_path=db)}
+    assert rows[first].superseded_by_alert_id is None and rows[second].superseded_by_alert_id is None
+
+
+def test_a_passed_on_message_never_joins_a_card_on_its_mail_thread(monkeypatch, db: Path) -> None:
+    """On a turn answering mail, a passed-on message keeps out of the card
+    the Executive raised on that mail thread: only other passed-on messages
+    share its conversation."""
+    from openexecutive.alerts import dispatcher, one_card
+    from openexecutive.audit.context import set_turn
+    from openexecutive.orchestrator.schedule_tools import current_session
+
+    async def fake_dispatch(alert, channels, **kw):  # noqa: ARG001
+        return None
+
+    monkeypatch.setattr(dispatcher, "dispatch_all", fake_dispatch)
+    chat = _Chat("mail-session", 2, mail_thread="T1")
+    token = current_session.set(chat)
+    try:
+        with set_turn(session_id=chat.session_id, turn_id="t1"), one_card.about(raised=True):
+            raised = insert_alert(
+                source="email", external_id="e1", severity="medium",
+                headline="Ann wants the contract back", body="Ann asked for the signed contract.",
+                routed_to_person_id=1, db_path=db,
+            )
+    finally:
+        current_session.reset(token)
+    passed = _pass_on(monkeypatch, db, chat, "t2", "m1", "From Sam: contract is in Drive", "From Sam: contract is in Drive.")
+    rows = {a.id: a for a in list_alerts(db_path=db)}
+    assert rows[passed].superseded_by_alert_id is None
+    assert rows[raised].body == "Ann asked for the signed contract."
+
+
+def test_a_teammates_message_never_joins_a_card_from_its_own_turn(monkeypatch, db: Path) -> None:
+    """A teammate's message joins only by its chat: a card the Executive
+    raised on the same turn keeps its own words."""
+    from openexecutive.alerts import dispatcher, one_card
+    from openexecutive.audit.context import set_turn
+    from openexecutive.orchestrator.schedule_tools import current_session
+
+    async def fake_dispatch(alert, channels, **kw):  # noqa: ARG001
+        return None
+
+    monkeypatch.setattr(dispatcher, "dispatch_all", fake_dispatch)
+    chat = _Chat("chat-sam", 2)
+    token = current_session.set(chat)
+    try:
+        with set_turn(session_id=chat.session_id, turn_id="t1"), one_card.about(raised=True):
+            raised = insert_alert(
+                source="executive", external_id="x1", severity="medium",
+                headline="Budget review is Friday", body="The budget review moved to Friday.",
+                routed_to_person_id=1, db_path=db,
+            )
+    finally:
+        current_session.reset(token)
+    passed = _pass_on(monkeypatch, db, chat, "t1", "m1", "From Sam: I'll bring the deck", "From Sam: I'll bring the deck.")
+    rows = {a.id: a for a in list_alerts(db_path=db)}
+    assert rows[passed].superseded_by_alert_id is None
+    assert rows[raised].superseded_by_alert_id is None
+    assert rows[raised].body == "The budget review moved to Friday."
+
+
+def test_a_name_with_a_period_is_said_once_on_the_joined_card(monkeypatch, db: Path) -> None:
+    from openexecutive.alerts import dispatcher
+
+    async def fake_dispatch(alert, channels, **kw):  # noqa: ARG001
+        return None
+
+    monkeypatch.setattr(dispatcher, "dispatch_all", fake_dispatch)
+    chat = _Chat("chat-dr", 2)
+    first = _pass_on(monkeypatch, db, chat, "t1", "m1", "Lab is closed", "Lab is closed today.", "Dr. Smith")
+    _pass_on(monkeypatch, db, chat, "t2", "m2", "Lab opens at noon", "Lab opens at noon.", "Dr. Smith")
+    body = {a.id: a for a in list_alerts(db_path=db)}[first].body
+    assert body.count("Raised by Dr. Smith.") == 1
+    assert "Smith. Lab opens" not in body and body.endswith("Lab opens at noon.")
+
+
+def test_a_teammates_message_never_joins_the_executives_message_from_the_same_chat(monkeypatch, db: Path) -> None:
+    from openexecutive.alerts import dispatcher, pipeline
+    from openexecutive.audit.context import set_turn
+    from openexecutive.orchestrator.schedule_tools import current_session
+
+    async def fake_dispatch(alert, channels, **kw):  # noqa: ARG001
+        return None
+
+    monkeypatch.setattr(dispatcher, "dispatch_all", fake_dispatch)
+    chat = _Chat("shared-chat", 2)
+    token = current_session.set(chat)
+    try:
+        with set_turn(session_id=chat.session_id, turn_id="t1"):
+            own = AlertEvent(
+                source="message", external_id="x1", subject="Standup moved", body="Standup moved to 10.",
+                routed_to_person_id=1, user="person:1", as_written=True,
+            )
+            _, executives = asyncio.run(pipeline.evaluate_and_dispatch(own, db_path=db))
+    finally:
+        current_session.reset(token)
+    teammates = _pass_on(monkeypatch, db, chat, "t2", "m1", "From Sam: I'll be late", "From Sam: I'll be late.")
+    rows = {a.id: a for a in list_alerts(db_path=db)}
+    assert rows[teammates].superseded_by_alert_id is None
+    assert rows[executives].body == "Standup moved to 10."
+
+
+def test_a_teammates_message_card_is_not_offered_for_the_executive_to_join(monkeypatch, db: Path) -> None:
+    from openexecutive.alerts import dispatcher, one_card
+
+    async def fake_dispatch(alert, channels, **kw):  # noqa: ARG001
+        return None
+
+    monkeypatch.setattr(dispatcher, "dispatch_all", fake_dispatch)
+    _pass_on(monkeypatch, db, _Chat("chat-sam", 2), "t1", "m1", "From Sam: running late", "From Sam: running late.")
+    assert one_card.open_cards_from("person:2", turn="t2", reader="1", db_path=db) == []
