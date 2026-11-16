@@ -62,19 +62,33 @@ async def print_reply(stream: AsyncIterator[str | dict[str, Any]]) -> str:
     """Print a streamed reply and return its final text.
 
     A terminal can't take back printed text, so when the reply is written
-    again (a ``rewrite`` event) the new one is marked as replacing it."""
+    again (a ``rewrite`` event) the new one is held until it differs from
+    the first and then printed under a "Corrected" line. A rewrite that comes
+    back the same (the first reply kept) prints nothing more."""
     from openexecutive.orchestrator.executive import Executive
 
     reply = ""
+    shown = ""
+    held: str | None = None
     async for chunk in stream:
         if isinstance(chunk, dict):
             if chunk.get("type") == "rewrite" and reply:
-                reply = ""
-                console.print("\n\n[dim]Corrected reply (replaces the one above):[/dim]\n")
+                shown, reply, held = reply, "", ""
             continue
-        if chunk != Executive._THINKING:
-            reply += chunk
+        if chunk == Executive._THINKING:
+            continue
+        reply += chunk
+        if held is None:
             console.print(chunk, end="", highlight=False)
+            continue
+        held += chunk
+        if not shown.startswith(held):
+            console.print("\n\n[dim]Corrected reply (replaces the one above):[/dim]\n")
+            console.print(held, end="", highlight=False)
+            held = None
+    if held and held != shown:
+        console.print("\n\n[dim]Corrected reply (replaces the one above):[/dim]\n")
+        console.print(held, end="", highlight=False)
     return reply
 
 

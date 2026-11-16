@@ -32,3 +32,11 @@ async def test_a_plain_reply_prints_as_is(capsys: pytest.CaptureFixture[str]) ->
     final = await cli.print_reply(_stream("Hello", {"type": "status", "text": "x"}, " there"))
     assert final == "Hello there"
     assert "Corrected" not in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_a_kept_first_reply_prints_once(capsys: pytest.CaptureFixture[str]) -> None:
+    final = await cli.print_reply(_stream("I saved the doc.", {"type": "rewrite"}, "I saved ", "the doc."))
+    out = capsys.readouterr().out
+    assert final == "I saved the doc."
+    assert out.count("I saved the doc.") == 1 and "Corrected" not in out
