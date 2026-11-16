@@ -254,9 +254,10 @@ async def _post_google_chat_space(space: str, text: str) -> dict[str, Any]:
     try:
         await asyncio.to_thread(google_chat.post_to_space, space, text)
     except Exception as exc:
-        logger.exception("broadcast_tools: google chat post failed")
         if isinstance(exc, google_chat.NotAppSpace):
+            logger.warning("broadcast_tools: %s isn't a Google Chat space the app is in", space)
             return {"error": "that isn't a Google Chat space the app is in"}
+        logger.exception("broadcast_tools: google chat post failed")
         return {"error": "google chat post failed"}
     return {"status": "sent", "channel": space}
 
