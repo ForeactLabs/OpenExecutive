@@ -588,9 +588,14 @@ def _leave_card(
 ) -> int:
     """Leave the card for ``person_id``, theirs alone. Where the chat can't
     show it (a call, mail, a chat app without buttons) it also goes on their
-    Needs you, so a card is never left where nobody sees it."""
+    Needs you, so a card is never left where nobody sees it: if that fails,
+    the card is closed and this raises, so the tool says it couldn't."""
     from openexecutive.alerts import own_chat
-    from openexecutive.memory.decision_ledger import create_decision_instance, put_on_needs_you
+    from openexecutive.memory.decision_ledger import (
+        close_externally,
+        create_decision_instance,
+        put_on_needs_you,
+    )
 
     decision_id = create_decision_instance(
         decision_class=DECISION_CLASS,
@@ -614,6 +619,8 @@ def _leave_card(
             )
         except Exception:
             logger.exception("app_control: couldn't put card %d on Needs you", decision_id)
+            close_externally(decision_id, reason="not_on_needs_you")
+            raise
     return decision_id
 
 

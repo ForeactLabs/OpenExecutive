@@ -265,6 +265,71 @@ def test_where_the_chat_cant_show_it_the_card_goes_on_needs_you(owner: Any) -> N
     assert cleared is not None and cleared.status != "unread"
 
 
+def test_a_needs_you_card_is_shown_only_to_its_person(owner: Any) -> None:
+    from openexecutive.alerts.models import visible_alert
+    from openexecutive.orchestrator.artifact_records import viewer_for_person
+
+    ben_id = people_store.upsert_person(full_name="Ben Teammate", email="ben@co.example")
+    people_registry.invalidate()
+    ben = people_store.get_person(ben_id)
+    _stored(owner=ben_id)
+    out = _save_fix(_one_on_one(ben))
+    card = _needs_you_card(out["decision_id"])
+    assert card is not None and card.routed_to_person_id == ben_id
+    # Ben's card isn't the principal's to read, nor the brief's (no viewer).
+    assert visible_alert(card, viewer_for_person(ben_id)) is True
+    assert visible_alert(card, viewer_for_person(owner.id)) is False
+    assert visible_alert(card, None) is False
+    assert ben is not None
+
+
+def test_a_card_that_cant_go_on_needs_you_isnt_left_and_the_tool_says_so(
+    owner: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stored()
+
+    def broken(*_a: Any, **_k: Any) -> None:
+        raise RuntimeError("alerts store down")
+
+    monkeypatch.setattr(decision_ledger, "put_on_needs_you", broken)
+    out = _save_fix(_one_on_one(owner))
+    assert "Couldn't leave the card" in out["error"]
+    # Nothing is left waiting where nobody sees it.
+    assert [i.status for i in decision_ledger.list_instances("app_action")] == [
+        decision_ledger.STATUS_CLOSED_EXTERNALLY,
+    ]
+
+
+@pytest.mark.parametrize(
+    ("creator", "asker", "expected"),
+    [
+        ("asker", "principal", True),   # its creator asks
+        ("ben", "principal", False),    # the principal, not its creator
+        (None, "principal", True),      # saved before creators: the principal
+        (None, "ben", False),           # ... and only the principal
+        ("ben", "ben", True),
+    ],
+)
+def test_who_counts_as_its_creator(owner: Any, creator: str | None, asker: str, expected: bool) -> None:
+    ben_id = people_store.upsert_person(full_name="Ben Teammate", email="ben@co.example")
+    people_registry.invalidate()
+    ids = {"principal": owner.id, "ben": ben_id}
+    asking = ids[asker]
+    _stored(owner=asking if creator == "asker" else ids.get(creator) if creator else None)
+    with set_session(_one_on_one(people_store.get_person(asking))):
+        assert workflow_change._asked_by_creator("meeting_prep") is expected
+
+
+def test_who_created_it_unknown_is_no(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    _stored(owner=owner.id)
+
+    def broken() -> Any:
+        raise RuntimeError("people store down")
+
+    monkeypatch.setattr(workflow_change, "_speaker", broken)
+    assert workflow_change._asked_by_creator("meeting_prep") is False
+
+
 def test_where_the_chat_shows_it_the_card_stays_under_the_reply(owner: Any) -> None:
     _stored()
     out = _save_fix(_web(owner))
@@ -389,6 +454,20 @@ def test_a_workflow_changed_since_the_card_is_left_alone(owner: Any) -> None:
     assert exc.value.status_code == 409
     stored = dynamic_store.get_definition("meeting_prep")
     assert stored is not None and "John's calendar" in stored.steps[0].goal  # type: ignore[union-attr]
+
+
+def test_a_card_that_cant_be_carried_out_leaves_needs_you_too(owner: Any) -> None:
+    _stored()
+    decision_id = int(_save_fix(_one_on_one(owner))["decision_id"])
+    current = dynamic_store.get_definition("meeting_prep")
+    assert current is not None
+    dynamic_store.upsert_definition(current.model_copy(update={"title": "Renamed on the page"}))
+    instance = decision_ledger.get_decision_instance(decision_id)
+    request = SimpleNamespace(state=SimpleNamespace(), headers={"x-caller-email": "olivia@co.example"})
+    with pytest.raises(HTTPException):
+        asyncio.run(decisions_route._carry_out_app_action(instance, decisions_route.ApproveBody(), request, owner.id))  # type: ignore[arg-type]
+    card = _needs_you_card(decision_id)
+    assert card is not None and card.status == "dismissed"
 
 
 def test_a_change_that_reads_as_its_creator_needs_that_creator(owner: Any) -> None:

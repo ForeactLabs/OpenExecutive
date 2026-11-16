@@ -3,7 +3,7 @@ speaker's own notes (``memory.history``).
 
 A note is private to its person, so the tool joins the toolkit only on a turn
 where that person is speaking, verified (``memory.history_chat.verified_speaker``),
-in a conversation nobody else can read (``history_chat.private_chat``: the web
+in a conversation nobody else can read (``delegation.settings.private_conversation``: the web
 chat signed in, a Slack or Discord DM, a private Telegram chat, or one its
 adapter marked private), and only once they turned on "Keep track of what
 happens". Act as me isn't needed: any team member on the People list may
