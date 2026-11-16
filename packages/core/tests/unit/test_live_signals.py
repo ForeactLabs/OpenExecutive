@@ -84,7 +84,7 @@ def test_stuck_collects_blocked_replies_and_not_mail_that_merely_arrived(audit: 
     audit.log("integration_inbound",
               "Accepted email from leo@x.com, who isn't on the team",
               details={"channel": "email", "from": "leo@x.com",
-                       "outcome": "accepted_outside_team"})
+                       "outcome": "accepted_non_roster"})
     audit.log("integration_inbound", "Google Chat reply not delivered in spaces/B: quota",
               details={"channel": "google_chat"})
 

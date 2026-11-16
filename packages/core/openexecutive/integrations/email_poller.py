@@ -874,7 +874,7 @@ async def _handle_mail(
                     "channel": "email",
                     "from": from_addr,
                     "message_id": message_id,
-                    "outcome": "accepted_outside_team",
+                    "outcome": "accepted_non_roster",
                 },
                 private=private,
             )

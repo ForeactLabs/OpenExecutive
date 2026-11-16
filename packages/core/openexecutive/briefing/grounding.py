@@ -795,7 +795,7 @@ async def ground_brief(
 
     ``enforce``: one repair call when something is ungrounded (only when
     ``system`` is given), then drop the lines still ungrounded, drop headers
-    left empty, add the held-back note and the citations. ``report``: audit
+    left empty, add the held-back note. ``report``: audit
     only, text unchanged. ``off``: nothing. Never raises; on an internal
     error the text comes back unchanged."""
     mode = grounding_mode()
