@@ -51,8 +51,6 @@ def roster(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNa
         db=path, events=events,
     )
     people_registry.invalidate()
-    facts.set_needs_approval(ids.sam, False)
-    facts.set_needs_approval(ids.dana, False)
     token = current_session.set(None)
     yield ids
     current_session.reset(token)
@@ -102,7 +100,7 @@ def test_a_decision_in_someones_own_chat_is_private_to_them(roster: SimpleNamesp
     assert "Going with the Q1 hire." in facts.render_facts_for_prompt(reader=roster.sam)
     assert facts.render_facts_for_prompt(reader=roster.owner) == ""
     assert facts.render_facts_for_prompt() == ""
-    assert facts.render_teammate_changes(datetime.now(UTC) - timedelta(days=1), include_proposed=True) == ""
+    assert facts.render_teammate_changes(datetime.now(UTC) - timedelta(days=1)) == ""
     # The audit row does not say what it was.
     [row] = [e for e in roster.events if e["event_type"] == "tool_invocation"]
     assert "Q1 hire" not in json.dumps(row, default=str)
@@ -113,13 +111,6 @@ def test_the_owners_own_chat_decision_is_private_too(roster: SimpleNamespace) ->
     assert _decide()["private"] is True
     assert facts.decision_rows(reader=roster.sam) == []
     assert len(facts.decision_rows(reader=roster.owner)) == 1
-
-
-def test_a_private_decision_skips_the_approval_wait(roster: SimpleNamespace) -> None:
-    facts.set_needs_approval(roster.sam, True)
-    _speak(roster.sam)
-    assert _decide()["status"] == "ok"
-    assert facts.decision_rows(reader=roster.sam)[0].status == "active"
 
 
 @pytest.mark.parametrize(
@@ -227,25 +218,14 @@ def test_sharing_makes_it_the_teams_and_taking_it_back_undoes_that(roster: Simpl
     assert facts.render_facts_for_prompt() == ""
 
 
-def test_a_teammates_share_follows_their_approval_rule(roster: SimpleNamespace) -> None:
-    facts.set_needs_approval(roster.sam, True)
+def test_a_teammates_share_replaces_the_owners_decision_at_once(roster: SimpleNamespace) -> None:
+    owners, _ = facts.record_fact(subject="Q1 hire", statement="No Q1 hire.", source_quote="", decision=True)
     _speak(roster.sam)
     fact_id = _decide()["fact_id"]
     shared = facts.share_decision(fact_id, shared=True, person_id=roster.sam)
-    assert shared is not None and shared.status == "proposed"
-    assert facts.render_facts_for_prompt() == ""
-    approved = facts.approve_fact(fact_id)
-    assert approved is not None and approved[0].status == "active"
+    assert shared is not None and shared.status == "active" and shared.private_to_person_id is None
+    assert facts.get_fact(owners.id).status == "superseded"  # type: ignore[union-attr]
     assert "Going with the Q1 hire." in facts.render_facts_for_prompt()
-
-
-def test_a_teammates_share_never_replaces_the_owners_fact(roster: SimpleNamespace) -> None:
-    facts.record_fact(subject="Q1 hire", statement="No Q1 hire.", source_quote="", decision=True)
-    _speak(roster.sam)
-    fact_id = _decide()["fact_id"]
-    with pytest.raises(facts.PrincipalFactConflict):
-        facts.share_decision(fact_id, shared=True, person_id=roster.sam)
-    assert facts.get_fact(fact_id).private_to_person_id == roster.sam  # type: ignore[union-attr]
 
 
 def test_sharing_replaces_the_teams_decision_on_the_same_subject(roster: SimpleNamespace) -> None:
@@ -403,11 +383,9 @@ def test_existing_decisions_stay_shared_after_the_upgrade(tmp_path: Path) -> Non
 # --------------------------------------------------------------------------- #
 
 
-def test_an_edited_private_decision_still_follows_the_approval_rule_when_shared(
+def test_an_edited_private_decision_is_shared_as_edited(
     roster: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    facts.set_needs_approval(roster.sam, True)
-    owners, _ = facts.record_fact(subject="Q1 hire", statement="No Q1 hire.", source_quote="", decision=True)
     _speak(roster.sam)
     fact_id = _decide()["fact_id"]
     sam = _client(monkeypatch, roster, "sam")
@@ -415,17 +393,14 @@ def test_an_edited_private_decision_still_follows_the_approval_rule_when_shared(
     row = facts.get_fact(edited["id"])
     assert row is not None and row.recorded_by_role == "teammate" and row.recorded_by_person_id == roster.sam
     assert row.private_to_person_id == roster.sam
-    out = sam.post(f"/memories/decisions/{edited['id']}/share", json={"shared": True})
-    assert out.status_code == 200 and out.json()["waiting_for_approval"] is True
-    assert facts.get_fact(owners.id).status == "active"  # type: ignore[union-attr]
-    assert "Hiring two people" not in facts.render_facts_for_prompt()
-    # The owner's "what changed" list never names it while it was private.
+    # The owner's "what changed" list never names it while it is private.
     from openexecutive.memory import changes
 
-    assert changes._facts(roster.owner, True, "2000-01-01T00:00:00+00:00", None, None) is not None
-    sam.post(f"/memories/decisions/{edited['id']}/share", json={"shared": False})
     listed = changes._facts(roster.owner, True, "2000-01-01T00:00:00+00:00", None, None)
     assert "Hiring two people" not in json.dumps(listed, default=str)
+    out = sam.post(f"/memories/decisions/{edited['id']}/share", json={"shared": True})
+    assert out.status_code == 200 and out.json()["waiting_for_approval"] is False
+    assert "Hiring two people" in facts.render_facts_for_prompt()
 
 
 def test_retiring_or_editing_a_private_decision_leaves_its_words_out_of_the_audit_log(
@@ -446,8 +421,9 @@ def test_a_proposal_nobody_reviewed_cannot_be_made_private_and_shared_into_use(
     roster: SimpleNamespace,
 ) -> None:
     waiting, _ = facts.record_fact(subject="Vendor", statement="Switching vendors.", source_quote="",
-                                   decision=True, proposed=True, recorded_by_person_id=roster.owner)
-    assert waiting.status == "proposed"
+                                   decision=True, recorded_by_person_id=roster.owner)
+    with facts._conn() as conn:
+        conn.execute("UPDATE facts SET status='proposed' WHERE id=?", (waiting.id,))
     assert facts.share_decision(waiting.id, shared=False, person_id=roster.owner, is_principal=True) is None
     assert facts.get_fact(waiting.id).status == "proposed"  # type: ignore[union-attr]
 
@@ -463,11 +439,11 @@ def test_a_teammate_cannot_take_back_a_decision_the_owner_approved(
     roster: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     kept, _ = facts.record_fact(subject="Q1 hire", statement="No Q1 hire.", source_quote="", decision=True)
-    facts.set_needs_approval(roster.sam, True)
     _speak(roster.sam)
     fact_id = _decide()["fact_id"]
     facts.share_decision(fact_id, shared=True, person_id=roster.sam)
-    assert facts.approve_fact(fact_id) is not None
+    with facts._conn() as conn:
+        conn.execute("UPDATE facts SET approved_at='2026-09-29' WHERE id=?", (fact_id,))
     assert facts.get_fact(kept.id).status == "superseded"  # type: ignore[union-attr]
     # Approved, it is the owner's to keep or drop: the owner's old fact stays replaced.
     assert facts.share_decision(fact_id, shared=False, person_id=roster.sam) is None

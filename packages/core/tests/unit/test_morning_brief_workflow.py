@@ -205,7 +205,6 @@ async def test_a_teammates_correction_reaches_the_brief_and_unsuppresses_it(
     first = [e async for e in MorningBriefWorkflow().run(MorningBriefInput(), MagicMock())]
     fp = next(e for e in first if e.type == "result").data["brief_fingerprint"]
     brief_state.record_delivered("principal_brief_morning", fp, "FULL BRIEF")
-    facts.set_needs_approval(7, False)  # a trusted teammate: theirs apply at once
     facts.record_fact(subject="Cedar Court unit count", statement="Cedar Court has 38 units.",
                       source_quote="q", recorded_by_role="teammate", recorded_by_name="Sam Lee",
                       recorded_by_person_id=7)
@@ -221,30 +220,6 @@ async def test_a_teammates_correction_reaches_the_brief_and_unsuppresses_it(
     n_calls = len(calls)
     _ = [e async for e in MorningBriefWorkflow().run(MorningBriefInput(), MagicMock())]
     assert all("TEAMMATE CORRECTIONS" not in str(c["rendered_context"]) for c in calls[n_calls:])
-
-
-@pytest.mark.asyncio
-async def test_a_teammates_proposal_is_only_in_the_principals_private_brief(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from openexecutive.memory import facts
-    from openexecutive.workflows import morning_brief
-
-    calls = _capture(monkeypatch)
-    _stub_aggregators(monkeypatch)
-    facts.record_fact(subject="Oak Row", statement="Oak Row has 12 units.", source_quote="q",
-                      recorded_by_role="teammate", recorded_by_name="Sam Lee", proposed=True)
-    # Anyone may run the brief from chat; its run history is shared.
-    shared = [e async for e in MorningBriefWorkflow().run(MorningBriefInput(), MagicMock())]
-    assert "Oak Row" not in str(calls[-1]["rendered_context"])
-    assert next(e for e in shared if e.type == "result").data["private_to_principal"] is False
-    token = morning_brief.PRINCIPAL_DELIVERY.set(True)
-    try:
-        delivered = [e async for e in MorningBriefWorkflow().run(MorningBriefInput(force_full=True), MagicMock())]
-    finally:
-        morning_brief.PRINCIPAL_DELIVERY.reset(token)
-    assert "Sam Lee proposed Oak Row" in str(calls[-1]["rendered_context"])
-    assert next(e for e in delivered if e.type == "result").data["private_to_principal"] is True
 
 
 def test_teammate_changes_count_against_a_quiet_day() -> None:

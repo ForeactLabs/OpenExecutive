@@ -113,8 +113,7 @@ EVENT_TYPES: tuple[str, ...] = (
     "delegation_invite_handled",    # Handle it for me accepted an invite on its own (no clash, a sender they know)
     "delegation_invite_dismissed",  # the person dismissed an invite card (nothing answered)
     "fact_retired",                 # the principal (or the teammate who recorded it) retired a standing fact from the Pulse page (memory/facts.py)
-    "fact_reviewed",                # the principal approved or declined a teammate's proposed standing fact
-    "fact_approval_changed",        # the principal turned "needs my approval" on or off for a teammate's standing facts
+    "fact_reviewed",                # the principal approved or declined a proposed standing fact (a decision copied in from mail)
     "fact_confirmation",            # an emailed standing-fact change held, confirmed, cancelled or refused (integrations/fact_confirmation.py)
     "content_flagged",  # the content check flagged something a chat turn read (orchestrator/outside_content.py), with which item it was
     "grounding",  # unattended prose held back / refused / rewritten for naming people or figures not in its inputs
