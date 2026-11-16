@@ -581,13 +581,11 @@ async def _share_decision(request: Any, item_id: str, shared: bool) -> str:
 
     if not item_id.isdigit():
         raise Refused("That isn't a decision id. Look it up with find_in_app.")
-    out = await _call(
+    await _call(
         episodic.share_decision_route, int(item_id), episodic.DecisionShare(shared=shared), request
     )
     if not shared:
         return "Made the decision private: only they see it now"
-    if out.waiting_for_approval:
-        return "Sent the decision for approval: the team sees it once the principal approves it"
     return "Shared the decision with the team"
 
 

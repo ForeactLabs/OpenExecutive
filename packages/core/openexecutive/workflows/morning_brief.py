@@ -286,18 +286,10 @@ class MorningBriefWorkflow(Workflow):
                 name_cards_for, reflection_flags, flag_reader, principal=for_principal, fmt="plain",
             )
         # Corrections teammates made since the last brief: the principal's
-        # FYI (memory.facts). What waits for their approval is theirs alone
-        # (GET /memories/facts hides it from other teammates), so a brief any
-        # teammate may run lists only what is in force.
+        # FYI (memory.facts). All of them are in force.
         from openexecutive.memory.facts import render_teammate_changes
 
-        teammate_changes = await asyncio.to_thread(
-            render_teammate_changes, since, include_proposed=private_ok,
-        )
-        in_force_changes = (
-            await asyncio.to_thread(render_teammate_changes, since, include_proposed=False)
-            if private_ok else teammate_changes
-        )
+        teammate_changes = await asyncio.to_thread(render_teammate_changes, since)
         # Always in the loop: what the owner's own notes say is due, only on
         # the scheduler's delivery to them alone (never a chat run, whose
         # tool result lands in the turn's shared audit row and peer memory)
@@ -325,7 +317,6 @@ class MorningBriefWorkflow(Workflow):
         private_used = private_ok and (
             bool(owner_notes.text)
             or first_week.private
-            or teammate_changes != in_force_changes
             or live.calendar is not None
             or any(
                 str(t).lower() == PRIVATE_ALERT_TAG

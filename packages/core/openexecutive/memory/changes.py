@@ -50,7 +50,7 @@ def _facts(person_id: int, principal: bool, since: str, session_id: str | None,
     from openexecutive.memory import facts
 
     where = (
-        "created_at > ? AND status IN ('active', 'proposed') AND kind != 'profile' "
+        "created_at > ? AND status = 'active' AND kind != 'profile' "
         "AND (recorded_by_person_id = ? OR (? AND recorded_by_role = 'principal')) "
         # Never someone else's private decision (memory.facts).
         "AND (private_to_person_id IS NULL OR private_to_person_id = ?)"

@@ -4,15 +4,12 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
   editStandingFact,
-  listFactApprovalRules,
   listStandingFacts,
   retireStandingFact,
   editOwnDecision,
   removeOwnDecision,
   reviewStandingFact,
   shareDecision,
-  setFactApprovalRule,
-  type FactApprovalRule,
   type StandingFact,
 } from "@/lib/api";
 import Button from "@/components/ui/Button";
@@ -25,11 +22,9 @@ import { PageSpinner } from "@/components/ui/Spinner";
 // fields changed from chat (`update_company_profile`). Active facts are read by
 // every prompt that produces output — chat, briefs, scheduled runs, the alert
 // review — so this is where the owner checks a correction actually held, and
-// edits or retires one that no longer holds. A teammate's fact is marked with their name
-// and waits for the owner's approval (listed first, with Approve and Decline)
-// unless the owner trusts that teammate — and even then when it would replace
-// the owner's own fact. The owner sets, per teammate, whether theirs need
-// approval (on by default).
+// edits or retires one that no longer holds. A teammate's fact is marked with
+// their name and is in use at once, as the owner's is. Only a decision copied
+// in from mail waits for the principal's OK (listed first, with Approve and Decline).
 
 const EMPTY =
   "No corrections yet — when you correct a figure or a fact in chat, the Executive keeps it here and uses it everywhere.";
@@ -63,7 +58,6 @@ export default function CorrectionsTab({ onCount }: { onCount: (n: number) => vo
   const [shareable, setShareable] = useState<Set<number>>(new Set());
   const [unshareable, setUnshareable] = useState<Set<number>>(new Set());
   const [canReview, setCanReview] = useState(false);
-  const [rules, setRules] = useState<FactApprovalRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -79,10 +73,6 @@ export default function CorrectionsTab({ onCount }: { onCount: (n: number) => vo
       setCanReview(page.can_review ?? false);
       setFailed(false);
       onCount(page.facts.filter((f) => f.status === "active").length);
-      if (page.can_review) {
-        // The switch list is extra: failing to load it leaves the facts shown.
-        setRules(await listFactApprovalRules().catch(() => []));
-      }
     } catch {
       setFailed(true);
     } finally {
@@ -145,15 +135,6 @@ export default function CorrectionsTab({ onCount }: { onCount: (n: number) => vo
     },
     [refresh],
   );
-
-  const handleRule = useCallback(async (rule: FactApprovalRule) => {
-    try {
-      const saved = await setFactApprovalRule(rule.person_id, !rule.needs_approval);
-      setRules((prev) => prev.map((r) => (r.person_id === saved.person_id ? saved : r)));
-    } catch {
-      window.alert("Failed to change who needs approval.");
-    }
-  }, []);
 
   if (loading) return <PageSpinner />;
   if (failed) return <EmptyState message="Corrections are unavailable right now." />;
@@ -223,32 +204,6 @@ export default function CorrectionsTab({ onCount }: { onCount: (n: number) => vo
               ))}
             </div>
           )}
-        </div>
-      )}
-      {canReview && rules.length > 0 && (
-        <div className="border-t border-line pt-3">
-          <div className="text-base font-semibold text-fg">Teammates&apos; corrections</div>
-          <p className="text-sm text-fg-muted mb-2">
-            Teammates can correct facts too; theirs are marked with their name and wait for your
-            approval. Untick &ldquo;needs my approval&rdquo; to trust a teammate&apos;s corrections straight
-            away (one that would replace yours still waits).
-          </p>
-          <ul className="space-y-1">
-            {rules.map((r) => (
-              <li key={r.person_id}>
-                <label className="flex items-center gap-3 min-h-10 text-[15px] text-fg cursor-pointer">
-                  <input
-                    type="checkbox"
-                    className="h-5 w-5 accent-[rgb(var(--accent-strong))]"
-                    checked={r.needs_approval}
-                    onChange={() => void handleRule(r)}
-                  />
-                  <span>{r.full_name}</span>
-                  <span className="text-sm text-fg-muted">— needs my approval</span>
-                </label>
-              </li>
-            ))}
-          </ul>
         </div>
       )}
     </div>

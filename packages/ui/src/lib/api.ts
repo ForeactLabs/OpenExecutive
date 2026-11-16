@@ -1656,13 +1656,6 @@ export interface StandingFactsPage {
   unshareable_ids?: number[];
 }
 
-/** One teammate and whether the principal approves their facts first. */
-export interface FactApprovalRule {
-  person_id: number;
-  full_name: string;
-  needs_approval: boolean;
-}
-
 export async function listStandingFacts(): Promise<StandingFactsPage> {
   const res = await fetch(`${API_BASE}/memories/facts`);
   if (!res.ok) throw new Error("Failed to list standing facts");
@@ -1729,25 +1722,6 @@ export async function reviewStandingFact(
     body: JSON.stringify({}),
   });
   if (!res.ok) throw new Error(`Failed to ${decision} standing fact`);
-  return res.json();
-}
-
-export async function listFactApprovalRules(): Promise<FactApprovalRule[]> {
-  const res = await fetch(`${API_BASE}/memories/facts/approval`);
-  if (!res.ok) throw new Error("Failed to list who needs approval");
-  return res.json();
-}
-
-export async function setFactApprovalRule(
-  personId: number,
-  needsApproval: boolean,
-): Promise<FactApprovalRule> {
-  const res = await fetch(`${API_BASE}/memories/facts/approval/${personId}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ needs_approval: needsApproval }),
-  });
-  if (!res.ok) throw new Error("Failed to change who needs approval");
   return res.json();
 }
 

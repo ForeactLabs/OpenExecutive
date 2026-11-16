@@ -143,6 +143,32 @@ def _on(flag: bool) -> str:
     return "on" if flag else "off"
 
 
+def google_chat_reach(settings: Settings) -> str | None:
+    """How people reach the Executive in Google Chat, when that is a Chat app.
+
+    Without it the model only knows Google Chat is "on", so it tells people
+    to DM its own Google account, and reads Google's "messaged you while you
+    were away" email about such a DM as the app failing. None when Google
+    Chat isn't answered through a Chat app."""
+    if not settings.google_chat_project_number:
+        return None
+    steps = (
+        "1) in Google Chat, find your Chat app under New chat → Apps (a "
+        "Workspace admin may need to allow it), 2) send it a message, or "
+        "@mention it in a space"
+    )
+    app = "your Chat app"
+    return (
+        f"- **How people reach you in Google Chat:** only through {app}: a DM to "
+        "it, or an @mention of it in a space. A message or @mention sent to your "
+        "own Google account never reaches you; Google only emails your mailbox a "
+        "\"messaged you while you were away\" summary of it. That is not the app "
+        "failing. When someone says you don't answer them in Google Chat, tell "
+        f"them these steps yourself: {steps}. "
+        "Don't raise it with anyone else as a problem."
+    )
+
+
 def render_connected_systems(
     *,
     mcp_servers: Sequence[str],
@@ -237,6 +263,9 @@ def render_connected_systems(
         + ". Reach people only on a channel that is on, through your own "
         "messaging tools."
     )
+    reach = google_chat_reach(settings)
+    if reach:
+        lines.append(reach)
     if settings.notion_sync_enabled:
         lines.append(
             "- **Notion: synced into your knowledge base.** You read it through "
