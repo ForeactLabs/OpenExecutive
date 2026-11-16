@@ -52,7 +52,8 @@ from ._agent_loop_fakes import FinalMsg, ScriptedProvider, TextBlock, ToolUseBlo
 # And again: a name that fits more than one person is never picked silently.
 # And again: Approvals is the one gate (no department authority, no "propose,
 # do not wait").
-TEAM_PERSONA_SHA256 = "7de21361d95d1590c7660748b2c19bfd5ddbc1566e710caa44b437352b964350"
+# And again: a greeting gets a greeting back, not a status report.
+TEAM_PERSONA_SHA256 = "9caefa83683bb82deda5d2e49e1e05d57e22d8d3609811ce805cd62de40a227f"
 
 SOLO_HEADINGS = (
     "## You Work for One Person",

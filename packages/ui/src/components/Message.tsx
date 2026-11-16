@@ -338,7 +338,13 @@ export default function Message({
 
       {/* Content */}
       <div className="flex-1 min-w-0">
-        <div className="text-xs text-fg-muted mb-2 font-medium tracking-wide uppercase">{executiveName}</div>
+        {/* On phones the avatar column is hidden, so the logo heads the name. */}
+        <div className="flex items-center gap-2 text-xs text-fg-muted mb-2 font-medium tracking-wide uppercase">
+          <span className="sm:hidden">
+            <BrandMark size="xs" />
+          </span>
+          {executiveName}
+        </div>
         <div className="prose prose-invert prose-sm max-w-none
           prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-code:bg-surface-overlay prose-code:before:content-none prose-code:after:content-none
           prose-pre:bg-surface-overlay prose-pre:text-fg prose-pre:border

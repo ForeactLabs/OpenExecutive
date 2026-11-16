@@ -8,13 +8,21 @@ needs from them. Then:
 
 - the extension brings that tab to the front with a bar at the top, "Waiting
   on you: <what>", with Done and Stop (``packages/extension``);
-- on a chat turn, a Needs you card says the same (``SOURCE``), and reaches
-  them wherever their cards do;
+- in the chat they are typing in, the turn asks there first, with Done and
+  Stop (``reserve``, the ``hand_over`` stream event); a Needs you card says
+  the same (``SOURCE``) and reaches them wherever their cards do only when
+  the chat's ask goes unanswered for ``CARD_AFTER_S``, or at once on a turn
+  with no chat to ask in;
   in a workflow, the run pauses on it (``extensions.workflow_wait``) and its
   creator is told, as for any pause;
 - they do it, then press Done on the bar or the card. When the page they
   were handed was a sign-in form, the extension also sees it go and says
   Done by itself.
+
+The hand-over owns its card: however it ends (Done, Stop, the chat turn
+stopped, a newer one pushing it out), the card closes with it (``finish``,
+``_drop``), and cards left by a restart close at start-up
+(``close_leftover_cards``).
 
 The Executive looks at the page again only after Done. Password, card and
 code fields never show their values to it, in the page's text or its
@@ -34,10 +42,13 @@ like the relay's steps: after a restart, Done on an old bar says it's gone.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Literal
+
+logger = logging.getLogger(__name__)
 
 Outcome = Literal["done", "stop"]
 OUTCOMES: frozenset[str] = frozenset({"done", "stop"})
@@ -50,6 +61,9 @@ SOURCE = "browser_handover"
 TAG = "browser-handover"
 # How long a chat turn waits for Done before it ends saying so.
 WAIT_S = 300.0
+# How long the chat's own ask waits for Done or Stop before the Needs you
+# card goes out too.
+CARD_AFTER_S = 60.0
 # What a hand-over says it needs, at most.
 MAX_NEED = 140
 # What the Executive was in the middle of, kept for carrying on later.
@@ -75,6 +89,13 @@ class Handover:
     # answer to the hand_over step). Only then is its own Done ("auto")
     # taken: a page left later can't say Done for any other kind of step.
     sign_in: bool = False
+    # The chat the person is typing in shows the ask with Done and Stop
+    # (``reserve``): the card waits ``CARD_AFTER_S``.
+    in_chat: bool = False
+    # How it ended ("done" or "stop"), "" while open.
+    outcome: str = ""
+    # Done or Stop the chat's ask got before this started (``answer_early``).
+    early: str = ""
     created: float = field(default_factory=time.monotonic)
     # Set while a turn waits for the answer.
     future: asyncio.Future[str] | None = None
@@ -86,6 +107,15 @@ class Handover:
 # Read from worker threads too (card_closed): iterate over a copy, never the
 # dict itself, so an insert on the loop thread can't break the loop.
 _open: dict[str, Handover] = {}
+# Ids the chat was already shown with the ask, by (person, chat, need),
+# taken by the hand-over that asks it (``reserve``, ``start``). They last
+# the round they were shown in, however long its other steps take: the
+# chat's next round clears what that one left (``new_round``).
+_reserved: dict[tuple[int, str, str], list[str]] = {}
+# Done or Stop pressed on the chat's ask before its hand-over started (an
+# earlier step of the round was still running), by id: the hand-over takes
+# it when it starts (``answer_early``).
+_early: dict[str, str] = {}
 
 
 def one_line(text: object, cap: int) -> str:
@@ -97,6 +127,7 @@ def _drop(handover: Handover) -> None:
     still waiting on it is told to stop now rather than sitting out its wait,
     and its bar comes down, since it can no longer be answered."""
     _open.pop(handover.id, None)
+    _ended(handover, "stop")
 
     def _close() -> None:
         future = handover.future
@@ -121,8 +152,102 @@ def _prune(now: float | None = None) -> None:
         _drop(h)
 
 
-def start(person_id: int, need: str, *, card_id: int | None = None, workflow_key: str = "") -> Handover:
-    """A new open hand-over for ``person_id``."""
+def _close_card(card_id: int | None, outcome: str) -> None:
+    """Close a hand-over's card the way it ended: Done = done, anything else
+    = dismissed. Only while it is still open (Done on it already closed it)."""
+    if card_id is None:
+        return
+    from openexecutive.alerts import store
+
+    try:
+        store.set_status_if_open(card_id, "ack" if outcome == "done" else "dismissed")
+    except Exception:
+        logger.warning("browser hand-over: couldn't close card %s", card_id, exc_info=True)
+
+
+def _ended(handover: Handover, outcome: str) -> None:
+    """It ended: its card, if it has one yet, closes with it (``place_card``
+    closes one made after this)."""
+    if handover.outcome:
+        return
+    handover.outcome = "done" if outcome == "done" else "stop"
+    _close_card(handover.card_id, handover.outcome)
+
+
+def place_card(handover: Handover, card_id: int | None) -> None:
+    """Its Needs you card was made: a hand-over that ended meanwhile closes it
+    at once, so no card outlives what it asks about. Safe from a worker
+    thread."""
+    handover.card_id = card_id
+    if handover.outcome:
+        _close_card(card_id, handover.outcome)
+
+
+def close_leftover_cards() -> int:
+    """At start-up: hand-overs live in this process, so a card one left open
+    before a restart can no longer be answered. Close them all. How many.
+    An install runs one API process (the browser relay assumes it too), so
+    no other process is still waiting on one of these."""
+    from openexecutive.alerts import store
+
+    try:
+        return store.close_open_by_source(SOURCE, "dismissed")
+    except Exception:
+        logger.warning("browser hand-over: couldn't close left-over cards", exc_info=True)
+        return 0
+
+
+def new_round(person_id: int, chat: str) -> None:
+    """Clear what ``person_id``'s chat ``chat`` reserved in an earlier round:
+    every hand-over of that round has run (or the turn stopped first), so
+    none is left to take it."""
+    for key in [k for k in list(_reserved) if k[0] == person_id and k[1] == chat]:
+        for hid in _reserved.pop(key, []):
+            _early.pop(hid, None)
+
+
+def answer_early(handover_id: str, person_id: int, outcome: str) -> bool:
+    """Done or Stop on the chat's ask of ``person_id`` whose hand-over hasn't
+    started yet: kept for it to take when it does (``start``). False when no
+    such ask of theirs is waiting to start."""
+    if outcome not in OUTCOMES:
+        return False
+    if not any(k[0] == person_id and handover_id in ids for k, ids in list(_reserved.items())):
+        return False
+    _early[handover_id] = outcome
+    return True
+
+
+def reserve(person_id: int, chat: str, need: str) -> str:
+    """The id the hand-over asking ``need`` of ``person_id`` in their chat
+    ``chat`` will take, so the chat can show the ask with Done and Stop
+    before it starts. The hand-over then waits ``CARD_AFTER_S`` before its
+    card goes out."""
+    hid = uuid.uuid4().hex
+    # Several with the same words in one round are taken in order.
+    _reserved.setdefault((person_id, chat, one_line(need, MAX_NEED)), []).append(hid)
+    while len(_reserved) > 64:
+        for old in _reserved.pop(next(iter(_reserved))):
+            _early.pop(old, None)
+    return hid
+
+
+def _take_reserved(person_id: int, chat: str, need: str) -> str | None:
+    queue = _reserved.get((person_id, chat, need))
+    if not queue:
+        return None
+    hid = queue.pop(0)
+    if not queue:
+        _reserved.pop((person_id, chat, need), None)
+    return hid
+
+
+def start(
+    person_id: int, need: str, *, card_id: int | None = None, workflow_key: str = "", in_chat: str = ""
+) -> Handover:
+    """A new open hand-over for ``person_id``. ``in_chat``: the chat of
+    theirs it was asked in, so it takes the id that chat was shown this
+    round (``reserve``)."""
     _prune()
     mine = sorted((h for h in list(_open.values()) if h.person_id == person_id), key=lambda h: h.created)
     for old in mine[: max(0, len(mine) - MAX_PER_PERSON + 1)]:
@@ -131,9 +256,12 @@ def start(person_id: int, need: str, *, card_id: int | None = None, workflow_key
         loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
     except RuntimeError:
         loop = None
+    need = one_line(need, MAX_NEED)
+    reserved = _take_reserved(person_id, in_chat, need) if in_chat and not workflow_key else None
     handover = Handover(
-        id=uuid.uuid4().hex, person_id=person_id, need=one_line(need, MAX_NEED),
-        card_id=card_id, workflow_key=workflow_key, loop=loop,
+        id=reserved or uuid.uuid4().hex, person_id=person_id, need=need,
+        card_id=card_id, workflow_key=workflow_key, in_chat=reserved is not None, loop=loop,
+        early=_early.pop(reserved, "") if reserved else "",
     )
     _open[handover.id] = handover
     return handover
@@ -191,7 +319,13 @@ def finish(handover_id: str, person_id: int, outcome: str) -> tuple[Handover | N
         return None, False
     _open.pop(handover.id, None)
     future = handover.future
-    if future is not None and not future.done():
+    waited = future is not None and not future.done()
+    if waited or outcome == "stop":
+        # Done with no turn waiting leaves the card open: Done on it is
+        # what carries the work on (its approve path) once the turn ended.
+        # A workflow's hand-over has no card (the run waits on the bar).
+        _ended(handover, outcome)
+    if waited and future is not None:
         future.set_result(outcome)
         return handover, True
     return handover, False
@@ -241,6 +375,7 @@ def card_closed(card_id: int) -> bool:
     if handover is None:
         return False
     _open.pop(handover.id, None)
+    handover.outcome = handover.outcome or "stop"
     loop = handover.loop
 
     def _close() -> None:
@@ -264,3 +399,5 @@ def card_closed(card_id: int) -> bool:
 
 def _reset_for_tests() -> None:
     _open.clear()
+    _reserved.clear()
+    _early.clear()

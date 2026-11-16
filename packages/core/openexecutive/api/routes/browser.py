@@ -22,7 +22,8 @@ as that person, through the UI's backend proxy:
                                  "Stay connected" is ticked (1/0; left out by older extensions)
   POST /browser/steps/{id}     — {ok, error?, ...what happened}: the step's answer
   POST /browser/hand-over/{id} — {outcome: "done" | "stop" | "auto"}: they pressed Done or Stop
-                                 on the "Waiting on you" bar (``browser.handover``), or
+                                 on the "Waiting on you" bar or the chat's ask
+                                 (``browser.handover``), or
                                  it saw the sign-in form go ("auto"): {ok, carried_on, kept?,
                                  on_card?}; 404 when it is already finished
 
@@ -155,9 +156,17 @@ async def answer(step_id: str, request: Request) -> dict[str, bool]:
     return {"ok": True}
 
 
-@router.post("/hand-over/{handover_id}")
+@router.post(
+    "/hand-over/{handover_id}",
+    openapi_extra={"requestBody": {"required": True, "content": {"application/json": {"schema": {
+        "type": "object",
+        "properties": {"outcome": {"type": "string", "enum": ["done", "stop", "auto"]}},
+        "required": ["outcome"],
+    }}}}},
+)
 async def hand_over(handover_id: str, request: Request) -> dict[str, bool]:
-    """Done or Stop on a hand-over's bar, or "auto" when the extension saw
+    """Done or Stop on a hand-over's bar or on the chat's ask (the
+    ``hand_over`` stream event), or "auto" when the extension saw
     the sign-in page left. A turn waiting for it gets the answer; a paused
     workflow run carries on or stops. When nothing waits any more, Done only
     takes the bar down: the work carries on from Done on its card, where the
@@ -177,6 +186,9 @@ async def hand_over(handover_id: str, request: Request) -> dict[str, bool]:
         raise HTTPException(status_code=422, detail='Say "done" or "stop".')
     open_one = browser_handover.get(handover_id)
     if open_one is None or open_one.person_id != person.id:
+        # The chat's ask, pressed before an earlier step of its round let it start.
+        if outcome != browser_handover.AUTO and browser_handover.answer_early(handover_id, person.id, outcome):
+            return {"ok": True, "carried_on": outcome == "done"}
         raise HTTPException(status_code=404, detail="That's already finished.")
     if outcome == browser_handover.AUTO:
         if not open_one.sign_in or not (browser_handover.waited_on(open_one) or open_one.workflow_key):
@@ -208,9 +220,6 @@ async def hand_over(handover_id: str, request: Request) -> dict[str, bool]:
             # older one's run has ended, so the bar comes down.
             return {"ok": True, "carried_on": False, "kept": True}
         return {"ok": True, "carried_on": outcome == "done" and picked > 0}
-    if handover.card_id is not None and outcome == "stop":
-        from openexecutive.alerts import store
-
-        store.set_status(handover.card_id, "dismissed")
-    # The turn ended: Done on the card carries the work on.
+    # Its card closed with it (``browser_handover.finish``). The turn
+    # ended: Done on the card carries the work on.
     return {"ok": True, "carried_on": False, "on_card": outcome == "done" and handover.card_id is not None}
