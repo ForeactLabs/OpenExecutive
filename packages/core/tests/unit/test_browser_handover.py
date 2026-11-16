@@ -453,3 +453,169 @@ async def test_the_card_is_seen_only_by_the_person_it_was_handed_to(alerts_db: P
     assert handover.card_id not in ids(None)
     browser_handover.finish(handover.id, 7, "stop")
     await run
+
+
+# --- The chat asks first; the hand-over owns its card ----------------------
+
+
+def _ask(need: str = "enter the code from your phone") -> dict[str, Any]:
+    events = browser_tools.hand_over_asks(
+        [{"id": "t1", "name": "browser_hand_over", "input": {"need": need}}], "s1"
+    )
+    assert len(events) == 1
+    return events[0]
+
+
+async def _start_in_chat(need: str) -> tuple[asyncio.Task[str], dict[str, Any]]:
+    await browser_relay.next_step(7, wait=0)
+    run = asyncio.create_task(browser_tools._handler("browser_hand_over")({"need": need}))
+    step = await _take(7, {"ok": True, "url": "https://login.example.com/", "sign_in": False})
+    return run, step
+
+
+async def test_the_chat_asks_first_and_the_card_waits(
+    alerts_db: Path, chat_turn: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(browser_relay, "on", lambda: True)
+    monkeypatch.setattr(browser_relay, "connected", lambda _pid: True)
+    ask = _ask()
+    assert ask["type"] == "hand_over" and ask["session_id"] == "s1"
+    assert ask["text"] == "Waiting on you: enter the code from your phone"
+    assert ask["done_label"] == "Done" and ask["stop_label"] == "Stop" and ask["detail"]
+    run, step = await _start_in_chat("enter the code from your phone")
+    # The hand-over took the id the chat was shown, so the chat's Done answers it.
+    assert step["args"]["id"] == ask["id"]
+    handover = browser_handover.get(ask["id"])
+    assert handover is not None and handover.in_chat
+    await asyncio.sleep(0.05)
+    assert handover.card_id is None  # the chat's ask goes first
+    browser_handover.finish(ask["id"], 7, "done")
+    assert json.loads(await run)["done"] is True
+    await asyncio.sleep(0.05)
+    # Answered in the chat: no card, so no push either.
+    assert handover.card_id is None
+    assert not [a for a in alert_store.list_alerts() if a.source == browser_handover.SOURCE]
+
+
+async def test_an_ask_left_unanswered_puts_the_card_up(
+    alerts_db: Path, chat_turn: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(browser_relay, "on", lambda: True)
+    monkeypatch.setattr(browser_relay, "connected", lambda _pid: True)
+    monkeypatch.setattr(browser_handover, "CARD_AFTER_S", 0.05)
+    ask = _ask()
+    run, _step = await _start_in_chat("enter the code from your phone")
+    handover = browser_handover.get(ask["id"])
+    assert handover is not None
+    for _ in range(200):
+        if handover.card_id is not None:
+            break
+        await asyncio.sleep(0.01)
+    assert handover.card_id is not None
+    assert alert_store.get_alert(handover.card_id).status == "unread"  # type: ignore[union-attr]
+    browser_handover.finish(ask["id"], 7, "done")
+    await run
+    assert alert_store.get_alert(handover.card_id).status == "ack"  # type: ignore[union-attr]
+
+
+async def test_stopping_the_chat_turn_ends_the_hand_over_and_closes_its_card(
+    alerts_db: Path, chat_turn: None
+) -> None:
+    run, step = await _handed({"need": "sign in to Shop"})
+    handover = browser_handover.get(step["args"]["id"])
+    assert handover is not None and handover.card_id is not None
+    run.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await run
+    assert browser_handover.get(handover.id) is None
+    assert alert_store.get_alert(handover.card_id).status == "dismissed"  # type: ignore[union-attr]
+    ended = await _take(7, {"ok": True})
+    assert ended["action"] == "hand_over_end" and ended["args"]["id"] == handover.id
+
+
+def test_a_card_made_after_the_hand_over_ended_closes_at_once(alerts_db: Path) -> None:
+    handover = browser_handover.start(7, "sign in")
+    browser_handover.finish(handover.id, 7, "stop")
+    card = alert_store.insert_alert(
+        source=browser_handover.SOURCE, external_id="x", severity="high", headline="Waiting on you: sign in",
+        body="b", routed_to_person_id=7,
+    )
+    browser_handover.place_card(handover, card)
+    assert alert_store.get_alert(card).status == "dismissed"  # type: ignore[arg-type,union-attr]
+
+
+def test_a_newer_hand_over_pushing_one_out_closes_its_card(alerts_db: Path) -> None:
+    card = alert_store.insert_alert(
+        source=browser_handover.SOURCE, external_id="old", severity="high", headline="Waiting on you: a",
+        body="b", routed_to_person_id=7,
+    )
+    browser_handover.start(7, "a", card_id=card)
+    for i in range(browser_handover.MAX_PER_PERSON):
+        browser_handover.start(7, f"n{i}")
+    assert alert_store.get_alert(card).status == "dismissed"  # type: ignore[arg-type,union-attr]
+
+
+def test_cards_left_by_a_restart_close_at_start_up(alerts_db: Path) -> None:
+    left = alert_store.insert_alert(
+        source=browser_handover.SOURCE, external_id="left", severity="high", headline="Waiting on you: a",
+        body="b", routed_to_person_id=7,
+    )
+    other = alert_store.insert_alert(
+        source="manual", external_id="other", severity="high", headline="Something else", body="b",
+    )
+    assert browser_handover.close_leftover_cards() == 1
+    assert alert_store.get_alert(left).status == "dismissed"  # type: ignore[arg-type,union-attr]
+    assert alert_store.get_alert(other).status == "unread"  # type: ignore[arg-type,union-attr]
+
+
+def test_no_chat_ask_outside_the_persons_own_chat(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(browser_relay, "on", lambda: True)
+    token = current_session.set(SimpleNamespace(
+        caller_person_id=7, from_web_chat=False, from_host=False, from_mcp_client=False,
+        from_meeting=False, unattended=False, session_id="s1",
+    ))
+    try:
+        assert browser_tools.hand_over_asks(
+            [{"id": "t1", "name": "browser_hand_over", "input": {"need": "sign in"}}], "s1"
+        ) == []
+    finally:
+        current_session.reset(token)
+    assert not browser_handover._reserved
+
+
+def test_done_on_the_bar_after_the_turn_ended_leaves_the_card_for_its_done(alerts_db: Path) -> None:
+    card = alert_store.insert_alert(
+        source=browser_handover.SOURCE, external_id="late", severity="high", headline="Waiting on you: a",
+        body="b", routed_to_person_id=7,
+    )
+    handover = browser_handover.start(7, "a", card_id=card)
+    assert browser_handover.finish(handover.id, 7, "done") == (handover, False)
+    # Done on the card carries the work on now, so it stays open for that.
+    assert alert_store.get_alert(card).status == "unread"  # type: ignore[arg-type,union-attr]
+
+
+def test_a_reservation_is_taken_only_in_the_chat_and_only_while_fresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    hid = browser_handover.reserve(7, "sign in")
+    assert browser_handover.start(7, "sign in").id != hid  # not asked in the chat: a fresh id
+    assert browser_handover.start(7, "sign in", in_chat=True).id == hid
+    stale = browser_handover.reserve(7, "sign in")
+    monkeypatch.setattr(browser_handover, "RESERVED_S", 0.0)
+    late = browser_handover.start(7, "sign in", in_chat=True)
+    assert late.id != stale and not late.in_chat
+
+
+def test_same_words_twice_in_a_round_each_get_their_own_id(chat_turn: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(browser_relay, "on", lambda: True)
+    monkeypatch.setattr(browser_relay, "connected", lambda _pid: True)
+    tu = {"name": "browser_hand_over", "input": {"need": "sign in"}}
+    first, second = browser_tools.hand_over_asks([{**tu, "id": "a"}, {**tu, "id": "b"}], "s1")
+    assert browser_handover.start(7, "sign in", in_chat=True).id == first["id"]
+    assert browser_handover.start(7, "sign in", in_chat=True).id == second["id"]
+
+
+def test_no_chat_ask_while_the_browser_isnt_connected(chat_turn: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(browser_relay, "on", lambda: True)
+    monkeypatch.setattr(browser_relay, "connected", lambda _pid: False)
+    assert browser_tools.hand_over_asks(
+        [{"id": "t1", "name": "browser_hand_over", "input": {"need": "sign in"}}], "s1"
+    ) == []

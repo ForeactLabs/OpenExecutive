@@ -209,6 +209,19 @@ export interface BrowserNeededEvent {
   store_url: string | null;
 }
 
+// A step in the person's browser only they can do, asked in the chat with
+// Done and Stop while the turn waits (browser/tools.py `hand_over_asks`,
+// lib/handOverAsk.ts). Shown to them only, never saved.
+export interface HandOverAskEvent {
+  type: "hand_over";
+  session_id?: string | null;
+  id: string;
+  text: string;
+  detail: string;
+  done_label: string;
+  stop_label: string;
+}
+
 // What the content check flagged this turn, in plain words: sent only with
 // held steps, as their reason (orchestrator/outside_content.py `pending_flags`).
 export interface FlagsEvent {
@@ -261,6 +274,7 @@ export type StreamItem =
   | HeldStepsEvent
   | BrowserNeededEvent
   | FlagsEvent
+  | HandOverAskEvent
   | ProgressEvent;
 
 export interface StreamChatOptions {
@@ -427,6 +441,21 @@ export async function stopChat(clientTurnId: string): Promise<boolean> {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ client_turn_id: clientTurnId }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+// Done or Stop on the chat's ask (lib/handOverAsk.ts). The turn waiting on it
+// carries on or stops; false when it had already finished.
+export async function answerHandOver(id: string, outcome: "done" | "stop"): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/browser/hand-over/${encodeURIComponent(id)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ outcome }),
     });
     return res.ok;
   } catch {

@@ -616,6 +616,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from openexecutive.workflows.resumer import run_resumer
     resumer_task = asyncio.create_task(run_resumer())
 
+    # Browser hand-overs live in the process: a "Waiting on you" card the last
+    # one left open can't be answered any more, so it closes now.
+    from openexecutive.browser import handover as browser_handover
+
+    await asyncio.to_thread(browser_handover.close_leftover_cards)
+
     # Discord gateway bot. Embedded in the lifespan (rather than a sibling
     # service) because the bot needs direct access to the same SQLite + ChromaDB
     # under /data, and that volume attaches to a single instance. Same pattern as
