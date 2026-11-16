@@ -609,7 +609,10 @@ def _leave_card(
         approver_person_id=person_id,
         confidence=None,
     )
-    own_chat.keep_with(decision_id, person_id)
+    if not own_chat.keep_with(decision_id, person_id):
+        # Not kept to its person, it would show to everyone: never left so.
+        close_externally(decision_id, reason="not_kept_with_person")
+        raise RuntimeError(f"couldn't keep card {decision_id} with its person")
     if not shown_here(session):
         first, _, rest = card.partition("\n")
         try:

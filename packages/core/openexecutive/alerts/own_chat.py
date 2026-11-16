@@ -80,11 +80,11 @@ def note_decision(decision_id: int, session_id: str | None, db_path: Path | None
         keep_with(decision_id, owner, db_path)
 
 
-def keep_with(decision_id: int, person_id: int, db_path: Path | None = None) -> None:
+def keep_with(decision_id: int, person_id: int, db_path: Path | None = None) -> bool:
     """Keep held step ``decision_id`` with ``person_id`` (and its approver)
     alone, whatever conversation it came from: a card only its own person
     answers, wherever they asked. The first owner written stays. Never
-    raises; a failed write is tried once more."""
+    raises; a failed write is tried once more, and False says it failed."""
     for attempt in (1, 2):
         try:
             with closing(sqlite3.connect(_path(db_path), timeout=10)) as conn, conn:
@@ -93,12 +93,13 @@ def keep_with(decision_id: int, person_id: int, db_path: Path | None = None) -> 
                     "INSERT OR IGNORE INTO decision_chat_owners (decision_id, person_id) VALUES (?, ?)",
                     (decision_id, person_id),
                 )
-            return
+            return True
         except Exception:
             if attempt == 2:
                 logger.error(
                     "own_chat: couldn't note whose held step %s is", decision_id, exc_info=True
                 )
+    return False
 
 
 def _noted(decision_ids: list[int], db_path: Path | None = None) -> dict[int, int]:

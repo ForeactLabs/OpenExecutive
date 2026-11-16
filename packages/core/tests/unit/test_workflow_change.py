@@ -315,6 +315,19 @@ def test_a_card_that_cant_go_on_needs_you_isnt_left_and_the_tool_says_so(
     ]
 
 
+def test_a_card_that_cant_be_kept_with_its_person_isnt_left(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.alerts import own_chat
+
+    _stored()
+    monkeypatch.setattr(own_chat, "keep_with", lambda *_a, **_k: False)
+    out = _save_fix(_one_on_one(owner))
+    assert "Couldn't leave the card" in out["error"]
+    assert [i.status for i in decision_ledger.list_instances("app_action")] == [
+        decision_ledger.STATUS_CLOSED_EXTERNALLY,
+    ]
+    assert _needs_you_card(decision_ledger.list_instances("app_action")[0].id) is None
+
+
 @pytest.mark.parametrize(
     ("creator", "asker", "expected"),
     [
