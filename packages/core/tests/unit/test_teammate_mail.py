@@ -445,3 +445,12 @@ def test_a_teammate_named_only_in_an_outside_body_keeps_nothing_private(roster: 
     with _reader(roster.ben), patch("openexecutive.memory.session_store.mark_mail_private") as mark:
         _run(FakeMailbox({READ: text}), READ, message_id="m1")
     mark.assert_not_called()
+
+
+def test_a_query_with_a_bracket_inside_quotes_is_refused() -> None:
+    # A search reads a quoted bracket as text; counted as a bracket it would
+    # let the query reopen the group the exclusions are appended into.
+    for query in ['"(" ) OR x', 'x OR ( ")"', '-( ( ")" ")"', '{ ( ")" "}"', "({)}", "a)(b"]:
+        assert not tm._balanced(query), query
+    for query in ['subject:"q3 plan" OR {from:a to:b}', "(invoice OR bill) -label:paid", ""]:
+        assert tm._balanced(query), query

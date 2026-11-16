@@ -127,7 +127,7 @@ def test_schedule_lists_all_five_kinds_soonest_first(db: Path) -> None:
 
     by_kind = {i["kind"]: i for i in body["items"]}
     assert by_kind["follow_up"]["stop_key"] == f"action:{follow_up}"
-    assert by_kind["follow_up"]["detail"] == "I follow up with Priya Nair"
+    assert by_kind["follow_up"]["detail"] == "I'll follow up with Priya Nair"
     assert by_kind["standing"]["stop_key"].startswith("job:")
     assert by_kind["standing"]["href"] == "/delegate#as-me"
     assert by_kind["workflow"] == {

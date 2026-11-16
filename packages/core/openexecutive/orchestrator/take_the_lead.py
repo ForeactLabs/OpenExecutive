@@ -3080,6 +3080,13 @@ def outcome_of(tool: str, tool_input: dict[str, Any], result: str, *, mcp: bool 
     return ""
 
 
+def is_message_send(tool: str) -> bool:
+    """Whether ``tool`` sends something to someone (an email, a chat app
+    message, a message to a person), so Done for you says "Sent as …"
+    rather than "Done as …"."""
+    return is_mail_send(tool) or tool in _DM_CHANNEL or tool == "message_person"
+
+
 def how_line(tool: str, *, to_person_id: int | None = None) -> str:
     """How it did it, for Done for you: "By email", "On Slack", "On the
     calendar"; "" when that says nothing. Never raises."""

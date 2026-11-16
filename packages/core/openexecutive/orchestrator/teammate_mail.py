@@ -122,7 +122,8 @@ RULE_NOTE = (
     "is private to them."
 )
 QUERY_NOTE = (
-    "{tool} was not run: close every quote and bracket in the query and try again."
+    "{tool} was not run: close every quote and bracket in the query, keep brackets out of quoted text, "
+    "and try again."
 )
 OUTLOOK_THEIRS_NOTE = (
     "{tool} was not run: that email involves another teammate and is their "
@@ -342,18 +343,21 @@ def _refusal(note: str) -> str:
 
 def _balanced(query: str) -> bool:
     """Whether the model's query leaves the exclusions appended to it alone:
-    quotes paired, brackets closed."""
-    if query.count('"') % 2:
-        return False
-    for open_, close in ("()", "{}"):
-        depth = 0
-        for ch in query:
-            depth += (ch == open_) - (ch == close)
-            if depth < 0:
+    quotes paired, no bracket inside quotes (a search may read it either
+    way), and every bracket closed in order by its own kind."""
+    stack: list[str] = []
+    quoted = False
+    for ch in query:
+        if ch == '"':
+            quoted = not quoted
+        elif ch in "(){}":
+            if quoted:
                 return False
-        if depth:
-            return False
-    return True
+            if ch in "({":
+                stack.append(")" if ch == "(" else "}")
+            elif not stack or stack.pop() != ch:
+                return False
+    return not quoted and not stack
 
 
 def _gmail_query(query: str, sides: _Sides) -> str:

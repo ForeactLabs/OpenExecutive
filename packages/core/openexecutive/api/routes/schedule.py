@@ -6,7 +6,7 @@ nothing of its own:
 
 - **follow_up**: the follow-ups and nudges it will send, and
 - **standing**: the standing work people gave As me, both read through
-  ``today._watching`` (the lines Home's Watching next shows, with the same
+  ``today._watching`` (the lines Home's Following up shows, with the same
   rules for who sees what), so Stop is ``POST /today/watching/stop``;
 - **workflow**: custom workflows on a schedule (their pending
   ``dynamic_workflow`` row says when they run next);
