@@ -185,7 +185,9 @@ def place_card(handover: Handover, card_id: int | None) -> None:
 
 def close_leftover_cards() -> int:
     """At start-up: hand-overs live in this process, so a card one left open
-    before a restart can no longer be answered. Close them all. How many."""
+    before a restart can no longer be answered. Close them all. How many.
+    An install runs one API process (the browser relay assumes it too), so
+    no other process is still waiting on one of these."""
     from openexecutive.alerts import store
 
     try:
