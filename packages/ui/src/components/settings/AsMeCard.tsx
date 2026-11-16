@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+
+import ScheduleLink from "@/components/schedule/ScheduleLink";
 import { useEffect, useState, type FormEvent } from "react";
 
 import ExecutiveRunSwitch from "@/components/executive/ExecutiveRunSwitch";
@@ -131,8 +133,9 @@ export default function AsMeCard({
 
         {state === "ready" && lead && (
           <SettingsCard
-            title="Standing jobs"
+            title="Standing work"
             description="Things you asked me to keep doing. Say it in chat or add one here. Each step still goes through Approvals."
+            action={<ScheduleLink kind="standing" />}
           >
             {jobs.length > 0 && (
               <ul className="mb-4 flex flex-col divide-y divide-line rounded-xl border border-line">
@@ -164,8 +167,8 @@ export default function AsMeCard({
                 value={job}
                 onChange={(event) => setJob(event.target.value)}
                 maxLength={200}
-                placeholder="Give me a standing job…"
-                aria-label="Give me a standing job"
+                placeholder="Give me standing work…"
+                aria-label="Give me standing work"
                 className="min-h-touch min-w-0 flex-1 rounded-full border border-line bg-surface px-4 text-[15px] text-fg placeholder:text-fg-subtle focus:border-accent focus:outline-none"
               />
               {job.trim() && (

@@ -25,6 +25,7 @@ import {
   stopWorkflowRun,
 } from "@/lib/api";
 import RepeatOfferCard from "@/components/jobs/RepeatOfferCard";
+import ScheduleLink from "@/components/schedule/ScheduleLink";
 import StartHere from "@/components/jobs/StartHere";
 import { buttonClass } from "@/components/ui/Button";
 import OverflowMenu, { type OverflowItem } from "@/components/ui/OverflowMenu";
@@ -294,6 +295,7 @@ function JobsPageInner() {
         <h2 className="text-xl font-bold tracking-tight text-fg">
           {tab === "runs" ? "Runs" : "Your workflows"}
         </h2>
+        {tab === "catalog" && <ScheduleLink kind="workflow" className="mr-auto" />}
         <ViewSwitch
           tab={tab}
           runsLabel={openRuns > 0 ? `Runs (${openRuns} open)` : `Runs (${runs.length})`}
