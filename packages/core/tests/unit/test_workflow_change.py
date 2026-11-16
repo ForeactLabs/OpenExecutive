@@ -13,6 +13,7 @@ from typing import Any
 import pytest
 from fastapi import HTTPException
 
+from openexecutive.alerts import store as alerts_store
 from openexecutive.api.routes import decisions as decisions_route
 from openexecutive.api.routes import workflows as workflows_route
 from openexecutive.delegation.verified import ChatTap
@@ -44,6 +45,7 @@ def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     episodic.initialize_db(path)
     people_store.initialize_db(path)
     dynamic_store.initialize_dynamic_workflows_db(path)
+    alerts_store.initialize_db(path)
     for var in ("OE_LOCAL_LOGIN", "OE_PUBLIC_DEPLOYMENT", "BACKEND_SHARED_SECRET"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr("openexecutive.audit.log_event", lambda *_a, **_k: None)
@@ -222,12 +224,81 @@ def test_save_leaves_a_card_and_changes_nothing_yet(owner: Any) -> None:
     assert chip is not None and chip["decision_id"] == out["decision_id"]
 
 
-def test_no_card_without_a_verified_speaker_or_where_it_cant_show(owner: Any) -> None:
+def _one_on_one(person: Any) -> Session:
+    """A call with the Executive: verified and private, and it shows no cards."""
+    return Session(session_id="call-1", origin_channel="meeting", origin_channel_ref="app:c1",
+                   caller_person_id=person.id, private_chat=True, speaker_verified=True)
+
+
+def _needs_you_card(decision_id: int) -> Any:
+    from openexecutive.alerts.store import get_alert_by_external
+
+    return get_alert_by_external(
+        decision_ledger.DECISION_ALERT_SOURCE, decision_ledger.decision_alert_external_id(decision_id),
+    )
+
+
+def test_no_card_without_a_verified_speaker_or_in_a_channel_others_read(owner: Any) -> None:
     _stored()
     assert "know who is asking" in _save_fix(None)["error"]
-    slack = Session(session_id="slack-dm-U1", origin_channel="slack", origin_channel_ref="U1",
-                    caller_person_id=owner.id)
-    assert "error" in _save_fix(slack)
+    channel = Session(session_id="slack:channel:C1:U1", origin_channel="slack", origin_channel_ref="U1",
+                      caller_person_id=owner.id)
+    assert "error" in _save_fix(channel)
+    assert decision_ledger.list_instances("app_action") == []
+
+
+def test_where_the_chat_cant_show_it_the_card_goes_on_needs_you(owner: Any) -> None:
+    _stored()
+    out = _save_fix(_one_on_one(owner))
+    assert out["status"] == "waiting_for_approval"
+    assert "Needs you" in out["note"]
+    card = _needs_you_card(out["decision_id"])
+    assert card is not None and card.status == "unread"
+    assert card.routed_to_person_id == owner.id
+    assert card.headline.startswith("Change the workflow")
+    assert decision_ledger.decision_instance_tag(out["decision_id"]) in card.topic_tags
+    # Answering it clears it.
+    instance = decision_ledger.get_decision_instance(out["decision_id"])
+    request = SimpleNamespace(state=SimpleNamespace(), headers={"x-caller-email": "olivia@co.example"})
+    asyncio.run(decisions_route._carry_out_app_action(instance, decisions_route.ApproveBody(), request, owner.id))  # type: ignore[arg-type]
+    cleared = _needs_you_card(out["decision_id"])
+    assert cleared is not None and cleared.status != "unread"
+
+
+def test_where_the_chat_shows_it_the_card_stays_under_the_reply(owner: Any) -> None:
+    _stored()
+    out = _save_fix(_web(owner))
+    assert "under this reply" in out["note"]
+    assert _needs_you_card(out["decision_id"]) is None
+
+
+def test_its_creators_own_ask_changes_one_that_works_as_them_from_a_call(
+    owner: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stored(owner=owner.id)
+    monkeypatch.setattr(wat, "_person_asked", lambda: True)
+    mine = _prep(tools=["oe__my_calendar"])
+    out = _call(wat.handle_save_workflow, {"definition": mine, "confirm_token": wat._canonical_token(mine),
+                                           "overwrite": True}, _one_on_one(owner))
+    assert "error" not in out and out.get("status") != "waiting_for_approval", out
+    stored = dynamic_store.get_definition("meeting_prep")
+    assert stored is not None and stored.steps[0].tools == ["oe__my_calendar"]  # type: ignore[union-attr]
+    assert decision_ledger.list_instances("app_action") == []
+
+
+def test_someone_elses_ask_to_make_it_work_as_its_creator_waits_on_a_card(
+    owner: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ben_id = people_store.upsert_person(full_name="Ben Teammate", email="ben@co.example")
+    people_registry.invalidate()
+    _stored(owner=ben_id)
+    monkeypatch.setattr(wat, "_person_asked", lambda: True)
+    mine = _prep(tools=["oe__my_calendar"])
+    out = _call(wat.handle_save_workflow, {"definition": mine, "confirm_token": wat._canonical_token(mine),
+                                           "overwrite": True}, _web(owner))
+    assert out["status"] == "waiting_for_approval"
+    stored = dynamic_store.get_definition("meeting_prep")
+    assert stored is not None and stored.steps[0].tools == [GATEWAY_READ]  # type: ignore[union-attr]
 
 
 def test_only_the_owner_or_its_creator_may_stage_a_change(owner: Any) -> None:

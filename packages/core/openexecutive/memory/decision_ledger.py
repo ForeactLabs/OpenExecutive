@@ -83,6 +83,44 @@ def decision_instance_tag(instance_id: int) -> str:
     return f"{DECISION_INSTANCE_TAG_PREFIX}{instance_id}"
 
 
+def put_on_needs_you(
+    instance_id: int,
+    decision_class: str,
+    *,
+    headline: str,
+    body: str,
+    suggested_action: str,
+    approver_person_id: int | None,
+    severity: str = "medium",
+    private: bool = False,
+    extra_tags: tuple[str, ...] = (),
+) -> None:
+    """Put a waiting decision on its approver's Needs you (web and phone),
+    with Approve and Skip: the companion alert the decisions route clears
+    when it is answered. ``private`` keeps it to the approver. Raises what
+    the alerts store raises; callers decide whether that breaks them."""
+    from openexecutive.alerts.models import PRIVATE_ALERT_TAG
+    from openexecutive.alerts.store import insert_alert
+
+    external_id = decision_alert_external_id(instance_id)
+    insert_alert(
+        source=DECISION_ALERT_SOURCE,
+        external_id=external_id,
+        severity=severity,
+        headline=headline[:160],
+        body=body,
+        suggested_action=suggested_action,
+        topic_tags=[
+            decision_instance_tag(instance_id),
+            f"decision_class:{decision_class}",
+            *extra_tags,
+            *([PRIVATE_ALERT_TAG] if private else []),
+        ],
+        dedup_key=external_id,
+        routed_to_person_id=approver_person_id,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Pydantic output models
 # ---------------------------------------------------------------------------

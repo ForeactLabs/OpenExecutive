@@ -1004,6 +1004,7 @@ async def _carry_out_app_action(
     payload = _parse_payload(instance)
     if app_control.card_stale(instance.created_at):
         mark_resolved(instance.id, STATUS_REJECTED, resolver_person_id=resolver)
+        _clear_decision_alert(instance.id, "dismissed")
         raise HTTPException(
             status_code=409, detail="This was more than a day ago, so it wasn't done. Ask again in chat.",
         )
@@ -1015,27 +1016,31 @@ async def _carry_out_app_action(
     except (app_control.Refused, HTTPException) as exc:
         reason = app_control.refusal_text(exc) if isinstance(exc, HTTPException) else str(exc)
         finish_execution(instance.id, STATUS_FAILED, final_payload={**payload, "error": reason})
+        _clear_decision_alert(instance.id, "dismissed")
         log_event("app_action_refused", f"Card {instance.id} refused", actor="user", details=details)
         status_code = exc.status_code if isinstance(exc, HTTPException) and exc.status_code < 500 else 409
         raise HTTPException(status_code=status_code, detail=reason) from None
     except Exception:
         logger.exception("decisions/approve: app action %d failed", instance.id)
         finish_execution(instance.id, STATUS_FAILED, final_payload={**payload, "error": "failed"})
+        _clear_decision_alert(instance.id, "dismissed")
         raise HTTPException(
             status_code=502, detail="That didn't go through. Check before trying again.",
         ) from None
     finish_execution(instance.id, STATUS_APPROVED_UNCHANGED, final_payload={**payload, "did": did})
+    _clear_decision_alert(instance.id, "ack")
     log_event("app_action_done", did[:200], actor="user", details=details)
     return _refresh(instance.id)
 
 
 # Something asked for in chat that waits for its person's tap
-# (orchestrator.app_control): theirs alone, and never an alert.
+# (orchestrator.app_control): theirs alone. Its Needs you card, left when the
+# chat couldn't show it, is cleared when it is answered.
 _APP_ACTION = DecisionClassSpec(
     name="app_action",
     principal_only=False,
     approver_only=True,
-    alert_source=None,
+    alert_source=DECISION_ALERT_SOURCE,
     approve=_carry_out_app_action,
 )
 

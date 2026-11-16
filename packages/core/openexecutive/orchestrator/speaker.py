@@ -1,0 +1,71 @@
+"""Who is asking on a chat turn, and whether only they read it.
+
+Every tool that acts for "the person asking" asks here, on every surface: the
+web chat (and the phone app, which uses it), a chat app's direct message, a
+call with the Executive, another AI app signed in as them. The answer comes
+from the turn's flags in this one place, so a surface added later works for
+every tool at once instead of tool by tool.
+
+- ``speaker``: the person on People talking on this turn, on a surface that
+  verified it is them (``people_tools``), or None (an email from someone
+  else, an unattended run, a sender on nobody's People entry).
+- ``own_private_speaker``: that person when nobody else reads this
+  conversation (``delegation.settings.private_conversation``): their chats,
+  tasks, notes and settings are shown and changed there, never in a shared
+  chat or a channel.
+"""
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+def _session() -> Any:
+    from openexecutive.orchestrator.schedule_tools import current_session
+
+    return current_session.get()
+
+
+def speaker(session: Any = None) -> Any:
+    """The verified speaker's People row (principal or teammate), or None.
+    ``session`` defaults to the turn's own (``current_session``). Fails
+    closed. Never raises."""
+    from openexecutive.orchestrator.people_tools import (
+        is_principal_on_verified_surface,
+        teammate_on_verified_surface,
+    )
+    from openexecutive.people.store import find_principal_person, get_person
+
+    session = session if session is not None else _session()
+    if (
+        session is None
+        or getattr(session, "unattended", False) is True
+        or getattr(session, "private_to_principal", False) is True
+    ):
+        return None
+    try:
+        if is_principal_on_verified_surface(session):
+            caller = getattr(session, "caller_person_id", None)
+            return get_person(int(caller)) if caller is not None else find_principal_person()
+        return teammate_on_verified_surface(session)
+    except Exception:
+        logger.warning("speaker: lookup failed", exc_info=True)
+        return None
+
+
+def own_private_speaker(session: Any = None) -> Any:
+    """``speaker`` when nobody but them (and the Executive) reads this
+    conversation, else None. Never raises."""
+    from openexecutive.delegation.settings import private_conversation
+
+    session = session if session is not None else _session()
+    person = speaker(session)
+    if person is None:
+        return None
+    try:
+        return person if private_conversation(session) else None
+    except Exception:
+        logger.warning("speaker: privacy check failed", exc_info=True)
+        return None

@@ -7253,8 +7253,8 @@ workflows:
     advanced editor drives the `/workflows/custom` CRUD endpoints directly.
     Approvals decides (2026-11-08): on Hands-off (workflow_change.hands_off,
     levels.relaxed) the draft's note says to save at once, it is saved
-    switched on, replacing a switched-on one needs no card unless it reads
-    or sends as its creator, and a run's write to a new target runs
+    switched on, replacing a switched-on one needs no card, and a run's
+    write to a new target runs
     (action_step._hands_off, levels.decide UNATTENDED). Below Hands-off, a
     definition with action (tool) steps saved from chat is stored
     is_active=False (applied after the token check), its cadence is not
@@ -7264,17 +7264,24 @@ workflows:
     the approval is **Turn on workflow** on the review card that /jobs/{name}
     shows for an inactive custom workflow (POST /workflows/custom/{name}/
     activate, which re-runs validate_definition_and_tools when turning on).
-    Chat may keep revising a switched-off one, but never replaces a
-    switched-on workflow with action steps, or one that reads or sends email
-    as its creator, directly (an inbound email steering the Executive could
-    otherwise stage new tools under a familiar name). save_workflow with
-    overwrite=true leaves a CHANGE CARD instead (orchestrator.workflow_change,
+    A person's own verified ask is their yes for a change too (2026-11-16:
+    a call with the Executive couldn't change the workflow it had just made,
+    since a browser step forced a card the call can't show). A change waits
+    on a card only when nobody on the team asked this turn (an inbound email
+    steering the Executive could otherwise stage new tools under a familiar
+    name), below Hands-off, for a switched-on workflow with action steps;
+    and at every level when the workflow reads or sends email as its creator
+    or uses their browser and the asker isn't its creator
+    (workflow_change.needs_card / _asked_by_creator). save_workflow with
+    overwrite=true then leaves a CHANGE CARD (orchestrator.workflow_change,
     decision class app_action, hidden catalog action change_workflow that
     do_in_app never offers): server-written lines name every step added,
     removed or changed, tools by plain name, schedule and title. Only a
-    verified speaker in a private conversation who is the owner or the
-    workflow's creator can stage one, and only where the card shows (web
-    chat, or a chat app channel_cards.shows_cards). The tap
+    verified speaker in a private conversation (orchestrator.speaker) who
+    is the owner or the workflow's creator can stage one. It goes where every
+    app_action card goes (app_control.leave_card): under the reply where the
+    chat shows cards (channel_cards.card_here), else on the person's Needs
+    you (decision_ledger.put_on_needs_you), cleared when answered. The tap
     (api.routes.workflows.apply_chat_change) saves it only if the stored
     workflow still matches the card's base (else 409), re-validates tools,
     runs workflow_email.save_refusal for the tapper (signed web caller or a
@@ -7650,8 +7657,8 @@ workflows:
     the send. A workflow with the send tool is created/changed/activated only
     by its creator per verified.caller_refusal (403 from POST/PUT
     /workflows/custom, save-edit, activate; save_refusal); chat's
-    save_workflow only leaves a change card for one (workflow_change), saved
-    on the creator's own verified tap. At send:
+    save_workflow saves the creator's own verified ask, and leaves a change
+    card (workflow_change) for anyone else's, saved on the creator's tap. At send:
     is_enabled, handle_it.signing_ok, no client slot, draft unchanged
     (recipients exactly as written, from an own address, <=10, never the
     Executive's). Results and the run report carry to/subject, never the

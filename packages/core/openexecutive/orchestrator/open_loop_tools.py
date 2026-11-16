@@ -182,39 +182,23 @@ def _is_principal(person_id: int) -> bool:
     return bool(person is not None and person.is_principal)
 
 
-def _is_private_surface(session: Any) -> bool:
-    """Whether a reply in this session is seen only by the person asking.
-
-    Web chat and 1:1 DMs are private. Slack / Discord channels and threads,
-    Telegram groups (negative chat ids), Google Chat spaces and email (which can
-    carry cc's) are not — a list rendered there is read by everyone present,
-    the same reason Slack keeps the alert board out of shared channels. So is
-    a web chat its owner shared with teammates (``Session.shared_chat``)."""
-    if getattr(session, "from_web_chat", False):
-        return getattr(session, "shared_chat", False) is not True
-    sid = str(getattr(session, "session_id", "") or "")
-    if sid.startswith(("slack:dm:", "discord:dm:")):
-        return True
-    if sid.startswith("telegram:"):
-        return not sid.removeprefix("telegram:").startswith("-")
-    return False
-
-
 def _visible_owner(requested: int | None) -> tuple[bool, int | None]:
     """``(allowed, owner filter)`` for listing loops in the current turn.
 
-    The principal may see everyone's loops, but only on a private surface.
-    Anyone else — and the principal in a shared channel — sees only their own.
-    No resolved speaker sees nothing."""
+    The principal may see everyone's loops, verified, in a conversation only
+    they read (``orchestrator.speaker.own_private_speaker``): the web chat, a
+    call with the Executive, their own chat app. Anyone else, and the
+    principal in a shared channel, sees only their own. No resolved speaker
+    sees nothing."""
     from openexecutive.orchestrator.schedule_tools import current_session
-    from openexecutive.people.store import get_person
+    from openexecutive.orchestrator.speaker import own_private_speaker
 
     session = current_session.get()
     caller = getattr(session, "caller_person_id", None) if session is not None else None
     if caller is None:
         return False, None
-    person = get_person(caller)
-    if person is not None and person.is_principal and _is_private_surface(session):
+    speaker = own_private_speaker(session)
+    if speaker is not None and speaker.is_principal:
         return True, requested
     if requested is not None and requested != caller:
         return False, None

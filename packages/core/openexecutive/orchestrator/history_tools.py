@@ -77,9 +77,9 @@ def recall_person(session: Any) -> Any:
     verified, in a conversation private to them, on an interactive turn, with
     "Keep track of what happens" on. Never raises."""
     try:
-        from openexecutive.delegation.settings import turn_delegation
+        from openexecutive.delegation.settings import private_conversation, turn_delegation
         from openexecutive.memory.history import can_keep_notes, person_settings
-        from openexecutive.memory.history_chat import private_chat, verified_speaker
+        from openexecutive.memory.history_chat import verified_speaker
         from openexecutive.people.store import get_person
 
         pinned = turn_delegation(session)
@@ -88,7 +88,7 @@ def recall_person(session: Any) -> Any:
         person = get_person(pinned.person_id)
         if person is None or not can_keep_notes(person) or not verified_speaker(session, person):
             return None
-        if not private_chat(session):
+        if not private_conversation(session):
             return None
         if not person_settings(person.id).reply_notes:
             return None
