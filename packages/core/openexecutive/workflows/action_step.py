@@ -54,6 +54,7 @@ from typing import Any
 
 from openexecutive.agents.workflow_actor import WORKFLOW_ACTOR_AGENT_ID, WorkflowActorAgent
 from openexecutive.config import get_settings
+from openexecutive.orchestrator import turn_live
 from openexecutive.providers.translator import reasoning_replay_block
 from openexecutive.workflows import step_script, tool_catalog
 from openexecutive.workflows.approved_targets import approved_values, normalize_value
@@ -674,7 +675,10 @@ class _StepCalls:
                 content, is_error, outcome = HELD_TOOL_RESULT, False, "held for approval"
             else:
                 budget.used += 1
-                self._events.append(("progress", _counted(progress_line(name, arguments), budget)))
+                line = progress_line(name, arguments)
+                self._events.append(("progress", _counted(line, budget)))
+                # A run started from chat says it there as it happens.
+                turn_live.say(line)
                 from openexecutive.orchestrator import extensions
 
                 try:
@@ -684,7 +688,7 @@ class _StepCalls:
                     # Stopped mid-call (a script's clock, or the run): it may
                     # have taken effect, so it still gets its audit row.
                     _audit(self._workflow_name, self._step_id, name, "cancelled (may have run)", targets)
-                    self._actions.append((name, "cancelled (may have run)"))
+                    self._actions.append((action_name(name, arguments), "cancelled (may have run)"))
                     raise
                 outcome = "error" if is_error else "ok"
                 # A call that failed did nothing to pause for: its error stands.
@@ -716,7 +720,7 @@ class _StepCalls:
                 ):
                     self._note_repeat(name, arguments, content)
         _audit(self._workflow_name, self._step_id, name, outcome, targets)
-        self._actions.append((name, outcome))
+        self._actions.append((action_name(name, arguments), outcome))
         return content, is_error
 
 
@@ -944,7 +948,7 @@ async def run_action_step(
                 # The script's own calls were audited one by one as they ran;
                 # this row adds how many and how long (script_summary).
                 _audit(workflow_name, step.id, step_script.RUN_SCRIPT_TOOL, outcome, stats=stats)
-                actions.append((step_script.RUN_SCRIPT_TOOL, outcome))
+                actions.append((plain_tool_name(step_script.RUN_SCRIPT_TOOL), outcome))
             else:
                 content, is_error = await calls.call(name, arguments)
             for event in calls.drain():
@@ -1187,6 +1191,28 @@ def _words(name: str) -> str:
     return " ".join(name.replace("-", "_").split("_")).strip()
 
 
+def _described(name: str, arguments: Any) -> str | None:
+    """What a call of a built-in tool says it is doing, in its own plain
+    words (``extensions.described``), or None."""
+    from openexecutive.orchestrator import extensions
+    from openexecutive.workflows.tool_catalog import BUILTIN_PREFIX
+
+    if not name.startswith(BUILTIN_PREFIX):
+        return None
+    return extensions.described(name[len(BUILTIN_PREFIX):], arguments)
+
+
+def action_name(name: str, arguments: Any) -> str:
+    """How a run's report names one call: what it did, in the tool's own
+    plain words when it says ("Adding the blue hat to your cart"), else the
+    tool's plain name. Never raises."""
+    try:
+        said = _described(name, arguments)
+    except Exception:
+        said = None
+    return said.rstrip("…").strip() if said else plain_tool_name(name)
+
+
 def plain_tool_name(name: str) -> str:
     """A tool's name in plain words for the person reading a run: an app's
     tool reads "Google Workspace: get events", a built-in one "Send telegram
@@ -1229,6 +1255,9 @@ def _progress_line(name: str, arguments: Any) -> str:
 
     if name == step_script.RUN_SCRIPT_TOOL:
         return "Running a script…"
+    said = _described(name, arguments)
+    if said:
+        return said
     doing = ""
     if name.startswith(BUILTIN_PREFIX):
         bare = name[len(BUILTIN_PREFIX):]
@@ -1267,8 +1296,8 @@ def _format_output(report: str, actions: list[tuple[str, str]]) -> str:
         for action in actions:
             counts[action] = counts.get(action, 0) + 1
         lines += [
-            f"- {plain_tool_name(name)} — {outcome}" + (f" (×{n})" if n > 1 else "")
-            for (name, outcome), n in counts.items()
+            f"- {label} — {outcome}" + (f" (×{n})" if n > 1 else "")
+            for (label, outcome), n in counts.items()
         ]
     else:
         lines.append("- No tools were called.")
