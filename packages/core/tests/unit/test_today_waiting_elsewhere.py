@@ -109,10 +109,12 @@ def test_broken_connections_are_rows(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "openexecutive.people.store.get_person", lambda pid: SimpleNamespace(email="me@co.example"),
     )
-    rows = today_route._needs_reconnecting(4)
+    rows = today_route._needs_reconnecting(4, accounts=True)
     assert [r.key for r in rows] == ["reconnect:mailbox", "reconnect:google_workspace"]
     assert seen["mailbox"] == ("me@co.example", "/delegate#as-you")
     assert rows[1].href == "/settings/status"
+    # A teammate sees their own mailbox, never the Executive's accounts.
+    assert [r.key for r in today_route._needs_reconnecting(4, accounts=False)] == ["reconnect:mailbox"]
 
 
 def test_long_text_is_cut_at_a_word() -> None:

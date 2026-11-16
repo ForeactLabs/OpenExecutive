@@ -2936,9 +2936,13 @@ async def get_today(request: Request, background_tasks: BackgroundTasks) -> Toda
         response.morning_brief = _morning_brief_today()
         response.calendar_next = _calendar_next(datetime.now(UTC))
         response.right_now = _right_now_rows()
-        # A connection that needs reconnecting goes first: everything that
-        # runs through it waits on it.
-        response.waiting_elsewhere = [*_needs_reconnecting(caller), *_waiting_elsewhere()]
+    # A connection that needs reconnecting goes first: everything that runs
+    # through it waits on it. Everyone's own mailbox is theirs to reconnect;
+    # the Executive's accounts and the Watch list are the principal's.
+    response.waiting_elsewhere = [
+        *await asyncio.to_thread(_needs_reconnecting, caller, accounts=principal),
+        *(_waiting_elsewhere() if principal else []),
+    ]
     response.done_for_you = _done_for_you(request, caller, datetime.now(UTC))
     response.watching = _watching(request, caller)
     response.to_act_on = _to_act_on(response, caller)
@@ -3501,9 +3505,11 @@ _RECONNECT_MAILBOX_HREF = "/delegate#as-you"
 _RECONNECT_ACCOUNT_HREF = "/settings/status"
 
 
-def _needs_reconnecting(caller: int | None) -> list[WaitingElsewhereItem]:
-    """The principal's broken connections (``briefing.needs_reconnecting``):
-    their own mailbox and the Executive's accounts. Never raises."""
+def _needs_reconnecting(caller: int | None, *, accounts: bool) -> list[WaitingElsewhereItem]:
+    """The reader's broken connections (``briefing.needs_reconnecting``):
+    their own mailbox, and with ``accounts`` (the principal) the Executive's
+    accounts. Reads the database and the disk, so ``get_today`` runs it off
+    the event loop. Never raises."""
     from openexecutive.briefing import needs_reconnecting
     from openexecutive.people.store import get_person
 
@@ -3513,7 +3519,8 @@ def _needs_reconnecting(caller: int | None) -> list[WaitingElsewhereItem]:
         mailbox = needs_reconnecting.mailbox_row(person.email if person else None, _RECONNECT_MAILBOX_HREF)
         if mailbox is not None:
             rows.append(mailbox)
-        rows += needs_reconnecting.account_rows(_RECONNECT_ACCOUNT_HREF)
+        if accounts:
+            rows += needs_reconnecting.account_rows(_RECONNECT_ACCOUNT_HREF)
     except Exception:
         logger.warning("today: reading broken connections failed", exc_info=True)
     return [WaitingElsewhereItem(**row) for row in rows]

@@ -3530,3 +3530,33 @@ def test_an_approved_department_step_is_in_its_approvers_done_for_you_only() -> 
     assert item.summary.startswith("Email ") and "Hi Dana" not in item.summary
     assert today_route._department_action_done(step, 5) is None  # someone else's yes
     assert today_route._department_action_done(SimpleNamespace(**{**vars(step), "status": "rejected"}), 1) is None
+
+
+def test_a_teammates_broken_mailbox_is_on_their_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Everyone connects their own mailbox, so a teammate whose sign-in
+    broke sees its Reconnect row; the Executive's accounts stay the
+    principal's."""
+    from openexecutive.briefing import needs_reconnecting
+
+    db = tmp_path / "reconnect.db"
+    _setup_isolated_db(db, monkeypatch)
+    monkeypatch.setenv("OE_LOCAL_LOGIN", "1")
+    people_store.upsert_person(full_name="Jordan", is_principal=True, email="jordan@example.com", db_path=db)
+    people_store.upsert_person(full_name="Sam Lee", email="sam@example.com", db_path=db)
+    people_registry.invalidate()
+
+    def mailbox_row(email: str | None, href: str) -> dict[str, object] | None:
+        if email != "sam@example.com":
+            return None
+        return {"key": "reconnect:mailbox", "title": "t", "count": 1, "href": href, "action": "Reconnect"}
+
+    monkeypatch.setattr(needs_reconnecting, "mailbox_row", mailbox_row)
+    monkeypatch.setattr(
+        needs_reconnecting, "account_rows",
+        lambda href: [{"key": "reconnect:google_workspace", "title": "g", "count": 1, "href": href, "action": "Reconnect"}],
+    )
+    client = _make_client()
+    sams = client.get("/today", headers={"x-caller-email": "sam@example.com"}).json()["waiting_elsewhere"]
+    assert [r["key"] for r in sams] == ["reconnect:mailbox"]
+    owners = client.get("/today", headers={"x-caller-email": "jordan@example.com"}).json()["waiting_elsewhere"]
+    assert [r["key"] for r in owners][:1] == ["reconnect:google_workspace"]
