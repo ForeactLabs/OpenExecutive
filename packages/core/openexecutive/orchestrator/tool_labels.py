@@ -145,9 +145,12 @@ _SENT_LABELS = ("Checked email I sent", "Checking email I sent")
 # Gmail's sent operators, and Microsoft 365's Sent Items folder by name.
 _SENT_RE = re.compile(r"(?<![\w-])(?:in:sent|label:sent|from:me)(?=[\s)]|$)|^sent ?items$", re.IGNORECASE)
 # A query that also reaches other mail ("in:sent OR in:inbox", "{…}", a
-# "NOT") stays
+# "NOT", another folder or label, or excluding sent) stays
 # "my email": a wrong "email I sent" is worse than the plain line.
-_ANY_OF_RE = re.compile(r"\sOR\s|\bNOT\b|[{}]")
+_ANY_OF_RE = re.compile(
+    r"\sOR\s|\bNOT\b|[{}]|(?<![\w-])(?:in|label):(?!sent(?=[\s)]|$))|(?<![\w])-(?:in|label):sent",
+    re.IGNORECASE,
+)
 
 GENERIC_DONE = "Used a connected tool"
 GENERIC_DOING = "Using a connected tool"
