@@ -170,12 +170,23 @@ def announce_space() -> str | None:
     return str(spaces[0]["space"]) if len(spaces) == 1 else None
 
 
+def space_title(space: str) -> str:
+    """The name of one of the app's group spaces ("" when unnamed or not
+    one of them). Synchronous; raises when Google Chat can't be reached."""
+    return next((str(s["title"]) for s in group_spaces() if s["space"] == space), "")
+
+
 def post_to_space(space: str, text: str) -> None:
-    """Post a new message as the Chat app in one of its spaces. Synchronous."""
-    if not _SPACE_NAME.fullmatch(space or ""):
-        raise ValueError("not a Google Chat space")
+    """Post a new message as the Chat app in one of its group spaces, never
+    a DM or a chat it isn't in. Chat's link markup is made inert, so the
+    post can't show words over a link that goes elsewhere. Synchronous."""
+    if not _SPACE_NAME.fullmatch(space or "") or space not in {s["space"] for s in group_spaces()}:
+        raise ValueError("not a Google Chat space the app is in")
     settings = get_settings()
-    send_reply(space, "", text, settings.google_chat_service_account_file, settings.google_chat_service_account_email)
+    send_reply(
+        space, "", card_safe(text),
+        settings.google_chat_service_account_file, settings.google_chat_service_account_email,
+    )
 
 
 # A card's button runs this function (``onClick.action.function``); its tap

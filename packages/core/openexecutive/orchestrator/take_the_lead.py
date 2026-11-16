@@ -2001,6 +2001,27 @@ _CHANNEL_NAMES = {"slack": "Slack", "discord": "Discord", "telegram": "Telegram"
 _DM_CHANNEL = {"send_slack_dm": "slack", "send_discord_dm": "discord", "send_telegram_message": "telegram"}
 
 
+def _google_chat_space_named(tool: str, tool_input: dict[str, Any]) -> str:
+    """The Google Chat space a post would land in, by name, so the card says
+    which one. "" when it can't be told. Never raises."""
+    try:
+        from openexecutive.integrations import google_chat
+
+        if tool == "send_company_broadcast":
+            space = google_chat.announce_space()
+        else:
+            from openexecutive.departments.store import get_department
+
+            dept = get_department(str(tool_input.get("department_slug") or ""))
+            space = getattr(getattr(dept, "config", None), "google_chat_space", None)
+        if not space:
+            return ""
+        title = google_chat.space_title(space)
+        return f"“{google_chat.card_safe(title)}”" if title else space
+    except Exception:
+        return ""
+
+
 def where(tool: str, tool_input: dict[str, Any]) -> str:
     """Where a held message would go, in a few words ("On Slack", "In Open
     Executive, on their Needs you"); "" when it isn't a message or can't be
@@ -2011,7 +2032,12 @@ def where(tool: str, tool_input: dict[str, Any]) -> str:
         if tool in _DM_CHANNEL:
             return f"On {_CHANNEL_NAMES[_DM_CHANNEL[tool]]}"
         if tool in _BROADCAST_TOOLS:
-            name = _CHANNEL_NAMES.get(str(tool_input.get("integration") or "").lower())
+            integration = str(tool_input.get("integration") or "").lower()
+            name = _CHANNEL_NAMES.get(integration)
+            if integration == "google_chat":
+                space = _google_chat_space_named(tool, tool_input)
+                if space:
+                    return f"On Google Chat, in {space}"
             return f"On {name}" if name else ""
         if tool != "message_person":
             return ""

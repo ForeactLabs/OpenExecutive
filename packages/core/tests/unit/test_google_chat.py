@@ -1125,10 +1125,16 @@ def test_announce_space_is_the_default_else_the_only_space(monkeypatch: pytest.M
     assert gc_module.announce_space() is None
 
 
-def test_post_to_space_posts_a_new_message_and_refuses_anything_else(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_post_to_space_posts_only_in_the_apps_group_spaces(monkeypatch: pytest.MonkeyPatch) -> None:
     sent: list[tuple[str, str, str]] = []
     monkeypatch.setattr(gc_module, "send_reply", lambda space, thread, text, *a: sent.append((space, thread, text)))
-    gc_module.post_to_space("spaces/ALL", "Q3 plan shipped")
-    assert sent == [("spaces/ALL", "", "Q3 plan shipped")]
-    with pytest.raises(ValueError):
-        gc_module.post_to_space("spaces/ALL/../x", "nope")
+    monkeypatch.setattr(gc_module, "group_spaces", lambda: [{"space": "spaces/ALL", "title": "Everyone", "announce": True}])
+    gc_module.post_to_space("spaces/ALL", "Q3 plan shipped: <https://evil.example|the plan>")
+    # Link markup made inert: no words shown over a link that goes elsewhere.
+    assert sent == [("spaces/ALL", "", "Q3 plan shipped: \u2039https://evil.example|the plan>")]
+    assert gc_module.space_title("spaces/ALL") == "Everyone"
+    # A DM or a space the app isn't in is refused.
+    for space in ("spaces/DM1", "spaces/ALL/../x"):
+        with pytest.raises(ValueError):
+            gc_module.post_to_space(space, "nope")
+    assert len(sent) == 1
