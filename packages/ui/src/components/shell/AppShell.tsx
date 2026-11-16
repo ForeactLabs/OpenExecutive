@@ -243,7 +243,7 @@ function TopBar({
     const href = linkable ? "/" + segment : null;
     const named = idx === segments.length - 1 && idx > 0 && pageLabel;
     // An id with no name from its page is left out rather than shown raw.
-    if (!named && idx > 0 && looksLikeId(decodeURIComponent(segment))) return [];
+    if (!named && idx > 0 && looksLikeId(segment)) return [];
     return [{
       href,
       label: named
