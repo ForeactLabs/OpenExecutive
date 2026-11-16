@@ -17,7 +17,6 @@ import {
   getDelegation,
   getToday,
   rejectDecision,
-  reopenAlert,
   rerunWorkflowRun,
   snoozeAlert,
   type DoneRow,
@@ -29,18 +28,7 @@ import {
 import { greeting, homeHeadline, teamOffTrack, waitingOnTeam } from "@/lib/briefingSummary";
 import { cardFromSearch } from "@/lib/cardMentions";
 import { FIRST_RUN_LINKS } from "@/lib/firstRun";
-import { principalIdOf } from "@/lib/dueSoon";
-import {
-  counted,
-  departmentsText,
-  goalTotals,
-  goalsText,
-  peopleText,
-  realDepartments,
-  tasksText,
-  watchingText,
-} from "@/lib/glance";
-import { groupHandled } from "@/lib/handled";
+import { counted } from "@/lib/glance";
 import {
   NEEDS_YOU_OLDER_AFTER_DAYS,
   ageAnchor,
@@ -58,16 +46,10 @@ import { ACTION_CARDS_TIP, ActionCardItem, useActionCards } from "./ActionCards"
 import { INVITE_CARDS_TIP, InviteCardItem, useInviteCards } from "./InviteCards";
 import { REPLIES_WAITING_TIP, ReplyCardItem, useReplyCards } from "./RepliesWaiting";
 import Icon from "./Icon";
-import {
-  HandledPanelBody,
-  InFlightPanelBody,
-  MonitoringPanelBody,
-  PracticeClientsPanelBody,
-} from "./briefing/AwarenessPanels";
+import { MonitoringPanelBody } from "./briefing/AwarenessPanels";
 import DoneForYou from "./briefing/DoneForYou";
 import { anyWorking } from "@/lib/doneForYou";
 import FirstWeekCard from "./briefing/FirstWeekCard";
-import { useGlance } from "./briefing/Glance";
 import { RightNowItem } from "./briefing/RightNow";
 import WaitingElsewhereRow from "./briefing/WaitingElsewhere";
 import HandMeSomething from "./briefing/HandMeSomething";
@@ -77,14 +59,7 @@ import { isLeadCard } from "./briefing/LeadTrainingCard";
 import ProposalCard from "./briefing/ProposalCard";
 import RequestGroupCard from "./briefing/RequestGroupCard";
 import { TONE_TEXT, type ContinueHandler } from "./briefing/shared";
-import {
-  ProjectsPanelBody,
-  WeeklyReviewPanelBody,
-  useActiveProjects,
-  useOpenLoops,
-  useWeeklyReview,
-} from "./briefing/SoloPanels";
-import { DepartmentsPanelBody, PeoplePanelBody } from "./briefing/TeamPanels";
+import { WeeklyReviewPanelBody, useWeeklyReview } from "./briefing/SoloPanels";
 import { buttonClass } from "./ui/Button";
 import SidePanel from "./ui/SidePanel";
 import { useWorkspace } from "./workspace/WorkspaceContext";
@@ -92,7 +67,6 @@ import { PageSpinner } from "@/components/ui/Spinner";
 
 // The card pieces stay importable from here for pages that show them alone.
 export { ProposalCard };
-export { DeptCard } from "./briefing/TeamPanels";
 
 // Home, the briefing: a greeting and one summary line, the Ask box, the
 // "Needs you" queue as large cards, then "At a glance": a row of count tiles —
@@ -108,16 +82,7 @@ const DONE_POLL_MAX_MS = 30 * 60 * 1000;
 
 const NEEDS_YOU_ID = "sec-needs-you";
 
-type PanelKey =
-  | "departments"
-  | "people"
-  | "inFlight"
-  | "handled"
-  | "monitoring"
-  | "team"
-  | "clients"
-  | "projects"
-  | "weeklyReview";
+type PanelKey = "monitoring" | "team" | "weeklyReview";
 
 interface Tile {
   key: string;
@@ -167,8 +132,6 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
   const [olderNotice, setOlderNotice] = useState<string | null>(null);
   // The card just snoozed, for the "Snoozed until …" notice and its Undo.
   const [snoozed, setSnoozed] = useState<{ alertId: number; short: string } | null>(null);
-  // Handled-rail rows undone this session (keyed per row, see handledKey).
-  const [undoneRows, setUndoneRows] = useState<Set<string>>(new Set());
   // Which tile's side panel (or the brief) is open.
   const [openPanel, setOpenPanel] = useState<PanelKey | null>(null);
   const [askText, setAskText] = useState("");
@@ -355,23 +318,6 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
     }
   }, [actedAlertIds, refreshToday]);
 
-  // Undo an autonomous close from the Handled panel. The rail is rebuilt
-  // from the audit log on every fetch (the "closed" row persists after a
-  // reopen), so a 409 "already open" after a reload counts as done.
-  const handleReopen = useCallback(async (rowKey: string, alertId: number) => {
-    try {
-      await reopenAlert(alertId);
-      setUndoneRows((prev) => new Set(prev).add(rowKey));
-      refreshToday();
-    } catch (e) {
-      if (e instanceof Error && /409|already/i.test(e.message)) {
-        setUndoneRows((prev) => new Set(prev).add(rowKey));
-        return;
-      }
-      console.error("Reopen failed", e);
-    }
-  }, [refreshToday]);
-
   // Approve-with-edits: the user tweaked the draft and wants exactly what
   // they wrote sent (no rephrasing). Same server-side approval as Approve,
   // with the edited text carried verbatim.
@@ -417,13 +363,6 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
   const actionCards = useActionCards();
   // Meeting invites from people the caller knows, to accept or decline (Act as me).
   const inviteCards = useInviteCards();
-  // Solo's own sections load on their own, so their tiles can count them.
-  const principalId = solo ? principalIdOf(today?.people ?? []) : null;
-  const projects = useActiveProjects(solo);
-  // Due soon is the caller's own (the owner's, in solo).
-  const loopOwnerId = solo ? principalId : (today?.caller_person_id ?? null);
-  const openLoops = useOpenLoops(loopOwnerId);
-  const glance = useGlance(today !== null);
   const weeklyReview = useWeeklyReview(solo);
 
   // Hand an Ask-box question to chat as the user's own words.
@@ -480,23 +419,9 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
   const dateLabel = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 
   const departments = today?.departments ?? [];
-  const activeDepts = departments.filter((d) => d.goal_count > 0 || d.awaiting_count > 0);
-  // Only the departments with a problem (at risk / off track / awaiting)
-  // count as needing attention; healthy ones fold into a quiet toggle in
-  // the panel.
-  const attentionDepts = activeDepts.filter(
-    (d) => d.at_risk_count > 0 || d.off_track_count > 0 || d.awaiting_count > 0,
-  );
-  // The Departments tile counts only real departments, not the row that holds
-  // the goals with no department.
-  const activeRealDepts = realDepartments(activeDepts);
-  const attentionRealDepts = realDepartments(attentionDepts);
-  const goals = goalTotals(departments);
 
   // What waits on other pages (watch suggestions, …): one Needs you row each.
   const elsewhere = today?.waiting_elsewhere ?? [];
-
-  const showPeople = !solo && (today?.people.length ?? 0) > 1;
 
   // Bucket proposals once so the summary line, the queue and the tiles work
   // off the same split. "Needs you" = action proposals routed to the caller,
@@ -520,15 +445,6 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
   const mineIds = new Set(mineProposals.map((p) => p.alert_id));
   const otherProposals =
     callerId == null || solo ? [] : actionProposals.filter((p) => !mineIds.has(p.alert_id));
-  const handledOvernight = today?.handled_overnight ?? [];
-  const handledRows = groupHandled(handledOvernight);
-  const inFlight = today?.in_flight ?? [];
-  const practiceClients = today?.practice_clients ?? [];
-
-  // A team's Departments tile counts its departments at risk.
-  const deptAtRiskCount = solo
-    ? 0
-    : attentionRealDepts.filter((d) => d.at_risk_count > 0 || d.off_track_count > 0).length;
   // Waiting on the owner with no card (Right now's rows): listed in Needs you.
   const rightNowRows = today?.right_now ?? [];
   // What the Executive did or is doing for the viewer today.
@@ -559,88 +475,20 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
     teamOffTrack(departments, today?.people ?? []),
   );
 
-  // At a glance — one quiet line, only the items with something to show,
-  // what's yours first. Each item reads on its own: the line has no headings.
+  // The bottom line: only the counts that need you, each a link (the
+  // server's `to_act_on`: overdue tasks, goals at risk or never checked,
+  // people to follow up), then what waits on someone else on the team and
+  // watch list signals to read. Everything else is on track.
   const tiles: Tile[] = [];
   if (today) {
-    if (glance.actAsMe)
-      tiles.push({
-        key: "actAsMe",
-        href: "/settings/act-as-me",
-        text: `${glance.actAsMe} handled as you this week`,
-      });
-    const view = openLoops.view;
-    if (loopOwnerId != null && (openLoops.error || (view && (view.items.length > 0 || view.later > 0)))) {
-      const overdue = view?.items.filter((i) => i.overdue).length ?? 0;
-      tiles.push({
-        key: "dueSoon",
-        href: "/tasks",
-        text: view ? tasksText(view.items.length, overdue, view.later) : "Tasks",
-      });
-    }
-    if (goals.goals > 0)
-      tiles.push({ key: "goals", href: "/goals", text: goalsText(goals.goals, goals.atRisk, goals.unchecked) });
-    if (glance.workflows && glance.workflows.scheduled > 0)
-      tiles.push({
-        key: "workflows",
-        href: "/jobs",
-        text: `${counted(glance.workflows.scheduled, "workflow", "workflows")} on a schedule`,
-      });
-    // Watching: what's on the watchlist, with the signals waiting to be read.
-    const signals = monitoringProposals.length;
-    if ((glance.watching && glance.watching.watched > 0) || signals > 0)
-      tiles.push({
-        key: "watching",
-        ...(signals > 0 ? { panel: "monitoring" as const } : { href: "/watchlist" }),
-        text: watchingText(glance.watching?.watched ?? 0, signals),
-      });
-    if (handledRows.length > 0)
-      tiles.push({
-        key: "handled",
-        panel: "handled",
-        text: `${handledRows.length} handled since your last brief`,
-      });
-    if (solo) {
-      if (projects.error || (projects.projects && projects.projects.length > 0))
-        tiles.push({
-          key: "projects",
-          panel: "projects",
-          text: projects.projects
-            ? counted(projects.projects.length, "active project", "active projects")
-            : "Your projects",
-        });
-      if (weeklyReview)
-        tiles.push({ key: "weeklyReview", panel: "weeklyReview", text: "This week's review is ready" });
-    } else {
-      // Only once departments are set up: the goals with no department are on
-      // the Goals item.
-      if (activeRealDepts.length > 0)
-        tiles.push({
-          key: "departments",
-          panel: "departments",
-          text: departmentsText(
-            activeRealDepts.length,
-            attentionRealDepts.length,
-            deptAtRiskCount > 0,
-            activeRealDepts.filter((d) => (d.unchecked_count ?? 0) > 0).length,
-          ),
-        });
-      if (showPeople && today) {
-        const people = today.people;
-        const busy = people.filter((p) => p.status === "needs_reply" || p.status === "awaiting").length;
-        tiles.push({ key: "people", panel: "people", text: peopleText(people.length, busy) });
-      }
-    }
-    const waitingOn = waitingOnTeam(otherProposals, today?.people ?? []);
+    for (const c of today.to_act_on ?? []) tiles.push({ key: c.key, href: c.href, text: c.text });
+    const waitingOn = waitingOnTeam(otherProposals, today.people ?? []);
     if (waitingOn) tiles.push({ key: "team", panel: "team", text: waitingOn.line });
-    if (inFlight.length > 0)
-      tiles.push({ key: "inFlight", panel: "inFlight", text: `${inFlight.length} under way` });
-    if (practiceClients.length > 0)
-      tiles.push({
-        key: "clients",
-        panel: "clients",
-        text: counted(practiceClients.length, "parked client", "parked clients"),
-      });
+    const signals = monitoringProposals.length;
+    if (signals > 0)
+      tiles.push({ key: "monitoring", panel: "monitoring", text: counted(signals, "new signal", "new signals") });
+    if (solo && weeklyReview)
+      tiles.push({ key: "weeklyReview", panel: "weeklyReview", text: "This week's review is ready" });
   }
 
   // The Needs you queue: replies waiting first (they came in first, as their
@@ -836,11 +684,6 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
   const showHeadline = Boolean(today) && !startLine;
   const hello = showHeader ? greeting(firstName) : "Today";
 
-  const panelFooterLink = (href: string, label: string) => (
-    <Link href={href} className={buttonClass("secondary", "md", "w-full sm:w-auto")}>
-      {label}
-    </Link>
-  );
 
   return (
     <div className="flex flex-col h-full bg-surface">
@@ -1032,44 +875,26 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
 
               {showHeadline && needsYouCount === 0 && onContinue && <HandMeSomething onPick={onContinue} />}
 
-              {/* Everything else, one quiet line: each opens its panel or page. */}
-              {tiles.length > 0 && (
-                <nav aria-label="More" className="mb-8 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-fg-muted">
+              {/* Only what needs you, as links; then that the rest is on track. */}
+              {today && (
+                <nav aria-label="More" className="mb-8 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
                   {tiles.map((t) => {
-                    const text = t.text;
-                    const cls = "hover:text-fg hover:underline underline-offset-4";
+                    const cls = "font-medium text-accent hover:underline underline-offset-4";
                     const panel = t.panel;
                     return panel ? (
                       <button key={t.key} type="button" onClick={() => setOpenPanel(panel)} aria-haspopup="dialog" className={cls}>
-                        {text}
+                        {t.text}
                       </button>
                     ) : (
                       <Link key={t.key} href={t.href ?? "/"} className={cls}>
-                        {text}
+                        {t.text}
                       </Link>
                     );
                   })}
+                  <span className="ml-auto text-fg-muted">Everything else is on track</span>
                 </nav>
               )}
 
-              <SidePanel
-                open={openPanel === "departments"}
-                onClose={() => setOpenPanel(null)}
-                title="Departments"
-                width="lg"
-                footer={panelFooterLink("/departments", "View all departments")}
-              >
-                <DepartmentsPanelBody departments={departments} onContinue={onContinue} />
-              </SidePanel>
-              <SidePanel
-                open={openPanel === "people"}
-                onClose={() => setOpenPanel(null)}
-                title="People"
-                width="lg"
-                footer={panelFooterLink("/people", "View all people")}
-              >
-                <PeoplePanelBody people={today.people} />
-              </SidePanel>
               <SidePanel
                 open={openPanel === "team"}
                 onClose={() => setOpenPanel(null)}
@@ -1104,17 +929,6 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
                   )}
                 </div>
               </SidePanel>
-              <SidePanel open={openPanel === "inFlight"} onClose={() => setOpenPanel(null)} title="Under way">
-                <InFlightPanelBody inFlight={inFlight} />
-              </SidePanel>
-              <SidePanel open={openPanel === "handled"} onClose={() => setOpenPanel(null)} title="Handled">
-                <HandledPanelBody
-                  items={handledOvernight}
-                  onReopen={handleReopen}
-                  undone={undoneRows}
-                  onJumpToAlert={jumpToAlert}
-                />
-              </SidePanel>
               <SidePanel open={openPanel === "monitoring"} onClose={() => setOpenPanel(null)} title="Monitoring">
                 <MonitoringPanelBody
                   proposals={monitoringProposals}
@@ -1125,24 +939,8 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
                   onSteerUndone={handleSteerUndone}
                 />
               </SidePanel>
-              <SidePanel
-                open={openPanel === "clients"}
-                onClose={() => setOpenPanel(null)}
-                title="Across your clients"
-                footer={panelFooterLink("/clients", "Manage clients")}
-              >
-                <PracticeClientsPanelBody clients={practiceClients} />
-              </SidePanel>
               {solo && (
                 <>
-                  <SidePanel
-                    open={openPanel === "projects"}
-                    onClose={() => setOpenPanel(null)}
-                    title="Your projects"
-                    footer={panelFooterLink("/goals", "Goals")}
-                  >
-                    <ProjectsPanelBody state={projects} />
-                  </SidePanel>
                   {weeklyReview && (
                     <SidePanel
                       open={openPanel === "weeklyReview"}
