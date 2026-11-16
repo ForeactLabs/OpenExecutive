@@ -218,7 +218,10 @@ async def _read_path(resolved: Path, tool_input: dict[str, Any]) -> str:
     if start:
         text = f"…[from character {start} of {total}]\n" + text
     if end < total:
-        text += f"\n…[cut off at character {end} of {total} — call again with start={end} to read on]"
+        # ``start`` counts into the text of the pages read, so the same pages
+        # go with it.
+        again = f"pages='{pages_raw}' and start={end}" if scope else f"start={end}"
+        text += f"\n…[cut off at character {end} of {total} — call again with {again} to read on]"
     return head + "\n" + text
 
 

@@ -179,3 +179,27 @@ def test_is_registered_on_the_executive_and_withheld_on_private_turns() -> None:
     assert executive._ALL_SKILL_HANDLERS["read_document"] is handle_read_document
     assert "read_document" in PRIVATE_TURN_WITHHELD_TOOLS
     assert private_turn_withholds("read_document", {"path": "/x"})
+
+
+async def test_a_long_page_range_reads_on_with_the_same_pages(dirs, monkeypatch) -> None:
+    # ``start`` counts into the pages read, so the note names them again.
+    import io
+
+    from pypdf import PdfWriter
+
+    async def fake_read(data: bytes | Path, *, filename: str = "", inbound: bool = False) -> pdf_reader.PdfReadResult:
+        return pdf_reader.PdfReadResult("y" * 5000, "text", 0)
+
+    monkeypatch.setattr(pdf_reader, "read_pdf_text", fake_read)
+    monkeypatch.setenv("TOOL_RESULT_MAX_CHARS", "1000")
+    writer = PdfWriter()
+    for _ in range(30):
+        writer.add_blank_page(width=612, height=792)
+    buf = io.BytesIO()
+    writer.write(buf)
+    downloads, _ = dirs
+    (downloads / "deck.pdf").write_bytes(buf.getvalue())
+
+    out = await handle_read_document({"path": str(downloads / "deck.pdf"), "pages": "11-20"})
+
+    assert "call again with pages='11-20' and start=" in out
