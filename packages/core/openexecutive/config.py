@@ -535,6 +535,11 @@ class Settings(BaseSettings):
     telegram_default_chat_id: str | None = Field(
         None, alias="TELEGRAM_DEFAULT_CHAT_ID"
     )
+    # The Google Chat space company announcements go to ("spaces/AAAA..."),
+    # one the Chat app is a member of.
+    google_chat_default_space: str | None = Field(
+        None, alias="GOOGLE_CHAT_DEFAULT_SPACE"
+    )
 
     # Required: the Executive's own mailbox address (Google Workspace or
     # Microsoft 365 — see EMAIL_PROVIDER). No default — we never want the

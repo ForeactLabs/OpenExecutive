@@ -104,6 +104,11 @@ SIDE_EFFECTING_TOOLS: frozenset[str] = frozenset({
 })
 
 
+def _integration_name(integration: str) -> str:
+    """A broadcast tool's integration as people say it ("Google Chat")."""
+    return {"google_chat": "Google Chat"}.get(integration, integration.capitalize())
+
+
 def _person_name(person_id: Any) -> str:
     """The name on People for ``person_id``, or "" (never a raw id on a
     chip). Never raises."""
@@ -642,7 +647,7 @@ def summarize_action(
         slug = tool_input.get("department_slug", "")
         integration = tool_input.get("integration", "")
         if slug and integration:
-            payload["summary"] = f"Posted to {slug} on {integration.capitalize()}"
+            payload["summary"] = f"Posted to {slug} on {_integration_name(integration)}"
         elif slug:
             payload["summary"] = f"Posted to {slug}"
         else:
@@ -653,7 +658,7 @@ def summarize_action(
     elif tool_name == "send_company_broadcast":
         integration = tool_input.get("integration", "")
         payload["summary"] = (
-            f"Broadcast to company on {integration.capitalize()}"
+            f"Broadcast to company on {_integration_name(integration)}"
             if integration else "Broadcast to company"
         )
         payload["target"] = integration or None

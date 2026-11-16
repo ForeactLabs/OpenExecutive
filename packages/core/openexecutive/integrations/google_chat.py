@@ -122,6 +122,62 @@ def send_reply(
     ).execute()
 
 
+_SPACE_NAME = re.compile(r"^spaces/[A-Za-z0-9_-]{1,128}$")
+_MAX_SPACES = 100
+
+
+def group_spaces() -> list[dict[str, Any]]:
+    """The group spaces (not DMs) the Chat app is in, for posts and the
+    department picker: ``[{"space", "title", "announce"}]``. ``announce``
+    marks the space company announcements go to. Synchronous; raises when
+    Google Chat can't be reached."""
+    settings = get_settings()
+    if not settings.google_chat_project_number:
+        return []
+    from googleapiclient.discovery import build as google_build
+
+    creds = _build_credentials(
+        settings.google_chat_service_account_file, settings.google_chat_service_account_email,
+    )
+    service = google_build("chat", "v1", credentials=creds, cache_discovery=False)
+    listed = service.spaces().list(filter='spaceType = "SPACE"', pageSize=_MAX_SPACES).execute()
+    default = (settings.google_chat_default_space or "").strip()
+    rows = [
+        {"space": s.get("name"), "title": s.get("displayName") or "", "announce": s.get("name") == default}
+        for s in listed.get("spaces") or []
+    ]
+    out: list[dict[str, Any]] = []
+    for row in rows[:_MAX_SPACES]:
+        space = str(row.get("space") or "")
+        if _SPACE_NAME.fullmatch(space):
+            out.append({
+                "space": space, "title": str(row.get("title") or "")[:200], "announce": bool(row.get("announce")),
+            })
+    return out
+
+
+def announce_space() -> str | None:
+    """Where company announcements go in Google Chat: ``GOOGLE_CHAT_DEFAULT_SPACE``,
+    else the app's only group space. None when there's no such space.
+    Synchronous."""
+    default = (get_settings().google_chat_default_space or "").strip()
+    if _SPACE_NAME.fullmatch(default):
+        return default
+    spaces = group_spaces()
+    picked = next((s["space"] for s in spaces if s["announce"]), None)
+    if picked is not None:
+        return str(picked)
+    return str(spaces[0]["space"]) if len(spaces) == 1 else None
+
+
+def post_to_space(space: str, text: str) -> None:
+    """Post a new message as the Chat app in one of its spaces. Synchronous."""
+    if not _SPACE_NAME.fullmatch(space or ""):
+        raise ValueError("not a Google Chat space")
+    settings = get_settings()
+    send_reply(space, "", text, settings.google_chat_service_account_file, settings.google_chat_service_account_email)
+
+
 # A card's button runs this function (``onClick.action.function``); its tap
 # comes back as a CARD_CLICKED event naming it, with the button's data
 # (``channel_cards.callback_data``) under ``_CARD_PARAM``.

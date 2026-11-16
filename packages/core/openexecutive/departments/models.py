@@ -119,6 +119,8 @@ class DepartmentConfig(BaseModel):
     slack_channel_id: str | None = None
     discord_channel_id: str | None = None
     telegram_chat_id: str | None = None
+    # A Google Chat space the Chat app is in ("spaces/AAAA..."), for posts.
+    google_chat_space: str | None = None
     # Named external entities this department wants monitored (vendors it
     # is evaluating, competitors in its lane, tickers it tracks). The
     # research watch policy treats these as strong grounding — like the

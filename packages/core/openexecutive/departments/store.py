@@ -217,7 +217,7 @@ def _migrate_add_channel_columns(conn: sqlite3.Connection) -> None:
     concurrent boot race are treated as success.
     """
     existing = {row["name"] for row in conn.execute("PRAGMA table_info(departments)")}
-    for col in ("slack_channel_id", "discord_channel_id", "telegram_chat_id"):
+    for col in ("slack_channel_id", "discord_channel_id", "telegram_chat_id", "google_chat_space"):
         if col in existing:
             continue
         try:
@@ -454,6 +454,7 @@ def _row_to_config(row: sqlite3.Row) -> DepartmentConfig:
         slack_channel_id=_opt_col("slack_channel_id"),
         discord_channel_id=_opt_col("discord_channel_id"),
         telegram_chat_id=_opt_col("telegram_chat_id"),
+        google_chat_space=_opt_col("google_chat_space"),
         watched_entities=(
             [str(e) for e in watched if isinstance(e, str) and e.strip()]
             if isinstance(watched, list) else []
@@ -641,6 +642,7 @@ def update_department(
     slack_channel_id: str | None | object = _UNSET,
     discord_channel_id: str | None | object = _UNSET,
     telegram_chat_id: str | None | object = _UNSET,
+    google_chat_space: str | None | object = _UNSET,
     watched_entities: list[str] | None = None,
     db_path: Path | None = None,
 ) -> bool:
@@ -680,6 +682,8 @@ def update_department(
         fields.append(("discord_channel_id", discord_channel_id))
     if telegram_chat_id is not _UNSET:
         fields.append(("telegram_chat_id", telegram_chat_id))
+    if google_chat_space is not _UNSET:
+        fields.append(("google_chat_space", google_chat_space))
     if watched_entities is not None:
         fields.append(("watched_entities_json", json.dumps(list(watched_entities))))
     if not fields:

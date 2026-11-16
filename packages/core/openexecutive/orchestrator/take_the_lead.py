@@ -1997,7 +1997,7 @@ def missing_args(tool: str, tool_input: dict[str, Any]) -> list[str]:
     return [a for a in _NEEDS.get(tool, ()) if empty(tool_input.get(a))]
 
 
-_CHANNEL_NAMES = {"slack": "Slack", "discord": "Discord", "telegram": "Telegram"}
+_CHANNEL_NAMES = {"slack": "Slack", "discord": "Discord", "telegram": "Telegram", "google_chat": "Google Chat"}
 _DM_CHANNEL = {"send_slack_dm": "slack", "send_discord_dm": "discord", "send_telegram_message": "telegram"}
 
 

@@ -1086,3 +1086,49 @@ def test_the_replys_cards_follow_it_only_in_the_apps_own_dm(
     assert ("Approve and Skip buttons" in seen["channel_context_block"]) is one_on_one
     assert sent == ([("spaces/DM1", "spaces/DM1/threads/T", 12, "Meeting to book", ("Approve", "Skip"), None, None)]
                     if one_on_one else [])
+
+
+# -- posting to a space (announcements, department rooms) ----------------------
+
+
+def _space_list(monkeypatch: pytest.MonkeyPatch, spaces: list[dict[str, Any]]) -> MagicMock:
+    service = MagicMock()
+    service.spaces.return_value.list.return_value.execute.return_value = {"spaces": spaces}
+    monkeypatch.setattr(gc_module, "_build_credentials", lambda *a: object())
+    monkeypatch.setattr("googleapiclient.discovery.build", lambda *a, **k: service)
+    return service
+
+
+def test_group_spaces_lists_the_apps_spaces_and_marks_the_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GOOGLE_CHAT_PROJECT_NUMBER", "123456789012")
+    monkeypatch.setenv("GOOGLE_CHAT_DEFAULT_SPACE", "spaces/ALL")
+    service = _space_list(monkeypatch, [
+        {"name": "spaces/ALL", "displayName": "Everyone"},
+        {"name": "spaces/OPS"},
+        {"name": "users/123", "displayName": "Not a space"},
+    ])
+    assert gc_module.group_spaces() == [
+        {"space": "spaces/ALL", "title": "Everyone", "announce": True},
+        {"space": "spaces/OPS", "title": "", "announce": False},
+    ]
+    assert service.spaces.return_value.list.call_args.kwargs["filter"] == 'spaceType = "SPACE"'
+
+
+def test_announce_space_is_the_default_else_the_only_space(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GOOGLE_CHAT_DEFAULT_SPACE", "spaces/DEFAULT")
+    assert gc_module.announce_space() == "spaces/DEFAULT"
+    monkeypatch.delenv("GOOGLE_CHAT_DEFAULT_SPACE")
+    one = [{"space": "spaces/ONLY", "title": "", "announce": False}]
+    monkeypatch.setattr(gc_module, "group_spaces", lambda: one)
+    assert gc_module.announce_space() == "spaces/ONLY"
+    monkeypatch.setattr(gc_module, "group_spaces", lambda: one + [{"space": "spaces/TWO", "title": "", "announce": False}])
+    assert gc_module.announce_space() is None
+
+
+def test_post_to_space_posts_a_new_message_and_refuses_anything_else(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(gc_module, "send_reply", lambda space, thread, text, *a: sent.append((space, thread, text)))
+    gc_module.post_to_space("spaces/ALL", "Q3 plan shipped")
+    assert sent == [("spaces/ALL", "", "Q3 plan shipped")]
+    with pytest.raises(ValueError):
+        gc_module.post_to_space("spaces/ALL/../x", "nope")

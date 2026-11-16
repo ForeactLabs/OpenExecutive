@@ -1480,7 +1480,11 @@ routing:
          integration, text)` posts to a configured room on the
          department row. No roster gate — channels are team-visible.
       3. Company broadcasts — `send_company_broadcast(integration,
-         text)` posts to the env-configured default channel.
+         text)` posts to the env-configured default channel. For
+         `google_chat` (offered while a Chat app is configured) both
+         tools post as the app: a department's `google_chat_space`, and
+         for the company `google_chat.announce_space()` —
+         GOOGLE_CHAT_DEFAULT_SPACE, else the app's only group space.
 
     Each tool returns a structured error on missing configuration so
     the model can read it and route around (e.g. dept has no slack

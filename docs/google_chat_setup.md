@@ -124,6 +124,8 @@ GOOGLE_CHAT_SERVICE_ACCOUNT_EMAIL=open-executive-chat@YOUR_PROJECT_ID.iam.gservi
 GOOGLE_CHAT_SERVICE_ACCOUNT_EMAIL=open-executive-chat@YOUR_PROJECT_ID.iam.gserviceaccount.com
 ```
 
+Optional: `GOOGLE_CHAT_DEFAULT_SPACE=spaces/AAAA...` names the space company announcements go to (`send_company_broadcast` with `google_chat`). Without it, they go to the app's only space when it is in exactly one. A department posts to the space set as its **Google Chat space** in its settings. The app must be a member of the space either way.
+
 ---
 
 ## Step 5 — Start the Server
