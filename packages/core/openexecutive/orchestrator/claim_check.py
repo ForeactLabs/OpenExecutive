@@ -168,7 +168,8 @@ def _fit(calls: list[tuple[str, str]], most: int) -> list[tuple[str, str]]:
     if len(keep) > room:
         keep = [*keep[: room // 2], *keep[len(keep) - (room - room // 2):]]
     else:
-        reads = [i for i in range(len(calls)) if i not in set(keep)]
+        changes = set(keep)
+        reads = [i for i in range(len(calls)) if i not in changes]
         spare = room - len(keep)
         keep += [*reads[: spare // 2], *reads[len(reads) - (spare - spare // 2):]] if spare else []
     kept = sorted(set(keep))
