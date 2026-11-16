@@ -20,7 +20,6 @@ import {
 } from "@/lib/api";
 import { approveLabel, newestAnchor } from "@/lib/needsYou";
 
-import { isHeldAction } from "./HeldActionCard";
 import CardTopRow from "./CardTopRow";
 
 // The words every card of a held request starts with, left off each row.
@@ -51,7 +50,7 @@ export default function RequestGroupCard({
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<number | null>(null);
 
-  const needsLoad = proposals.filter((p) => isHeldAction(p) && p.decision_instance_id != null);
+  const needsLoad = proposals.filter((p) => p.view?.panel === "held" && p.decision_instance_id != null);
   const loadKey = needsLoad.map((p) => p.decision_instance_id).join(",");
   useEffect(() => {
     if (!loadKey) return;
@@ -70,7 +69,7 @@ export default function RequestGroupCard({
   // Only the ticked items must have loaded: one that failed to load can be
   // unticked and the rest approved.
   const loaded = chosen.every(
-    (p) => !isHeldAction(p) || p.decision_instance_id == null || held[p.decision_instance_id] != null,
+    (p) => p.view?.panel !== "held" || p.decision_instance_id == null || held[p.decision_instance_id] != null,
   );
 
   async function run(items: ProposalItem[], act: (id: number) => Promise<unknown>) {

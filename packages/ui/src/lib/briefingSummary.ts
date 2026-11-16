@@ -105,23 +105,6 @@ export function daysUntil(iso: string | null | undefined, now: Date = new Date()
 
 export type ChipTone = "rose" | "amber" | "neutral";
 
-/** The one status chip a collapsed proposal card shows: its deadline when it
- * has one (overdue in red), else "Likely stale" when the review says so, else
- * how long it has waited. The full chip row shows when the card is opened. */
-export function proposalStatusChip(
-  p: { due_at?: string | null; review_verdict?: string; created_at: string },
-  now: Date = new Date(),
-): { label: string; tone: ChipTone } | null {
-  const dueIn = daysUntil(p.due_at, now);
-  if (dueIn != null) {
-    if (dueIn < 0) return { label: "Overdue", tone: "rose" };
-    return { label: dueIn === 0 ? "Due today" : `Due in ${dueIn}d`, tone: "amber" };
-  }
-  if ((p.review_verdict ?? "") === "likely_stale") return { label: "Likely stale", tone: "amber" };
-  const age = ageLabel(p.created_at, now);
-  return age ? { label: `${age} old`, tone: "neutral" } : null;
-}
-
 /** Home's headline, in the Executive's words: what needs you first, then
  *  what it handled in the last day and what it's watching. `lead` is the
  *  part Home colors (and, when something needs you, the link to Needs you).

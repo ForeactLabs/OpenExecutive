@@ -122,6 +122,7 @@ def test_reply_rewrites_the_plan_and_undo_puts_it_back(
     assert body == {
         "plan": NEW, "previous_plan": OLD,
         "reply": "I'll share the whole folder instead.", "changed": True,
+        "plan_title": "If you approve · Updated",
     }
     # The model read the card, its plan and the line, each fenced.
     assert "<person_said>\nDon't ask him." in seen["turn"]
