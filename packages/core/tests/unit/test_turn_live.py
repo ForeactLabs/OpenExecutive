@@ -220,3 +220,33 @@ def test_a_turn_stopped_mid_round_cancels_its_tools() -> None:
             assert seen.get("cancelled") is True
 
     asyncio.run(asyncio.wait_for(go(), 5))
+
+
+def test_executive_loop_a_failing_tool_still_answers_with_its_error() -> None:
+    """A handler that raises after posting a live line: the line is streamed
+    and the next model call still gets an error result for that call."""
+    provider = _ScriptedProvider([
+        _FinalMsg([_ToolUseBlock("tu_1", _RUN, {})], "tool_use"),
+        _FinalMsg([_TextBlock("That didn't work.")], "end_turn"),
+    ])
+
+    async def broken(*_a: Any, **_k: Any) -> str:
+        turn_live.say("Trying the booking site")
+        raise RuntimeError("site down")
+
+    async def go() -> list[Any]:
+        with patch(
+            "openexecutive.orchestrator.executive.get_provider", return_value=provider,
+        ), patch.dict(
+            "openexecutive.orchestrator.executive._ALL_SKILL_HANDLERS", {_RUN: broken},
+        ):
+            return [
+                item async for item in Executive()._stream_agent_loop(
+                    system_blocks=[], messages=[{"role": "user", "content": "book it"}], model="claude-test",
+                )
+            ]
+
+    items = asyncio.run(go())
+    assert any(isinstance(it, dict) and it.get("label") == "Trying the booking site…" for it in items)
+    sent = json.dumps(provider.calls[1]["messages"], default=str)
+    assert "tu_1" in sent and "The failure is recorded" in sent
