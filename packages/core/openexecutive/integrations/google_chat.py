@@ -202,8 +202,12 @@ def announce_space(spaces: list[dict[str, Any]] | None = None) -> str | None:
     else the app's only group space. None when there's no such space.
     ``spaces`` is a listing already at hand. Synchronous."""
     default = (get_settings().google_chat_default_space or "").strip()
-    if _SPACE_NAME.fullmatch(default):
-        return default
+    if default:
+        if _SPACE_NAME.fullmatch(default):
+            return default
+        # Set but not a space name: never fall back to a space nobody chose.
+        logger.warning("GOOGLE_CHAT_DEFAULT_SPACE is not a space name (spaces/...)")
+        return None
     spaces = group_spaces() if spaces is None else spaces
     picked = next((s["space"] for s in spaces if s["announce"]), None)
     if picked is not None:

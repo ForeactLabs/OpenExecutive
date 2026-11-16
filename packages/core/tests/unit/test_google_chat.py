@@ -1159,3 +1159,10 @@ def test_a_listing_is_reused_for_posts_and_cards_but_not_for_a_new_space(monkeyp
     rows.append({"space": "spaces/NEW", "title": "New", "announce": False})
     gc_module.post_to_space("spaces/NEW", "three")  # not in the cached listing: asked again
     assert len(listings) == 2
+
+
+def test_a_malformed_default_space_never_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OE_GOOGLE_CHAT_APP", raising=False)
+    monkeypatch.setenv("GOOGLE_CHAT_DEFAULT_SPACE", "AAAA123")
+    monkeypatch.setattr(gc_module, "group_spaces", lambda **_: [{"space": "spaces/ONLY", "title": "", "announce": False}])
+    assert gc_module.announce_space() is None
