@@ -312,6 +312,9 @@ def test_quiet_hours_from_chat(roster: dict[str, Any], monkeypatch: pytest.Monke
 def test_open_in_app_gives_an_app_link() -> None:
     out = _run(app_control.handle_open_in_app, {"screen": "notifications"}, None)
     assert out == {"status": "link", "link": "/settings/notifications", "screen": "Settings, Notifications"}
+    made = _run(app_control.handle_open_in_app, {"screen": "documents"}, None)
+    assert made == {"status": "link", "link": "/artifacts", "screen": "Work, Made for you"}
+    assert "documents (Work, Made for you)" in app_control.OPEN_IN_APP_TOOL["description"]
     assert "error" in _run(app_control.handle_open_in_app, {"screen": "https://evil.example"}, None)
     with pytest.raises(ValueError):
         app_control.register_screen("evil", "https://evil.example", "x")

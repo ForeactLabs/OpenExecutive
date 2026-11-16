@@ -46,7 +46,7 @@ test("team hubs: Work and Company tabs", () => {
   assert.deepEqual(links(work.tabs), [
     "Tasks → /tasks",
     "Workflows → /jobs",
-    "Documents → /artifacts",
+    "Made for you → /artifacts",
     "Watch list → /watchlist",
     "Schedule → /schedule",
   ]);

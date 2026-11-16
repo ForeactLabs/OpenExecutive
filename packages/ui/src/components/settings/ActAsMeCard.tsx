@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import Icon from "@/components/Icon";
-import { AsYouTrainingCard, ReachCard } from "@/components/settings/ReachCard";
+import { Check, ReachCard, useReachSave } from "@/components/settings/ReachCard";
 import SettingsCard from "@/components/settings/SettingsCard";
 import { LearnedSection } from "@/components/settings/TrainingCard";
+import { TrainingLine } from "@/components/settings/TrainingStep";
 import type { DelegationLoad } from "@/components/settings/useDelegation";
 import Switch from "@/components/Switch";
 import Button from "@/components/ui/Button";
@@ -19,6 +20,7 @@ import {
   resetVoiceProfile,
   setInboxWatch,
   setReadMyCalendar,
+  setTraining,
   updateVoiceProfile,
   type DelegationSettings,
   type DelegationTeam,
@@ -200,8 +202,8 @@ export default function ActAsMeCard({
 
   // Two columns where the page is wide enough (the page sets the container):
   // how far it goes as you (the mailbox on its first line), your calendar and
-  // `side`; then In training (its own card, first in the second column) and
-  // how it learns from you.
+  // `side`; then In training's state (its switch is on Approvals) and how it
+  // learns from you.
   return (
     <div className="grid gap-4 @4xl:grid-cols-2 @4xl:items-start">
       <div className="space-y-4">
@@ -238,7 +240,7 @@ export default function ActAsMeCard({
       </div>
 
       <div className="space-y-4">
-        <AsYouTrainingCard settings={settings} onSettings={setSettings} />
+        {settings.training && <TrainingLine side="you" on={Boolean(settings.training.training)} />}
         <HowItLearnsCard settings={settings} onSettings={setSettings} connected={connected} outlook={outlook} />
       </div>
     </div>
@@ -247,8 +249,8 @@ export default function ActAsMeCard({
 
 // How it learns from you: everything it picked up as you, in one card. How
 // you write (the style, Describe it, Learn again, Fine-tune details) and how
-// you write to each person (from Learn from my edits). In training, who goes on their
-// own and Learn from my edits are on the In training card above it. Shown
+// you write to each person, and Learn from my edits, which fills it. In
+// training and who goes on their own are on Delegate → Approvals. Shown
 // once a mailbox is connected, or while it still keeps something learned.
 function HowItLearnsCard({
   settings,
@@ -261,6 +263,7 @@ function HowItLearnsCard({
   connected: boolean;
   outlook: boolean;
 }) {
+  const { busy, error, save } = useReachSave(onSettings);
   const training = settings.training;
   if (!connected && !training?.learned.some((item) => item.setting === "drafts")) return null;
   return (
@@ -276,7 +279,19 @@ function HowItLearnsCard({
             empty="Nothing yet. Change a draft and tick “Do it like this next time”."
           />
         )}
+        {training && (
+          <div className="border-t border-line pt-5">
+            <Check
+              checked={Boolean(training.drafts)}
+              disabled={busy}
+              onChange={(learn) => void save(() => setTraining({ drafts: learn }))}
+              label="Learn from my edits"
+              help="Change a draft, tick Do it like this next time, and it learns how you write to that person."
+            />
+          </div>
+        )}
       </div>
+      {error && <p className="mt-3 text-sm text-red-500">{error}</p>}
     </SettingsCard>
   );
 }
