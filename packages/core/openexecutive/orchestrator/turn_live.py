@@ -99,14 +99,21 @@ def post(event: dict[str, Any]) -> bool:
 def say(line: Any) -> bool:
     """Show ``line`` as what the turn is doing now: the chat's live line, as
     a round's ``activity`` would. Empty or not text: nothing."""
-    if not isinstance(line, str):
-        return False
-    # Often the model's words: one plain line, no control or direction marks.
-    text = " ".join(_UNSAFE.sub("", " ".join(line.split())).split())
+    text = plain_line(line, MAX_LINE_CHARS)
     if not text:
         return False
-    if len(text) > MAX_LINE_CHARS:
-        text = text[: MAX_LINE_CHARS - 1].rstrip() + "…"
-    elif not text.endswith("…"):
-        text = text.rstrip(".") + "…"
     return post({"type": "activity", "label": text, "tool": ""})
+
+
+def plain_line(line: Any, cap: int) -> str:
+    """``line`` as one plain line for the chat, ending in "…", at most
+    ``cap`` characters: often the model's words, so no control or direction
+    marks. "" when nothing is left."""
+    if not isinstance(line, str):
+        return ""
+    text = " ".join(_UNSAFE.sub("", " ".join(line.split())).split()).rstrip(".…").strip()
+    if not text:
+        return ""
+    if len(text) > cap - 1:
+        text = text[: cap - 1].rstrip()
+    return f"{text}…"

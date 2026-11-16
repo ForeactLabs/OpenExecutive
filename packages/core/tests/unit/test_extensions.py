@@ -364,6 +364,9 @@ def test_a_tool_can_say_what_each_call_does_in_plain_words() -> None:
     # Nothing said, or a describe that fails: the registered line.
     assert extensions.activity_label("make_widget", {}) == "Making a widget…"
     assert extensions.activity_label("make_widget", {"boom": True}) == "Making a widget…"
+    # The model's words: one plain line, no direction marks, an activity's length.
+    odd = extensions.activity_label("make_widget", {"doing": "Making \u202eevil\u202c widgets " + "x" * 100})
+    assert odd is not None and "\u202e" not in odd and len(odd) == 60 and odd.endswith("…")
     assert "Making the blue widget for Dana" in str(
         summarize_activity([{"id": "tu-1", "name": "make_widget", "input": said}])
     )

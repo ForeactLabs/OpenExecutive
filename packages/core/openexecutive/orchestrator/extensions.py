@@ -375,18 +375,13 @@ def described(tool_name: str, arguments: Any) -> str | None:
     except Exception:
         logger.warning("extension_describe_failed tool=%s", tool_name, exc_info=True)
         return None
-    if not isinstance(said, str):
-        return None
-    line = " ".join(said.split()).rstrip(".…").strip()
-    if not line:
-        return None
-    if len(line) > _DESCRIBED_MAX:
-        line = line[: _DESCRIBED_MAX - 1].rstrip()
-    return f"{line}…"
+    from openexecutive.orchestrator import turn_live
+
+    return turn_live.plain_line(said, _DESCRIBED_MAX) or None
 
 
-# One line in the chat, the ellipsis included.
-_DESCRIBED_MAX = 80
+# One line in the chat, the ellipsis included: an ``activity`` label's cap.
+_DESCRIBED_MAX = 60
 
 
 def workflow_tools() -> list[ExtraTool]:
