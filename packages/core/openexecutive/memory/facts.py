@@ -25,13 +25,15 @@ from every prompt from the next one on.
 
 A teammate's fact is attributed: ``recorded_by_role="teammate"`` and their
 name, rendered as "(per <name>)" so every prompt reads it as their word, not
-the principal's. A teammate's write is stored as ``proposed`` unless the
-principal marked that teammate trusted ("needs my approval" off,
-``fact_approval_rules``; on by default). Even a trusted teammate's write
-that would replace an active fact the principal set, or one they approved,
-is stored as ``proposed``. A proposed row never renders; the principal
-approves it (it then replaces what it names) or declines it from the Pulse
-page.
+the principal's. It is in force at once, as the principal's is: a teammate is
+a full user, and what the Executive may do with what it knows is decided by
+Approvals, Your rules and In training, never by a hold on the fact itself.
+The principal sees teammates' new facts in their brief and can edit or retire
+any of them on the Memory page.
+
+A fact about the speaker alone (``private_to_person_id``: their own mailbox,
+sign-off, how they like to work) is kept for them: only their own turns,
+emails and Memory page read it.
 
 A decision is a fact too (``decision=1``): what the principal decided, in
 their words, with the department it belongs to and, once they say, how it
@@ -124,11 +126,6 @@ CREATE TABLE IF NOT EXISTS fact_confirmations (
     decided_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_fact_conf_token ON fact_confirmations(token_hash, status);
-CREATE TABLE IF NOT EXISTS fact_approval_rules (
-    person_id INTEGER PRIMARY KEY,
-    needs_approval INTEGER NOT NULL DEFAULT 0,
-    updated_at TEXT NOT NULL
-);
 """
 # Columns added after the table first shipped; ``_migrate`` adds any a DB
 # lacks. Every row written before them was the principal's own.
@@ -189,23 +186,6 @@ class Fact(BaseModel):
         return self.recorded_by_role == "principal" or self.approved_at is not None
 
 
-# Proposals one teammate may have waiting at once, so they cannot bury the
-# principal's Corrections tab (as MAX_PENDING_CONFIRMATIONS bounds email).
-MAX_PENDING_PROPOSALS_PER_PERSON = 20
-
-
-class TooManyProposals(Exception):  # noqa: N818 - a refusal, not an error.
-    """A teammate already has ``MAX_PENDING_PROPOSALS_PER_PERSON`` waiting."""
-
-
-class PrincipalFactConflict(Exception):  # noqa: N818 - a refusal, not an error.
-    """A teammate's write would replace an active fact the principal set."""
-
-    def __init__(self, fact: Fact) -> None:
-        super().__init__(f"fact {fact.id} was set by the principal")
-        self.fact = fact
-
-
 def _db_path(db_path: Path | None) -> Path:
     # Read episodic.DB_PATH at call time so a test's monkeypatch of it
     # reaches this store too (never bind it as a default argument).
@@ -237,6 +217,88 @@ def _migrate(conn: sqlite3.Connection) -> None:
             if "duplicate column" not in str(exc):
                 raise
     _copy_old_decisions(conn)
+    _put_teammate_proposals_in_force(conn)
+
+
+def _put_teammate_proposals_in_force(conn: sqlite3.Connection) -> None:
+    """Teammates' facts no longer wait for the principal: put the ones
+    still waiting in force, each replacing what it would have replaced on
+    approval, and drop the old per-teammate approval switches. One is
+    declined instead when its teammate is no longer on the team, or when the
+    team has kept a newer fact on its subject since. One put in force is
+    dated now, so the principal's next brief lists it among teammates' new
+    facts. Runs until none are left, so once per database in practice."""
+    if not conn.execute(
+        "SELECT 1 FROM facts WHERE status='proposed' AND recorded_by_role='teammate' LIMIT 1"
+    ).fetchone() and not conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='fact_approval_rules'"
+    ).fetchone():
+        return
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        waiting = conn.execute(
+            "SELECT * FROM facts WHERE status='proposed' AND recorded_by_role='teammate' "
+            "ORDER BY created_at, id"
+        ).fetchall()
+        has_people = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='people'"
+        ).fetchone() is not None
+        now = datetime.now(UTC).isoformat()
+        for r in waiting:
+            on_team = has_people and r["recorded_by_person_id"] is not None and conn.execute(
+                "SELECT 1 FROM people WHERE id=? AND archived=0 AND kind='team'",
+                (r["recorded_by_person_id"],),
+            ).fetchone() is not None
+            newer = conn.execute(
+                "SELECT 1 FROM facts WHERE status='active' AND kind!='profile' "
+                "AND private_to_person_id IS NULL AND (subject_key=? OR id=?) AND created_at > ?",
+                (_col(r, "subject_key", ""), _col(r, "replaces_fact_id", None) or -1, r["created_at"]),
+            ).fetchone() is not None
+            if not on_team or newer:
+                conn.execute(
+                    "UPDATE facts SET status='declined', retired_at=?, retired_reason=? WHERE id=?",
+                    (now, "no longer on the team" if not on_team else "a newer fact replaced it", r["id"]),
+                )
+                continue
+            try:
+                _put_in_force(conn, r)
+            except ValueError:  # an unreadable row (pydantic): never in force
+                conn.execute(
+                    "UPDATE facts SET status='declined', retired_at=?, retired_reason=? WHERE id=?",
+                    (now, "unreadable", r["id"]),
+                )
+                continue
+            conn.execute("UPDATE facts SET created_at=? WHERE id=?", (now, r["id"]))
+        conn.execute("DROP TABLE IF EXISTS fact_approval_rules")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def _put_in_force(conn: sqlite3.Connection, r: sqlite3.Row) -> list[Fact]:
+    """Make a proposed row active, replacing the fact it named and every
+    active team fact with its subject. Inside the caller's transaction."""
+    proposal = _row(r)
+    rows = conn.execute(
+        "SELECT * FROM facts WHERE status='active' AND kind!='profile' "
+        "AND private_to_person_id IS NULL AND (subject_key=? OR id=?)",
+        (_col(r, "subject_key", ""),
+         proposal.replaces_fact_id if proposal.replaces_fact_id is not None else -1),
+    ).fetchall()
+    superseded = [_row(x) for x in rows]
+    previous = proposal.previous_statement or (superseded[0].statement if superseded else "")
+    kind: FactKind = "correction" if (superseded or previous) else proposal.kind
+    conn.execute(
+        "UPDATE facts SET status='active', kind=?, previous_statement=? WHERE id=?",
+        (kind, previous, proposal.id),
+    )
+    for old in superseded:
+        conn.execute(
+            "UPDATE facts SET status='superseded', superseded_by=? WHERE id=? AND status='active'",
+            (proposal.id, old.id),
+        )
+    return superseded
 
 
 _OLD_DECISIONS_COPIED = "decisions_copied_to_facts"
@@ -361,7 +423,7 @@ _PRIVATE_ARG = "(private_to_person_id IS NULL OR private_to_person_id = ?)"
 
 def _seen_by(reader: int | None) -> tuple[str, tuple[int, ...]]:
     """The SQL clause (and its arguments) for the rows ``reader`` may read:
-    the team's, plus the decisions private to them. With no reader (a run
+    the team's, plus the rows private to them. With no reader (a run
     for nobody in particular) only the team's."""
     if reader is None:
         return _TEAM_ONLY, ()
@@ -370,7 +432,7 @@ def _seen_by(reader: int | None) -> tuple[str, tuple[int, ...]]:
 
 def readable(fact: Fact, reader: int | None) -> bool:
     """Whether ``reader`` may read ``fact``: the team's rows, and the
-    decisions private to them (the same rule as ``_seen_by``)."""
+    rows private to them (the same rule as ``_seen_by``)."""
     return fact.private_to_person_id is None or (
         reader is not None and fact.private_to_person_id == reader
     )
@@ -390,7 +452,6 @@ def record_fact(
     recorded_by_person_id: int | None = None,
     recorded_by_role: RecordedByRole = "principal",
     recorded_by_name: str = "",
-    proposed: bool = False,
     decision: bool | None = None,
     department: str | None = None,
     private_to_person_id: int | None = None,
@@ -398,13 +459,11 @@ def record_fact(
 ) -> tuple[Fact, list[Fact]]:
     """Store a fact and supersede what it replaces, in one transaction.
 
-    ``private_to_person_id`` keeps a decision to the person who made it in
-    their own chat (``Fact.private_to_person_id``). A private decision and
-    the team's facts never replace each other: it supersedes only that
-    person's own private rows, and an edit of a private decision (named by
-    ``replaces_fact_id``) stays private. A private row is never ``proposed``:
-    nobody else reads it, so there is nothing for the principal to approve
-    until it is shared (``share_decision``).
+    ``private_to_person_id`` keeps the row to one person
+    (``Fact.private_to_person_id``): a decision made in their own chat, or a
+    fact about them alone. A private row and the team's facts never replace
+    each other: it supersedes only that person's own private rows, and an
+    edit of a private row (named by ``replaces_fact_id``) stays private.
 
     ``decision`` marks a decision the speaker made and ``department`` names
     its department. Left as None, both carry over from the decision it
@@ -420,13 +479,9 @@ def record_fact(
     and was passed as ``kind="fact"`` is stored as a ``correction``; so is one
     that names the wrong value in ``previous_statement``.
 
-    A teammate's row (``recorded_by_role="teammate"``) may replace another
-    teammate's but never the principal's, nor one the principal approved:
-    that raises
-    ``PrincipalFactConflict`` and stores nothing. ``proposed=True`` stores the
-    row as ``proposed`` and replaces nothing yet (``approve_fact`` does); so
-    does any write by a teammate the principal marked "needs my approval"
-    (``fact_approval_rules``, read inside the same transaction).
+    A teammate's row (``recorded_by_role="teammate"``) is stored and
+    replaces what it names exactly as the principal's does; it stays
+    attributed to them.
     """
     subject = _clean(subject, SUBJECT_MAX)
     statement = _clean(statement, STATEMENT_MAX)
@@ -452,42 +507,17 @@ def record_fact(
                 (key, replaces_fact_id if replaces_fact_id is not None else -1),
             ).fetchall()
         replaced = [_row(r) for r in rows]
-        scope = private_to_person_id if decision is True and kind != "profile" else None
-        if scope is None and decision is None and replaces_fact_id is not None:
-            # An edit of a private decision stays private (who may edit it is
-            # the caller's check).
+        scope = private_to_person_id if kind != "profile" else None
+        if scope is None and replaces_fact_id is not None:
+            # An edit of a private row stays private to its person, whoever
+            # makes the edit (the principal's has no person id to match).
+            # Who may name a private row is the caller's check: it is
+            # readable by its own person alone (``readable``).
             named_row = next((f for f in replaced if f.id == replaces_fact_id), None)
-            if (
-                named_row is not None and named_row.decision
-                and named_row.private_to_person_id is not None
-            ):
+            if named_row is not None and named_row.private_to_person_id is not None:
                 scope = named_row.private_to_person_id
         # Private rows and the team's never replace each other.
         replaced = [f for f in replaced if f.private_to_person_id == scope]
-        if scope is not None:
-            proposed = False
-        if recorded_by_role == "teammate" and not proposed and scope is None:
-            # "Needs my approval", read in this write's transaction: a switch
-            # turned on a moment earlier cannot let one fact through. On
-            # unless the principal marked this teammate trusted; a teammate
-            # write naming no person is never trusted.
-            rule = None if recorded_by_person_id is None else conn.execute(
-                "SELECT needs_approval FROM fact_approval_rules WHERE person_id=?",
-                (recorded_by_person_id,),
-            ).fetchone()
-            proposed = rule is None or bool(rule["needs_approval"])
-        if recorded_by_role == "teammate" and not proposed and scope is None:
-            outranks = next((f for f in replaced if f.principal_owned), None)
-            if outranks is not None:
-                raise PrincipalFactConflict(outranks)
-        if proposed and recorded_by_role == "teammate":
-            (waiting,) = conn.execute(
-                "SELECT COUNT(*) FROM facts WHERE status='proposed' AND recorded_by_role='teammate' "
-                "AND recorded_by_person_id IS ?",
-                (recorded_by_person_id,),
-            ).fetchone()
-            if int(waiting) >= MAX_PENDING_PROPOSALS_PER_PERSON:
-                raise TooManyProposals()
         previous = _clean(previous_statement, STATEMENT_MAX)
         if not previous and replaced:
             previous = replaced[0].statement
@@ -497,12 +527,6 @@ def record_fact(
         was_decision = next((f for f in replaced if f.decision), None)
         is_decision = bool(was_decision) if decision is None else decision
         area = department if department is not None else (was_decision.department if was_decision else "")
-        # What a proposal would replace, shown to the principal and applied on
-        # approval: the fact it named, else the one with its subject.
-        target = None
-        if proposed and replaced:
-            named = [f.id for f in replaced if f.id == replaces_fact_id]
-            target = named[0] if named else replaced[0].id
         cur = conn.execute(
             "INSERT INTO facts (kind, subject, subject_key, statement, previous_statement, "
             "source_quote, source_channel, session_id, turn_id, recorded_by_person_id, "
@@ -513,34 +537,33 @@ def record_fact(
                 stored_kind, subject, key, statement, previous,
                 _clean(source_quote, QUOTE_MAX), _clean(source_channel, 40),
                 session_id, turn_id, recorded_by_person_id, now,
-                "proposed" if proposed else "active",
+                "active",
                 recorded_by_role, _clean(recorded_by_name, 120),
-                target, 1 if is_decision and kind != "profile" else 0,
+                None, 1 if is_decision and kind != "profile" else 0,
                 _clean(area, 60) if is_decision else "",
                 # An edit of a decision keeps how it turned out.
                 was_decision.outcome if is_decision and was_decision is not None else "",
-                scope if is_decision else None,
+                scope,
             ),
         )
         new_id = int(cur.lastrowid or 0)
-        superseded: list[Fact] = []
-        if not proposed:
-            superseded = replaced
-            for old in superseded:
-                conn.execute(
-                    "UPDATE facts SET status='superseded', superseded_by=? WHERE id=? AND status='active'",
-                    (new_id, old.id),
-                )
+        superseded = replaced
+        for old in superseded:
+            conn.execute(
+                "UPDATE facts SET status='superseded', superseded_by=? WHERE id=? AND status='active'",
+                (new_id, old.id),
+            )
         new_row = conn.execute("SELECT * FROM facts WHERE id=?", (new_id,)).fetchone()
     return _row(new_row), superseded
 
 
 def approve_fact(fact_id: int, db_path: Path | None = None) -> tuple[Fact, list[Fact]] | None:
-    """Make a proposed fact active, replacing — as it was proposed to — the
-    fact it named and every active fact with its subject, the principal's
-    included: approving it is the principal's own word, so it is stamped
-    ``approved_at`` and outranks teammates from then on (``principal_owned``).
-    None when the row is no longer proposed."""
+    """Put a proposed fact in force: a decision copied in from mail or a chat
+    app (``_copy_old_decisions``), which waits for the principal's OK because
+    a sender's words may be in it. It replaces the fact it named and every
+    active team fact with its subject, and is stamped ``approved_at``: the
+    principal's own word from then on (``principal_owned``). None when the
+    row is no longer proposed."""
     with _conn(db_path) as conn:
         conn.execute("BEGIN IMMEDIATE")
         r = conn.execute(
@@ -548,25 +571,8 @@ def approve_fact(fact_id: int, db_path: Path | None = None) -> tuple[Fact, list[
         ).fetchone()
         if r is None:
             return None
-        proposal = _row(r)
-        rows = conn.execute(
-            "SELECT * FROM facts WHERE status='active' AND kind!='profile' "
-            "AND private_to_person_id IS NULL AND (subject_key=? OR id=?)",
-            (_col(r, "subject_key", ""),
-             proposal.replaces_fact_id if proposal.replaces_fact_id is not None else -1),
-        ).fetchall()
-        superseded = [_row(x) for x in rows]
-        previous = proposal.previous_statement or (superseded[0].statement if superseded else "")
-        kind: FactKind = "correction" if (superseded or previous) else proposal.kind
-        conn.execute(
-            "UPDATE facts SET status='active', kind=?, previous_statement=?, approved_at=? WHERE id=?",
-            (kind, previous, datetime.now(UTC).isoformat(), fact_id),
-        )
-        for old in superseded:
-            conn.execute(
-                "UPDATE facts SET status='superseded', superseded_by=? WHERE id=? AND status='active'",
-                (fact_id, old.id),
-            )
+        superseded = _put_in_force(conn, r)
+        conn.execute("UPDATE facts SET approved_at=? WHERE id=?", (datetime.now(UTC).isoformat(), fact_id))
         new_row = conn.execute("SELECT * FROM facts WHERE id=?", (fact_id,)).fetchone()
     return _row(new_row), superseded
 
@@ -587,40 +593,6 @@ def decline_fact(fact_id: int, *, reason: str = "", db_path: Path | None = None)
     return _row(r) if r else None
 
 
-# --------------------------------------------------------------------------- #
-# "Needs my approval": per teammate, set by the principal
-# --------------------------------------------------------------------------- #
-
-
-def needs_approval(person_id: int, db_path: Path | None = None) -> bool:
-    """Whether the principal approves this teammate's facts before they are
-    used. On by default: off only for a teammate the principal trusts."""
-    with _conn(db_path) as conn:
-        r = conn.execute(
-            "SELECT needs_approval FROM fact_approval_rules WHERE person_id=?", (person_id,),
-        ).fetchone()
-    return r is None or bool(r["needs_approval"])
-
-
-def set_needs_approval(person_id: int, on: bool, db_path: Path | None = None) -> None:
-    now = datetime.now(UTC).isoformat()
-    with _conn(db_path) as conn:
-        conn.execute(
-            "INSERT INTO fact_approval_rules (person_id, needs_approval, updated_at) VALUES (?,?,?) "
-            "ON CONFLICT(person_id) DO UPDATE SET needs_approval=excluded.needs_approval, "
-            "updated_at=excluded.updated_at",
-            (person_id, 1 if on else 0, now),
-        )
-
-
-def approval_rules(db_path: Path | None = None) -> dict[int, bool]:
-    """person_id → needs approval, for every teammate the principal set; a
-    teammate with no row needs approval (the default)."""
-    with _conn(db_path) as conn:
-        rows = conn.execute("SELECT person_id, needs_approval FROM fact_approval_rules").fetchall()
-    return {int(r["person_id"]): bool(r["needs_approval"]) for r in rows}
-
-
 def get_fact(fact_id: int, db_path: Path | None = None) -> Fact | None:
     with _conn(db_path) as conn:
         r = conn.execute("SELECT * FROM facts WHERE id=?", (fact_id,)).fetchone()
@@ -630,27 +602,14 @@ def get_fact(fact_id: int, db_path: Path | None = None) -> Fact | None:
 def list_facts(
     *,
     include_inactive: bool = False,
-    own_proposals_of: int | None = None,
     reader: int | None = None,
     limit: int = 200,
     db_path: Path | None = None,
 ) -> list[Fact]:
     """Newest first. Active rows only unless ``include_inactive``. Only what
     ``reader`` may read (``_seen_by``): the team's rows and their own
-    private decisions.
-    ``own_proposals_of`` (a teammate's view): the active rows plus that
-    person's own proposals, filtered in SQL before the limit, so neither
-    history nor anyone else's proposals can crowd them out."""
+    private rows."""
     seen, seen_args = _seen_by(reader)
-    if own_proposals_of is not None:
-        with _conn(db_path) as conn:
-            rows = conn.execute(
-                f"SELECT * FROM facts WHERE {seen} AND (status='active' OR (status='proposed' "  # noqa: S608 - fixed clause
-                "AND recorded_by_role='teammate' AND recorded_by_person_id=?)) "
-                "ORDER BY created_at DESC, id DESC LIMIT ?",
-                (*seen_args, own_proposals_of, max(1, limit)),
-            ).fetchall()
-        return [_row(r) for r in rows]
     where = f"WHERE {seen}" if include_inactive else f"WHERE {seen} AND status='active'"
     with _conn(db_path) as conn:
         rows = conn.execute(
@@ -933,16 +892,20 @@ def render_facts_for_draft(
     written as someone should say, and the thread it answers), for the
     composer's user turn; "" when none do. Only matching facts, and few: an
     email goes to someone outside, so it carries what it needs and no more.
-    Never raises."""
+    ``reader`` is the writer: their own about-me facts (private to them,
+    not a decision: a sign-off, how they write) come first on every email,
+    matching or not. Never raises."""
     from openexecutive.memory.lessons import _stems
 
     want = _stems(query or "")
-    if not want:
+    if not want and reader is None:
         return ""
     seen, seen_args = _seen_by(reader)
     rows = _read_only_rows(
         f"SELECT * FROM facts WHERE status='active' AND kind!='profile' AND {seen} "  # noqa: S608 - fixed clause
-        "ORDER BY created_at DESC, id DESC LIMIT ?",
+        # The writer's own private rows first, so newer team facts never
+        # crowd an old sign-off out of the pool.
+        "ORDER BY private_to_person_id IS NOT NULL DESC, created_at DESC, id DESC LIMIT ?",
         (*seen_args, RANK_POOL_FACTS),
         db_path,
     )
@@ -950,10 +913,13 @@ def render_facts_for_draft(
     for i, r in enumerate(rows):
         try:
             shared = len(want & _stems(f"{r['subject']} {r['statement']}"))
+            own = reader is not None and _col(r, "private_to_person_id", None) == reader and not _col(r, "decision", 0)
         except Exception:  # noqa: BLE001 - a bad row is skipped, as in _rank_for.
             continue
         # Two shared words, as a lesson needs: one common word matches too much.
-        if shared >= 2:
+        if own:
+            scored.append((-1000, i, r))
+        elif shared >= 2:
             scored.append((-shared, i, r))
     now = datetime.now(UTC)
     lines: list[str] = []
@@ -975,20 +941,16 @@ def render_facts_for_draft(
 def render_teammate_changes(
     since: datetime,
     *,
-    include_proposed: bool = True,
     limit: int = 15,
     db_path: Path | None = None,
 ) -> str:
     """The standalone briefs' FYI: facts teammates recorded since ``since``
-    (the last brief), newest first — in force now, and, with
-    ``include_proposed``, those waiting for the principal's approval (theirs
-    alone to see: pass it only for a brief the principal reads privately).
-    "" when none. Read-only; never raises."""
-    statuses = "('active', 'proposed')" if include_proposed else "('active')"
+    (the last brief) and still in force, newest first. "" when none.
+    Read-only; never raises."""
     rows = _read_only_rows(
         "SELECT * FROM facts WHERE recorded_by_role='teammate' AND kind!='profile' "
         "AND private_to_person_id IS NULL "
-        f"AND status IN {statuses} AND created_at >= ? "  # noqa: S608 - fixed clause
+        "AND status='active' AND created_at >= ? "
         "ORDER BY created_at DESC, id DESC LIMIT ?",
         (since.astimezone(UTC).isoformat(), max(1, limit)),
         db_path,
@@ -1003,10 +965,7 @@ def render_teammate_changes(
         what = f"{_safe(f.subject, SUBJECT_MAX)}: {_safe(f.statement, STATEMENT_MAX)}"
         if f.previous_statement:
             what += f" (was: {_safe(f.previous_statement, 160)})"
-        if f.status == "proposed":
-            lines.append(f"- {who} proposed {what} — waiting for your approval on the Memory page")
-        else:
-            lines.append(f"- {who} recorded {what} — in use now; retire it on the Memory page if it is wrong")
+        lines.append(f"- {who} recorded {what} — in use now; edit or retire it on the Memory page if it is wrong")
     if not lines:
         return ""
     return "\n".join([
@@ -1024,9 +983,7 @@ def share_decision(
 
     ``shared=True``: ``person_id``'s own private decision becomes the team's.
     It replaces the team's active facts with its subject, as recording it
-    shared would have; a teammate's goes to the principal as ``proposed``
-    first when their facts need approval, and a teammate's never replaces a
-    fact the principal set (``PrincipalFactConflict``).
+    shared would have, whoever shares it.
 
     ``shared=False``: an active team decision ``person_id`` recorded
     themselves (for the principal, ``is_principal``, one the principal set)
@@ -1037,7 +994,7 @@ def share_decision(
     with _conn(db_path) as conn:
         conn.execute("BEGIN IMMEDIATE")
         r = conn.execute(
-            "SELECT * FROM facts WHERE id=? AND decision=1 AND status IN ('active','proposed')",
+            "SELECT * FROM facts WHERE id=? AND decision=1 AND status='active'",
             (fact_id,),
         ).fetchone()
         if r is None:
@@ -1052,14 +1009,11 @@ def share_decision(
                 # or drop, as with retiring it.
                 and fact.approved_at is None
             )
-            # A row still waiting for approval is taken back only by the
-            # teammate who shared it; any other proposal needs its review.
-            waiting_ok = fact.status == "active" or fact.recorded_by_role == "teammate"
-            if fact.private_to_person_id is not None or not own or not waiting_ok:
+            if fact.private_to_person_id is not None or not own:
                 conn.rollback()
                 return None
             conn.execute(
-                "UPDATE facts SET private_to_person_id=?, status='active' WHERE id=?",
+                "UPDATE facts SET private_to_person_id=? WHERE id=?",
                 (person_id, fact_id),
             )
             # What it replaced when it was shared is the team's again, unless
@@ -1073,51 +1027,22 @@ def share_decision(
                 (fact_id, fact_id),
             )
         else:
-            if fact.private_to_person_id != person_id or fact.status != "active":
+            if fact.private_to_person_id != person_id:
                 conn.rollback()
                 return None
-            # By who is sharing, not what the row says: anyone but the
-            # principal follows the teammate rules.
-            teammate = not is_principal
-            proposed = False
             # What it corrected was said in private too: it does not go to the team.
             conn.execute("UPDATE facts SET previous_statement='' WHERE id=?", (fact_id,))
-            if teammate:
-                rule = conn.execute(
-                    "SELECT needs_approval FROM fact_approval_rules WHERE person_id=?", (person_id,),
-                ).fetchone()
-                proposed = rule is None or bool(rule["needs_approval"])
             rows = conn.execute(
                 "SELECT * FROM facts WHERE status='active' AND kind!='profile' "
                 "AND private_to_person_id IS NULL AND subject_key=? AND id!=?",
                 (_col(r, "subject_key", ""), fact_id),
             ).fetchall()
-            replaced = [_row(x) for x in rows]
-            if teammate and not proposed:
-                outranks = next((f for f in replaced if f.principal_owned), None)
-                if outranks is not None:
-                    conn.rollback()
-                    raise PrincipalFactConflict(outranks)
-            if proposed:
-                (waiting,) = conn.execute(
-                    "SELECT COUNT(*) FROM facts WHERE status='proposed' AND recorded_by_role='teammate' "
-                    "AND recorded_by_person_id IS ?",
-                    (person_id,),
-                ).fetchone()
-                if int(waiting) >= MAX_PENDING_PROPOSALS_PER_PERSON:
-                    conn.rollback()
-                    raise TooManyProposals()
+            conn.execute("UPDATE facts SET private_to_person_id=NULL WHERE id=?", (fact_id,))
+            for old in rows:
                 conn.execute(
-                    "UPDATE facts SET private_to_person_id=NULL, status='proposed', replaces_fact_id=? WHERE id=?",
-                    (replaced[0].id if replaced else None, fact_id),
+                    "UPDATE facts SET status='superseded', superseded_by=? WHERE id=? AND status='active'",
+                    (fact_id, old["id"]),
                 )
-            else:
-                conn.execute("UPDATE facts SET private_to_person_id=NULL WHERE id=?", (fact_id,))
-                for old in replaced:
-                    conn.execute(
-                        "UPDATE facts SET status='superseded', superseded_by=? WHERE id=? AND status='active'",
-                        (fact_id, old.id),
-                    )
         new_row = conn.execute("SELECT * FROM facts WHERE id=?", (fact_id,)).fetchone()
     return _row(new_row) if new_row else None
 
@@ -1282,15 +1207,9 @@ __all__ = [
     "Confirmation",
     "FACTS_BLOCK_HEADER",
     "MAX_PENDING_CONFIRMATIONS",
-    "MAX_PENDING_PROPOSALS_PER_PERSON",
-    "PrincipalFactConflict",
-    "TooManyProposals",
-    "approval_rules",
     "approve_fact",
     "decline_fact",
-    "needs_approval",
     "render_teammate_changes",
-    "set_needs_approval",
     "decide_confirmation",
     "find_confirmation",
     "find_confirmation_tokens",

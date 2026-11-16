@@ -25,9 +25,6 @@ from openexecutive.memory.episodic import (
 )
 from openexecutive.memory.facts import (
     Fact,
-    PrincipalFactConflict,
-    TooManyProposals,
-    approval_rules,
     approve_fact,
     decision_rows,
     decline_fact,
@@ -36,7 +33,6 @@ from openexecutive.memory.facts import (
     readable,
     record_fact,
     retire_fact,
-    set_needs_approval,
     share_decision,
 )
 from openexecutive.memory.honcho_client import (
@@ -48,7 +44,6 @@ from openexecutive.memory.honcho_client import (
     people_overview,
     person_conclusions,
 )
-from openexecutive.people.models import Person
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -175,23 +170,11 @@ def remove_decision(decision_id: int, request: Request) -> Response:
 def share_decision_route(decision_id: int, body: DecisionShare, request: Request) -> DecisionOut:
     """Share the caller's own private decision with the team
     (``shared: true``), or make one they recorded private to them again
-    (``shared: false``). A teammate's shared decision follows their usual
-    approval rule, as recording it shared would have."""
+    (``shared: false``)."""
     reader, principal = _decision_reader(request)
     if reader is None:
         raise HTTPException(status_code=403, detail="Sign in as someone on the People list")
-    try:
-        fact = share_decision(decision_id, shared=body.shared, person_id=reader, is_principal=principal)
-    except PrincipalFactConflict:
-        raise HTTPException(
-            status_code=409,
-            detail="The team already has a fact on this that only the principal can change",
-        ) from None
-    except TooManyProposals:
-        raise HTTPException(
-            status_code=409,
-            detail="Too many of your facts are waiting for approval. Try again once they are reviewed.",
-        ) from None
+    fact = share_decision(decision_id, shared=body.shared, person_id=reader, is_principal=principal)
     if fact is None:
         raise HTTPException(status_code=404, detail="Decision not found")
     _audit_fact(
@@ -275,8 +258,8 @@ class FactsPage(BaseModel):
     # The facts this caller may retire: every active one for the principal; a
     # teammate's own attributed ones for them.
     retirable_ids: list[int] = []
-    # Whether this caller approves or declines teammates' proposed facts and
-    # sets who needs approval (the principal only).
+    # Whether this caller approves or declines a decision copied in from mail
+    # that waits for their OK (the principal only).
     can_review: bool = False
     # The caller's own private decisions, which they may share with the team.
     shareable_ids: list[int] = []
@@ -294,16 +277,6 @@ class FactEdit(BaseModel):
 
 class FactReview(BaseModel):
     reason: str = ""
-
-
-class FactApprovalRule(BaseModel):
-    person_id: int
-    full_name: str
-    needs_approval: bool
-
-
-class FactApprovalUpdate(BaseModel):
-    needs_approval: bool
 
 
 def _caller_id(request: Request) -> int | None:
@@ -384,8 +357,7 @@ def get_facts(
     proposed and declined history unless ``include_inactive=false`` — and the
     company-profile fields changed from chat. Every prompt that produces
     output reads the active ones. The history is the principal's alone:
-    anyone else gets the active rows, plus their own proposals waiting for
-    the principal.
+    anyone else gets the active rows.
 
     The facts themselves are company knowledge every conversation already
     sees, and so is who stated a teammate's (it renders "(per <name>)"); the
@@ -403,11 +375,7 @@ def get_facts(
         retirable = [f.id for f in rows if f.status == "active" and f.kind != "profile"]
         flags = {f.id: _decision_out(f, reader, principal) for f in rows if f.decision}
     else:
-        rows = (
-            list_facts(own_proposals_of=caller, limit=limit, reader=reader)
-            if caller is not None
-            else list_facts(limit=limit, reader=reader)
-        )
+        rows = list_facts(limit=limit, reader=reader)
         retirable = [
             f.id for f in rows
             if f.status == "active"
@@ -470,8 +438,7 @@ def edit_standing_fact(fact_id: int, body: FactEdit, request: Request) -> Fact:
     """Change what an active fact says. The edit is recorded as a correction
     that replaces it (same subject; the old wording kept as what it
     corrects), through ``record_fact``'s own checks. Who may: as for retire,
-    the principal any fact, a teammate only their own, whose edit follows
-    their usual approval rule."""
+    the principal any fact, a teammate only their own."""
     principal = _caller_is_principal(request)
     existing = _readable_fact(fact_id, request)
     caller = None if principal else _caller_id(request)
@@ -496,8 +463,6 @@ def edit_standing_fact(fact_id: int, body: FactEdit, request: Request) -> Fact:
             recorded_by_role="principal" if principal else "teammate",
             recorded_by_name="" if principal else existing.recorded_by_name,
         )
-    except PrincipalFactConflict:
-        raise HTTPException(status_code=403, detail="Only the principal can change this fact") from None
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
     _audit_fact(
@@ -520,9 +485,9 @@ def _require_principal(request: Request, what: str) -> None:
 
 @router.post("/memories/facts/{fact_id}/approve", response_model=Fact)
 def approve_standing_fact(fact_id: int, request: Request) -> Fact:
-    """Put a teammate's proposed fact in force (it replaces what it names,
-    the principal's own fact included). Principal only."""
-    _require_principal(request, "approve a teammate's fact")
+    """Put a proposed fact in force: a decision copied in from mail or a chat
+    app that waits for the principal's OK (``memory.facts.approve_fact``)."""
+    _require_principal(request, "approve a fact")
     approved = approve_fact(fact_id)
     if approved is None:
         raise HTTPException(status_code=409, detail="Fact is not waiting for approval")
@@ -538,8 +503,8 @@ def approve_standing_fact(fact_id: int, request: Request) -> Fact:
 
 @router.post("/memories/facts/{fact_id}/decline", response_model=Fact)
 def decline_standing_fact(fact_id: int, request: Request, body: FactReview | None = None) -> Fact:
-    """Drop a teammate's proposed fact; it is never used. Principal only."""
-    _require_principal(request, "decline a teammate's fact")
+    """Drop a proposed fact; it is never used. Principal only."""
+    _require_principal(request, "decline a fact")
     reason = " ".join(((body.reason if body else "") or "declined from the Memory page").split())
     declined = decline_fact(fact_id, reason=reason[:280])
     if declined is None:
@@ -551,47 +516,6 @@ def decline_standing_fact(fact_id: int, request: Request, body: FactReview | Non
         actor="principal",
     )
     return declined
-
-
-def _teammates() -> list[Person]:
-    from openexecutive.people.store import list_people
-
-    return [
-        p for p in list_people()
-        if not p.is_principal and not p.archived and p.kind == "team" and p.id is not None
-    ]
-
-
-@router.get("/memories/facts/approval", response_model=list[FactApprovalRule])
-def get_fact_approval_rules(request: Request) -> list[FactApprovalRule]:
-    """Every teammate and whether the principal approves their facts before
-    they are used ("needs my approval", on by default; off = trusted).
-    Principal only."""
-    _require_principal(request, "see who needs approval")
-    rules = approval_rules()
-    return [
-        FactApprovalRule(person_id=pid, full_name=p.full_name, needs_approval=rules.get(pid, True))
-        for p in _teammates()
-        if (pid := p.id) is not None
-    ]
-
-
-@router.put("/memories/facts/approval/{person_id}", response_model=FactApprovalRule)
-def put_fact_approval_rule(person_id: int, body: FactApprovalUpdate, request: Request) -> FactApprovalRule:
-    """Turn "needs my approval" on or off for one teammate. Principal only."""
-    _require_principal(request, "change who needs approval")
-    person = next((p for p in _teammates() if p.id == person_id), None)
-    if person is None:
-        raise HTTPException(status_code=404, detail="Teammate not found")
-    set_needs_approval(person_id, body.needs_approval)
-    _audit_fact(
-        "fact_approval_changed",
-        f"Standing facts from {person.full_name} {'need' if body.needs_approval else 'no longer need'} approval",
-        {"person_id": person_id, "needs_approval": body.needs_approval},
-        actor="principal",
-    )
-    return FactApprovalRule(person_id=person_id, full_name=person.full_name,
-                            needs_approval=body.needs_approval)
 
 
 # --- People (peer memory) ---

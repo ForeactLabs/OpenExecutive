@@ -145,7 +145,7 @@ system:
     - A repeat of an open alert with the same `(source, dedup_key)` coalesces into the existing row (`alerts.store.coalesce_alert`) rather than inserting a second card, and does not re-dispatch unless severity rose into high/urgent. Monitoring alerts carry a producer-supplied `watch:<slug>` key so one watch = one open card.
     - Unattended prose is grounded deterministically (`briefing.grounding`, no model in the check). The morning brief, the EOD digest, the executive reflection's "Flagged for the brief" bullets and its outward tool calls (message_person, send_department_message, send_company_broadcast, schedule_followup, create_alert), triage's rewrite of an alert and the alert review's rewrites may name only people and figures found in their own inputs — the rendered context, the tool results so far, the event, the evidence — or the company profile. Standing facts (memory.facts) count as input wherever the prompt carried them: they sit in the brief, digest and reflection context, and the alert review grounds its rewrites against the batch's STANDING FACTS block too, so correcting a card to the principal's correction is not refused. A name must appear whole in ONE source line (or belong to a roster person some source mentions; being on the roster alone is not enough); a figure (money, %, k/M/B, bare numbers ≥ 11) must match a source number within the precision the prose shows. What fails is held back (briefs — one repair call, then the line is dropped and a "held back N lines" note added), refused with a reason the model can act on (tools), or replaced by the event's own text / the old text (alerts, made inert first — links masked, markup and @-mentions stripped). Fail-open; `GROUNDING_CHECKS=enforce|report|off`; every finding writes a `grounding` audit row.
     - Cards are named by what they are, never by their number (alerts.card_refs). The Executive's tools need the alert id, so the chat's board block prints [alert_id] and the reflection reads alert_id=N, and a reply or brief that said 'Review card 220' told the reader nothing. Plain code rewrites it before a message goes out: Executive.chat (every chat app and email reply), the morning brief and the EOD digest after grounding, and the reflection's flags before the brief reads them. 'card N' / 'alert #N' / 'alert_id=N' becomes the card's headline, linked to UI_BASE_URL/?card=N (Home opens on that card), as Markdown or, for Slack and Google Chat, <url|text> (the scheduler's Slack DM delivery rewrites Markdown links the same way). A number that is no card is left as written; a card the reader may not see (a teammate's drafted document, a private:principal card outside the principal's own private conversation, anyone off the roster) becomes 'that card' with no headline or link. Grounding masks a card number, so it is neither held back nor cited. The web chat streams, so the UI links any number that slips through (lib/cardMentions.ts). The briefs' CARRIED OVER line names Home with its address instead of /today.
-    - A decision made in one person's own chat is private to them until they share it (memory.facts private_to_person_id). fact_tools.own_chat_person names the verified speaker of a chat only they read (web chat not shared, their own DM; never a shared chat, channel, meeting, email or unattended run; team installs only) and remember_fact stores a decision from there with that person's id. facts._seen_by(reader) filters every list and render; no reader means the team's rows only. Readers passed are the speaker on their own chat turns, the caller on the Memory routes and the MCP decisions resource, the person on their own Home header, and the principal on a brief delivered to them alone (facts.brief_reader). Private and team rows never replace each other; a private row is never proposed, is not mirrored to department memory, and its audit row omits its text. facts.share_decision shares it (teammate approval rule applies, PrincipalFactConflict when it would replace the principal's fact) or takes it back for the person who recorded it; POST /memories/decisions/{id}/share, the Memory page buttons, and do_in_app share_decision / unshare_decision all go through it. Decisions from before this stay the team's. Why - one person's chats should not reach another teammate, and decisions from a private chat were listed for everyone.
+    - A decision made in one person's own chat is private to them until they share it (memory.facts private_to_person_id). fact_tools.own_chat_person names the verified speaker of a chat only they read (web chat not shared, their own DM; never a shared chat, channel, meeting, email or unattended run; team installs only) and remember_fact stores a decision from there with that person's id. facts._seen_by(reader) filters every list and render; no reader means the team's rows only. Readers passed are the speaker on their own chat turns, the caller on the Memory routes and the MCP decisions resource, the person on their own Home header, and the principal on a brief delivered to them alone (facts.brief_reader). Private and team rows never replace each other; a private row is not mirrored to department memory, and its audit row omits its text. facts.share_decision shares it (in force at once, replacing the team's fact on its subject, whoever shares it) or takes it back for the person who recorded it; POST /memories/decisions/{id}/share, the Memory page buttons, and do_in_app share_decision / unshare_decision all go through it. Decisions from before this stay the team's. Why - one person's chats should not reach another teammate, and decisions from a private chat were listed for everyone.
     - A card raised from one person's own chat is theirs (alerts.own_chat). When a step is held, decision_ledger.create_decision_instance writes whose saved conversation it came from to decision_chat_owners (the chat's caller, or the principal for a chat saved before callers were recorded), so deleting the chat later changes nothing; a decision with no row is read from its conversation. The decision's own card (source decision_scheduling with the decision's external id; a decision_instance tag on any other alert is just text) and the decision itself show only to that person and to the person it went to for the OK (approver_person_id, or the card's routed_to_person_id), the principal included among everyone else. alerts.models.visible_alert carries the rule, so Home, the phone, the chat's board and card tools (find_alerts, ack_alert, answer_card), card names in a reply (card_refs), phone pushes and the /alerts/{id} routes agree; api.routes.decisions applies it to GET /decisions, GET /decisions/{id}, approve, reject, cancel and a tap in a chat app. With no viewer the card is left out (the review, the reflection, the handled block), unless the build names its chat_reader; _build_today uses the principal when include_private, the end-of-day digest the principal on their own delivery, the Home header its caller outside the company scope. A card with no saved conversation behind it (a department's run, inbound mail, a watch, a workflow) is the team's. A read that fails leaves the card to its routed person alone. Why - teammates are full users with their own chats, and a card from one of those showed to everyone under Across the team.
     - Every brief knows its reader in code (briefing.reader). The /today header, morning brief and EOD digest mask the reader's full name and addresses in their context to "the reader", head it with THE READER line, and share READER_NAME_RULE ("you" for the reader, never their name or "the principal", anyone else by name, "I/me/my" for the Executive). A draft that still slips is rewritten once, then fixed in code. Before this the header had no reader at all and called its own reader by name or "the principal".
     - The alert review model (`agents.alert_review`) never mutates state. `alerts.review.apply_verdict` is the only writer: it closes only on a high-confidence `resolved`/`stale` verdict with named evidence, routes only to a person on the roster slice it showed the model (scope-holders or the principal for board/comp/legal matters), runs department moves through `departments.authority.gate_action` (propose-only → `propose_via_alert`, never a third-party DM), caps outbound moves per pass, and audits every move with its evidence and prior state. Status `resolved` (Executive closed) is distinct from `ack` (user approved).
@@ -2667,28 +2667,28 @@ memory:
         `recorded_by_role='teammate'`, `recorded_by_name` (People-list name
         at write time), rendered "(per <name>)"; the header says such a line
         is the teammate's word and the principal's unmarked line wins a
-        conflict. PRINCIPAL OUTRANKS: a teammate write whose subject /
-        replaces_fact_id hits an active principal fact raises
-        `PrincipalFactConflict` → stored `proposed` (never renders) with
-        `replaces_fact_id` naming it; teammates supersede each other freely;
-        the principal supersedes anyone. "NEEDS MY APPROVAL":
-        `fact_approval_rules(person_id, needs_approval)`, DEFAULT ON (no row
-        = needs approval; the owner chose opt-in trust over opt-in review),
-        principal-only `GET/PUT /memories/facts/approval[/{person_id}]` →
-        every write from that teammate is `proposed` unless the principal
-        marked them trusted (off). Read inside record_fact's BEGIN
-        IMMEDIATE, so a switch flipped mid-request cannot leak one fact; a
-        teammate write with no person id is never trusted. At most
-        MAX_PENDING_PROPOSALS_PER_PERSON (20) proposals per teammate
-        (TooManyProposals). A teammate retire guards ownership in the UPDATE
-        (`retire_fact(teammate_id=)`: role teammate, their id, not approved). The tool answers
-        `awaiting_approval` (no chip). `approve_fact` → active, supersedes
-        what it names (the principal's own included — approval is their
-        word) and stamps `approved_at`: from then on the row is
-        `principal_owned` (outranks teammates, principal-only to retire), so
-        approval is not a one-shot gate. `decline_fact` → `declined`.
+        conflict. IN FORCE AT ONCE (Rufus 2026-11-16, teammates are full
+        users; the only gates are Approvals, Your rules and In training): a
+        teammate's write is stored `active` and supersedes what it names, the
+        principal's own facts included, exactly as the principal's does. There
+        is no per-teammate "needs my approval" switch and no proposal cap;
+        `_migrate` puts any proposal still waiting in force, dated now so the
+        brief lists it (declined instead when its teammate left the team or
+        the team kept a newer fact on its subject), and drops the old
+        `fact_approval_rules` table. The principal sees teammates' new facts in
+        the brief FYI and edits or retires any on the Memory page. ABOUT ME:
+        `remember_fact(about_me=true)` keeps a fact about the speaker alone
+        (their own mailbox, sign-off, how they work) private to them
+        (`private_to_person_id` = the verified speaker), read only on their own
+        turns and Memory page, and on every email written as them
+        (`render_facts_for_draft(reader=)`, matching or not). A teammate retire guards ownership in
+        the UPDATE (`retire_fact(teammate_id=)`: role teammate, their id, not
+        approved). `approve_fact` / `decline_fact` remain only for decisions
+        copied in from mail or a chat app (`_copy_old_decisions`), which wait
+        for the principal because a sender's words may be in them; approval stamps
+        `approved_at` (`principal_owned`: principal-only to retire).
         forget_fact and update_company_profile stay principal-only; a
-        teammate retires only their own unapproved facts, from the Memory
+        teammate retires only their own facts, from the Memory
         page. No field of a TEAMMATE's fact may contain `(per <anyone>` (any case; units such as
         month/unit/square foot excepted, `_PER_UNITS`), `[fact N]` or a dash + `YYYY-MM-DD`
         stamp (`_marker_error`): the render adds those, so a stored one
@@ -2881,11 +2881,10 @@ memory:
     SURFACE — Memory page What you taught it (`GET /memories/facts`
     with `retirable_ids` / `can_review`; `POST /memories/facts/{id}/retire`
     — principal any, a teammate their own; `/approve`, `/decline` —
-    principal only). Other viewers get the active rows plus their own
-    proposals, with the retire reason, session_id, turn_id and
+    principal only, for decisions copied in from mail). Other viewers get the
+    active rows, with the retire reason, session_id, turn_id and
     recorded_by_person_id blanked, and the quote blanked except on their own
-    facts. Proposals show first with Approve / Decline; the principal sets
-    "needs my approval" per teammate at the bottom of the tab. A subject that
+    facts. Proposals show first with Approve / Decline. A subject that
     folds to an empty key ("???") is refused, so such subjects never
     supersede one another. `/memories?tab=corrections` opens it; the chat
     chips for the three tools link there / to /company-profile.
