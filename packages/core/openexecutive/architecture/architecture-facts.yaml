@@ -7979,12 +7979,7 @@ workflows:
       last day's back for `GET /today` `held_back` and `GET /today/held-back` (the Memory page) — principal only, set
       after the narrative inputs are taken so held lines never reach a
       prompt. Before this the note said "/today has the full list", and
-      nothing there listed them. Each grounded figure then gets a server-chosen
-      ` [n]` (the value-matching line with the most words in common with the
-      figure's clause) and a `**Sources**` list at the end (`- [n] <section>
-      — <snippet>`, snippets stripped of []()<>*_`| and cut to 90 chars, at
-      most 9; links masked, @-mentions stripped — they quote inbound mail).
-      Text with nothing to change comes back byte-identical. The
+      nothing there listed them. Text with nothing to change comes back byte-identical. The
       morning brief now renders its context itself and passes it as
       `rendered_context`, so the check reads exactly what the model read. The
       fingerprint hashes inputs, so suppression is unaffected;
@@ -7994,8 +7989,7 @@ workflows:
       naming the items; the "Flagged for the brief" section is filtered before
       the tool log is appended (brief_state._FLAGGED_RE now also stops at
       `---`), with a "_Grounding: held back N flags_" note after the log.
-    - Modes: GROUNDING_CHECKS=enforce (default) | report (audit only) | off;
-      GROUNDING_CITATIONS=true. Fail-open everywhere.
+    - Modes: GROUNDING_CHECKS=enforce (default) | report (audit only) | off. Fail-open everywhere.
   notable_recent:
     - |
       engagement_value_report — a NEW PATTERN: the data-driven retrospective.

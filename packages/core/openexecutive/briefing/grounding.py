@@ -60,10 +60,7 @@ BRIEF_SURFACES = ("morning brief", "end-of-day digest")
 # Lines kept for Home per brief, and characters per line.
 _HELD_KEEP = 30
 _HELD_LINE_CHARS = 400
-SOURCES_HEADER = "**Sources**"
 
-_MAX_CITED_SOURCES = 9
-_SNIPPET_CHARS = 90
 _MAX_RESULT_CHARS = 4000
 
 
@@ -99,7 +96,6 @@ class LineCheck:
     text: str
     names_bad: list[str] = field(default_factory=list)
     figures_bad: list[str] = field(default_factory=list)
-    grounded: list[tuple[Figure, GroundingSource]] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -189,7 +185,7 @@ _ALWAYS_MASK = re.compile(
 )
 # Masked in prose only: things that look like figures but never are. A card
 # number ("card 220") is an id, not a figure: checked, it held the line back
-# when the context didn't print it, and cited, it got a "[1]" of its own.
+# when the context didn't print it.
 _PROSE_MASK = re.compile(
     r"\[\d{1,2}\]"
     r"|\b(?:cards?|alerts?)(?:\s*_?id)?(?:\s*[=:#]\s*|\s+)#?\d+\b"
@@ -492,26 +488,6 @@ class _Index:
         return hits
 
 
-_CLAUSE_BREAK = re.compile(r"[;,.!?()]\s|\s[-–—]\s|[()]")
-
-
-def _clause(line: str, fig: Figure) -> str:
-    """The clause of ``line`` a figure sits in — what its citation is about."""
-    start = 0
-    end = len(line)
-    for m in _CLAUSE_BREAK.finditer(line):
-        if m.end() <= fig.start:
-            start = m.end()
-        elif m.start() >= fig.end:
-            end = m.start()
-            break
-    return line[start:end]
-
-
-def _content_tokens(text: str) -> set[str]:
-    return {t for t in _tokens(text) if len(t) >= 3 and not t.isdigit() and t not in _SPLITTERS}
-
-
 def check_text(
     text: str, sources: list[GroundingSource], roster: list[str] | None = None,
     *, index: _Index | None = None,
@@ -528,14 +504,6 @@ def check_text(
             hits = idx.figure_sources(fig)
             if not hits:
                 check.figures_bad.append(fig.raw)
-                continue
-            near = _content_tokens(_clause(line, fig))
-            whole = _content_tokens(line)
-            best = max(
-                hits,
-                key=lambda i: (len(near & idx.tokens[i]), len(whole & idx.tokens[i]), -i),
-            )
-            check.grounded.append((fig, idx.sources[best]))
         lines.append(check)
     return GroundingReport(lines)
 
@@ -654,15 +622,6 @@ def grounding_mode() -> str:
     return mode if mode in MODES else "enforce"
 
 
-def citations_enabled() -> bool:
-    try:
-        from openexecutive.config import get_settings
-
-        return bool(get_settings().grounding_citations)
-    except Exception:
-        return True
-
-
 def _audit(
     summary: str,
     details: dict[str, Any],
@@ -770,52 +729,12 @@ _MENTION = re.compile(r"(?<![\w.])@(?=\w)")
 
 def _plain(text: str) -> str:
     """Quoted text made inert for every channel the prose reaches: links
-    masked (the Sources list and a fallback quote attacker-written mail, and
+    masked (a fallback quotes attacker-written mail, and
     Gmail / Slack / Discord linkify bare URLs), Markdown and Slack's
     ``<!channel>`` / ``<url|text>`` syntax stripped, @-mentions broken."""
     text = _SNIPPET_STRIP.sub(" ", _LINKISH.sub("\x00", text))
     text = _MENTION.sub("", text).replace("\x00", "(link removed)")
     return " ".join(text.split())
-
-
-def _snippet(text: str, limit: int = _SNIPPET_CHARS) -> str:
-    clean = _plain(text)
-    return clean if len(clean) <= limit else clean[: limit - 1].rstrip() + "…"
-
-
-def _cite(text: str, report: GroundingReport) -> tuple[str, int]:
-    """Put ``[n]`` after each grounded figure and a Sources list at the end.
-    Numbered by first appearance; at most ``_MAX_CITED_SOURCES`` sources."""
-    numbers: dict[str, int] = {}
-    listed: list[GroundingSource] = []
-    lines = text.splitlines()
-    by_index = {c.index: c for c in report.lines}
-    for i, line in enumerate(lines):
-        check = by_index.get(i)
-        if check is None or not check.grounded or _is_header(line):
-            continue
-        inserts: list[tuple[int, str]] = []
-        for fig, src in check.grounded:
-            n = numbers.get(src.ref)
-            if n is None:
-                if len(listed) >= _MAX_CITED_SOURCES:
-                    continue
-                listed.append(src)
-                n = numbers[src.ref] = len(listed)
-            if line[fig.end:fig.end + 1] == "[" or line[fig.end:fig.end + 2] == " [":
-                continue
-            tail = " " if line[fig.end:fig.end + 1] == "(" else ""
-            inserts.append((fig.end, f" [{n}]{tail}"))
-        for pos, mark in sorted(inserts, reverse=True):
-            line = line[:pos] + mark + line[pos:]
-        lines[i] = line
-    if not listed:
-        return text, 0
-    footer = [
-        "", SOURCES_HEADER,
-        *(f"- [{n}] {_snippet(src.label, 40)} — {_snippet(src.text)}" for n, src in enumerate(listed, 1)),
-    ]
-    return "\n".join(lines + footer), len(listed)
 
 
 _REPAIR_INSTRUCTION = (
@@ -860,7 +779,6 @@ class BriefGrounding:
     held: list[str] = field(default_factory=list)
     names_bad: list[str] = field(default_factory=list)
     figures_bad: list[str] = field(default_factory=list)
-    cited: int = 0
     repaired: bool = False
 
 
@@ -877,7 +795,7 @@ async def ground_brief(
 
     ``enforce``: one repair call when something is ungrounded (only when
     ``system`` is given), then drop the lines still ungrounded, drop headers
-    left empty, add the held-back note and the citations. ``report``: audit
+    left empty, add the held-back note. ``report``: audit
     only, text unchanged. ``off``: nothing. Never raises; on an internal
     error the text comes back unchanged."""
     mode = grounding_mode()
@@ -908,13 +826,10 @@ async def ground_brief(
                     report = check_text(out, sources, index=idx)
                 else:
                     out = HELD_BACK_ALL
-            if citations_enabled() and out != HELD_BACK_ALL:
-                out, result.cited = _cite(out, report)
             if result.held and out != HELD_BACK_ALL:
                 n = len(result.held)
                 note = HELD_BACK_NOTE.format(n=n, s="" if n == 1 else "s")
-                body, sep, footer = out.partition("\n\n" + SOURCES_HEADER)
-                out = f"{body}\n\n{note}" + (sep + footer if sep else "")
+                out = f"{out}\n\n{note}"
         else:
             result.held = [c.text for c in report.bad_lines]
         if result.held or result.repaired:
@@ -923,7 +838,7 @@ async def ground_brief(
                 f"Grounding: {verb} {len(result.held)} line(s) of the {surface}",
                 {
                     "surface": surface, "kind": kind, "mode": mode,
-                    "repaired": result.repaired, "cited": result.cited,
+                    "repaired": result.repaired,
                     "names_bad": result.names_bad, "figures_bad": result.figures_bad,
                     "held_back": [h[:200] for h in result.held[:5]],
                 },
@@ -1184,7 +1099,6 @@ __all__ = [
     "HELD_BACK_ALL",
     "HELD_BACK_NOTE",
     "OUTWARD_FIELDS",
-    "SOURCES_HEADER",
     "BriefGrounding",
     "GroundingReport",
     "GroundingScope",

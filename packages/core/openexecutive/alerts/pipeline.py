@@ -138,10 +138,15 @@ def _ground_decision(
     )
 
 
+def _raised_label(name: str) -> str:
+    """How a card a team member raised opens: who raised it."""
+    return f"Raised by {name}."
+
+
 def _label_team_raised(decision: TriageDecision, name: str) -> TriageDecision:
     """``decision`` with its body led by who raised it, so a card a team
     member raised from chat never reads as news from anywhere else."""
-    label = f"Raised by {name}."
+    label = _raised_label(name)
     body = decision.body.strip()
     if body.startswith(label):
         return decision
@@ -336,11 +341,19 @@ async def evaluate_and_dispatch(
 
     from openexecutive.alerts import one_card
 
-    # A teammate's own message to someone stays as they wrote it, on a card of
-    # its own. Anything else, a message the Executive or a department writes
-    # included, takes part in the one card per topic check.
-    teammates_message = event.as_written and bool(event.raised_by)
-    with one_card.about(joins=event.joins_alert_id, raised=not teammates_message):
+    # Every card a turn raises takes part in the one card per topic check. A
+    # message passed on to one person keeps its words and joins the open card
+    # of an earlier message from the same chat to the same person, so a
+    # correction lands under what it corrects rather than beside it. A
+    # teammate's own message joins only that way: never a card the Executive
+    # wrote on the same turn.
+    own_words = event.as_written and bool(event.raised_by)
+    conversation = one_card.chat_conversation(own_words=own_words) if event.as_written else ""
+    with one_card.about(
+        thread=conversation, joins=event.joins_alert_id, raised=True,
+        own_words=own_words,
+        label=_raised_label(event.raised_by) if event.raised_by else "",
+    ):
         alert_id = _insert(event, decision, topic_tags, dedup_key, routed_to, path)
     if alert_id is None:
         logger.info(
@@ -356,10 +369,12 @@ async def evaluate_and_dispatch(
         return decision, alert_id
     if alert.superseded_by_alert_id is not None:
         # It joined an open card on its topic (alerts.one_card). A grave one
-        # (a fraud warning) still reaches its reader, on the card it joined.
+        # (a fraud warning), or a message passed on to its reader, still
+        # reaches them, on the card it joined.
         logger.info("alerts.pipeline alert=%d joined alert=%d", alert_id, alert.superseded_by_alert_id)
         survivor = store.get_alert(alert.superseded_by_alert_id, db_path=path)
-        if decision.severity.value not in _REDISPATCH_SEVERITIES or survivor is None:
+        notify = event.as_written or decision.severity.value in _REDISPATCH_SEVERITIES
+        if not notify or survivor is None:
             return decision, alert_id
         alert = survivor
 

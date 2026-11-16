@@ -240,7 +240,8 @@ def _matter_choice(event: Any, joins: Any) -> str | None:
     of those matters (``joins_card``: that card's id) or another one (0), so
     the card joins it or gets its own (``alerts.one_card``). Returns what to
     tell the turn when it hasn't said yet, else None with ``event`` set.
-    A message passed on as written is its own card. Never raises."""
+    A message passed on as written joins by its chat instead
+    (``one_card.chat_conversation``). Never raises."""
     if event.as_written:
         return None
     try:
@@ -421,10 +422,15 @@ async def handle_create_alert(tool_input: dict[str, Any], *, as_written: bool = 
             event.private = True
         event.needs, event.question, event.choices = _card_ask(tool_input)
         if as_written:
-            # A message for one person keeps its words. A teammate's own
-            # message is its own card; one the Executive writes joins an open
-            # card on its topic (alerts.pipeline).
+            # A message for one person keeps its words, and is for them to
+            # know: its Approve would have nothing to carry out but the
+            # message's own words. Later messages from the same chat to the
+            # same person join its card while it is open (alerts.pipeline).
             event.as_written = True
+            if not event.needs:
+                from openexecutive.alerts.models import NEEDS_FYI
+
+                event.needs = NEEDS_FYI
         else:
             ask_first = _matter_choice(event, tool_input.get("joins_card"))
             if ask_first is not None:
