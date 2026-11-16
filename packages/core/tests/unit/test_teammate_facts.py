@@ -214,6 +214,9 @@ def test_about_me_keeps_a_fact_for_the_speaker_alone(roster: SimpleNamespace) ->
     assert facts.render_facts_for_prompt(reader=roster.owner) == ""
     assert facts.render_facts_for_prompt() == ""
     assert facts.render_teammate_changes(datetime.now(UTC) - timedelta(minutes=1)) == ""
+    # It rides on every email written as Sam, matching or not; never on anyone else's.
+    assert "Head of Sales" in facts.render_facts_for_draft("Lunch on Friday?", reader=roster.sam)
+    assert facts.render_facts_for_draft("Lunch on Friday?", reader=roster.owner) == ""
     # The principal's own about-me fact is theirs alone too.
     _speak(roster.owner, said="Sign my emails as Olivia from Northwind please")
     out = _remember(subject="Sign-off", about_me=True, statement="Olivia signs her emails as Olivia from Northwind.",
@@ -240,14 +243,30 @@ def test_proposals_still_waiting_are_put_in_force(roster: SimpleNamespace) -> No
     mine, _ = facts.record_fact(subject="Cedar Court unit count", statement="Cedar Court has 36 units.",
                                 source_quote="q")
     with sqlite3.connect(str(roster.db)) as conn:
+        old = (datetime.now(UTC) - timedelta(days=30)).isoformat()
+        conn.execute("UPDATE facts SET created_at=? WHERE id=?", (old, mine.id))
         held = _waiting(conn, recorded_by_role="teammate", recorded_by_name="Sam Lee",
                         recorded_by_person_id=roster.sam, replaces_fact_id=mine.id)
+        # Older than a fact the team has kept since: it does not win.
+        stale = _waiting(conn, subject="Maple House", subject_key="maple house", created_at=old,
+                         recorded_by_role="teammate", recorded_by_person_id=roster.sam)
+        conn.execute("INSERT INTO facts (kind, subject, subject_key, statement, created_at, status) "
+                     "VALUES ('fact', 'Maple House', 'maple house', 'Maple House has 48 units.', ?, 'active')",
+                     (datetime.now(UTC).isoformat(),))
+        # Someone no longer on the team: dropped.
+        gone = _waiting(conn, subject="Oak Row", subject_key="oak row",
+                        recorded_by_role="teammate", recorded_by_person_id=roster.gone)
         copied = _waiting(conn, subject="Hire", subject_key="decision 1", statement="We hire in Q1.",
                           decision=1, source_channel="decisions:email")
         conn.execute("CREATE TABLE fact_approval_rules (person_id INTEGER PRIMARY KEY, "
                      "needs_approval INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL)")
     live = facts.get_fact(held)
     assert live is not None and live.status == "active" and live.kind == "correction"
+    assert facts.get_fact(stale).status == "declined"  # type: ignore[union-attr]
+    assert facts.get_fact(gone).status == "declined"  # type: ignore[union-attr]
+    # Dated now, so the next brief lists it.
+    assert "Sam Lee recorded Cedar Court unit count" in facts.render_teammate_changes(
+        datetime.now(UTC) - timedelta(minutes=1))
     assert live.approved_at is None and not live.principal_owned
     assert facts.get_fact(mine.id).status == "superseded"  # type: ignore[union-attr]
     # A decision copied in from mail still waits for the principal.

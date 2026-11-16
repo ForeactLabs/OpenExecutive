@@ -812,7 +812,12 @@ def _apply_remember(args: dict[str, Any], provenance: dict[str, Any]) -> str:
         "kind": fact.kind,
         "subject": fact.subject,
         "statement": fact.statement,
-        "replaced": [{"fact_id": f.id, "statement": f.statement} for f in superseded],
+        # A private row's earlier wording stays out of a result a shared
+        # conversation may read.
+        "replaced": [
+            {"fact_id": f.id, **({} if f.private_to_person_id is not None else {"statement": f.statement})}
+            for f in superseded
+        ],
         **({"attributed_to": fact.recorded_by_name} if fact.recorded_by_role == "teammate" else {}),
         **({
             "private": True,

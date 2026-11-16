@@ -223,8 +223,11 @@ def _migrate(conn: sqlite3.Connection) -> None:
 def _put_teammate_proposals_in_force(conn: sqlite3.Connection) -> None:
     """Teammates' facts no longer wait for the principal: put the ones
     still waiting in force, each replacing what it would have replaced on
-    approval, and drop the old per-teammate approval switches. Runs until
-    none are left, so once per database in practice."""
+    approval, and drop the old per-teammate approval switches. One is
+    declined instead when its teammate is no longer on the team, or when the
+    team has kept a newer fact on its subject since. One put in force is
+    dated now, so the principal's next brief lists it among teammates' new
+    facts. Runs until none are left, so once per database in practice."""
     if not conn.execute(
         "SELECT 1 FROM facts WHERE status='proposed' AND recorded_by_role='teammate' LIMIT 1"
     ).fetchone() and not conn.execute(
@@ -237,8 +240,35 @@ def _put_teammate_proposals_in_force(conn: sqlite3.Connection) -> None:
             "SELECT * FROM facts WHERE status='proposed' AND recorded_by_role='teammate' "
             "ORDER BY created_at, id"
         ).fetchall()
+        has_people = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='people'"
+        ).fetchone() is not None
+        now = datetime.now(UTC).isoformat()
         for r in waiting:
-            _put_in_force(conn, r)
+            on_team = has_people and r["recorded_by_person_id"] is not None and conn.execute(
+                "SELECT 1 FROM people WHERE id=? AND archived=0 AND kind='team'",
+                (r["recorded_by_person_id"],),
+            ).fetchone() is not None
+            newer = conn.execute(
+                "SELECT 1 FROM facts WHERE status='active' AND kind!='profile' "
+                "AND private_to_person_id IS NULL AND (subject_key=? OR id=?) AND created_at > ?",
+                (_col(r, "subject_key", ""), _col(r, "replaces_fact_id", None) or -1, r["created_at"]),
+            ).fetchone() is not None
+            if not on_team or newer:
+                conn.execute(
+                    "UPDATE facts SET status='declined', retired_at=?, retired_reason=? WHERE id=?",
+                    (now, "no longer on the team" if not on_team else "a newer fact replaced it", r["id"]),
+                )
+                continue
+            try:
+                _put_in_force(conn, r)
+            except ValueError:  # an unreadable row (pydantic): never in force
+                conn.execute(
+                    "UPDATE facts SET status='declined', retired_at=?, retired_reason=? WHERE id=?",
+                    (now, "unreadable", r["id"]),
+                )
+                continue
+            conn.execute("UPDATE facts SET created_at=? WHERE id=?", (now, r["id"]))
         conn.execute("DROP TABLE IF EXISTS fact_approval_rules")
         conn.commit()
     except Exception:
@@ -479,10 +509,15 @@ def record_fact(
         replaced = [_row(r) for r in rows]
         scope = private_to_person_id if kind != "profile" else None
         if scope is None and replaces_fact_id is not None:
-            # An edit of a private row stays private (who may edit it is the
-            # caller's check).
+            # An edit of a private row stays private: a private decision (who
+            # may edit it is the caller's check, as before), or any private
+            # row its own person edits. Nobody else's write takes on
+            # someone's private scope.
             named_row = next((f for f in replaced if f.id == replaces_fact_id), None)
-            if named_row is not None and named_row.private_to_person_id is not None:
+            if named_row is not None and named_row.private_to_person_id is not None and (
+                (named_row.decision and decision is None)
+                or named_row.private_to_person_id == recorded_by_person_id
+            ):
                 scope = named_row.private_to_person_id
         # Private rows and the team's never replace each other.
         replaced = [f for f in replaced if f.private_to_person_id == scope]
@@ -860,11 +895,13 @@ def render_facts_for_draft(
     written as someone should say, and the thread it answers), for the
     composer's user turn; "" when none do. Only matching facts, and few: an
     email goes to someone outside, so it carries what it needs and no more.
-    Never raises."""
+    ``reader`` is the writer: their own about-me facts (private to them,
+    not a decision: a sign-off, how they write) come first on every email,
+    matching or not. Never raises."""
     from openexecutive.memory.lessons import _stems
 
     want = _stems(query or "")
-    if not want:
+    if not want and reader is None:
         return ""
     seen, seen_args = _seen_by(reader)
     rows = _read_only_rows(
@@ -877,10 +914,13 @@ def render_facts_for_draft(
     for i, r in enumerate(rows):
         try:
             shared = len(want & _stems(f"{r['subject']} {r['statement']}"))
+            own = reader is not None and _col(r, "private_to_person_id", None) == reader and not _col(r, "decision", 0)
         except Exception:  # noqa: BLE001 - a bad row is skipped, as in _rank_for.
             continue
         # Two shared words, as a lesson needs: one common word matches too much.
-        if shared >= 2:
+        if own:
+            scored.append((-1000, i, r))
+        elif shared >= 2:
             scored.append((-shared, i, r))
     now = datetime.now(UTC)
     lines: list[str] = []

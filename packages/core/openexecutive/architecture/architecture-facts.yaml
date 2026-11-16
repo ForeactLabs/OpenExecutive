@@ -2672,13 +2672,16 @@ memory:
         teammate's write is stored `active` and supersedes what it names, the
         principal's own facts included, exactly as the principal's does. There
         is no per-teammate "needs my approval" switch and no proposal cap;
-        `_migrate` puts any proposal still waiting in force and drops the old
+        `_migrate` puts any proposal still waiting in force, dated now so the
+        brief lists it (declined instead when its teammate left the team or
+        the team kept a newer fact on its subject), and drops the old
         `fact_approval_rules` table. The principal sees teammates' new facts in
         the brief FYI and edits or retires any on the Memory page. ABOUT ME:
         `remember_fact(about_me=true)` keeps a fact about the speaker alone
         (their own mailbox, sign-off, how they work) private to them
         (`private_to_person_id` = the verified speaker), read only on their own
-        turns, drafts and Memory page. A teammate retire guards ownership in
+        turns and Memory page, and on every email written as them
+        (`render_facts_for_draft(reader=)`, matching or not). A teammate retire guards ownership in
         the UPDATE (`retire_fact(teammate_id=)`: role teammate, their id, not
         approved). `approve_fact` / `decline_fact` remain only for decisions
         copied in from mail or a chat app (`_copy_old_decisions`), which wait
