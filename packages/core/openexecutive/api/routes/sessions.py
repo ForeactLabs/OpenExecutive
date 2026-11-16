@@ -740,7 +740,7 @@ def post_message_feedback(
 # new key. Single-process, like `_suggested_prompts_cache`.
 _FOLLOWUP_TTL_S = 3600
 _FOLLOWUP_CACHE_MAX = 512
-_followup_cache: dict[tuple[str, int, int | None], tuple[float, str]] = {}
+_followup_cache: dict[tuple[str, int, int | None, tuple[int, ...]], tuple[float, str]] = {}
 
 
 @router.get("/sessions/{session_id:session}/followup")
@@ -764,7 +764,9 @@ async def get_followup_suggestion(session_id: str, request: Request) -> dict[str
     if last is None or last.get("role") != "assistant" or not last.get("id"):
         return {"suggestion": None}
 
-    key = (session_id, int(last["id"]), caller if names else None)
+    # Who is in the chat is part of the key: sharing or removing someone
+    # changes who the suggestion may name, with no new reply.
+    key = (session_id, int(last["id"]), caller if names else None, tuple(sorted(names)))
     now = time.monotonic()
     hit = _followup_cache.get(key)
     if hit is not None and (now - hit[0]) < _FOLLOWUP_TTL_S:

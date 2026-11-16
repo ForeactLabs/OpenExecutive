@@ -155,6 +155,22 @@ def test_same_reply_hits_cache_new_reply_misses(monkeypatch: pytest.MonkeyPatch)
     assert calls["n"] == 2
 
 
+def test_sharing_the_chat_misses_the_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A suggestion made while the chat was solo is not reused once someone
+    # joins, or it could still say "ask Riya" to a chat Riya is now in.
+    _patch_session(monkeypatch, list(_CONVO))
+    calls = _patch_llm(monkeypatch, "Ask Riya for the numbers.")
+
+    with TestClient(_make_app()) as client:
+        client.get("/sessions/s1/followup")
+        monkeypatch.setattr(
+            sessions_route, "chat_people", lambda _sid: [(1, "Alex", True), (2, "Riya", False)]
+        )
+        client.get("/sessions/s1/followup")
+
+    assert calls["n"] == 2
+
+
 def test_transcript_keeps_tail_and_truncates() -> None:
     long = "x" * 5000
     messages = [{"role": "user", "content": f"m{i}"} for i in range(10)]
@@ -346,7 +362,7 @@ def test_a_shared_chat_suggests_the_readers_own_next_message(monkeypatch: pytest
     assert "The USER is Jordan Lee" in t
     assert "Sam Rivera: Top three things this week?" in t
     assert "Jordan Lee: Add hiring." in t
-    assert ("s-1", 9, 5) in sessions_route._followup_cache
+    assert ("s-1", 9, 5, (1, 5)) in sessions_route._followup_cache
 
 
 def test_a_chat_of_one_keeps_the_plain_transcript() -> None:
