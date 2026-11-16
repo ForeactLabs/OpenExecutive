@@ -68,7 +68,8 @@
             "steps": [
               "ran"
             ],
-            "sent": 1
+            "sent": 1,
+            "views": []
           }
         }
       ]
@@ -103,13 +104,22 @@
             ],
             "cards_for": [
               "sam"
+            ],
+            "views": [
+              {
+                "kind": "lead",
+                "panel": "lead",
+                "need": "Needs your OK",
+                "buttons": []
+              }
             ]
           }
         },
         {
           "approve": "last",
           "expect": {
-            "sent": 1
+            "sent": 1,
+            "views": []
           }
         }
       ]
@@ -144,6 +154,14 @@
             ],
             "cards_for": [
               "sam"
+            ],
+            "views": [
+              {
+                "kind": "lead",
+                "panel": "lead",
+                "need": "Needs your OK",
+                "buttons": []
+              }
             ]
           }
         }
@@ -186,6 +204,14 @@
             ],
             "cards_for": [
               "sam"
+            ],
+            "views": [
+              {
+                "kind": "lead",
+                "panel": "lead",
+                "need": "Needs your OK",
+                "buttons": []
+              }
             ]
           }
         }
@@ -225,7 +251,8 @@
             "steps": [
               "ran"
             ],
-            "sent": 1
+            "sent": 1,
+            "views": []
           }
         }
       ]
@@ -259,7 +286,8 @@
             "steps": [
               "ran"
             ],
-            "sent": 1
+            "sent": 1,
+            "views": []
           }
         }
       ]
@@ -295,6 +323,14 @@
             ],
             "cards_for": [
               "sam"
+            ],
+            "views": [
+              {
+                "kind": "lead",
+                "panel": "lead",
+                "need": "Needs your OK",
+                "buttons": []
+              }
             ]
           }
         },
@@ -302,7 +338,8 @@
           "approve": "last",
           "allow": true,
           "expect": {
-            "sent": 1
+            "sent": 1,
+            "views": []
           }
         },
         {
@@ -326,7 +363,8 @@
             "steps": [
               "ran"
             ],
-            "sent": 1
+            "sent": 1,
+            "views": []
           }
         }
       ]
@@ -384,6 +422,14 @@
             ],
             "open_cards": [
               "sam"
+            ],
+            "views": [
+              {
+                "kind": "lead",
+                "panel": "lead",
+                "need": "Needs your OK",
+                "buttons": []
+              }
             ]
           }
         }
@@ -436,6 +482,18 @@
             ],
             "open_cards": [
               "sam"
+            ],
+            "views": [
+              {
+                "kind": "ask",
+                "panel": "ask",
+                "need": "Needs your answer",
+                "buttons": [
+                  "menu:snooze:Snooze",
+                  "menu:open:Open Sam's page",
+                  "side:dismiss:Dismiss"
+                ]
+              }
             ]
           }
         }

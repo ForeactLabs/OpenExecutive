@@ -7,10 +7,13 @@ exact tool calls the model made. The bench feeds those calls to the real
 agent loop (a scripted model stands in for the real one) over the real
 gateway with a stub server behind it that records what would have gone out,
 then checks what the gates, the card store and routing did: which steps ran,
-which waited on a card, whose card it is, and what an Approve tap does.
+which waited on a card, whose card it is, what an Approve tap does, and
+what each open card shows: its panel, what it needs and its buttons, as
+GET /today gives them to every app.
 
 It catches a gate that lets a step through or holds one it shouldn't, a card
-that goes to the wrong person and a step that is carded twice, with no model.
+that goes to the wrong person, a step that is carded twice and a card that
+shows the wrong words or buttons, with no model.
 To add an event, copy a recorded turn's tool calls into the file (made-up
 names and addresses only) and say what should happen.
 """
@@ -118,6 +121,14 @@ class _Week:
             return [(r[0], r[1]) for r in conn.execute(
                 "SELECT id, routed_to_person_id FROM alerts WHERE status IN ('unread', 'read')"
                 " AND superseded_by_alert_id IS NULL AND archived_at IS NULL ORDER BY id")]
+
+    def views(self) -> list[dict[str, Any]]:
+        """What the open cards show (words and buttons), as GET /today
+        gives them to every app."""
+        from openexecutive.api.routes import today as today_route
+
+        today = today_route._build_today(include_private=True)
+        return [_shown(p.view) for p in today.proposals if p.view is not None]
 
     def settle(self, settings: dict[str, Any]) -> None:
         self.mode = _MODES[settings.get("level", "balanced")]
@@ -266,6 +277,17 @@ def _outcome(result: str) -> str:
     return "ran"
 
 
+def _shown(view: Any) -> dict[str, Any]:
+    """The part of a card's view the bench checks: what it needs, its panel
+    and its buttons by place."""
+    return {
+        "kind": view.kind,
+        "panel": view.panel,
+        "need": view.need,
+        "buttons": [f"{b.place}:{b.action}:{b.label}" for b in view.buttons],
+    }
+
+
 @pytest.mark.parametrize("event", WEEK["events"], ids=[e["id"] for e in WEEK["events"]])
 def test_the_week(event: dict[str, Any], db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     week = _Week(db, monkeypatch)
@@ -286,3 +308,5 @@ def test_the_week(event: dict[str, Any], db: Path, monkeypatch: pytest.MonkeyPat
         if "open_cards" in expect:
             assert [w for _id, w in week.open_cards()] == [
                 week.ids.get(k) for k in expect["open_cards"]], where
+        if "views" in expect:
+            assert week.views() == expect["views"], where
