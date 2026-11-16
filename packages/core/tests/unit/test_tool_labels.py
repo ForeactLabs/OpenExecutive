@@ -182,6 +182,7 @@ def test_a_search_of_sent_mail_says_so(raw: str, arguments: dict[str, str]) -> N
         {"query": "NOT in:sent"},
         {"query": "in:inbox from:me"},
         {"query": "from:me -in:sent"},
+        {"query": "in:sent", "folder": "Inbox"},
         None,
     ],
 )

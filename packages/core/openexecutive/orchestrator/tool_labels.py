@@ -194,12 +194,17 @@ def _searches_sent(arguments: Any) -> bool:
     """Whether a mail search's arguments limit it to sent mail."""
     if not isinstance(arguments, dict):
         return False
-    return any(
-        isinstance(value, str)
-        and _SENT_RE.search(value.strip()) is not None
-        and _ANY_OF_RE.search(value) is None
-        for value in arguments.values()
-    )
+    texts = [value for value in arguments.values() if isinstance(value, str)]
+    if any(_ANY_OF_RE.search(text) for text in texts):
+        return False
+    # A folder argument that names another folder ("Inbox") reaches other mail.
+    for key, value in arguments.items():
+        if (
+            isinstance(value, str) and "folder" in key.lower() and value.strip()
+            and not _SENT_RE.search(value.strip())
+        ):
+            return False
+    return any(_SENT_RE.search(text.strip()) for text in texts)
 
 
 def labels_for(raw_name: Any, arguments: Any = None) -> tuple[str, str]:
