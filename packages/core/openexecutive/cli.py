@@ -59,37 +59,40 @@ async def _ask(question: str) -> None:
 
 
 async def print_reply(stream: AsyncIterator[str | dict[str, Any]]) -> str:
-    """Print a streamed reply and return its final text.
+    """Print a streamed reply and return the one left on screen.
 
     A terminal can't take back printed text, so when the reply is written
-    again (a ``rewrite`` event) the new one is held until it differs from
-    the first and then printed under a "Corrected" line. A rewrite that comes
-    back the same (the first reply kept) prints nothing more."""
+    again (a ``rewrite`` event) the new text is held until it differs from
+    what is on screen, then printed under a "Corrected" line. A rewrite that
+    comes back the same, or empty, leaves the shown reply as the answer."""
     from openexecutive.orchestrator.executive import Executive
 
-    reply = ""
     shown = ""
-    held: str | None = None
+    new: str | None = None
+
+    def _correct(text: str) -> None:
+        console.print("\n\n[dim]Corrected reply (replaces the one above):[/dim]\n")
+        console.print(text, end="", highlight=False)
+
     async for chunk in stream:
         if isinstance(chunk, dict):
-            if chunk.get("type") == "rewrite" and reply:
-                shown, reply, held = reply, "", ""
+            if chunk.get("type") == "rewrite" and shown:
+                new = ""  # a rewrite not yet on screen starts over too
             continue
         if chunk == Executive._THINKING:
             continue
-        reply += chunk
-        if held is None:
+        if new is None:
+            shown += chunk
             console.print(chunk, end="", highlight=False)
             continue
-        held += chunk
-        if not shown.startswith(held):
-            console.print("\n\n[dim]Corrected reply (replaces the one above):[/dim]\n")
-            console.print(held, end="", highlight=False)
-            held = None
-    if held and held != shown:
-        console.print("\n\n[dim]Corrected reply (replaces the one above):[/dim]\n")
-        console.print(held, end="", highlight=False)
-    return reply
+        new += chunk
+        if not shown.startswith(new):
+            _correct(new)
+            shown, new = new, None
+    if new and new != shown:
+        _correct(new)
+        shown = new
+    return shown
 
 
 @cli.command()

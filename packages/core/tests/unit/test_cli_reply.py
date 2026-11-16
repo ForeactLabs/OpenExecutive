@@ -40,3 +40,23 @@ async def test_a_kept_first_reply_prints_once(capsys: pytest.CaptureFixture[str]
     out = capsys.readouterr().out
     assert final == "I saved the doc."
     assert out.count("I saved the doc.") == 1 and "Corrected" not in out
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("chunks", "final", "corrected"),
+    [
+        (["Hi there.", {"type": "rewrite"}], "Hi there.", False),
+        (["I saved the doc.", {"type": "rewrite"}, "I saved"], "I saved", True),
+        (["I saved the doc.", {"type": "rewrite"}, "I saved ", "nothing."], "I saved nothing.", True),
+        (["I sent it.", {"type": "rewrite"}, "I ", {"type": "rewrite"}, "I sent it."], "I sent it.", False),
+        (["A.", {"type": "rewrite"}, "B.", {"type": "rewrite"}, "C."], "C.", True),
+    ],
+)
+async def test_what_the_terminal_shows_is_what_it_returns(
+    chunks: list[str | dict[str, Any]], final: str, corrected: bool, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert await cli.print_reply(_stream(*chunks)) == final
+    out = capsys.readouterr().out
+    assert ("Corrected" in out) is corrected
+    assert out.rstrip().endswith(final)
