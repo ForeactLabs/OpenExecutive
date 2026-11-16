@@ -71,11 +71,14 @@ def note_decision(decision_id: int, session_id: str | None, db_path: Path | None
     conversation instead (``decision_readers``). A failed write is tried
     once more, since nothing else keeps the card with its person after the
     conversation is deleted."""
-    try:
-        owner = _chat_owner(session_id, db_path)
-    except Exception:
-        logger.error("own_chat: couldn't read whose chat held step %s came from", decision_id, exc_info=True)
-        return
+    for attempt in (1, 2):
+        try:
+            owner = _chat_owner(session_id, db_path)
+            break
+        except Exception:
+            if attempt == 2:
+                logger.error("own_chat: couldn't read whose chat held step %s came from", decision_id, exc_info=True)
+                return
     if owner is not None:
         keep_with(decision_id, owner, db_path)
 

@@ -245,9 +245,15 @@ def _needs_review(defn: Any) -> bool:
     asked for this turn, below Hands-off: then a person turns it on from its
     review card on the Workflows page. A person's own ask in chat is their
     yes (``_person_asked``); a step that writes somewhere new (an address
-    outside the team) still asks first (``action_step.TargetPolicy``)."""
+    outside the team) still asks first (``action_step.TargetPolicy``). One
+    that sends email as its creator always waits for them to turn it on."""
+    from openexecutive.delegation.workflow_email import sends
     from openexecutive.workflows.dynamic_models import ActionStepSpec
 
+    if sends(defn):
+        # Email sent as its creator goes only on their own tap, at every
+        # level: turning it on (workflow_email.save_refusal).
+        return True
     if workflow_change.hands_off():
         return False
     if not any(isinstance(step, ActionStepSpec) for step in defn.steps):
