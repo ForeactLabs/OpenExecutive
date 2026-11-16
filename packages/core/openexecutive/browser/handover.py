@@ -318,9 +318,10 @@ def finish(handover_id: str, person_id: int, outcome: str) -> tuple[Handover | N
     _open.pop(handover.id, None)
     future = handover.future
     waited = future is not None and not future.done()
-    if waited or outcome == "stop" or handover.workflow_key:
+    if waited or outcome == "stop":
         # Done with no turn waiting leaves the card open: Done on it is
         # what carries the work on (its approve path) once the turn ended.
+        # A workflow's hand-over has no card (the run waits on the bar).
         _ended(handover, outcome)
     if waited and future is not None:
         future.set_result(outcome)
@@ -336,7 +337,6 @@ def reopen(handover: Handover) -> bool:
     Whether it was put back."""
     if time.monotonic() - handover.created >= FRESH_S:
         return False
-    handover.outcome = ""
     _open[handover.id] = handover
     return True
 
