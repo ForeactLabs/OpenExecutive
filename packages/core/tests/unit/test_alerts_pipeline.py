@@ -621,7 +621,9 @@ class _Chat:
         self.email_thread_id = mail_thread
 
 
-def _pass_on(monkeypatch, db: Path, chat: _Chat, turn: str, ext: str, subject: str, body: str) -> int | None:
+def _pass_on(
+    monkeypatch, db: Path, chat: _Chat, turn: str, ext: str, subject: str, body: str, raised_by: str = "Sam Lee",
+) -> int | None:
     from openexecutive.alerts import pipeline
     from openexecutive.audit.context import set_turn
     from openexecutive.orchestrator.schedule_tools import current_session
@@ -631,7 +633,7 @@ def _pass_on(monkeypatch, db: Path, chat: _Chat, turn: str, ext: str, subject: s
         with set_turn(session_id=chat.session_id, turn_id=turn):
             event = AlertEvent(
                 source="message", external_id=ext, subject=subject, body=body,
-                routed_to_person_id=1, user="person:1", raised_by="Sam Lee", as_written=True,
+                routed_to_person_id=1, user="person:1", raised_by=raised_by, as_written=True,
             )
             return asyncio.run(pipeline.evaluate_and_dispatch(event, db_path=db))[1]
     finally:
@@ -735,3 +737,18 @@ def test_a_teammates_message_never_joins_a_card_from_its_own_turn(monkeypatch, d
     assert rows[passed].superseded_by_alert_id is None
     assert rows[raised].superseded_by_alert_id is None
     assert rows[raised].body == "The budget review moved to Friday."
+
+
+def test_a_name_with_a_period_is_said_once_on_the_joined_card(monkeypatch, db: Path) -> None:
+    from openexecutive.alerts import dispatcher
+
+    async def fake_dispatch(alert, channels, **kw):  # noqa: ARG001
+        return None
+
+    monkeypatch.setattr(dispatcher, "dispatch_all", fake_dispatch)
+    chat = _Chat("chat-dr", 2)
+    first = _pass_on(monkeypatch, db, chat, "t1", "m1", "Lab is closed", "Lab is closed today.", "Dr. Smith")
+    _pass_on(monkeypatch, db, chat, "t2", "m2", "Lab opens at noon", "Lab opens at noon.", "Dr. Smith")
+    body = {a.id: a for a in list_alerts(db_path=db)}[first].body
+    assert body.count("Raised by Dr. Smith.") == 1
+    assert "Smith. Lab opens" not in body and body.endswith("Lab opens at noon.")

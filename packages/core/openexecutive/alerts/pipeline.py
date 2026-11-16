@@ -138,10 +138,15 @@ def _ground_decision(
     )
 
 
+def _raised_label(name: str) -> str:
+    """How a card a team member raised opens: who raised it."""
+    return f"Raised by {name}."
+
+
 def _label_team_raised(decision: TriageDecision, name: str) -> TriageDecision:
     """``decision`` with its body led by who raised it, so a card a team
     member raised from chat never reads as news from anywhere else."""
-    label = f"Raised by {name}."
+    label = _raised_label(name)
     body = decision.body.strip()
     if body.startswith(label):
         return decision
@@ -346,6 +351,7 @@ async def evaluate_and_dispatch(
     with one_card.about(
         thread=conversation, joins=event.joins_alert_id, raised=True,
         own_words=event.as_written and bool(event.raised_by),
+        label=_raised_label(event.raised_by) if event.raised_by else "",
     ):
         alert_id = _insert(event, decision, topic_tags, dedup_key, routed_to, path)
     if alert_id is None:

@@ -91,16 +91,19 @@ _given: ContextVar[dict[str, Any] | None] = ContextVar("one_card_given", default
 @contextlib.contextmanager
 def about(
     *, thread: str = "", step: str = "", joins: int | None = None, raised: bool = False,
-    own_words: bool = False,
+    own_words: bool = False, label: str = "",
 ) -> Iterator[None]:
     """Cards written inside the block take part in the check: a held step's
     Approve card (about ``thread``, holding ``step``), or a card a turn
     raised (``raised``; ``joins`` is the open card the model said it is the
     same matter as, 0 when it said it is another one). An ``own_words`` card
     (a teammate's message) joins only by its conversation, never by turn, so
-    its words never mix with a card the Executive wrote on the same turn."""
+    its words never mix with a card the Executive wrote on the same turn.
+    ``label`` is the "Raised by <name>." its text opens with, said once when
+    it joins a card that opens with the same."""
     token = _given.set({
         "thread": thread, "step": step, "joins": joins, "raised": raised, "own_words": own_words,
+        "label": label,
     })
     try:
         yield
@@ -356,19 +359,17 @@ def _with_then(existing: str, joined: str) -> str:
     return _with_follow_up(existing, joined)
 
 
-# Who raised a teammate's card, as its text opens (``alerts.pipeline``).
-_RAISED_BY = re.compile(r"^Raised by [^.\n]{1,120}\.\s+")
-
-
 def _said(card: _Card, survivor_body: str = "") -> str:
     """What a joining card adds to the one it joins: its headline, and its
     text when that says more. A "Raised by" label the card it joins already
     opens with isn't said twice."""
     body = " ".join(card.body.split())
     head = " ".join(card.headline.split())
-    label = _RAISED_BY.match(body)
-    if label and survivor_body.startswith(label.group(0).strip()):
-        body = body[label.end():]
+    # Who raised it, as its text opens (``alerts.pipeline``): given whole,
+    # since a name can hold a period ("Dr. Smith").
+    label = " ".join(str((_given.get() or {}).get("label") or "").split())
+    if label and body.startswith(label) and survivor_body.startswith(label):
+        body = body[len(label):].strip()
     if not body or body.startswith(head[:60]):
         return body or head
     return f"{head}: {body}"
