@@ -71,7 +71,9 @@ def test_a_card_for_one_person_stays_theirs(team: tuple[Path, int, int]) -> None
     assert "Waiting on you: sign in to the pharmacy" in _feed(owner)
     assert "Waiting on you: sign in to the pharmacy" not in _feed(mate)
     assert "Waiting on you: sign in to the pharmacy" not in _feed(None)
-    assert "Waiting on you: sign in to the pharmacy" in _feed(None, everyone=True)
+    # Not even in the Executive's own reasoning: the review quotes what it
+    # reads onto team cards.
+    assert "Waiting on you: sign in to the pharmacy" not in _feed(None, everyone=True)
     # A teammate's hand-over card: theirs, not even the principal's.
     alert_store.insert_alert(
         source="browser_handover", external_id="h2", severity="medium",
