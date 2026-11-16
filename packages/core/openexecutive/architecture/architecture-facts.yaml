@@ -7270,11 +7270,9 @@ workflows:
     on a card only when nobody on the team asked this turn (an inbound email
     steering the Executive could otherwise stage new tools under a familiar
     name), below Hands-off, for a switched-on workflow with action steps;
-    at every level when the workflow reads email as its creator or uses
-    their browser and the asker isn't its creator
-    (workflow_change.needs_card / _asked_by_creator); and always when it
-    sends email as its creator, as anything sent as someone waits on their
-    own tap (a new one is saved switched off, for them to turn on). save_workflow with
+    and at every level when the workflow reads or sends email as its creator
+    or uses their browser and the asker isn't its creator
+    (workflow_change.needs_card / _asked_by_creator). save_workflow with
     overwrite=true then leaves a CHANGE CARD (orchestrator.workflow_change,
     decision class app_action, hidden catalog action change_workflow that
     do_in_app never offers): server-written lines name every step added,

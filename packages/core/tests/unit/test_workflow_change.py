@@ -404,28 +404,6 @@ def test_after_reading_mail_or_a_page_the_creators_ask_still_waits_on_a_card(
     assert out.get("status") != "waiting_for_approval" and "error" not in out, out
 
 
-def test_email_sent_as_its_creator_always_waits_on_their_tap(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    from openexecutive.delegation.workflow_email import SEND_TOOL
-
-    monkeypatch.setattr(wat, "_person_asked", lambda: True)
-    monkeypatch.setattr(workflow_change, "hands_off", lambda: True)
-    # A change, even the creator's own on Hands-off: a card (Needs you in a call).
-    _stored(owner=owner.id)
-    mine = _prep(tools=[GATEWAY_READ, SEND_TOOL])
-    out = _call(wat.handle_save_workflow, {"definition": mine, "confirm_token": wat._canonical_token(mine),
-                                           "overwrite": True}, _one_on_one(owner))
-    assert out["status"] == "waiting_for_approval"
-    assert _needs_you_card(out["decision_id"]) is not None
-    stored = dynamic_store.get_definition("meeting_prep")
-    assert stored is not None and SEND_TOOL not in stored.steps[0].tools  # type: ignore[union-attr]
-    # A new one is saved switched off, for them to turn on from the Workflows page.
-    new = {**_prep(tools=[SEND_TOOL]), "name": "weekly_numbers", "title": "Weekly numbers"}
-    out = _call(wat.handle_save_workflow, {"definition": new, "confirm_token": wat._canonical_token(new)},
-                _one_on_one(owner))
-    saved = dynamic_store.get_definition("weekly_numbers")
-    assert "error" not in out and saved is not None and saved.is_active is False, out
-
-
 def test_someone_elses_ask_to_make_it_work_as_its_creator_waits_on_a_card(
     owner: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

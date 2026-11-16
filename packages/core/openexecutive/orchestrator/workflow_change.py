@@ -6,10 +6,8 @@ is them (``orchestrator.speaker``) the change is saved in the turn, and each
 step still goes through the three checks when it runs. A change waits on a
 card only when nobody on the team asked for it this turn (say, it came from
 mail it read), below Hands-off, for a switched-on workflow with action steps;
-at every level, when the workflow reads email as its creator or uses their
-browser and its creator didn't ask for the change themselves; and always
-when it sends email as its creator, as anything sent as someone waits on
-their own tap (a reply card's Send).
+and, at every level, when the workflow reads or sends email as its creator
+or uses their browser and its creator didn't ask for the change themselves.
 
 The card (decision class ``app_action``, hidden action ``change_workflow``)
 spells out every step it adds, removes or changes, tools included. It goes
@@ -45,20 +43,16 @@ def needs_card(existing: Any, defn: Any, *, asked: bool = False) -> bool:
     ``asked``: a person on the team asked for this change themselves this
     turn, verified (``workflow_authoring_tools._asked_by_its_owner``).
 
-    - A workflow that sends email as its creator (before or after the
-      change) waits on their tap, as anything sent as them does.
-    - One that reads their email or uses their browser runs as that person:
-      only their own ask saves it, at every level; anyone else's waits on a
-      card.
+    - A workflow that reads or sends email as its creator or uses their
+      browser (before or after the change) runs as that person: only their
+      own ask saves it, at every level; anyone else's waits on a card.
     - Below Hands-off, a switched-on workflow with action steps waits when
       nobody asked for the change this turn."""
-    from openexecutive.delegation.workflow_email import as_creator, sends
+    from openexecutive.delegation.workflow_email import as_creator
     from openexecutive.workflows.dynamic_models import ActionStepSpec
 
     if existing is None:
         return False
-    if sends(existing) or sends(defn):
-        return True
     if as_creator(existing) or as_creator(defn):
         return not (asked and _asked_by_creator(existing.name))
     approved = existing.is_active and any(isinstance(s, ActionStepSpec) for s in existing.steps)
