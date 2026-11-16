@@ -321,7 +321,8 @@ def card_view(
             "chat", f"Nudge {first or 'owner'}",
             prompt=(
                 f"Nudge {assignee_name or 'the owner'} about this item — it has gone quiet: "
-                f"{item.headline}\n\nSend a short, friendly check-in via message_person "
+                f'"{_clip(" ".join(item.headline.split()), MEMORY_LINE_MAX_CHARS)}"'
+                "\n\nSend a short, friendly check-in via message_person "
                 "and tell me what you sent."
             ),
             memory=memory_line(f"Nudge {assignee_name or 'the owner'} about this item", item.headline),

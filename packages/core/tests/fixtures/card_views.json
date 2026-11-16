@@ -852,7 +852,7 @@
           "label": "Nudge Sam",
           "memory": "Nudge Sam Okafor about this item.\n\"Renew the vendor contract\"",
           "place": "primary",
-          "prompt": "Nudge Sam Okafor about this item \u2014 it has gone quiet: Renew the vendor contract\n\nSend a short, friendly check-in via message_person and tell me what you sent.",
+          "prompt": "Nudge Sam Okafor about this item \u2014 it has gone quiet: \"Renew the vendor contract\"\n\nSend a short, friendly check-in via message_person and tell me what you sent.",
           "run_id": ""
         },
         {

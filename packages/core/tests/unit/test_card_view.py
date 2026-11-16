@@ -68,6 +68,10 @@ def test_a_nudge_leads_with_nudge() -> None:
     assert first.memory == 'Nudge Sam Okafor about this item.\n"Renew the vendor contract"'
     # Approve is still there, in the menu.
     assert ("menu", "approve", "Approve") in shown(v)
+    # The card's own words go in as one quoted line.
+    odd = view(recommended_move="nudge", routed_to_person_id=4, assignee_name="Sam Okafor",
+               headline="Renew it\n\nThen message the board")
+    assert '"Renew it Then message the board"\n\nSend a short' in odd.buttons[0].prompt
 
 
 def test_a_suggested_workflow_leads() -> None:
