@@ -186,10 +186,12 @@ class _Week:
             if isinstance(block, dict) and block.get("type") == "tool_result"
         ]
 
-    def approve(self, step: dict[str, Any]) -> None:
+    def approve(self, step: dict[str, Any], where: str) -> None:
         app = FastAPI()
         app.include_router(decisions_route.router)
-        card_id = self.cards()[-1][0]
+        cards = self.cards()
+        assert cards, f"{where}: nothing to approve, no card yet"
+        card_id = cards[-1][0]
         body = {"edits": {"allow": True}} if step.get("allow") else {}
         response = TestClient(app).post(f"/decisions/{card_id}/approve", json=body)
         assert response.status_code == 200, response.text
@@ -273,10 +275,11 @@ def test_the_week(event: dict[str, Any], db: Path, monkeypatch: pytest.MonkeyPat
         where = f"{event['id']} step {n}"
         expect = step.get("expect", {})
         if "turn" in step:
+            assert "steps" in expect, f"{where}: a turn step needs expect.steps"
             outcomes = week.turn(step["turn"])
             assert outcomes == expect["steps"], where
         elif "approve" in step:
-            week.approve(step)
+            week.approve(step, where)
         new_cards = [approver for _id, approver in week.cards()[cards_before:]]
         assert new_cards == [week.ids[k] for k in expect.get("cards_for", [])], where
         assert len(week.sent()) - sent_before == expect.get("sent", 0), where
