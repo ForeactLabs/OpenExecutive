@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import re
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncGenerator, Iterator
 from contextvars import ContextVar
 from typing import Any
 
@@ -54,7 +54,7 @@ class Feed:
         finally:
             _feed.reset(token)
 
-    async def until(self, task: asyncio.Future[Any]) -> AsyncIterator[dict[str, Any]]:
+    async def until(self, task: asyncio.Future[Any]) -> AsyncGenerator[dict[str, Any], None]:
         """Each event posted until ``task`` is done, then any left over.
         Cancels ``task`` if the reader stops early (the turn was stopped)."""
         try:
