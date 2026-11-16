@@ -778,3 +778,14 @@ def test_a_teammates_message_never_joins_the_executives_message_from_the_same_ch
     rows = {a.id: a for a in list_alerts(db_path=db)}
     assert rows[teammates].superseded_by_alert_id is None
     assert rows[executives].body == "Standup moved to 10."
+
+
+def test_a_teammates_message_card_is_not_offered_for_the_executive_to_join(monkeypatch, db: Path) -> None:
+    from openexecutive.alerts import dispatcher, one_card
+
+    async def fake_dispatch(alert, channels, **kw):  # noqa: ARG001
+        return None
+
+    monkeypatch.setattr(dispatcher, "dispatch_all", fake_dispatch)
+    _pass_on(monkeypatch, db, _Chat("chat-sam", 2), "t1", "m1", "From Sam: running late", "From Sam: running late.")
+    assert one_card.open_cards_from("person:2", turn="t2", reader="1", db_path=db) == []

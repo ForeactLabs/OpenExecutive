@@ -272,6 +272,11 @@ def _turn_thread(session: Any) -> str:
     return mail_thread(str(getattr(session, "email_thread_id", "") or ""))
 
 
+# The conversation keys of passed-on messages (:func:`chat_conversation`).
+_MESSAGE = "message:"
+_OWN_MESSAGE = "message:own:"
+
+
 def chat_conversation(session: Any = None, *, own_words: bool = False) -> str:
     """The conversation a message passed on from this turn belongs to: the
     chat (or mail thread's session) it was said in. Messages one person
@@ -287,7 +292,7 @@ def chat_conversation(session: Any = None, *, own_words: bool = False) -> str:
     session_id = str(getattr(session, "session_id", "") or "").strip()
     if not session_id:
         return ""
-    return f"message:{'own:' if own_words else ''}{session_id}"
+    return f"{_OWN_MESSAGE if own_words else _MESSAGE}{session_id}"
 
 
 def _turn_id() -> str:
@@ -606,6 +611,8 @@ def open_cards_from(
             rows = conn.execute(
                 "SELECT a.id, a.headline, a.question FROM alerts a JOIN card_topics t ON t.alert_id = a.id "
                 f"WHERE t.person = ? AND t.reader = ? AND t.turn != ? AND a.needs != ? "
+                # A teammate's own message joins nothing the Executive wrote.
+                f"AND t.thread NOT LIKE '{_OWN_MESSAGE}%' "
                 f"AND a.status IN ({','.join('?' * len(_OPEN))}) ORDER BY t.created_at, a.id LIMIT 10",
                 (person, reader, turn, _OWN_ACTION, *_OPEN),
             ).fetchall()
