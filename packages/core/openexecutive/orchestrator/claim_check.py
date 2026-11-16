@@ -159,8 +159,10 @@ def _reads(label: str) -> bool:
 
 def _fit(calls: list[tuple[str, str]], most: int) -> list[tuple[str, str]]:
     """At most ``most`` lines for a very long turn. Reads go first, from the
-    middle out, so every call that may have changed something stays; past
-    that the middle goes. One line says how many were left out."""
+    middle out, so every call that may have changed something stays while
+    those fit in ``most - 1`` lines; past that the middle ones go too, and a
+    true claim about one of them can come back unbacked. One line says how
+    many were left out."""
     room = most - 1
     keep = [i for i, (label, _) in enumerate(calls) if not _reads(label)]
     if len(keep) > room:
