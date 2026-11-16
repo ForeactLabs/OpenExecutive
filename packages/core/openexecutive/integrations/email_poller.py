@@ -860,17 +860,15 @@ async def _handle_mail(
             # back here once they say. No turn, whatever else failed above.
             return await _hold_from_source(mail, raw, display_name, private=private, done=done)
         if not sender_in_roster:
-            # A contact, like any non-team sender, gets no reply from this turn
-            # (the gateway reaches contacts only when the principal asks
-            # directly). A contact's row reads exactly like a non-roster
-            # sender's; only its visibility differs (private to the principal).
-            logger.info(
-                "non-roster sender=%s message=%s — routing to Executive (no auto-reply allowed)",
-                from_addr, message_id,
-            )
+            # Mail from outside the team. This row says only that it arrived:
+            # whether an answer went out is the outbound row's to say
+            # (``integration_outbound`` / ``integration_outbound_blocked``).
+            # A contact's row reads exactly like any outside sender's; only
+            # its visibility differs (private to the principal).
+            logger.info("outside sender=%s message=%s — routing to Executive", from_addr, message_id)
             audit_log(
                 "integration_inbound",
-                f"Accepted non-roster email from {from_addr} (reply blocked at outbound gate)",
+                f"Accepted email from {from_addr}, who isn't on the team",
                 actor="email",
                 details={
                     "channel": "email",
