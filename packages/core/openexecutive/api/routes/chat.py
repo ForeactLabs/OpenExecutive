@@ -678,6 +678,18 @@ def _session_access(
     return "forbidden"
 
 
+def _turn_access(
+    request: Request, session_id: str, caller_person_id: int | None
+) -> tuple[SessionAccess, bool]:
+    """The one rule for who may write in ``session_id`` this turn: whoever may
+    use it (``_session_access``), or someone its owner shared it with
+    (``_shared_member``, then the second value is True)."""
+    access = _session_access(request, session_id, caller_person_id)
+    if access == "forbidden" and _shared_member(session_id, caller_person_id):
+        return "allowed", True
+    return access, False
+
+
 def _shared_member(session_id: str, caller_person_id: int | None) -> bool:
     """Whether the owner of web chat ``session_id`` shared it with this caller,
     who then reads it and writes in it with them (``session_store.set_shares``).
@@ -1082,9 +1094,7 @@ async def _run_chat_turn(
     # Someone the owner shared this chat with, writing in it with them.
     member = False
     if requested_id is not None:
-        access = _session_access(request, requested_id, caller_person_id)
-        if access == "forbidden" and _shared_member(requested_id, caller_person_id):
-            access, member = "allowed", True
+        access, member = _turn_access(request, requested_id, caller_person_id)
         if access in ("forbidden", "orphaned"):
             # Someone else's chat, or an ownerless one nobody here can vouch
             # for (its starter was lost to a restart). Continue in a fresh
@@ -1164,6 +1174,14 @@ async def _run_chat_turn(
             _release_stop(client_turn_id, turn_id)
             raise
     try:
+        if requested_id is not None and _turn_access(request, requested_id, caller_person_id)[0] not in (
+            "allowed",
+            "missing",
+        ):
+            # Decided again once this turn holds the chat: the owner may have
+            # taken them out, deleted it, or someone else's first turn claimed
+            # the id while this one waited.
+            raise HTTPException(status_code=404, detail="Session not found")
         session = await _get_or_create_session(requested_id, request)
         # A host origin's page writes only in a conversation it started or
         # already wrote in: one line from it holds the conversation read-only
