@@ -170,3 +170,39 @@ def test_a_long_line_is_cut_to_one_line() -> None:
     assert len(events[0]["label"]) == turn_live.MAX_LINE_CHARS and events[0]["label"].endswith("…")
     assert "\n" not in events[0]["label"]
     assert events[1]["label"] == "Done…"
+
+
+def test_a_turn_stopped_mid_round_cancels_its_tools() -> None:
+    """The chat stops reading the agent loop while a tool runs (Stop, a
+    dropped client): closing the loop cancels the tool at once."""
+    provider = _ScriptedProvider([
+        _FinalMsg([_ToolUseBlock("tu_1", _RUN, {})], "tool_use"),
+        _FinalMsg([_TextBlock("unused")], "end_turn"),
+    ])
+    seen: dict[str, bool] = {}
+
+    async def slow(*_a: Any, **_k: Any) -> str:
+        turn_live.say("Working on step one")
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            seen["cancelled"] = True
+            raise
+        return "{}"
+
+    async def go() -> None:
+        with patch(
+            "openexecutive.orchestrator.executive.get_provider", return_value=provider,
+        ), patch.dict(
+            "openexecutive.orchestrator.executive._ALL_SKILL_HANDLERS", {_RUN: slow},
+        ):
+            loop = Executive()._stream_agent_loop(
+                system_blocks=[], messages=[{"role": "user", "content": "go"}], model="claude-test",
+            )
+            async for item in loop:
+                if isinstance(item, dict) and item.get("label") == "Working on step one…":
+                    break
+            await loop.aclose()
+
+    asyncio.run(asyncio.wait_for(go(), 5))
+    assert seen.get("cancelled") is True
