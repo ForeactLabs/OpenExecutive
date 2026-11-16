@@ -216,6 +216,7 @@ def test_a_turn_stopped_mid_round_cancels_its_tools() -> None:
                 if isinstance(item, dict) and item.get("label") == "Working on step one…":
                     break
             await loop.aclose()
+            # At once, not when the loop's leftover generators are collected.
+            assert seen.get("cancelled") is True
 
     asyncio.run(asyncio.wait_for(go(), 5))
-    assert seen.get("cancelled") is True
