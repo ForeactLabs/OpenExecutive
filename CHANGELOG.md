@@ -9,6 +9,48 @@ From 0.3.0 on, entries are written by release-please from the titles of the
 merged pull requests (`feat` → Added, `fix` → Fixed). The open release PR holds
 the next entry; edit it there before merging if a line needs rewording.
 
+## [0.7.5](https://github.com/ForeactLabs/OpenExecutive/compare/v0.7.4...v0.7.5) (2026-11-16)
+
+
+### Added
+
+* **alerts:** change a card's plan from a reply on the card ([#845](https://github.com/ForeactLabs/OpenExecutive/issues/845)) ([cd8e0db](https://github.com/ForeactLabs/OpenExecutive/commit/cd8e0dba36982fac8e6431ca49b45d90e75108ca))
+* **briefing:** count everything that waits on Home ([#869](https://github.com/ForeactLabs/OpenExecutive/issues/869)) ([0fd96b9](https://github.com/ForeactLabs/OpenExecutive/commit/0fd96b91bc67d17ce5f94bc6aa507432560b93d4))
+* **briefing:** decide each Needs you card's words and buttons on the server ([#875](https://github.com/ForeactLabs/OpenExecutive/issues/875)) ([f1659ba](https://github.com/ForeactLabs/OpenExecutive/commit/f1659baf816fcd424ac815396c3a424f34ceed9a))
+* **browser:** let the Executive use the person's own browser ([#834](https://github.com/ForeactLabs/OpenExecutive/issues/834)) ([c57fc58](https://github.com/ForeactLabs/OpenExecutive/commit/c57fc58175da25b3eabf222d8849052069cd1e0e))
+* **chat:** show the speaker's recent chats so past work gets searched ([#846](https://github.com/ForeactLabs/OpenExecutive/issues/846)) ([04efd46](https://github.com/ForeactLabs/OpenExecutive/commit/04efd46f0ff0d05abafe3ced2aca232ccb674f08))
+* **delegation:** read the connected mailbox's address from its credential file ([#861](https://github.com/ForeactLabs/OpenExecutive/issues/861)) ([925e3fb](https://github.com/ForeactLabs/OpenExecutive/commit/925e3fbdda26ce4b9059e87e7820a9e2a9812212))
+* **mcp:** make an AI app's turn the person's own and add card answers and workflow runs ([#865](https://github.com/ForeactLabs/OpenExecutive/issues/865)) ([ad00bab](https://github.com/ForeactLabs/OpenExecutive/commit/ad00babf7993348c4d309ac80a8209c2e31b1723))
+* **memory:** keep cards and decisions from one person's own chat to them ([#849](https://github.com/ForeactLabs/OpenExecutive/issues/849)) ([7885b2f](https://github.com/ForeactLabs/OpenExecutive/commit/7885b2f42df7935706cddded6e8d9ca951938b84))
+* **ui:** list everything on its schedule on one Schedule page ([#870](https://github.com/ForeactLabs/OpenExecutive/issues/870)) ([53c8f34](https://github.com/ForeactLabs/OpenExecutive/commit/53c8f349221c973aaec12161622e6ae3d1d93da3))
+* **ui:** make People one page with Needs a look on top ([#853](https://github.com/ForeactLabs/OpenExecutive/issues/853)) ([c9c6b02](https://github.com/ForeactLabs/OpenExecutive/commit/c9c6b026c9f1e7dfc21300a8f4311874afb55a92))
+* **ui:** open Home with a headline and things to hand over ([#850](https://github.com/ForeactLabs/OpenExecutive/issues/850)) ([1535be8](https://github.com/ForeactLabs/OpenExecutive/commit/1535be86ec4fc8d8b5e5fe767ea99c38f1af6ce1))
+* **ui:** put every Approvals setting on one page ([#867](https://github.com/ForeactLabs/OpenExecutive/issues/867)) ([ebd149a](https://github.com/ForeactLabs/OpenExecutive/commit/ebd149a89b3f2901c57e642a7f9a21ea3444a3e8))
+* **ui:** rename Work → Documents to Made for you ([#868](https://github.com/ForeactLabs/OpenExecutive/issues/868)) ([dd3c8b1](https://github.com/ForeactLabs/OpenExecutive/commit/dd3c8b17d1981bc9dac37683fcbf788cad38b341))
+
+
+### Fixed
+
+* **alerts:** give one card per ask and log only real sends as done ([#848](https://github.com/ForeactLabs/OpenExecutive/issues/848)) ([cf19c2f](https://github.com/ForeactLabs/OpenExecutive/commit/cf19c2f1b9d5b47edc442f752ca5be059f19cbc6))
+* **alerts:** join a follow-up the mailbox filed as a new thread to its card ([#852](https://github.com/ForeactLabs/OpenExecutive/issues/852)) ([b8aae30](https://github.com/ForeactLabs/OpenExecutive/commit/b8aae301eeecce9b963fe608ab2fa2f30890fc67))
+* **alerts:** keep a passed-on message's card as written ([#844](https://github.com/ForeactLabs/OpenExecutive/issues/844)) ([4b1c6b4](https://github.com/ForeactLabs/OpenExecutive/commit/4b1c6b46aecd594f9694af3c95f15cd346fcf9e8))
+* **alerts:** make passed-on messages notes and keep one card per chat ([#871](https://github.com/ForeactLabs/OpenExecutive/issues/871)) ([dd876f3](https://github.com/ForeactLabs/OpenExecutive/commit/dd876f3b5043e0fdc26e1fbf2b59a1f2bd22f7db))
+* **alerts:** one card per topic for every card, and three card fixes ([#851](https://github.com/ForeactLabs/OpenExecutive/issues/851)) ([b43c1e0](https://github.com/ForeactLabs/OpenExecutive/commit/b43c1e080efd86b235b6ef1e84d4615f3a9080e9))
+* **alerts:** run the Executive's own messages through the one-card check ([#855](https://github.com/ForeactLabs/OpenExecutive/issues/855)) ([d0a1fb9](https://github.com/ForeactLabs/OpenExecutive/commit/d0a1fb94b8ec6ad3fa46ac7753cee28ee206ab5d))
+* **alerts:** stop skipping cards that have no upstream id as replays ([#854](https://github.com/ForeactLabs/OpenExecutive/issues/854)) ([7480c81](https://github.com/ForeactLabs/OpenExecutive/commit/7480c8111299b830aeea4e74b50989ad522f7e8b))
+* **api:** show plain text, not the exception, when a run fails unexpectedly ([#860](https://github.com/ForeactLabs/OpenExecutive/issues/860)) ([0471f93](https://github.com/ForeactLabs/OpenExecutive/commit/0471f93c4c7c74a348fb68e363fc6384088a5cb9))
+* **briefing:** stop calling answered mail stuck and drop brief source marks ([#874](https://github.com/ForeactLabs/OpenExecutive/issues/874)) ([9425692](https://github.com/ForeactLabs/OpenExecutive/commit/9425692a5b4995cf07c0d7e27cf3d21b28222aca))
+* **email:** say why an unproven teammate email couldn't be verified ([#847](https://github.com/ForeactLabs/OpenExecutive/issues/847)) ([85cf0f2](https://github.com/ForeactLabs/OpenExecutive/commit/85cf0f2e6abbcda6b4cf1ed19d5d42d7713b8042))
+* **monitoring:** let a watch's notes set how much a change matters ([#859](https://github.com/ForeactLabs/OpenExecutive/issues/859)) ([ab6ac7b](https://github.com/ForeactLabs/OpenExecutive/commit/ab6ac7b2d28ef751043076a7e607b18274e8aa33))
+* **monitoring:** show what a watched page said before and after a change ([#857](https://github.com/ForeactLabs/OpenExecutive/issues/857)) ([8eb46b8](https://github.com/ForeactLabs/OpenExecutive/commit/8eb46b8552338976173e822a83a70958866f51ca))
+* **orchestrator:** hold every step on Careful and replace a corrected reply ([#866](https://github.com/ForeactLabs/OpenExecutive/issues/866)) ([96c2ddd](https://github.com/ForeactLabs/OpenExecutive/commit/96c2ddd9d00725a7cf42edfc6d3499d3a7aad586))
+* **orchestrator:** let a person's own ask change a workflow from any chat ([#873](https://github.com/ForeactLabs/OpenExecutive/issues/873)) ([266b8ee](https://github.com/ForeactLabs/OpenExecutive/commit/266b8ee16e892c58332b1e9f059da0e2974a68d2))
+* **orchestrator:** read long files in parts and never card a step only the turn reads ([#879](https://github.com/ForeactLabs/OpenExecutive/issues/879)) ([ca7aaa9](https://github.com/ForeactLabs/OpenExecutive/commit/ca7aaa9d326858c49bac1e9801b3ef3b72d604c4))
+* **orchestrator:** refuse a mail search with a bracket inside quotes ([#872](https://github.com/ForeactLabs/OpenExecutive/issues/872)) ([58ab04a](https://github.com/ForeactLabs/OpenExecutive/commit/58ab04a3a54fe72654ebb030f2ec5ca333039634))
+* **today:** show only real work in Done for you and say what approved cards did ([#856](https://github.com/ForeactLabs/OpenExecutive/issues/856)) ([bf69654](https://github.com/ForeactLabs/OpenExecutive/commit/bf6965458064499ad93d366a6c60c0906b2469b0))
+* **ui:** show one live line while a chat turn works ([#877](https://github.com/ForeactLabs/OpenExecutive/issues/877)) ([e583411](https://github.com/ForeactLabs/OpenExecutive/commit/e583411fa0765fef52d8d1274375c2b61b6d097d))
+* **workflows:** let only the creator or the principal delete a workflow ([#843](https://github.com/ForeactLabs/OpenExecutive/issues/843)) ([7017ca4](https://github.com/ForeactLabs/OpenExecutive/commit/7017ca41d17051228a398a41b17cca5f8e1e205d))
+
 ## [0.7.4](https://github.com/SenteLabsAI/OpenExecutive/compare/v0.7.3...v0.7.4) (2026-11-13)
 
 
