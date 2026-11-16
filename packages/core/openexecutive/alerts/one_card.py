@@ -281,9 +281,12 @@ def chat_conversation(session: Any = None, *, own_words: bool = False) -> str:
     """The conversation a message passed on from this turn belongs to: the
     chat (or mail thread's session) it was said in. Messages one person
     passes on from one chat to the same reader are one card while it is
-    open. Its own key, never a mail thread's, so a passed-on message joins
-    only another passed-on message, never a held step's Approve card or a
-    card the Executive raised on that thread. A teammate's own messages
+    open. Its own key, never a mail thread's, so by conversation a passed-on
+    message joins only another passed-on message, never a card raised on a
+    mail thread. (The Executive's own message still joins a card from its
+    own turn, as every card it raises does; an Approve card stays the one
+    that wins, and approving it still carries out only its held step.) A
+    teammate's own messages
     (``own_words``) have a key apart from the Executive's, so the two never
     mix even in a chat both wrote in. Empty off a turn."""
     session = session if session is not None else _session()
