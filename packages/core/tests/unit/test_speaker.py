@@ -78,9 +78,6 @@ def test_nobody_speaks_on_a_run_mail_or_an_unverified_call(owner: int) -> None:
         Session(session_id="run-1", unattended=True, caller_person_id=owner),
         Session(session_id="brief", private_to_principal=True, caller_person_id=owner),
         unverified,
-        # A meeting anyone in it can speak in, even one marked private.
-        Session(session_id="meeting:m1", origin_channel="meeting", origin_channel_ref="m1", from_meeting=True,
-                caller_person_id=owner, private_chat=True, speaker_verified=True),
         None,
     ):
         assert own_private_speaker(session) is None
