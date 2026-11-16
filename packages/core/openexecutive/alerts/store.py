@@ -411,6 +411,19 @@ def set_status_if_open(alert_id: int, status: str, db_path: Path | None = None) 
         return cursor.rowcount > 0
 
 
+def close_open_by_source(source: str, status: str, db_path: Path | None = None) -> int:
+    """Move every still-open (``unread`` or ``read``) alert of ``source`` to
+    ``status``. How many."""
+    if not _resolve_db_path(db_path).exists():
+        return 0
+    with _get_conn(db_path) as conn:
+        cursor = conn.execute(
+            "UPDATE alerts SET status = ? WHERE source = ? AND status IN ('unread', 'read')",
+            (status, source),
+        )
+        return cursor.rowcount
+
+
 def set_snoozed_until(
     alert_id: int, until: str | None, db_path: Path | None = None
 ) -> bool:

@@ -10,6 +10,8 @@ import { browserWelcomeClosed, closeBrowserWelcome, showBrowserWelcome } from "@
 import BrandMark from "./BrandMark";
 import TurnStatusRow, { useTurnClock } from "./TurnStatusRow";
 import TurnSteps from "./TurnSteps";
+import HandOverAsk from "./HandOverAsk";
+import { toHandOverAsk, type HandOverAsk as HandOverAskState } from "@/lib/handOverAsk";
 import Icon from "./Icon";
 import MicButton from "./MicButton";
 import InfoTip from "./InfoTip";
@@ -214,6 +216,9 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
   const [liveLine, setLiveLine] = useState<string | null>(null);
   const [writingReply, setWritingReply] = useState(false);
   const [handingOver, setHandingOver] = useState(false);
+  // A step in their browser only they can do, asked here with Done and Stop
+  // while the turn waits (components/HandOverAsk.tsx).
+  const [handOverAsk, setHandOverAsk] = useState<HandOverAskState | null>(null);
   const [committeeEnabled, setCommitteeEnabled] = useState(false);
   const [committeePhase, setCommitteePhase] = useState<CommitteePhase | null>(null);
   const turnClock = useTurnClock(isLoading);
@@ -639,6 +644,7 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
     setLiveLine(null);
     setWritingReply(false);
     setHandingOver(false);
+    setHandOverAsk(null);
     setCommitteePhase(null);
     const { clientTurnId, signal } = beginTurn();
     turnIdRef.current = clientTurnId;
@@ -706,6 +712,8 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
           if (roundText >= WRITING_FROM_CHARS) setWritingReply(true);
           setIsConsulting(false);
           setActivityLabel(null);
+          // Words of the reply: the step it asked about is over.
+          setHandOverAsk(null);
           setStreamingContent(accumulated);
         } else if (item.type === "rewrite") {
           // Written again whole: the next chunks replace what came so far.
@@ -718,6 +726,8 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
           // `action_taken`: a chip can land while the same round is still
           // running, and clearing there would flicker the line off and on.
           setActivityLabel(item.label);
+          // A new round: the ask the last one waited on was answered.
+          setHandOverAsk(null);
           setTurnSteps((prev) => addStep(prev, item.label));
           setTurnReads((prev) => addReads(prev, item.reads));
           // The turn's own words for this round, when it sent them just
@@ -735,6 +745,8 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
           }
         } else if (item.type === "handing_over") {
           setHandingOver(true);
+        } else if (item.type === "hand_over") {
+          setHandOverAsk(toHandOverAsk(item));
         } else if (item.type === "thinking") {
           setIsConsulting(true);
         } else if (item.type === "phase" && item.phase) {
@@ -890,6 +902,7 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
       setLiveLine(null);
       setWritingReply(false);
       setHandingOver(false);
+      setHandOverAsk(null);
       setCommitteePhase(null);
       textareaRef.current?.focus();
     }
@@ -1038,6 +1051,16 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
       />
     ) : liveKind === "status" ? (
       <TurnStatusRow status={status} committeePhase={committeePhase} showMark={Boolean(streamingContent)} />
+    ) : null;
+  // The ask the turn waits on, under the line.
+  const liveSlot =
+    liveStatus || (isLoading && handOverAsk) ? (
+      <>
+        {liveStatus}
+        {isLoading && handOverAsk && (
+          <HandOverAsk key={handOverAsk.id} ask={handOverAsk} onAnswered={() => setHandOverAsk(null)} />
+        )}
+      </>
     ) : null;
 
   // Fill the composer with the suggestion without sending it, so the user
@@ -1420,17 +1443,17 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
                   isStreaming
                   paused={status.show}
                   actions={streamingActions.length > 0 ? streamingActions : undefined}
-                  status={liveStatus ?? undefined}
+                  status={liveSlot ?? undefined}
                 />
               ) : (
-                liveStatus && (
+                liveSlot && (
                   <div className="flex gap-4 mb-8">
                     <div className="flex-shrink-0 mt-1">
                       <BrandMark size="md" consulting />
                     </div>
                     <div className="flex-1 pt-1.5">
                       <div className="text-xs text-fg-muted mb-3 font-medium tracking-wide uppercase">{executiveName}</div>
-                      {liveStatus}
+                      {liveSlot}
                     </div>
                   </div>
                 )

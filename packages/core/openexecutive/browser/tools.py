@@ -58,6 +58,7 @@ An install can change what it needs without touching this file:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import re
@@ -218,15 +219,15 @@ TOOLS: dict[str, dict[str, Any]] = {
     },
     "browser_hand_over": {
         "description": (
-            "Hand the page over to the person for a step that is theirs to do: signing in, a code or "
-            "approval from their phone, a passkey, a password, card or code field, a \"prove you're human\" "
-            "check, or a choice only they should make (which size, which address, accepting terms). Their "
-            "browser brings that tab to the front with a bar saying \"Waiting on you: <need>\", and they get "
-            "a Needs you card. Password, card and code fields stay blank in what you see. It waits for them to press Done: then look "
-            "again and carry on. If they press Stop, stop. If it says they haven't done it yet, tell them "
-            "in a line what you need and that you'll carry on when they press Done, and end your turn. Use "
-            "it instead of asking them in chat to do something on the page. Never use it for something you "
-            "can do yourself."
+            "Hand the page over to the person for a step only they can do: typing a password, a code or "
+            "approval from their phone, a passkey, a card field, or a \"prove you're human\" check. Their "
+            "browser brings that tab to the front with a bar saying \"Waiting on you: <need>\", and the "
+            "chat asks them with Done and Stop. Password, card and code fields stay blank in what you see. It "
+            "waits for them to press Done: then look again and carry on. If they press Stop, stop. If it says "
+            "they haven't done it yet, tell them in a line what you need and that you'll carry on when they "
+            "press Done, and end your turn. Never use it for something you can click or pick yourself: for a "
+            "choice (which account on a \"Pick an account\" page, which size, which address, accepting "
+            "terms), ask them in your reply and do it once they answer."
         ),
         "input_schema": {
             "type": "object",
@@ -235,7 +236,7 @@ TOOLS: dict[str, dict[str, Any]] = {
                     "type": "string",
                     "description": (
                         "What they need to do, short, starting with a verb: \"sign in to Disney Store\", "
-                        "\"enter the code from your phone\", \"pick the size\"."
+                        "\"enter the code from your phone\"."
                     ),
                 },
                 "task": {
@@ -484,6 +485,14 @@ def _args(name: str, tool_input: dict[str, Any]) -> tuple[dict[str, Any] | None,
 SIDE_WINDOW = "side"
 
 
+def _chat_id() -> str:
+    """The chat this turn is the person typing in (``_in_chat``), or ""."""
+    from openexecutive.orchestrator.schedule_tools import current_session
+
+    chat = getattr(current_session.get(), "session_id", None)
+    return chat if _in_chat() and isinstance(chat, str) else ""
+
+
 def _in_chat() -> bool:
     """Whether this turn is the person typing in the web chat (not a
     scheduled run or a step approved on a card later)."""
@@ -690,15 +699,31 @@ def _handover_card(person_id: int, need: str, task: str, site: str, handover_id:
     )
 
 
-def _close_card(card_id: int | None, status: str) -> None:
-    if card_id is None:
-        return
-    from openexecutive.alerts import store
+async def _card_when_due(
+    handover: Any, delay: float, now: asyncio.Event, person_id: int, need: str, task: str, site: str
+) -> None:
+    """Put up the hand-over's Needs you card after ``delay`` (the chat's own
+    ask goes first), or as soon as ``now`` is set. The card is made in a
+    worker thread that hands it over (``browser_handover.place_card``) even
+    if this is cancelled meanwhile, so one made as the hand-over ends closes
+    at once instead of staying open."""
+    from openexecutive.browser import handover as browser_handover
 
-    try:
-        store.set_status(card_id, status)
-    except Exception:
-        logger.warning("browser hand-over: couldn't close card %s", card_id, exc_info=True)
+    if delay > 0:
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(now.wait(), delay)
+    if handover.outcome:
+        return
+
+    def _make() -> None:
+        try:
+            card_id = _handover_card(person_id, need, task, site, handover.id)
+        except Exception:
+            logger.warning("browser hand-over: couldn't make its card", exc_info=True)
+            return
+        browser_handover.place_card(handover, card_id)
+
+    await asyncio.to_thread(_make)
 
 
 async def _hand_over(person_id: int, given: dict[str, Any], window: str | None) -> str:
@@ -710,7 +735,16 @@ async def _hand_over(person_id: int, given: dict[str, Any], window: str | None) 
     if not need:
         return json.dumps({"error": "Say what they need to do, like \"sign in to Disney Store\"."})
     task = browser_handover.one_line(given.get("task"), browser_handover.MAX_TASK)
-    handover = browser_handover.start(person_id, need)
+    handover = browser_handover.start(
+        person_id, need, in_chat=_chat_id() if _speaker() == person_id else ""
+    )
+    if handover.early:
+        # Answered on the chat's ask before this step came round: nothing to
+        # hand over now.
+        browser_handover.finish(handover.id, person_id, handover.early)
+        if handover.early == "done":
+            return json.dumps({"done": True, "note": HANDED_DONE})
+        return json.dumps({"stopped": True, "note": HANDED_STOP})
     # Ready for Done before the bar shows: it can come straight away.
     browser_handover.arm(handover)
     args: dict[str, Any] = {"id": handover.id, "need": need}
@@ -722,24 +756,91 @@ async def _hand_over(person_id: int, given: dict[str, Any], window: str | None) 
         browser_handover.finish(handover.id, person_id, "stop")
         _mark_needed()
         return json.dumps({"error": NOT_CONNECTED_AWAY if window == OWN_WINDOW and _away() else not_connected()})
+    except BaseException:
+        browser_handover.finish(handover.id, person_id, "stop")
+        raise
     if not result.get("ok"):
         browser_handover.finish(handover.id, person_id, "stop")
         return json.dumps({"error": str(result.get("error") or "That didn't work in the browser.")})
     handover.sign_in = result.get("sign_in") is True
+    now = asyncio.Event()
+    delay = browser_handover.CARD_AFTER_S if handover.in_chat else 0.0
+    card = asyncio.create_task(_card_when_due(handover, delay, now, person_id, need, task, _site(result.get("url"))))
     try:
-        handover.card_id = await asyncio.to_thread(
-            _handover_card, person_id, need, task, _site(result.get("url")), handover.id
-        )
-    except Exception:
-        logger.warning("browser hand-over: couldn't make its card", exc_info=True)
-    outcome = await browser_handover.wait(handover)
+        outcome = await browser_handover.wait(handover)
+    except BaseException:
+        # The turn was stopped (Stop in the chat, or it ran out of time):
+        # the hand-over ends with it, its card and its bar too.
+        card.cancel()
+        browser_handover.finish(handover.id, person_id, "stop")
+        browser_handover.end_bar(handover)
+        raise
+    if outcome is None:
+        # Not done in time: the card goes up now, if it hasn't, and waits.
+        now.set()
+        try:
+            await card
+        except Exception:
+            logger.warning("browser hand-over: couldn't make its card", exc_info=True)
+        return json.dumps({"waiting": True, "note": HANDED_WAITING})
+    card.cancel()
     if outcome == "done":
-        _close_card(handover.card_id, "ack")
         return json.dumps({"done": True, "note": HANDED_DONE})
-    if outcome == "stop":
-        _close_card(handover.card_id, "dismissed")
-        return json.dumps({"stopped": True, "note": HANDED_STOP})
-    return json.dumps({"waiting": True, "note": HANDED_WAITING})
+    return json.dumps({"stopped": True, "note": HANDED_STOP})
+
+
+ASK_DETAIL = "Do it in your browser, then press Done here or on the bar at the top of the page."
+
+
+def hand_over_asks(round_work: list[dict[str, Any]], session_id: Any = None) -> list[dict[str, Any]]:
+    """The ``hand_over`` stream events for a round's hand-overs, sent before
+    they run so the chat the person is typing in asks them there, with Done
+    and Stop (POST /browser/hand-over/{id}). The first reserves the id
+    its hand-over takes (``browser_handover.reserve``), whose card then waits.
+    Only in their own chat: anywhere else (a run approved on a card) the
+    card goes out at once. The words
+    are the server's, so every screen says the same."""
+    from openexecutive.browser import handover as browser_handover
+
+    chat = _chat_id()
+    person_id = _speaker()
+    if not chat or person_id is None:
+        return []
+    # What an earlier round showed and nothing took is done with.
+    browser_handover.new_round(person_id, chat)
+    if not round_work or not browser_relay.on():
+        return []
+    asks = [tu for tu in round_work if tu.get("name") == "browser_hand_over"]
+    if not asks:
+        return []
+    from openexecutive.orchestrator import extensions
+
+    if extensions.in_workflow_step("browser_hand_over"):
+        return []
+    if not browser_relay.connected(person_id):
+        # Not connected: the step says so instead, and there's nothing to press.
+        return []
+    out: list[dict[str, Any]] = []
+    for tu in asks:
+        raw = tu.get("input")
+        given: dict[str, Any] = raw if isinstance(raw, dict) else {}
+        need = browser_handover.one_line(given.get("need"), browser_handover.MAX_NEED)
+        if not need:
+            continue
+        out.append({
+            "type": "hand_over",
+            "session_id": session_id if isinstance(session_id, str) else None,
+            "id": browser_handover.reserve(person_id, chat, need),
+            "text": f"Waiting on you: {need}",
+            "detail": ASK_DETAIL,
+            "done_label": "Done",
+            "stop_label": "Stop",
+        })
+        # The chat shows one ask at a time: the round's first it can ask.
+        # Another in the same round isn't reserved, so its card goes out at once.
+        break
+
+    return out
 
 
 async def _hand_over_in_workflow(person_id: int, given: dict[str, Any]) -> str:
