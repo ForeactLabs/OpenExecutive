@@ -347,10 +347,11 @@ async def evaluate_and_dispatch(
     # correction lands under what it corrects rather than beside it. A
     # teammate's own message joins only that way: never a card the Executive
     # wrote on the same turn.
-    conversation = one_card.chat_conversation() if event.as_written else ""
+    own_words = event.as_written and bool(event.raised_by)
+    conversation = one_card.chat_conversation(own_words=own_words) if event.as_written else ""
     with one_card.about(
         thread=conversation, joins=event.joins_alert_id, raised=True,
-        own_words=event.as_written and bool(event.raised_by),
+        own_words=own_words,
         label=_raised_label(event.raised_by) if event.raised_by else "",
     ):
         alert_id = _insert(event, decision, topic_tags, dedup_key, routed_to, path)

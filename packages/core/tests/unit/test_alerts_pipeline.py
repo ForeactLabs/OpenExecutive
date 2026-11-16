@@ -752,3 +752,29 @@ def test_a_name_with_a_period_is_said_once_on_the_joined_card(monkeypatch, db: P
     body = {a.id: a for a in list_alerts(db_path=db)}[first].body
     assert body.count("Raised by Dr. Smith.") == 1
     assert "Smith. Lab opens" not in body and body.endswith("Lab opens at noon.")
+
+
+def test_a_teammates_message_never_joins_the_executives_message_from_the_same_chat(monkeypatch, db: Path) -> None:
+    from openexecutive.alerts import dispatcher, pipeline
+    from openexecutive.audit.context import set_turn
+    from openexecutive.orchestrator.schedule_tools import current_session
+
+    async def fake_dispatch(alert, channels, **kw):  # noqa: ARG001
+        return None
+
+    monkeypatch.setattr(dispatcher, "dispatch_all", fake_dispatch)
+    chat = _Chat("shared-chat", 2)
+    token = current_session.set(chat)
+    try:
+        with set_turn(session_id=chat.session_id, turn_id="t1"):
+            own = AlertEvent(
+                source="message", external_id="x1", subject="Standup moved", body="Standup moved to 10.",
+                routed_to_person_id=1, user="person:1", as_written=True,
+            )
+            _, executives = asyncio.run(pipeline.evaluate_and_dispatch(own, db_path=db))
+    finally:
+        current_session.reset(token)
+    teammates = _pass_on(monkeypatch, db, chat, "t2", "m1", "From Sam: I'll be late", "From Sam: I'll be late.")
+    rows = {a.id: a for a in list_alerts(db_path=db)}
+    assert rows[teammates].superseded_by_alert_id is None
+    assert rows[executives].body == "Standup moved to 10."
