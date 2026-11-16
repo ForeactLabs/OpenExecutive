@@ -738,6 +738,13 @@ async def _hand_over(person_id: int, given: dict[str, Any], window: str | None) 
     handover = browser_handover.start(
         person_id, need, in_chat=_chat_id() if _speaker() == person_id else ""
     )
+    if handover.early:
+        # Answered on the chat's ask before this step came round: nothing to
+        # hand over now.
+        browser_handover.finish(handover.id, person_id, handover.early)
+        if handover.early == "done":
+            return json.dumps({"done": True, "note": HANDED_DONE})
+        return json.dumps({"stopped": True, "note": HANDED_STOP})
     # Ready for Done before the bar shows: it can come straight away.
     browser_handover.arm(handover)
     args: dict[str, Any] = {"id": handover.id, "need": need}

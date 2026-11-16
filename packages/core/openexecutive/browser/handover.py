@@ -94,6 +94,8 @@ class Handover:
     in_chat: bool = False
     # How it ended ("done" or "stop"), "" while open.
     outcome: str = ""
+    # Done or Stop the chat's ask got before this started (``answer_early``).
+    early: str = ""
     created: float = field(default_factory=time.monotonic)
     # Set while a turn waits for the answer.
     future: asyncio.Future[str] | None = None
@@ -110,6 +112,10 @@ _open: dict[str, Handover] = {}
 # the round they were shown in, however long its other steps take: the
 # chat's next round clears what that one left (``new_round``).
 _reserved: dict[tuple[int, str, str], list[str]] = {}
+# Done or Stop pressed on the chat's ask before its hand-over started (an
+# earlier step of the round was still running), by id: the hand-over takes
+# it when it starts (``answer_early``).
+_early: dict[str, str] = {}
 
 
 def one_line(text: object, cap: int) -> str:
@@ -182,15 +188,11 @@ def close_leftover_cards() -> int:
     before a restart can no longer be answered. Close them all. How many."""
     from openexecutive.alerts import store
 
-    closed = 0
     try:
-        for status in ("unread", "read"):
-            for alert in store.list_alerts(status=status, limit=100_000):
-                if alert.source == SOURCE and alert.id is not None:
-                    closed += int(store.set_status_if_open(alert.id, "dismissed"))
+        return store.close_open_by_source(SOURCE, "dismissed")
     except Exception:
         logger.warning("browser hand-over: couldn't close left-over cards", exc_info=True)
-    return closed
+        return 0
 
 
 def new_round(person_id: int, chat: str) -> None:
@@ -198,7 +200,20 @@ def new_round(person_id: int, chat: str) -> None:
     every hand-over of that round has run (or the turn stopped first), so
     none is left to take it."""
     for key in [k for k in list(_reserved) if k[0] == person_id and k[1] == chat]:
-        _reserved.pop(key, None)
+        for hid in _reserved.pop(key, []):
+            _early.pop(hid, None)
+
+
+def answer_early(handover_id: str, person_id: int, outcome: str) -> bool:
+    """Done or Stop on the chat's ask of ``person_id`` whose hand-over hasn't
+    started yet: kept for it to take when it does (``start``). False when no
+    such ask of theirs is waiting to start."""
+    if outcome not in OUTCOMES:
+        return False
+    if not any(k[0] == person_id and handover_id in ids for k, ids in list(_reserved.items())):
+        return False
+    _early[handover_id] = outcome
+    return True
 
 
 def reserve(person_id: int, chat: str, need: str) -> str:
@@ -210,7 +225,8 @@ def reserve(person_id: int, chat: str, need: str) -> str:
     # Several with the same words in one round are taken in order.
     _reserved.setdefault((person_id, chat, one_line(need, MAX_NEED)), []).append(hid)
     while len(_reserved) > 64:
-        _reserved.pop(next(iter(_reserved)))
+        for old in _reserved.pop(next(iter(_reserved))):
+            _early.pop(old, None)
     return hid
 
 
@@ -243,6 +259,7 @@ def start(
     handover = Handover(
         id=reserved or uuid.uuid4().hex, person_id=person_id, need=need,
         card_id=card_id, workflow_key=workflow_key, in_chat=reserved is not None, loop=loop,
+        early=_early.pop(reserved, "") if reserved else "",
     )
     _open[handover.id] = handover
     return handover
@@ -381,3 +398,4 @@ def card_closed(card_id: int) -> bool:
 def _reset_for_tests() -> None:
     _open.clear()
     _reserved.clear()
+    _early.clear()

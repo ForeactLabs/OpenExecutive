@@ -250,6 +250,40 @@ def test_the_bar_answers_only_done_or_stop_on_an_open_one(client: TestClient) ->
     assert client.post(f"/browser/hand-over/{other.id}", json={"outcome": "done"}).status_code == 404
 
 
+def test_a_press_on_the_chats_ask_before_its_step_starts_is_kept_for_it(client: TestClient) -> None:
+    pid = client.pid  # type: ignore[attr-defined]
+    early = browser_handover.reserve(pid, "s1", "sign in")
+    # Pressed while an earlier step of the round still runs: not a 404.
+    got = client.post(f"/browser/hand-over/{early}", json={"outcome": "stop"})
+    assert got.status_code == 200 and got.json()["carried_on"] is False
+    # Only the person it was asked of, and only a real ask.
+    assert client.post("/browser/hand-over/nope", json={"outcome": "done"}).status_code == 404
+    theirs = browser_handover.reserve(pid + 1, "s9", "sign in")
+    assert client.post(f"/browser/hand-over/{theirs}", json={"outcome": "done"}).status_code == 404
+    assert browser_handover.start(pid, "sign in", in_chat="s1").early == "stop"
+
+
+async def test_a_step_answered_early_on_the_chat_hands_nothing_over(
+    chat_turn: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ran: list[Any] = []
+
+    async def run(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        ran.append(args)
+        return {"ok": True}
+
+    monkeypatch.setattr(browser_relay, "run", run)
+    hid = browser_handover.reserve(7, "s1", "sign in")
+    assert browser_handover.answer_early(hid, 7, "done")
+    out = json.loads(await browser_tools._hand_over(7, {"need": "sign in"}, None))
+    assert out["done"] is True and not ran and browser_handover.get(hid) is None
+    # A later round clears what an earlier one kept.
+    left = browser_handover.reserve(7, "s1", "sign in")
+    assert browser_handover.answer_early(left, 7, "stop")
+    browser_handover.new_round(7, "s1")
+    assert not browser_handover._early
+
+
 def test_done_on_the_bar_picks_up_a_waiting_workflow_run_and_stop_stops_it(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

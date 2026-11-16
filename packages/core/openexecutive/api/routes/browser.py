@@ -186,6 +186,9 @@ async def hand_over(handover_id: str, request: Request) -> dict[str, bool]:
         raise HTTPException(status_code=422, detail='Say "done" or "stop".')
     open_one = browser_handover.get(handover_id)
     if open_one is None or open_one.person_id != person.id:
+        # The chat's ask, pressed before an earlier step of its round let it start.
+        if outcome != browser_handover.AUTO and browser_handover.answer_early(handover_id, person.id, outcome):
+            return {"ok": True, "carried_on": outcome == "done"}
         raise HTTPException(status_code=404, detail="That's already finished.")
     if outcome == browser_handover.AUTO:
         if not open_one.sign_in or not (browser_handover.waited_on(open_one) or open_one.workflow_key):
