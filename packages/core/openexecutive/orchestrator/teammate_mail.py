@@ -122,7 +122,8 @@ RULE_NOTE = (
     "is private to them."
 )
 QUERY_NOTE = (
-    "{tool} was not run: close every quote and bracket in the query and try again."
+    "{tool} was not run: close every quote and bracket in the query, keep brackets out of quoted text, "
+    "and try again."
 )
 OUTLOOK_THEIRS_NOTE = (
     "{tool} was not run: that email involves another teammate and is their "
