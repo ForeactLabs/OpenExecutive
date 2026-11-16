@@ -30,6 +30,7 @@ import {
   type ReadMyCalendar,
   type VoiceProfile,
 } from "@/lib/api";
+import { MAILBOX_BROKEN, MAILBOX_BROKEN_DETAIL, mailboxNeedsReconnecting } from "@/lib/reconnect";
 import { formatAgo } from "@/lib/setupStatus";
 import { addPhrase, markNew, STYLE_PHRASES, styleSentences } from "@/lib/voiceStyle";
 import { PageSpinner } from "@/components/ui/Spinner";
@@ -169,7 +170,14 @@ export default function ActAsMeCard({
     </div>
   ) : (
     <div className="rounded-xl border border-line px-4 py-3">
-      <p className="text-[15px] text-fg">{settings.gmail.message}</p>
+      {mailboxNeedsReconnecting(settings.gmail.status) ? (
+        <>
+          <p className="text-[15px] font-semibold text-fg">{MAILBOX_BROKEN}</p>
+          <p className="text-sm text-fg-muted">{MAILBOX_BROKEN_DETAIL}</p>
+        </>
+      ) : (
+        <p className="text-[15px] text-fg">{settings.gmail.message}</p>
+      )}
       <div className="mt-3 space-y-3">
         {settings.gmail.status === "not_configured" && (
           <details className="group">

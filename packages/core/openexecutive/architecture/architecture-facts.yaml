@@ -12346,7 +12346,7 @@ delegation:
     As me is on, the first check only takes stock): a goal whose status got
     worse, a workflow run that errored (not the reflection's own), a task
     whose due time passed, a timed meeting on the cached calendar that
-    ended; one wake for all of them. Home's Watching next (GET /today
+    ended; one wake for all of them. Home's Following up (GET /today
     watching, POST /today/watching/stop) lists the pending ad_hoc and
     proactive_nudge follow-ups (for the owner the team's and their own by
     api.own_rows, never one a teammate asked for; only their own for a

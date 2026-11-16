@@ -5879,7 +5879,7 @@ export interface PointSource {
 // One row of Home's Done for you (GET /today `done_for_you`): a card the
 // viewer approved (`kind` "approval", one row per card, its status changing
 // in place) or something the Executive did on its own in the last day.
-// One line of Home's Watching next (GET /today `watching`): a follow-up it
+// One line of Home's Following up (GET /today `watching`): a follow-up it
 // will send (`action:<id>`) or standing work (`job:<id>`), what it does
 // next and when. Stop ends that one thing (POST /today/watching/stop).
 export interface WatchingItem {
@@ -5906,6 +5906,13 @@ export async function stopWatching(key: string): Promise<void> {
     }
     throw new Error(message);
   }
+}
+
+export interface ActOnCount {
+  key: "tasks_overdue" | "goals_at_risk" | "goals_unchecked" | "people_follow_up";
+  text: string;
+  count: number;
+  href: string;
 }
 
 // The Schedule page (GET /schedule): everything the Executive does without
@@ -5950,6 +5957,9 @@ export interface DoneRow {
   alert_id?: number | null;
   approval_id?: number | null;
   artifact_id?: string | null;
+  // Whose name it went out in: "Sent as you", "Sent as <Executive>", "Done
+  // as <Executive>". "" when the title says it.
+  as_tag?: string;
 }
 
 /** Home's Done for you on its own (GET /today/done), for the screens that
@@ -6033,6 +6043,9 @@ export interface Today {
   // Done for you: what the Executive did or is doing for the viewer today.
   done_for_you?: DoneRow[];
   watching?: WatchingItem[];
+  // Home's bottom line: only the counts that need the reader to act, each a
+  // link. Empty: everything else is on track.
+  to_act_on?: ActOnCount[];
   inbox_also_total?: number;
   // The owner's own: today's delivered morning brief and the meetings still
   // ahead today.
