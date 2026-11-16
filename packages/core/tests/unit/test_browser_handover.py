@@ -677,13 +677,14 @@ async def test_the_ask_holds_however_long_the_rounds_other_steps_take(
     assert handover.id == ask["id"] and handover.in_chat
 
 
-def test_same_words_twice_in_a_round_each_get_their_own_id(chat_turn: None, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_only_the_rounds_first_hand_over_is_asked_in_the_chat(chat_turn: None, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(browser_relay, "on", lambda: True)
     monkeypatch.setattr(browser_relay, "connected", lambda _pid: True)
     tu = {"name": "browser_hand_over", "input": {"need": "sign in"}}
-    first, second = browser_tools.hand_over_asks([{**tu, "id": "a"}, {**tu, "id": "b"}], "s1")
-    assert browser_handover.start(7, "sign in", in_chat="s1").id == first["id"]
-    assert browser_handover.start(7, "sign in", in_chat="s1").id == second["id"]
+    (ask,) = browser_tools.hand_over_asks([{**tu, "id": "a"}, {**tu, "id": "b"}], "s1")
+    assert browser_handover.start(7, "sign in", in_chat="s1").id == ask["id"]
+    # The second wasn't shown, so it isn't in the chat: its card goes out at once.
+    assert not browser_handover.start(7, "sign in", in_chat="s1").in_chat
 
 
 def test_no_chat_ask_while_the_browser_isnt_connected(chat_turn: None, monkeypatch: pytest.MonkeyPatch) -> None:

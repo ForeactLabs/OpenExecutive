@@ -810,7 +810,9 @@ def hand_over_asks(round_work: list[dict[str, Any]], session_id: Any = None) -> 
     browser_handover.new_round(person_id, chat)
     if not round_work or not browser_relay.on():
         return []
-    asks = [tu for tu in round_work if tu.get("name") == "browser_hand_over"]
+    # The chat shows one ask at a time: the round's first. Another in the
+    # same round isn't reserved, so its card goes out at once.
+    asks = [tu for tu in round_work if tu.get("name") == "browser_hand_over"][:1]
     if not asks:
         return []
     from openexecutive.orchestrator import extensions
