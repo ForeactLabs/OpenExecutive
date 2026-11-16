@@ -65,8 +65,9 @@ class Feed:
                 finally:
                     if not getter.done():
                         getter.cancel()
-                        with contextlib.suppress(asyncio.CancelledError):
-                            await getter
+                        # The getter's own outcome only: a stop aimed at the
+                        # reader still goes through.
+                        await asyncio.gather(getter, return_exceptions=True)
                 if getter.done() and not getter.cancelled():
                     yield getter.result()
             while not self._queue.empty():
