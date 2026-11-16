@@ -597,37 +597,17 @@ def _provenance(session: Any) -> dict[str, Any]:
 
 
 def own_chat_person(session: Any) -> int | None:
-    """The person whose own conversation this turn is: the verified speaker
-    of a chat only they read (``delegation.settings.private_conversation``:
-    the web chat not shared with teammates, their own DM). None for a shared
-    chat or channel, a meeting, an email, a run nobody is watching, or when
-    it can't be told. A decision made there is private to them
+    """The person whose own conversation this turn is
+    (``orchestrator.speaker.own_private_speaker``: the web chat not shared
+    with teammates, their own DM, a call with the Executive). None for a
+    shared chat or channel, a meeting with others, an email, a run nobody is
+    watching, or when it can't be told. A decision made there is private to them
     (``memory.facts``), and their private decisions are read back there."""
-    try:
-        from openexecutive.delegation.settings import private_conversation
-        from openexecutive.orchestrator.people_tools import (
-            is_principal_on_verified_surface,
-            teammate_on_verified_surface,
-        )
+    from openexecutive.orchestrator.speaker import own_private_speaker
 
-        if (
-            session is None
-            or getattr(session, "unattended", False)
-            or getattr(session, "meeting_call", False)
-            or getattr(session, "email_from", "")
-            or not private_conversation(session)
-        ):
-            return None
-        if is_principal_on_verified_surface(session):
-            from openexecutive.people import registry as people_registry
-
-            principal = people_registry.get_principal()
-            return principal.id if principal is not None else None
-        teammate = teammate_on_verified_surface(session)
-        return teammate.id if teammate is not None else None
-    except Exception:  # noqa: BLE001 - nobody's: the team's facts only.
-        logger.warning("fact_tools: couldn't tell whose conversation this is", exc_info=True)
-        return None
+    person = own_private_speaker(session) if session is not None else None
+    person_id = getattr(person, "id", None)
+    return person_id if isinstance(person_id, int) else None
 
 
 def _private_decision_owner(session: Any) -> int | None:

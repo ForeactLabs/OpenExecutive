@@ -156,11 +156,13 @@ SAVE_WORKFLOW_TOOL: dict[str, Any] = {
         "mismatch) — re-draft if you need to change anything. On success the "
         "workflow appears in /jobs and is immediately runnable — except one "
         "with action (tool) steps, which stays off until the user reviews its "
-        "tools and turns it on at the returned deep_link. Replacing a switched-on "
-        "workflow that uses tools, or one that reads or sends email as its "
-        "creator, changes nothing yet: it leaves a card spelling out the change "
-        "for the user to approve, and it is saved, staying on, when they tap "
-        "Approve."
+        "tools and turns it on at the returned deep_link. The person's own "
+        "ask is their yes for a change too. A change nobody on the team asked "
+        "for this turn to a switched-on workflow that uses tools, or one to a "
+        "workflow that reads or sends email as its creator or uses their "
+        "browser that its creator didn't ask for, changes nothing yet: it "
+        "leaves a card spelling out the change for them to approve, and it is "
+        "saved, staying on, when they tap Approve."
     ),
     "input_schema": {
         "type": "object",
@@ -296,8 +298,7 @@ def _summarize(defn: Any) -> str:
 def _asked_by_its_owner(existing: Any, name: str) -> bool:
     """Whether the person asked for this change themselves and may change
     this workflow from chat (the account owner or its creator, in a chat
-    only they read). Someone else's workflow keeps its change card, which
-    then says why it can't be changed here."""
+    only they read). Someone else's workflow keeps its change card."""
     if not _person_asked():
         return False
     return existing is None or workflow_change.may_read(name) is None
@@ -310,7 +311,7 @@ async def handle_draft_workflow(tool_input: dict[str, Any]) -> str:
     existing = get_definition(defn.name) if error is None else None
     on_card = error is None and workflow_change.needs_card(existing, defn, asked=_asked_by_its_owner(existing, defn.name))
     if on_card:
-        error = workflow_change.may_stage(defn.name)
+        error = workflow_change.may_read(defn.name)
     if error is None:
         error = _reads_refusal(defn)
     if error is not None:
@@ -326,8 +327,8 @@ async def handle_draft_workflow(tool_input: dict[str, Any]) -> str:
     if on_card:
         note += (
             " It changes a saved workflow, so saving (overwrite=true) doesn't change it "
-            "right away: it leaves a card showing the change, in this chat and their chat "
-            "app, and it is saved when they tap Approve."
+            "right away: it leaves a card showing the change for them, and it is saved "
+            "when they tap Approve."
         )
     elif _needs_review(defn):
         note += (

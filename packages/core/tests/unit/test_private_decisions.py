@@ -61,7 +61,7 @@ def roster(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNa
 
 def _speak(person_id: int | None, *, said: str = SAID, **surface: Any) -> None:
     session = SimpleNamespace(
-        session_id="s-1", caller_person_id=person_id, origin_channel="", from_web_chat=True,
+        session_id="s-1", caller_person_id=person_id, origin_channel="", from_web_chat=True, web_caller_signed_in=True,
         unattended=False, private_to_principal=False, email_from="", company_profile=None,
         turn_delegation=TurnDelegation(speaker_text=said, session_id="s-1"),
     )

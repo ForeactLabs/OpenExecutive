@@ -9,7 +9,7 @@ it came from before it is stated as current.
 The speaker's own chats only (``session_store.search_past_messages``: chats
 they own, never one shared with them), and only on a turn where they are the
 verified speaker in a conversation nobody else reads, as ``recall_history``
-(``history_chat.verified_speaker`` / ``private_chat``). Its own registry,
+(``history_chat.verified_speaker`` / ``delegation.settings.private_conversation``). Its own registry,
 never ``_ALL_SKILL_TOOLS``, so on any other turn a call to it is an unknown
 tool. Every call checks the surface again.
 
@@ -75,15 +75,15 @@ def search_person(session: Any) -> Any:
     speaker, verified, in a conversation private to them, on an interactive
     turn. Never raises."""
     try:
-        from openexecutive.delegation.settings import turn_delegation
-        from openexecutive.memory.history_chat import private_chat, verified_speaker
+        from openexecutive.delegation.settings import private_conversation, turn_delegation
+        from openexecutive.memory.history_chat import verified_speaker
         from openexecutive.people.store import get_person
 
         pinned = turn_delegation(session)
         if pinned is None or pinned.person_id is None:
             return None
         person = get_person(pinned.person_id)
-        if person is None or not verified_speaker(session, person) or not private_chat(session):
+        if person is None or not verified_speaker(session, person) or not private_conversation(session):
             return None
         return person
     except Exception:

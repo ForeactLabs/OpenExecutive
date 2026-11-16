@@ -30,6 +30,8 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from openexecutive.orchestrator.speaker import speaker as _speaker
+
 logger = logging.getLogger(__name__)
 
 FOLLOWUP_KIND = "ad_hoc"
@@ -140,32 +142,6 @@ def _audit(tool: str, ok: bool, summary: str, details: dict[str, Any]) -> None:
 
 def _refused(detail: str) -> str:
     return json.dumps({"status": "refused", "detail": detail})
-
-
-def _speaker(session: Any = None) -> Any:
-    """The verified speaker's People row (principal or teammate), or None.
-    ``session`` defaults to the turn's own (``current_session``)."""
-    from openexecutive.orchestrator.people_tools import (
-        is_principal_on_verified_surface,
-        teammate_on_verified_surface,
-    )
-    from openexecutive.people.store import get_person
-
-    session = session if session is not None else _session()
-    if session is None or getattr(session, "unattended", False):
-        return None
-    try:
-        if is_principal_on_verified_surface(session):
-            caller = getattr(session, "caller_person_id", None)
-            if caller is not None:
-                return get_person(int(caller))
-            from openexecutive.people.store import find_principal_person
-
-            return find_principal_person()
-        return teammate_on_verified_surface(session)
-    except Exception:
-        logger.warning("correction_tools: speaker lookup failed", exc_info=True)
-        return None
 
 
 _NOT_VERIFIED = (
