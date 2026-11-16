@@ -1086,3 +1086,83 @@ def test_the_replys_cards_follow_it_only_in_the_apps_own_dm(
     assert ("Approve and Skip buttons" in seen["channel_context_block"]) is one_on_one
     assert sent == ([("spaces/DM1", "spaces/DM1/threads/T", 12, "Meeting to book", ("Approve", "Skip"), None, None)]
                     if one_on_one else [])
+
+
+# -- posting to a space (announcements, department rooms) ----------------------
+
+
+def _space_list(monkeypatch: pytest.MonkeyPatch, spaces: list[dict[str, Any]]) -> MagicMock:
+    service = MagicMock()
+    service.spaces.return_value.list.return_value.execute.return_value = {"spaces": spaces}
+    monkeypatch.setattr(gc_module, "_build_credentials", lambda *a: object())
+    monkeypatch.setattr("googleapiclient.discovery.build", lambda *a, **k: service)
+    return service
+
+
+def test_group_spaces_lists_the_apps_spaces_and_marks_the_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GOOGLE_CHAT_PROJECT_NUMBER", "123456789012")
+    monkeypatch.setenv("GOOGLE_CHAT_DEFAULT_SPACE", "spaces/ALL")
+    service = _space_list(monkeypatch, [
+        {"name": "spaces/ALL", "displayName": "Everyone"},
+        {"name": "spaces/OPS"},
+        {"name": "users/123", "displayName": "Not a space"},
+    ])
+    assert gc_module.group_spaces() == [
+        {"space": "spaces/ALL", "title": "Everyone", "announce": True},
+        {"space": "spaces/OPS", "title": "", "announce": False},
+    ]
+    assert service.spaces.return_value.list.call_args.kwargs["filter"] == 'spaceType = "SPACE"'
+
+
+def test_announce_space_is_the_default_else_the_only_space(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GOOGLE_CHAT_DEFAULT_SPACE", "spaces/DEFAULT")
+    assert gc_module.announce_space() == "spaces/DEFAULT"
+    monkeypatch.delenv("GOOGLE_CHAT_DEFAULT_SPACE")
+    one = [{"space": "spaces/ONLY", "title": "", "announce": False}]
+    monkeypatch.setattr(gc_module, "group_spaces", lambda **_: one)
+    assert gc_module.announce_space() == "spaces/ONLY"
+    monkeypatch.setattr(gc_module, "group_spaces", lambda **_: one + [{"space": "spaces/TWO", "title": "", "announce": False}])
+    assert gc_module.announce_space() is None
+
+
+def test_post_to_space_posts_only_in_the_apps_group_spaces(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(gc_module, "send_reply", lambda space, thread, text, *a: sent.append((space, thread, text)))
+    monkeypatch.setattr(gc_module, "group_spaces", lambda **_: [{"space": "spaces/ALL", "title": "Everyone", "announce": True}])
+    gc_module.post_to_space("spaces/ALL", "Q3 plan shipped: <https://evil.example|the plan>")
+    # Link markup made inert: no words shown over a link that goes elsewhere.
+    assert sent == [("spaces/ALL", "", "Q3 plan shipped: \u2039https://evil.example|the plan>")]
+    assert gc_module.space_title("spaces/ALL") == "Everyone"
+    # A DM or a space the app isn't in is refused.
+    for space in ("spaces/DM1", "spaces/ALL/../x"):
+        with pytest.raises(ValueError):
+            gc_module.post_to_space(space, "nope")
+    assert len(sent) == 1
+
+
+def test_a_listing_is_reused_for_posts_and_cards_but_not_for_a_new_space(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gc_module, "_spaces_cache", None)
+    listings: list[int] = []
+    rows = [{"space": "spaces/ALL", "title": "Everyone", "announce": True}]
+
+    def _list() -> list[dict[str, Any]]:
+        listings.append(1)
+        return [dict(r) for r in rows]
+
+    monkeypatch.setattr(gc_module, "_list_spaces", _list)
+    monkeypatch.setattr(gc_module, "send_reply", lambda *a: None)
+    assert gc_module.known_spaces() is None  # nothing at hand: a card never asks
+    gc_module.post_to_space("spaces/ALL", "one")
+    gc_module.post_to_space("spaces/ALL", "two")
+    assert len(listings) == 1
+    assert gc_module.known_spaces() == rows
+    rows.append({"space": "spaces/NEW", "title": "New", "announce": False})
+    gc_module.post_to_space("spaces/NEW", "three")  # not in the cached listing: asked again
+    assert len(listings) == 2
+
+
+def test_a_malformed_default_space_never_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OE_GOOGLE_CHAT_APP", raising=False)
+    monkeypatch.setenv("GOOGLE_CHAT_DEFAULT_SPACE", "AAAA123")
+    monkeypatch.setattr(gc_module, "group_spaces", lambda **_: [{"space": "spaces/ONLY", "title": "", "announce": False}])
+    assert gc_module.announce_space() is None

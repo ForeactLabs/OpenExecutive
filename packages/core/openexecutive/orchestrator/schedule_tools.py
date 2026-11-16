@@ -1889,6 +1889,9 @@ _DM_TOOL_INTEGRATION: dict[str, str] = {
 
 # Channel values that can appear in a broadcast tool's `integration` enum.
 _CHANNEL_INTEGRATIONS: frozenset[str] = frozenset({"slack", "discord", "telegram"})
+# The chat apps the broadcast tools post to: the DM channels, plus Google
+# Chat, whose app posts in its spaces (``broadcast_tools.INTEGRATIONS``).
+_POST_INTEGRATIONS: frozenset[str] = _CHANNEL_INTEGRATIONS | {"google_chat"}
 
 
 def configured_integrations(settings: Any) -> set[str]:
@@ -1900,6 +1903,8 @@ def configured_integrations(settings: Any) -> set[str]:
         configured.add("discord")
     if getattr(settings, "telegram_bot_token", None):
         configured.add("telegram")
+    if getattr(settings, "google_chat_project_number", None):
+        configured.add("google_chat")
     # Calendar is enabled when the feature flag is true AND MCP is running.
     # Import lazily to avoid circular imports.
     if getattr(settings, "calendar_booking_enabled", False) and getattr(settings, "mcp_enabled", False):
@@ -2541,13 +2546,13 @@ def filter_tools_for_configured_channels(
             .get("integration", {})
             .get("enum")
         )
-        if isinstance(enum_vals, list) and (set(enum_vals) & _CHANNEL_INTEGRATIONS):
+        if isinstance(enum_vals, list) and (set(enum_vals) & _POST_INTEGRATIONS):
             narrowed = [
                 v
                 for v in enum_vals
-                if v not in _CHANNEL_INTEGRATIONS or v in configured
+                if v not in _POST_INTEGRATIONS or v in configured
             ]
-            if not (set(narrowed) & _CHANNEL_INTEGRATIONS):
+            if not (set(narrowed) & _POST_INTEGRATIONS):
                 # No channel left to post on — the tool can't do anything.
                 continue
             if narrowed == enum_vals:

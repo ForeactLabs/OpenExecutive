@@ -1997,8 +1997,33 @@ def missing_args(tool: str, tool_input: dict[str, Any]) -> list[str]:
     return [a for a in _NEEDS.get(tool, ()) if empty(tool_input.get(a))]
 
 
-_CHANNEL_NAMES = {"slack": "Slack", "discord": "Discord", "telegram": "Telegram"}
+_CHANNEL_NAMES = {"slack": "Slack", "discord": "Discord", "telegram": "Telegram", "google_chat": "Google Chat"}
 _DM_CHANNEL = {"send_slack_dm": "slack", "send_discord_dm": "discord", "send_telegram_message": "telegram"}
+
+
+def _google_chat_space_named(tool: str, tool_input: dict[str, Any]) -> str:
+    """The Google Chat space a post would land in, by name, so the card says
+    which one. "" when it can't be told. Never raises."""
+    try:
+        from openexecutive.integrations import google_chat
+
+        # Only a listing already at hand: building a card never waits on Google.
+        spaces = google_chat.known_spaces()
+        if spaces is None:
+            return ""
+        if tool == "send_company_broadcast":
+            space = google_chat.announce_space(spaces)
+        else:
+            from openexecutive.departments.store import get_department
+
+            dept = get_department(str(tool_input.get("department_slug") or ""))
+            space = getattr(getattr(dept, "config", None), "google_chat_space", None)
+        if not space:
+            return ""
+        title = google_chat.space_title(space, spaces)
+        return f"“{google_chat.card_safe(title)}”" if title else space
+    except Exception:
+        return ""
 
 
 def where(tool: str, tool_input: dict[str, Any]) -> str:
@@ -2011,7 +2036,12 @@ def where(tool: str, tool_input: dict[str, Any]) -> str:
         if tool in _DM_CHANNEL:
             return f"On {_CHANNEL_NAMES[_DM_CHANNEL[tool]]}"
         if tool in _BROADCAST_TOOLS:
-            name = _CHANNEL_NAMES.get(str(tool_input.get("integration") or "").lower())
+            integration = str(tool_input.get("integration") or "").lower()
+            name = _CHANNEL_NAMES.get(integration)
+            if integration == "google_chat":
+                space = _google_chat_space_named(tool, tool_input)
+                if space:
+                    return f"On Google Chat, in {space}"
             return f"On {name}" if name else ""
         if tool != "message_person":
             return ""

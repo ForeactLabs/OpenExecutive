@@ -4778,6 +4778,8 @@ export interface DepartmentConfig {
   slack_channel_id: string | null;
   discord_channel_id: string | null;
   telegram_chat_id: string | null;
+  // A Google Chat space the Chat app is in ("spaces/…").
+  google_chat_space?: string | null;
   // Named external entities this department wants monitored. The research
   // watch policy treats them as strong grounding: a proposal about one can
   // be added to the watch list on its own and is routed to this department.
@@ -4846,6 +4848,7 @@ export interface DepartmentPatch {
   slack_channel_id?: string | null;
   discord_channel_id?: string | null;
   telegram_chat_id?: string | null;
+  google_chat_space?: string | null;
   watched_entities?: string[];
 }
 

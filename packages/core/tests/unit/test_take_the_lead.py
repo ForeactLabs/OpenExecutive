@@ -1321,6 +1321,20 @@ def test_where_a_message_goes() -> None:
     assert ttl.where("create_calendar_event", {"title": "Sync"}) == ""
 
 
+def test_a_google_chat_post_names_its_space(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.integrations import google_chat
+
+    monkeypatch.delenv("GOOGLE_CHAT_DEFAULT_SPACE", raising=False)
+    monkeypatch.setattr(google_chat, "known_spaces", lambda: [{"space": "spaces/ALL", "title": "All <hands>", "announce": True}])
+    monkeypatch.setattr(google_chat, "group_spaces", lambda **_: pytest.fail("a card never asks Google"))
+    assert ttl.where("send_company_broadcast", {"integration": "google_chat", "text": "x"}) == (
+        "On Google Chat, in \u201cAll \u2039hands>\u201d"
+    )
+    # No listing at hand: the plain line, not a wait on Google.
+    monkeypatch.setattr(google_chat, "known_spaces", lambda: None)
+    assert ttl.where("send_company_broadcast", {"integration": "google_chat", "text": "x"}) == "On Google Chat"
+
+
 @pytest.mark.parametrize(("channel", "ref", "usable"), [
     ("discord", "123456789", True), ("discord", "@sam", False),
     ("telegram", "-100123", True), ("telegram", "--1", False), ("slack", "U123", True), ("slack", None, False),

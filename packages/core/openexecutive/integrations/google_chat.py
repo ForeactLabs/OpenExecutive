@@ -122,6 +122,124 @@ def send_reply(
     ).execute()
 
 
+_SPACE_NAME = re.compile(r"^spaces/[A-Za-z0-9_-]{1,128}$")
+_MAX_SPACES = 100
+# The last listing of the app's spaces, so a post or an approval card
+# doesn't ask Google (or the control plane) every time: (monotonic time, rows).
+_spaces_cache: tuple[float, list[dict[str, Any]]] | None = None
+
+
+class NotAppSpace(ValueError):
+    """A post to a chat that isn't one of the app's group spaces."""
+
+_KNOWN_FOR_S = 600.0
+
+
+def _list_spaces() -> list[dict[str, Any]]:
+    settings = get_settings()
+    if not settings.google_chat_project_number:
+        return []
+    from googleapiclient.discovery import build as google_build
+
+    creds = _build_credentials(
+        settings.google_chat_service_account_file, settings.google_chat_service_account_email,
+    )
+    service = google_build("chat", "v1", credentials=creds, cache_discovery=False)
+    default = (settings.google_chat_default_space or "").strip()
+    rows: list[dict[str, Any]] = []
+    token = ""
+    while len(rows) < _MAX_SPACES:
+        kwargs: dict[str, Any] = {"filter": 'spaceType = "SPACE"', "pageSize": _MAX_SPACES}
+        if token:
+            kwargs["pageToken"] = token
+        listed = service.spaces().list(**kwargs).execute()
+        rows += [
+            {"space": s.get("name"), "title": s.get("displayName") or "", "announce": s.get("name") == default}
+            for s in listed.get("spaces") or []
+        ]
+        token = listed.get("nextPageToken") or ""
+        if not token:
+            break
+    return rows
+
+
+def group_spaces(max_age_s: float = 0.0) -> list[dict[str, Any]]:
+    """The group spaces (not DMs) the Chat app is in, for posts and the
+    department picker: ``[{"space", "title", "announce"}]``. ``announce``
+    marks the space company announcements go to. ``max_age_s`` accepts a
+    listing that recent instead of asking again. Synchronous; raises when
+    Google Chat can't be reached."""
+    global _spaces_cache
+    import time
+
+    cached = _spaces_cache
+    if cached is not None and time.monotonic() - cached[0] <= max_age_s:
+        return [dict(r) for r in cached[1]]
+    out: list[dict[str, Any]] = []
+    for row in _list_spaces()[:_MAX_SPACES]:
+        space = str(row.get("space") or "")
+        if _SPACE_NAME.fullmatch(space):
+            out.append({
+                "space": space, "title": str(row.get("title") or "")[:200], "announce": bool(row.get("announce")),
+            })
+    _spaces_cache = (time.monotonic(), out)
+    return [dict(r) for r in out]
+
+
+def known_spaces() -> list[dict[str, Any]] | None:
+    """The last listing of the app's spaces, if one from the last few
+    minutes is at hand; never asks Google. For a card's wording."""
+    import time
+
+    cached = _spaces_cache
+    if cached is None or time.monotonic() - cached[0] > _KNOWN_FOR_S:
+        return None
+    return [dict(r) for r in cached[1]]
+
+
+def announce_space(spaces: list[dict[str, Any]] | None = None) -> str | None:
+    """Where company announcements go in Google Chat: ``GOOGLE_CHAT_DEFAULT_SPACE``,
+    else the app's only group space. None when there's no such space.
+    ``spaces`` is a listing already at hand. Synchronous."""
+    default = (get_settings().google_chat_default_space or "").strip()
+    if default:
+        if _SPACE_NAME.fullmatch(default):
+            return default
+        # Set but not a space name: never fall back to a space nobody chose.
+        logger.warning("GOOGLE_CHAT_DEFAULT_SPACE is not a space name (spaces/...)")
+        return None
+    spaces = group_spaces() if spaces is None else spaces
+    picked = next((s["space"] for s in spaces if s["announce"]), None)
+    if picked is not None:
+        return str(picked)
+    return str(spaces[0]["space"]) if len(spaces) == 1 else None
+
+
+def space_title(space: str, spaces: list[dict[str, Any]] | None = None) -> str:
+    """The name of one of the app's group spaces ("" when unnamed or not
+    one of them). Synchronous; raises when Google Chat can't be reached."""
+    spaces = group_spaces() if spaces is None else spaces
+    return next((str(s["title"]) for s in spaces if s["space"] == space), "")
+
+
+def post_to_space(space: str, text: str) -> None:
+    """Post a new message as the Chat app in one of its group spaces, never
+    a DM or a chat it isn't in. Chat's link markup is made inert, so the
+    post can't show words over a link that goes elsewhere. Synchronous."""
+    if not _SPACE_NAME.fullmatch(space or ""):
+        raise NotAppSpace("not a Google Chat space the app is in")
+    # A recent listing will do; a space it doesn't have is asked about again.
+    if space not in {s["space"] for s in group_spaces(max_age_s=300)} and space not in {
+        s["space"] for s in group_spaces()
+    }:
+        raise NotAppSpace("not a Google Chat space the app is in")
+    settings = get_settings()
+    send_reply(
+        space, "", card_safe(text),
+        settings.google_chat_service_account_file, settings.google_chat_service_account_email,
+    )
+
+
 # A card's button runs this function (``onClick.action.function``); its tap
 # comes back as a CARD_CLICKED event naming it, with the button's data
 # (``channel_cards.callback_data``) under ``_CARD_PARAM``.

@@ -258,17 +258,17 @@ def _label_for(tool_use: dict[str, Any]) -> tuple[str, str]:
         return FALLBACK_LABEL, ""
     if name == "call_tool":
         return _mcp_label(tool_use.get("input"))
-    return _LABELS.get(name) or _extension_label(name) or FALLBACK_LABEL, name
+    return _LABELS.get(name) or _extension_label(name, tool_use.get("input")) or FALLBACK_LABEL, name
 
 
-def _extension_label(name: Any) -> str | None:
-    """The activity line an installed extension's tool registered
-    (orchestrator/extensions.py), if any."""
+def _extension_label(name: Any, arguments: Any = None) -> str | None:
+    """The activity line of an installed extension's tool
+    (orchestrator/extensions.py) for this call, if it has one."""
     if not isinstance(name, str) or name in _LABELS:
         return None
     from openexecutive.orchestrator import extensions
 
-    return extensions.activity_label(name)
+    return extensions.activity_label(name, arguments)
 
 
 def _is_nameable(tool_use: dict[str, Any]) -> bool:

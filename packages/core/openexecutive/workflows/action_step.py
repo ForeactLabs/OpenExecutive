@@ -54,6 +54,7 @@ from typing import Any
 
 from openexecutive.agents.workflow_actor import WORKFLOW_ACTOR_AGENT_ID, WorkflowActorAgent
 from openexecutive.config import get_settings
+from openexecutive.orchestrator import turn_live
 from openexecutive.providers.translator import reasoning_replay_block
 from openexecutive.workflows import step_script, tool_catalog
 from openexecutive.workflows.approved_targets import approved_values, normalize_value
@@ -674,7 +675,10 @@ class _StepCalls:
                 content, is_error, outcome = HELD_TOOL_RESULT, False, "held for approval"
             else:
                 budget.used += 1
-                self._events.append(("progress", _counted(progress_line(name, arguments), budget)))
+                line = progress_line(name, arguments)
+                self._events.append(("progress", _counted(line, budget)))
+                # A run started from chat says it there as it happens.
+                turn_live.say(line)
                 from openexecutive.orchestrator import extensions
 
                 try:
@@ -1187,6 +1191,17 @@ def _words(name: str) -> str:
     return " ".join(name.replace("-", "_").split("_")).strip()
 
 
+def _described(name: str, arguments: Any) -> str | None:
+    """What a call of a built-in tool says it is doing, in its own plain
+    words (``extensions.described``), or None."""
+    from openexecutive.orchestrator import extensions
+    from openexecutive.workflows.tool_catalog import BUILTIN_PREFIX
+
+    if not name.startswith(BUILTIN_PREFIX):
+        return None
+    return extensions.described(name[len(BUILTIN_PREFIX):], arguments)
+
+
 def plain_tool_name(name: str) -> str:
     """A tool's name in plain words for the person reading a run: an app's
     tool reads "Google Workspace: get events", a built-in one "Send telegram
@@ -1211,7 +1226,7 @@ _PROGRESS_MAX = 80
 
 def progress_line(name: str, arguments: Any) -> str:
     """What a running step is doing, in plain words, for the run's progress
-    card: "Opening example.com…", 'Searching my inbox for "invoice"…'. Reads
+    card: "Opening example.com…", 'Searching my email for "invoice"…'. Reads
     the same wording as the chat's activity line, never the raw tool name.
     The arguments are the model's, and a label must never fail a run, so any
     error falls back to the tool's plain name."""
@@ -1229,6 +1244,9 @@ def _progress_line(name: str, arguments: Any) -> str:
 
     if name == step_script.RUN_SCRIPT_TOOL:
         return "Running a script…"
+    said = _described(name, arguments)
+    if said:
+        return said
     doing = ""
     if name.startswith(BUILTIN_PREFIX):
         bare = name[len(BUILTIN_PREFIX):]

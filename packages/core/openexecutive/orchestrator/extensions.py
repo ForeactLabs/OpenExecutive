@@ -139,6 +139,11 @@ class ExtraTool:
     private_row: bool = False
     # The chat's activity line while it runs ("Checking the draft…").
     activity_label: str | None = None
+    # What one call is doing, in plain words from its arguments ("Adding
+    # the blue hat to your cart"), shown in its place: in the chat, a
+    # workflow's progress and its report. None or "" keeps
+    # ``activity_label``; an error is the same as None.
+    describe: Callable[[dict[str, Any]], str | None] | None = None
     # Each call counts toward a workflow step's own call limit, even one a
     # step script makes (scripts otherwise get a larger allowance of their
     # own): for a tool whose every call is slow or acts somewhere, like the
@@ -346,11 +351,37 @@ def counts_on_step_budget(tool_name: str) -> bool:
     return tool is not None and tool.step_budget
 
 
-def activity_label(tool_name: str) -> str | None:
-    """The activity line extension tool ``tool_name`` registered, if any."""
+def activity_label(tool_name: str, arguments: Any = None) -> str | None:
+    """The activity line for a call of extension tool ``tool_name``, if it
+    has one: what this call is doing (``described``), else the line it
+    registered."""
     load()
     tool = _tools.get(tool_name)
-    return tool.activity_label if tool is not None else None
+    if tool is None:
+        return None
+    return described(tool_name, arguments) or tool.activity_label
+
+
+def described(tool_name: str, arguments: Any) -> str | None:
+    """What one call of extension tool ``tool_name`` is doing, in its own
+    plain words (``ExtraTool.describe``), as one line ending in "…", or None
+    when it doesn't say. Never raises."""
+    load()
+    tool = _tools.get(tool_name)
+    if tool is None or tool.describe is None or not isinstance(arguments, dict):
+        return None
+    try:
+        said = tool.describe(arguments)
+    except Exception:
+        logger.warning("extension_describe_failed tool=%s", tool_name, exc_info=True)
+        return None
+    from openexecutive.orchestrator import turn_live
+
+    return turn_live.plain_line(said, _DESCRIBED_MAX) or None
+
+
+# One line in the chat, the ellipsis included: an ``activity`` label's cap.
+_DESCRIBED_MAX = 60
 
 
 def workflow_tools() -> list[ExtraTool]:
@@ -542,6 +573,7 @@ __all__ = [
     "collection_for_tags",
     "collection_tag",
     "counts_on_step_budget",
+    "described",
     "get_collection",
     "has_chip",
     "in_workflow_step",

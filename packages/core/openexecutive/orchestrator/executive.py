@@ -53,6 +53,7 @@ from openexecutive.orchestrator import (
     take_the_lead,
     tool_groups,
     tool_images,
+    turn_live,
     turn_progress,
 )
 from openexecutive.orchestrator import pushback as pushback_mod
@@ -3420,10 +3421,22 @@ class Executive:
                     logger.info("→ skill:%s  input=%s", tu["name"], _log_value(tu["name"], tu["input"]))
                 # return_exceptions=True: one crashing handler must not abort
                 # the whole turn. See `_tool_error_result`.
-                skill_results = await asyncio.gather(
-                    *(turn_handlers[tu["name"]](tu["input"]) for tu in skill_tool_uses),
-                    return_exceptions=True,
-                )
+                # What a running tool says meanwhile (a workflow's steps)
+                # streams as it happens (orchestrator.turn_live).
+                # Bound only while the task is made (it copies the context),
+                # never across a yield.
+                feed = turn_live.Feed()
+                with feed.bound():
+                    skill_task = asyncio.ensure_future(asyncio.gather(
+                        *(turn_handlers[tu["name"]](tu["input"]) for tu in skill_tool_uses),
+                        return_exceptions=True,
+                    ))
+                # Closed here, so a turn that stops at a yield cancels the
+                # tools at once, not when the generator is collected.
+                async with contextlib.aclosing(feed.until(skill_task)) as live_events:
+                    async for live in live_events:
+                        yield live
+                skill_results = skill_task.result()
                 # `raw` rather than `result` so the narrowed value keeps the
                 # plain `str` type the rest of this function's loops use.
                 for tu, raw in zip(skill_tool_uses, skill_results, strict=True):

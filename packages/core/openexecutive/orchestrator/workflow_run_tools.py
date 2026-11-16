@@ -29,6 +29,7 @@ from typing import Any
 
 from openexecutive.audit import log_event as audit_log
 from openexecutive.audit.redaction import ERROR_DETAIL_LEN
+from openexecutive.orchestrator import turn_live
 from openexecutive.workflows import run_control
 
 logger = logging.getLogger(__name__)
@@ -492,6 +493,9 @@ async def handle_run_workflow(tool_input: dict[str, Any]) -> str:
                         "resumable": pause.resumable,
                     }
                     break
+                if event.type == "step_start" and event.step_title:
+                    # The chat follows the run step by step (turn_live).
+                    turn_live.say(event.step_title)
                 if event.type == "artifact" and event.content:
                     artifact = event.content
                 elif event.type == "result" and event.data and event.data.get("private_to_principal"):

@@ -31,9 +31,9 @@ from openexecutive.memory.drive_reads import parse_content_result
 # servers do not reuse a name for different things.
 _LABELS: dict[str, tuple[str, str]] = {
     # Mail
-    "search_gmail_messages": ("Searched my inbox", "Searching my inbox"),
-    "list_mail_messages": ("Searched my inbox", "Searching my inbox"),
-    "list_mail_folder_messages": ("Searched my inbox", "Searching my inbox"),
+    "search_gmail_messages": ("Searched my email", "Searching my email"),
+    "list_mail_messages": ("Searched my email", "Searching my email"),
+    "list_mail_folder_messages": ("Searched my email", "Searching my email"),
     "get_gmail_message_content": ("Read an email", "Reading an email"),
     "get_gmail_messages_content_batch": ("Read an email", "Reading an email"),
     "get_gmail_thread_content": ("Read an email", "Reading an email"),
@@ -57,7 +57,7 @@ _LABELS: dict[str, tuple[str, str]] = {
     "update_mail_message": ("Updated an email", "Updating an email"),
     "delete_mail_message": ("Deleted an email", "Deleting an email"),
     "modify_gmail_message_labels": ("Labeled an email", "Labeling an email"),
-    "list_gmail_labels": ("Checked my mail labels", "Checking my mail labels"),
+    "list_gmail_labels": ("Checked my email folders", "Checking my email folders"),
     # Files
     "search_drive_files": ("Searched Drive", "Searching Drive"),
     "list_drive_items": ("Searched Drive", "Searching Drive"),
@@ -136,6 +136,22 @@ _VERBS: dict[str, tuple[str, str]] = {
     "copy": ("Copied", "Copying"),
 }
 
+# A mail search that looks only at sent mail says so: "my email" would hide
+# that it is checking what was sent.
+_MAIL_SEARCHES = frozenset({
+    "search_gmail_messages", "list_mail_messages", "list_mail_folder_messages",
+})
+_SENT_LABELS = ("Checked email I sent", "Checking email I sent")
+# Gmail's sent operators, and Microsoft 365's Sent Items folder by name.
+_SENT_RE = re.compile(r"(?<![\w-])(?:in:sent|label:sent|from:me)(?=[\s)]|$)|^sent ?items$", re.IGNORECASE)
+# A query that also reaches other mail ("in:sent OR in:inbox", "{…}", a
+# "NOT", another folder or label, or excluding sent) stays
+# "my email": a wrong "email I sent" is worse than the plain line.
+_ANY_OF_RE = re.compile(
+    r"\sOR\s|\bNOT\b|[{}]|(?<![\w-])(?:in|label):(?!sent(?=[\s)]|$))|(?<![\w])-(?:in|label):sent",
+    re.IGNORECASE,
+)
+
 GENERIC_DONE = "Used a connected tool"
 GENERIC_DOING = "Using a connected tool"
 
@@ -174,12 +190,30 @@ def _clean(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
+def _searches_sent(arguments: Any) -> bool:
+    """Whether a mail search's arguments limit it to sent mail."""
+    if not isinstance(arguments, dict):
+        return False
+    texts = [value for value in arguments.values() if isinstance(value, str)]
+    if any(_ANY_OF_RE.search(text) for text in texts):
+        return False
+    # A folder argument that names another folder ("Inbox") reaches other mail.
+    for key, value in arguments.items():
+        if (
+            isinstance(value, str) and "folder" in key.lower() and value.strip()
+            and not _SENT_RE.search(value.strip())
+        ):
+            return False
+    return any(_SENT_RE.search(text.strip()) for text in texts)
+
+
 def labels_for(raw_name: Any, arguments: Any = None) -> tuple[str, str]:
     """(done, doing) phrases for an MCP tool name. Never returns the raw name.
 
     `arguments` matters only for a tool whose action depends on them, such
     as Google's `manage_event`, which also deletes: a deletion must not read
-    as "Updated my calendar".
+    as "Updated my calendar". A mail search limited to sent mail reads as
+    "Checking email I sent".
     """
     if not isinstance(raw_name, str) or not raw_name.strip():
         return GENERIC_DONE, GENERIC_DOING
@@ -190,6 +224,8 @@ def labels_for(raw_name: Any, arguments: Any = None) -> tuple[str, str]:
         and str(arguments.get("action", "")).lower() == "delete"
     ):
         return _LABELS["delete_calendar_event"]
+    if tool in _MAIL_SEARCHES and _searches_sent(arguments):
+        return _SENT_LABELS
     if tool in _LABELS:
         return _LABELS[tool]
     words = [w for w in tool.split("_") if w]

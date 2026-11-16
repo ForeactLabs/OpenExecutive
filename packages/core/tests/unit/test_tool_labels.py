@@ -15,7 +15,7 @@ from openexecutive.orchestrator.activity_labels import summarize_activity
     [
         ("google_workspace__search_drive_files", "Searched Drive", "Searching Drive"),
         ("google_workspace__get_drive_file_content", "Read a Drive file", "Reading a Drive file"),
-        ("google_workspace__search_gmail_messages", "Searched my inbox", "Searching my inbox"),
+        ("google_workspace__search_gmail_messages", "Searched my email", "Searching my email"),
         ("microsoft_365__get-mail-message", "Read an email", "Reading an email"),
         ("microsoft_365__list-calendar-events", "Checked my calendar", "Checking my calendar"),
         ("google_workspace__manage_event", "Updated my calendar", "Updating my calendar"),
@@ -150,4 +150,44 @@ def test_a_calendar_delete_through_manage_event_says_so() -> None:
     assert activity["label"] == "Removing a calendar event…"
     assert tool_labels.labels_for("google_workspace__manage_event", {"action": "update"})[0] == (
         "Updated my calendar"
+    )
+
+
+@pytest.mark.parametrize(
+    ("raw", "arguments"),
+    [
+        ("google_workspace__search_gmail_messages", {"query": "in:sent to:dan@example.com"}),
+        ("google_workspace__search_gmail_messages", {"query": "from:me newer_than:2d"}),
+        ("microsoft_365__list-mail-folder-messages", {"mailFolderId": "sentitems"}),
+        ("microsoft_365__list-mail-folder-messages", {"mailFolderId": "Sent Items"}),
+    ],
+)
+def test_a_search_of_sent_mail_says_so(raw: str, arguments: dict[str, str]) -> None:
+    assert tool_labels.labels_for(raw, arguments) == (
+        "Checked email I sent",
+        "Checking email I sent",
+    )
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"query": "invoice"},
+        {"query": "-in:sent invoice"},
+        {"query": "sent items report"},
+        {"query": "from:me.smith@example.com"},
+        {"query": "from:me@example.com"},
+        {"query": "in:sent OR in:inbox"},
+        {"query": "{in:sent in:inbox}"},
+        {"query": "NOT in:sent"},
+        {"query": "in:inbox from:me"},
+        {"query": "from:me -in:sent"},
+        {"query": "in:sent", "folder": "Inbox"},
+        None,
+    ],
+)
+def test_any_other_mail_search_is_my_email(arguments: dict[str, str] | None) -> None:
+    assert tool_labels.labels_for("google_workspace__search_gmail_messages", arguments) == (
+        "Searched my email",
+        "Searching my email",
     )

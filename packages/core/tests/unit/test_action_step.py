@@ -591,7 +591,7 @@ def test_progress_says_what_a_tool_is_doing_in_plain_words() -> None:
     from openexecutive.workflows.action_step import progress_line
 
     assert progress_line("google_workspace__search_gmail_messages", {"query": "invoice"}) == (
-        'Searching my inbox for "invoice"…'
+        'Searching my email for "invoice"…'
     )
     assert progress_line("oe__send_telegram_message", {"text": "hi"}) == "Sending a Telegram message…"
     assert progress_line("hubspot__create_contact", {"name": "Ada"}) == "Creating contact: Ada · Hubspot…"
