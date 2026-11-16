@@ -7,13 +7,6 @@ import type { DepartmentBriefItem, PersonBriefItem } from "@/lib/api";
 
 import { Chip, ClickableBriefingItem, PanelIntro, TONE_TEXT, formatRelTime, type ContinueHandler } from "./shared";
 
-// The Approvals level each department's work runs at.
-const APPROVALS_LABELS: Record<string, string> = {
-  auto_execute: "Hands-off",
-  propose_only: "Balanced",
-  escalate: "Careful",
-};
-
 // The team-only side panels behind Home's Departments and People tiles.
 
 export function DeptCard({
@@ -42,7 +35,7 @@ export function DeptCard({
         <div className="text-base font-semibold text-fg group-hover:text-accent transition-colors" title={dept.title}>
           {dept.title}
         </div>
-        <span className="flex-shrink-0 text-xs text-fg-muted">{APPROVALS_LABELS[dept.authority_level] ?? dept.authority_level.replace("_", " ")}</span>
+        <span className="flex-shrink-0 text-xs text-fg-muted">{dept.approvals}</span>
       </div>
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className="text-fg-muted">

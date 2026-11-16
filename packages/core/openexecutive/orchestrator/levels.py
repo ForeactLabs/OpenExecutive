@@ -7,7 +7,7 @@ AI app, a shared chat and scheduled work.
 
 The checks that notice why a step might wait (a read that tried to give
 orders, the owner's own mail read this turn, a turn private to the owner,
-a shared chat a teammate wrote into, an AI app's turn, a tool that changes
+a shared chat a teammate wrote into, a page in another app, a tool that changes
 the install) only *detect*. This module decides, in one place
 (``decide``), and the dispatch guard in ``orchestrator.executive`` does what
 it says:
@@ -18,9 +18,10 @@ it says:
   (only a read the check flagged): the outside-content check is the
   level's.
 - **Whose level**: the level belongs to whoever is asking. The owner's
-  turns and a teammate's turns (a shared chat they wrote in included) run
-  at the company's level. Someone not in People (mail from a stranger, a
-  page in another app, an AI app that isn't the owner's) gives no one's
+  turns and a teammate's turns (a shared chat they wrote in included, and
+  an AI app they signed in to, which is them) run at the company's level.
+  Someone not in People (mail from a stranger, a page in another app, an AI
+  app signed in as no one) gives no one's
   level: what they ask for comes to the owner as an Approve card on every
   level, as does a tool only the owner may use on anyone else's turn.
 
@@ -61,7 +62,9 @@ OWN_MAIL = "mail_touched"
 MAIL_FLAGGED = "mail_flagged"
 PRIVATE = "private_turn"
 SHARED = "shared_chat"
-AI_APP = "mcp_client"
+# A turn that may only read and advise (``schedule_tools.read_only_turn``):
+# a page in another app, or a scheduled run a teammate queued.
+READ_ONLY = "read_only_turn"
 NOT_OWNER = "not_principal"
 UNATTENDED = "unattended"
 STRANGER = "stranger_mail"
@@ -73,7 +76,7 @@ SCRIPT = "apps_script"
 # (``browser.tools``), where it can send a message.
 SEND_SITE = "send_site"
 REASONS: frozenset[str] = frozenset({
-    OUTSIDE, OUTSIDE_READ, OWN_MAIL, MAIL_FLAGGED, PRIVATE, SHARED, AI_APP, NOT_OWNER, UNATTENDED, STRANGER,
+    OUTSIDE, OUTSIDE_READ, OWN_MAIL, MAIL_FLAGGED, PRIVATE, SHARED, READ_ONLY, NOT_OWNER, UNATTENDED, STRANGER,
     NEW_PERSON, FILE_PLACE, URL_FETCH, SCRIPT, SEND_SITE,
 })
 
@@ -85,7 +88,7 @@ _WHY: dict[str, str] = {
     MAIL_FLAGGED: "something it read looked like it was trying to give it instructions",
     PRIVATE: "it came from mail that's private to you",
     SHARED: "someone else wrote in this shared chat",
-    AI_APP: "another AI app asked for it",
+    READ_ONLY: "it was asked from a page in another app or a run queued for someone else",
     NOT_OWNER: "it changes how your Executive is set up",
     UNATTENDED: "it came up while nobody was chatting",
     STRANGER: "someone outside your team asked for it",
@@ -231,11 +234,7 @@ def decide(reason: str, *, mode: str | None = None) -> str:
     try:
         # Someone not in People has no level of their own, and a tool only
         # the owner may use is theirs alone: a card on every level.
-        if reason in (STRANGER, NOT_OWNER):
-            return CARD
-        if reason == AI_APP and not _owners_ai_app():
-            # The owner's own AI app, signed in as them and allowed to act,
-            # follows their level like the web app; any other is a card.
+        if reason in (STRANGER, NOT_OWNER, READ_ONLY):
             return CARD
         current = mode if mode is not None else turn_level()
         if current == outside_mode.TRUST:
@@ -248,8 +247,8 @@ def decide(reason: str, *, mode: str | None = None) -> str:
 
 def unrostered_speaker(session: Any) -> bool:
     """Whether someone not in People is speaking on this turn: a web sign-in
-    on nobody's People entry (or an archived one), or a chat-app sender
-    matched to no one. They have no level of their own, so what they ask to
+    on nobody's People entry (or an archived one), an AI app signed in as no
+    one, or a chat-app sender matched to no one. They have no level of their own, so what they ask to
     send or change is the owner's to approve (``STRANGER``). Email is left
     out: its sender is marked by ``outside_content`` instead. Never raises:
     an error is someone not in People."""
@@ -265,6 +264,11 @@ def unrostered_speaker(session: Any) -> bool:
         if person_id is None:
             if getattr(session, "from_web_chat", False) is True:
                 return getattr(session, "web_caller_signed_in", False) is True
+            if getattr(session, "from_mcp_client", False) is True:
+                # An AI app signed in as no one (a service, or a sign-in on
+                # nobody's entry): ``mcp_server`` names the principal itself
+                # when the request names no one in open mode.
+                return True
             channel = str(getattr(session, "origin_channel", "") or "")
             return bool(channel) and channel != "email"
         from openexecutive.people.store import get_person
@@ -291,12 +295,6 @@ def acts(tool: str, tool_input: Any) -> bool:
     except Exception:
         return True
 
-
-def _owners_ai_app() -> bool:
-    from openexecutive.orchestrator import outside_mode
-    from openexecutive.orchestrator.schedule_tools import current_session
-
-    return outside_mode.owners_ai_app(current_session.get())
 
 
 _OWNER_SEND_TOOLS = frozenset({"google_workspace__send_gmail_message"})
@@ -393,7 +391,7 @@ def _approver(requester: Any, reason: str, tool: str, tool_input: dict[str, Any]
 
     try:
         if (
-            reason not in (STRANGER, NOT_OWNER, AI_APP)
+            reason not in (STRANGER, NOT_OWNER, READ_ONLY)
             and getattr(requester, "id", None) is not None
             and getattr(requester, "is_principal", False) is not True
             and getattr(requester, "kind", "") == "team"

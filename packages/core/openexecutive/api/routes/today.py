@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field
 
 from openexecutive.briefing.value_summary import ValueSummary
 from openexecutive.clients.cockpit import ClientCockpitCard, format_practice_for_today
-from openexecutive.departments import authority as dept_authority
+from openexecutive.departments.models import AuthorityLevel
 
 if TYPE_CHECKING:
     from openexecutive.alerts.models import Alert
@@ -85,6 +85,9 @@ class DepartmentBriefItem(BaseModel):
     slug: str
     title: str
     authority_level: str
+    # Its Approvals level by name (Careful, Balanced, Hands-off); "" for the
+    # row of goals with no department.
+    approvals: str = ""
     goal_count: int
     at_risk_count: int
     off_track_count: int
@@ -1089,6 +1092,7 @@ def _build_today(
             slug=slug,
             title=title,
             authority_level=authority_level,
+            approvals=AuthorityLevel(authority_level).label if authority_level else "",
             goal_count=sum(1 for g in goals if g.status != "done"),
             at_risk_count=sum(1 for g in goals if g.status == "at_risk"),
             off_track_count=sum(1 for g in goals if g.status == "off_track"),
@@ -1110,7 +1114,7 @@ def _build_today(
         )
 
     dept_items = [
-        _brief_row(ds.config.slug, ds.config.title, dept_authority.department_level(ds.config.slug).value, ds.goals)
+        _brief_row(ds.config.slug, ds.config.title, ds.config.authority_level, ds.goals)
         for ds in depts
     ]
     unassigned = [v.goal for v in views if not v.goal.department_slug]
@@ -1755,7 +1759,7 @@ def _build_activity(
     propose_only_depts = {
         d.config.slug
         for d in dept_store.list_departments()
-        if dept_authority.department_level(d.config.slug) == "propose_only"
+        if d.config.authority_level == "propose_only"
     }
 
     from openexecutive.alerts.models import PERSONAL_SOURCES, is_private_alert, visible_alert

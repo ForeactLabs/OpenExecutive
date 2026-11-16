@@ -303,7 +303,7 @@ def test_the_tool_is_offered_in_chat_and_withheld_where_nobody_is_there() -> Non
     assert executive._private_tool_row("keep_figure")
     assert "keep_figure" in schedule_tools.UNATTENDED_WITHHELD_TOOLS
     assert "keep_figure" in schedule_tools.PRIVATE_TURN_WITHHELD_TOOLS
-    assert "keep_figure" in schedule_tools.MCP_CLIENT_WITHHELD_TOOLS
+    assert "keep_figure" in schedule_tools.READ_ONLY_WITHHELD_TOOLS
 
 
 def test_both_chat_paths_read_and_keep_figures() -> None:

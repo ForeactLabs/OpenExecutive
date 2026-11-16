@@ -111,18 +111,9 @@ class DepartmentDetail(DepartmentState):
     next_check_in_at: str | None = None
 
 
-def _with_level(state: DepartmentState) -> DepartmentState:
-    """``state`` showing the level its work runs at: Approvals
-    (``authority.department_level``), not the "How it acts" it once stored."""
-    from openexecutive.departments.authority import department_level
-
-    config = state.config.model_copy(update={"authority_level": department_level(state.config.slug)})
-    return state.model_copy(update={"config": config})
-
-
 def _detail(state: DepartmentState) -> DepartmentDetail:
     return DepartmentDetail(
-        **_with_level(state).model_dump(),
+        **state.model_dump(),
         next_check_in_at=next_check_in_at(state.config.slug),
     )
 
@@ -202,7 +193,7 @@ def list_departments() -> list[DepartmentState]:
     """List all departments with their Goals."""
     # Read straight through the store (not the cache) so the API view is always
     # fresh; the registry cache is for the per-turn prompt-block path only.
-    return [_with_level(state) for state in store.list_departments()]
+    return store.list_departments()
 
 
 @router.get("/departments/{slug}", response_model=DepartmentDetail)

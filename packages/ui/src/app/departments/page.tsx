@@ -17,13 +17,6 @@ import { goalCounts } from "@/lib/goalGroups";
 import { PageSpinner } from "@/components/ui/Spinner";
 import { isImeComposing } from "@/lib/imeComposing";
 
-// The Approvals level each department's work runs at.
-const AUTHORITY_LABELS: Record<string, string> = {
-  auto_execute: "Hands-off",
-  propose_only: "Balanced",
-  escalate: "Careful",
-};
-
 const AUTHORITY_DOT: Record<string, string> = {
   auto_execute: "bg-emerald-500",
   propose_only: "bg-sky-500",
@@ -163,7 +156,7 @@ export default function DepartmentsPage() {
                     </div>
                     <span className="flex-shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-line text-[13px] font-medium text-fg">
                       <span aria-hidden="true" className={`h-2 w-2 rounded-full ${AUTHORITY_DOT[cfg.authority_level] ?? "bg-fg-subtle"}`} />
-                      {AUTHORITY_LABELS[cfg.authority_level] ?? cfg.authority_level}
+                      {cfg.approvals}
                     </span>
                   </div>
                   <div className="text-[15px] text-fg-muted mt-1.5">{cfg.charter.mission.slice(0, 80)}{cfg.charter.mission.length > 80 ? "…" : ""}</div>

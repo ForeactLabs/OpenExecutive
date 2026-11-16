@@ -7,8 +7,8 @@ type, pick, scroll and open pages there, in a loop, until a task is done ("fill 
 "set the Northwind deal to Negotiation"). Each tool puts one step on the
 person's own relay (``browser.relay``) and returns what happened.
 
-Offered on a web chat turn (and on any other kind of turn an install adds to
-``SURFACES``), to someone on the People list, in the ``browser`` tool group
+Offered on a web chat turn and an AI app's turn over Open Executive's MCP
+server (and on any other kind of turn an install adds to ``SURFACES``), to someone on the People list, in the ``browser`` tool group
 (when their extension isn't connected, each tool says how to connect it),
 so the direct tool list stays the same. The steps go to the browser of the
 person whose turn it is, never anyone else's.
@@ -915,11 +915,11 @@ def _handler(name: str) -> Any:
 
 
 def surface_ok(session: Any) -> bool:
-    """A web chat turn (not a host page's or another AI app's), or a kind of
-    turn an install added to ``SURFACES``."""
-    if getattr(session, "from_host", False) is True or getattr(session, "from_mcp_client", False) is True:
+    """A web chat turn (not a host page's), an AI app's turn (the person
+    signed in to it), or a kind of turn an install added to ``SURFACES``."""
+    if getattr(session, "from_host", False) is True:
         return False
-    if getattr(session, "from_web_chat", False) is True:
+    if getattr(session, "from_web_chat", False) is True or getattr(session, "from_mcp_client", False) is True:
         return True
     for check in SURFACES:
         try:

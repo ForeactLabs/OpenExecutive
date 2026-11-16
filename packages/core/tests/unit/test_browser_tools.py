@@ -101,7 +101,8 @@ def test_offered_on_web_chat_connected_or_not() -> None:
     assert not browser_tools.offered(_session(from_web_chat=False, origin_channel="kiosk", origin_channel_ref="app:abc"))
     assert not browser_tools.offered(_session(from_web_chat=False, origin_channel="slack"))
     assert not browser_tools.offered(_session(from_host=True))
-    assert not browser_tools.offered(_session(from_mcp_client=True))
+    # Another AI app is the person signed in to it.
+    assert browser_tools.offered(_session(from_web_chat=False, from_mcp_client=True))
     assert not browser_tools.offered(_session(caller_person_id=None))
 
 
@@ -700,9 +701,8 @@ def test_an_install_can_add_a_kind_of_turn(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(browser_tools, "SURFACES", [broken, call])
     assert browser_tools.offered(_session(from_web_chat=False, origin_channel="kiosk", origin_channel_ref="app:abc"))
     assert not browser_tools.offered(_session(from_web_chat=False, origin_channel="kiosk", origin_channel_ref="bot:1"))
-    # Never on a host page's turn or another AI app's, whatever an install adds.
+    # Never on a host page's turn, whatever an install adds.
     assert not browser_tools.offered(_session(from_host=True, origin_channel_ref="app:abc"))
-    assert not browser_tools.offered(_session(from_mcp_client=True, origin_channel_ref="app:abc"))
 
 
 async def test_a_chat_works_beside_the_chat_and_another_turn_in_their_window(

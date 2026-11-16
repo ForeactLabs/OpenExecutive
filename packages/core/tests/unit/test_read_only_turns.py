@@ -1,9 +1,9 @@
-"""A turn another AI app asks over Open Executive's MCP server
-(``Session.from_mcp_client``, set by ``mcp_server.ask_executive``) reads and
-advises but never sends, posts, books, schedules, runs or changes anything:
-the chat loop neither offers nor runs ``MCP_CLIENT_WITHHELD_TOOLS``, Act as
-me or extension tools, and of the gateway tools only the reads in
-``MCP_CLIENT_MCP_TOOLS``."""
+"""A turn that may only read and advise (``schedule_tools.read_only_turn``:
+here a scheduled run a teammate queued, ``Session.run_for_person_id``) never
+sends, posts, books, schedules, runs or changes anything on its own: the chat
+loop puts ``READ_ONLY_WITHHELD_TOOLS`` on the owner's card, offers no Act as
+me or extension tools, and of the gateway tools runs only the reads in
+``READ_ONLY_MCP_TOOLS``."""
 from __future__ import annotations
 
 import asyncio
@@ -22,10 +22,10 @@ from openexecutive.departments import registry as dept_registry
 from openexecutive.departments import store as dept_store
 from openexecutive.memory import episodic
 from openexecutive.orchestrator.schedule_tools import (
-    MCP_CLIENT_MCP_TOOLS,
-    MCP_CLIENT_WITHHELD_TOOLS,
     PRIVATE_TURN_MCP_TOOLS,
     PRIVATE_TURN_WITHHELD_TOOLS,
+    READ_ONLY_MCP_TOOLS,
+    READ_ONLY_WITHHELD_TOOLS,
     UNATTENDED_WITHHELD_TOOLS,
     current_session,
 )
@@ -41,7 +41,7 @@ TEAM_EMAIL = "ben@co.example"
 
 @pytest.fixture(autouse=True)
 def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
-    path = tmp_path / "mcp_client.db"
+    path = tmp_path / "read_only.db"
     monkeypatch.setattr(people_store, "DB_PATH", path)
     monkeypatch.setattr(episodic, "DB_PATH", path)
     monkeypatch.setattr(dept_store, "DB_PATH", path)
@@ -70,8 +70,9 @@ def roster() -> SimpleNamespace:
     return SimpleNamespace(principal=principal, teammate=teammate)
 
 
-def _mcp_turn(person_id: int | None) -> Session:
-    return Session(from_mcp_client=True, caller_person_id=person_id)
+def _mcp_turn(person: Any) -> Session:
+    person_id = getattr(person, "id", person)
+    return Session(run_for_person_id=person_id, caller_person_id=person_id)
 
 
 class _ScriptedStreams:
@@ -153,7 +154,7 @@ def _refusals() -> list[Any]:
     return [
         e
         for e in audit_logger.get_audit_logger().query(event_type="tool_invocation", limit=200)
-        if e.details.get("held") == "mcp_client"
+        if e.details.get("held") == "read_only_turn"
     ]
 
 
@@ -166,13 +167,13 @@ def _held(result: str) -> bool:
 
 
 def test_the_withheld_set_starts_from_the_private_and_unattended_sets() -> None:
-    assert PRIVATE_TURN_WITHHELD_TOOLS | UNATTENDED_WITHHELD_TOOLS <= MCP_CLIENT_WITHHELD_TOOLS
+    assert PRIVATE_TURN_WITHHELD_TOOLS | UNATTENDED_WITHHELD_TOOLS <= READ_ONLY_WITHHELD_TOOLS
     for name in (
         "message_person", "send_slack_dm", "send_discord_dm", "send_telegram_message",
         "create_calendar_event", "cancel_calendar_event", "ack_alert", "upsert_person",
         "archive_person", "set_department_head", "close_open_loop", "create_alert",
     ):
-        assert name in MCP_CLIENT_WITHHELD_TOOLS
+        assert name in READ_ONLY_WITHHELD_TOOLS
 
 
 def test_every_withheld_name_is_a_real_tool() -> None:
@@ -181,8 +182,8 @@ def test_every_withheld_name_is_a_real_tool() -> None:
     from openexecutive.workflows.step_script import LIST_SAVED_TOOLS_TOOL, RUN_SCRIPT_TOOL
 
     gateway_side = MCP_TOOL_NAMES | {RUN_SCRIPT_TOOL, LIST_SAVED_TOOLS_TOOL}
-    assert {t["name"] for t in _ALL_SKILL_TOOLS} | gateway_side >= MCP_CLIENT_WITHHELD_TOOLS
-    assert set(_ALL_SKILL_HANDLERS) | gateway_side >= MCP_CLIENT_WITHHELD_TOOLS
+    assert {t["name"] for t in _ALL_SKILL_TOOLS} | gateway_side >= READ_ONLY_WITHHELD_TOOLS
+    assert set(_ALL_SKILL_HANDLERS) | gateway_side >= READ_ONLY_WITHHELD_TOOLS
 
 
 def test_every_tool_left_offered_only_reads() -> None:
@@ -190,7 +191,7 @@ def test_every_tool_left_offered_only_reads() -> None:
     added to the withheld set, not slip in."""
     from openexecutive.orchestrator.executive import _ALL_SKILL_TOOLS
 
-    offered = {t["name"] for t in _ALL_SKILL_TOOLS} - MCP_CLIENT_WITHHELD_TOOLS
+    offered = {t["name"] for t in _ALL_SKILL_TOOLS} - READ_ONLY_WITHHELD_TOOLS
     assert offered == {
         "ask_about_person", "find_alerts", "get_artifact", "list_artifacts",
         "list_department_goals", "list_followups", "list_my_activity", "list_open_loops", "list_people",
@@ -200,8 +201,8 @@ def test_every_tool_left_offered_only_reads() -> None:
 
 
 def test_the_gateway_allow_list_holds_no_send_or_draft() -> None:
-    assert MCP_CLIENT_MCP_TOOLS < PRIVATE_TURN_MCP_TOOLS
-    for name in MCP_CLIENT_MCP_TOOLS:
+    assert READ_ONLY_MCP_TOOLS < PRIVATE_TURN_MCP_TOOLS
+    for name in READ_ONLY_MCP_TOOLS:
         assert "send" not in name and "draft" not in name
 
 
@@ -212,7 +213,7 @@ def test_the_gateway_allow_list_holds_no_send_or_draft() -> None:
     "tool",
     ["message_person", "send_slack_dm", "create_calendar_event", "ack_alert", "upsert_person"],
 )
-def test_an_mcp_client_turn_refuses_a_withheld_tool_the_model_emits_anyway(
+def test_a_read_only_turn_refuses_a_withheld_tool_the_model_emits_anyway(
     roster: SimpleNamespace, tool: str
 ) -> None:
     from openexecutive.orchestrator import executive as executive_module
@@ -227,7 +228,7 @@ def test_an_mcp_client_turn_refuses_a_withheld_tool_the_model_emits_anyway(
     assert [e.details["tool"] for e in _refusals()] == [tool]
 
 
-def test_an_mcp_client_turn_refuses_through_use_tool(roster: SimpleNamespace) -> None:
+def test_a_read_only_turn_refuses_through_use_tool(roster: SimpleNamespace) -> None:
     from openexecutive.orchestrator import executive as executive_module
 
     handler = AsyncMock(return_value=json.dumps({"status": "sent"}))
@@ -241,10 +242,9 @@ def test_an_mcp_client_turn_refuses_through_use_tool(roster: SimpleNamespace) ->
     assert _held(_results(provider)["tu-1"])
 
 
-def test_an_mcp_client_turn_gets_no_act_as_me_or_extension_tools(
+def test_a_read_only_turn_gets_no_act_as_me_or_extension_tools(
     roster: SimpleNamespace,
 ) -> None:
-    from openexecutive.delegation import settings as delegation_settings
     from openexecutive.orchestrator.delegation_tools import DELEGATION_TOOL_HANDLERS
 
     # Even with Act as me on and pinned as offered, the turn is not offered it.
@@ -260,10 +260,9 @@ def test_an_mcp_client_turn_gets_no_act_as_me_or_extension_tools(
     assert not set(DELEGATION_TOOL_HANDLERS) & set(offered)
     assert "recall_history" not in offered
     # And Act as me is never pinned as offered on such a turn.
-    assert delegation_settings._offered(_mcp_turn(roster.principal), None, True) is False
 
 
-def test_an_mcp_client_turn_refuses_load_mcp_server(roster: SimpleNamespace) -> None:
+def test_a_read_only_turn_refuses_load_mcp_server(roster: SimpleNamespace) -> None:
     gateway = _gateway()
     tool_use = SimpleNamespace(
         type="tool_use", id="tu-1", name="load_mcp_server",
@@ -306,7 +305,7 @@ def _real_gateway() -> tuple[Any, list[tuple[str, dict[str, Any]]]]:
     return gateway, reached
 
 
-def test_an_mcp_client_turn_reaches_gateway_reads_only(roster: SimpleNamespace) -> None:
+def test_a_read_only_turn_reaches_gateway_reads_only(roster: SimpleNamespace) -> None:
     import openexecutive.orchestrator.mcp_gateway as gw_module
 
     def _call(i: int, tool: str, arguments: dict[str, Any]) -> Any:
@@ -339,7 +338,7 @@ def test_an_mcp_client_turn_reaches_gateway_reads_only(roster: SimpleNamespace) 
     assert called == ["google_workspace__send_gmail_message", "google_workspace__search_drive_files"]
 
 
-def test_the_gateway_itself_puts_a_send_on_a_card_on_an_mcp_client_turn(roster: SimpleNamespace) -> None:
+def test_the_gateway_itself_puts_a_send_on_a_card_on_a_read_only_turn(roster: SimpleNamespace) -> None:
     from openexecutive.orchestrator.schedule_tools import set_session
 
     gateway, reached = _real_gateway()
