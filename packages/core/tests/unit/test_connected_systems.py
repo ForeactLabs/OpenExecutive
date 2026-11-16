@@ -193,7 +193,7 @@ def test_google_chat_app_says_how_people_reach_it(channel_env: pytest.MonkeyPatc
     # Google's away summary isn't the app failing.
     assert "own Google account never reaches you" in line
     assert '"messaged you while you were away"' in line
-    assert "tell that person these steps yourself" in line
+    assert "tell them these steps yourself" in line
     assert "1234" not in line
 
 

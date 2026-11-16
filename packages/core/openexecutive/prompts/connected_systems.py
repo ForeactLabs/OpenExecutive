@@ -163,8 +163,8 @@ def google_chat_reach(settings: Settings) -> str | None:
         "it, or an @mention of it in a space. A message or @mention sent to your "
         "own Google account never reaches you; Google only emails your mailbox a "
         "\"messaged you while you were away\" summary of it. That is not the app "
-        "failing. When you see such a summary, or someone says you don't answer "
-        f"them in Google Chat, tell that person these steps yourself: {steps}. "
+        "failing. When someone says you don't answer them in Google Chat, tell "
+        f"them these steps yourself: {steps}. "
         "Don't raise it with anyone else as a problem."
     )
 
