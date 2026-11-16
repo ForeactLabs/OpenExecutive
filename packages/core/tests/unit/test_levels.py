@@ -136,6 +136,9 @@ def test_a_step_that_cant_be_carried_out_is_told_not_dropped() -> None:
     assert "run_script" in out["error"] and "can't wait on a card" in out["error"]
     assert levels.carriable("google_workspace__send_gmail_message", mcp=True)
     assert not levels.carriable("not_a_tool", mcp=False)
+    # A step only the turn reads is never put on a card, whatever it is.
+    for tool in ("run_python_job", "read_document", "find_in_app", "list_saved_tools"):
+        assert tool in levels.TURN_OWN and not levels.carriable(tool, mcp=False)
 
 
 def test_hold_returns_the_card_and_the_chip_carries_it(monkeypatch: pytest.MonkeyPatch) -> None:

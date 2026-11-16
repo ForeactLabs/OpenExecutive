@@ -213,7 +213,7 @@ async def _read_path(resolved: Path, tool_input: dict[str, Any]) -> str:
     if start >= total:
         return _err(f"that file has only {total} characters")
     head = "".join(header)
-    end = start + max(500, get_settings().tool_result_max_chars - len(head) - _NOTES_ROOM)
+    end = start + max(1, get_settings().tool_result_max_chars - len(head) - _NOTES_ROOM)
     text = result.text[start:end]
     if start:
         text = f"…[from character {start} of {total}]\n" + text
