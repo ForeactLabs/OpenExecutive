@@ -3411,6 +3411,8 @@ class Executive:
                 # the whole turn. See `_tool_error_result`.
                 # What a running tool says meanwhile (a workflow's steps)
                 # streams as it happens (orchestrator.turn_live).
+                # Bound only while the task is made (it copies the context),
+                # never across a yield.
                 feed = turn_live.Feed()
                 with feed.bound():
                     skill_task = asyncio.ensure_future(asyncio.gather(

@@ -369,7 +369,8 @@ def test_a_tool_can_say_what_each_call_does_in_plain_words() -> None:
     )
     # A workflow's progress and its report say the same.
     assert progress_line("oe__make_widget", said) == "Making the blue widget for Dana…"
-    assert action_name("oe__make_widget", said) == "Making the blue widget for Dana"
+    # The report keeps the kind of call beside the model's words.
+    assert action_name("oe__make_widget", said) == "Make widget: Making the blue widget for Dana"
     assert action_name("oe__make_widget", {}) == "Make widget"
 
 

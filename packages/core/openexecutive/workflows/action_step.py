@@ -975,7 +975,7 @@ async def run_action_step(
 
     # Out of turns without a final report: the goal may be half done, so this
     # is a failure — but say exactly what was already done.
-    done = ", ".join(f"{plain_tool_name(name)} ({outcome})" for name, outcome in actions) or "nothing"
+    done = ", ".join(f"{label} ({outcome})" for label, outcome in actions) or "nothing"
     yield (
         "error",
         f"step {step.id!r} did not finish within its turn limit; tools already "
@@ -1203,14 +1203,16 @@ def _described(name: str, arguments: Any) -> str | None:
 
 
 def action_name(name: str, arguments: Any) -> str:
-    """How a run's report names one call: what it did, in the tool's own
-    plain words when it says ("Adding the blue hat to your cart"), else the
-    tool's plain name. Never raises."""
+    """How a run's report names one call: the tool's plain name, with what
+    it did in the tool's own plain words when it says ("Browser click:
+    Adding the blue hat to your cart"). The model writes those words, so
+    the kind of call stays beside them. Never raises."""
     try:
         said = _described(name, arguments)
     except Exception:
         said = None
-    return said.rstrip("…").strip() if said else plain_tool_name(name)
+    plain = plain_tool_name(name)
+    return f"{plain}: {said.rstrip('…').strip()}" if said else plain
 
 
 def plain_tool_name(name: str) -> str:
