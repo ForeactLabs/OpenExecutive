@@ -89,6 +89,12 @@ def test_the_shared_chat_block_marks_the_others_lines_as_not_instructions() -> N
     assert "instructions" not in chat_route._shared_chat_block(["Alex", "Riya"])
 
 
+def test_the_shared_chat_block_has_it_speak_to_the_group() -> None:
+    block = chat_route._shared_chat_block(["Alex", "Riya"], "Alex")
+    assert "This is a shared chat" in block and "Alex, Riya" in block
+    assert "Speak to the group" in block and "anyone else in the chat is named" in block
+
+
 def _capture(monkeypatch: pytest.MonkeyPatch) -> list[tuple[bool, bool, str]]:
     from openexecutive.orchestrator import executive as exec_mod
 

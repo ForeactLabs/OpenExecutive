@@ -776,7 +776,9 @@ def _shared_chat_block(names: list[str], owner: str = "") -> str:
         "This is a shared chat in the web app. Everyone in it reads every "
         f"message and every reply: {', '.join(names)}. Each person's message "
         "starts with [Name] for who wrote it; answer whoever wrote the latest "
-        "one. Anything private to one of them (their own notes, mail or what "
+        "one. Speak to the group: \"you\" is whoever wrote the latest "
+        "message, and anyone else in the chat is named (never ask someone "
+        "to get, tell or loop in themselves). Anything private to one of them (their own notes, mail or what "
         "you remember about them) stays out of this chat unless they bring it "
         "up here themselves."
     )
@@ -2637,15 +2639,46 @@ _FOLLOWUP_MAX_CHARS_PER_MESSAGE = 1500
 _FOLLOWUP_MAX_WORDS = 24
 
 
-def _build_followup_transcript(messages: list[dict[str, Any]]) -> str:
+def _build_followup_transcript(
+    messages: list[dict[str, Any]],
+    names: dict[int, str] | None = None,
+    reader: int | None = None,
+    owner: int | None = None,
+) -> str:
+    """The tail of the chat for the follow-up model. In a shared chat
+    (``names``, everyone in it by person id) each person's line carries their
+    name, and the transcript says it is a group chat and whose next message
+    to write: ``reader``'s, who is asking. A line saved without a sender is
+    ``owner``'s, as in ``_named_history``."""
+    group = bool(names) and len(names or {}) > 1
     lines: list[str] = []
     for m in messages[-_FOLLOWUP_MAX_MESSAGES:]:
-        speaker = "EXECUTIVE" if m.get("role") == "assistant" else "USER"
+        if m.get("role") == "assistant":
+            speaker = "EXECUTIVE"
+        elif group:
+            sender = m.get("sender_person_id")
+            sender = owner if sender is None else sender
+            speaker = (names or {}).get(sender, "") if isinstance(sender, int) else ""
+            speaker = speaker or "SOMEONE IN THE CHAT"
+        else:
+            speaker = "USER"
         text = str(m.get("content") or "").strip()
         if len(text) > _FOLLOWUP_MAX_CHARS_PER_MESSAGE:
             text = text[:_FOLLOWUP_MAX_CHARS_PER_MESSAGE] + " […]"
         lines.append(f"{speaker}: {text}")
-    return "\n\n".join(lines)
+    body = "\n\n".join(lines)
+    if not group:
+        return body
+    everyone = ", ".join((names or {}).values())
+    who = (names or {}).get(reader, "") if reader is not None else ""
+    header = f"This is a group chat with the executive. People in it: {everyone}."
+    if who:
+        header += (
+            f" The USER is {who}: write {who}'s next message, in {who}'s own voice."
+            f" Never suggest {who} message, loop in or ask {who}; another person"
+            " in the chat is named, never called 'me'."
+        )
+    return f"{header}\n\n{body}"
 
 
 async def _generate_followup_via_llm(transcript: str) -> str | None:
