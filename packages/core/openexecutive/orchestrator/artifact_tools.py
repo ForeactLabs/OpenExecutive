@@ -74,7 +74,7 @@ DRAFT_ARTIFACT_TOOL: dict[str, Any] = {
         "one-page web report, a Word document, a spreadsheet, or a link to "
         "something you created in one of the principal's connected apps. "
         "It belongs to the person you are talking with: it lands in their "
-        "'/today' review queue and on their Documents page with your "
+        "'/today' review queue and on their Made for you page with your "
         "rationale attached, and nobody else can open it. The result "
         "gives you its id and a link to share. It does NOT page or DM "
         "anyone. When the principal ASKS for a written deliverable, always "

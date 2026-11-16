@@ -171,9 +171,9 @@ const WORK_TABS: NavItem[] = [
   },
   {
     href: "/artifacts",
-    label: "Documents",
+    label: "Made for you",
     icon: "book",
-    description: "Your library of finished documents — drafts and workflow outputs.",
+    description: "What your Executive made for you — documents, drafts and workflow outputs.",
   },
   {
     href: "/watchlist",
@@ -222,7 +222,7 @@ export function buildHubs({
     key: "work",
     label: "Work",
     icon: "briefcase",
-    description: "Tasks, workflows, finished documents, the watch list and the schedule.",
+    description: "Tasks, workflows, what it made for you, the watch list and the schedule.",
     tabs: WORK_TABS,
   };
   const people: Hub =
@@ -306,7 +306,7 @@ export function buildDestinations({
       icon: "book",
       badge: reviewBadge,
       description:
-        "Upload company documents so the Executive can ground its answers in your context, and approve what it relies on.",
+        "Your company files, so the Executive can ground its answers in your context, and approve what it relies on.",
     },
     { key: "pulse", ...PULSE_NAV_ITEM },
   ];
