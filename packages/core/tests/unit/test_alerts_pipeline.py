@@ -613,10 +613,12 @@ def test_as_written_same_text_to_two_people_is_two_cards(monkeypatch, db: Path) 
 class _Chat:
     """A chat session as ``current_session`` holds one."""
 
-    def __init__(self, session_id: str, speaker: int) -> None:
+    def __init__(self, session_id: str, speaker: int, *, mail_thread: str = "") -> None:
         self.session_id = session_id
         self.caller_person_id = speaker
-        self.origin_channel = ""
+        self.origin_channel = "email" if mail_thread else ""
+        self.email_from = "ann@example.com" if mail_thread else ""
+        self.email_thread_id = mail_thread
 
 
 def _pass_on(monkeypatch, db: Path, chat: _Chat, turn: str, ext: str, subject: str, body: str) -> int | None:
@@ -675,3 +677,32 @@ def test_messages_from_another_chat_are_their_own_card(monkeypatch, db: Path) ->
     second = _pass_on(monkeypatch, db, _Chat("chat-b", 2), "t2", "m2", "Invoice paid", "The invoice is paid.")
     rows = {a.id: a for a in list_alerts(db_path=db)}
     assert rows[first].superseded_by_alert_id is None and rows[second].superseded_by_alert_id is None
+
+
+def test_a_passed_on_message_never_joins_a_card_on_its_mail_thread(monkeypatch, db: Path) -> None:
+    """On a turn answering mail, a passed-on message keeps out of the card
+    the Executive raised on that mail thread: only other passed-on messages
+    share its conversation."""
+    from openexecutive.alerts import dispatcher, one_card
+    from openexecutive.audit.context import set_turn
+    from openexecutive.orchestrator.schedule_tools import current_session
+
+    async def fake_dispatch(alert, channels, **kw):  # noqa: ARG001
+        return None
+
+    monkeypatch.setattr(dispatcher, "dispatch_all", fake_dispatch)
+    chat = _Chat("mail-session", 2, mail_thread="T1")
+    token = current_session.set(chat)
+    try:
+        with set_turn(session_id=chat.session_id, turn_id="t1"), one_card.about(raised=True):
+            raised = insert_alert(
+                source="email", external_id="e1", severity="medium",
+                headline="Ann wants the contract back", body="Ann asked for the signed contract.",
+                routed_to_person_id=1, db_path=db,
+            )
+    finally:
+        current_session.reset(token)
+    passed = _pass_on(monkeypatch, db, chat, "t2", "m1", "From Sam: contract is in Drive", "From Sam: contract is in Drive.")
+    rows = {a.id: a for a in list_alerts(db_path=db)}
+    assert rows[passed].superseded_by_alert_id is None
+    assert rows[raised].body == "Ann asked for the signed contract."

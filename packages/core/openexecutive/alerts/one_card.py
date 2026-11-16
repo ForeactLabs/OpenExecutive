@@ -11,10 +11,10 @@ notes what the card is about, then joins it with an open card on the same
 topic:
 
 * the same reader (who the card is for, and whether it is private), and
-* one of: written on the same turn; about the same conversation (a mail
-  thread, or for a passed-on message the chat it was said in,
-  :func:`chat_conversation`) with the same person, unless the model said
-  it is another matter; or the model said it is the same matter
+* one of: written on the same turn; about the same mail thread with the
+  same person, unless the model said it is another matter (passed-on
+  messages: the same chat, :func:`chat_conversation`, which only other
+  passed-on messages share); or the model said it is the same matter
   (``create_alert``'s ``joins_card``).
 
 How two cards on one topic become one:
@@ -270,18 +270,17 @@ def _turn_thread(session: Any) -> str:
 
 
 def chat_conversation(session: Any = None) -> str:
-    """The conversation a message passed on from this turn belongs to: its
-    mail thread on a turn answering mail, else the chat it was said in.
-    Messages one person passes on from one chat to the same reader are one
-    card while it is open. Empty off a turn."""
+    """The conversation a message passed on from this turn belongs to: the
+    chat (or mail thread's session) it was said in. Messages one person
+    passes on from one chat to the same reader are one card while it is
+    open. Its own key, never a mail thread's, so a passed-on message joins
+    only another passed-on message, never a held step's Approve card or a
+    card the Executive raised on that thread. Empty off a turn."""
     session = session if session is not None else _session()
     if session is None:
         return ""
-    mail = _turn_thread(session)
-    if mail:
-        return mail
     session_id = str(getattr(session, "session_id", "") or "").strip()
-    return f"chat:{session_id}" if session_id else ""
+    return f"message:{session_id}" if session_id else ""
 
 
 def _turn_id() -> str:
