@@ -372,6 +372,18 @@ def test_a_tool_can_say_what_each_call_does_in_plain_words() -> None:
     # The report keeps the kind of call beside the model's words.
     assert action_name("oe__make_widget", said) == "Make widget: Making the blue widget for Dana"
     assert action_name("oe__make_widget", {}) == "Make widget"
+    assert action_name("oe__make_widget", {"boom": True}) == "Make widget"
+
+
+def test_a_runs_report_keeps_the_words_a_tool_gave() -> None:
+    from openexecutive.workflows.action_step import _format_output, action_name
+
+    extensions.register_tool(_tool(describe=lambda a: a.get("doing")))
+    said = action_name("oe__make_widget", {"doing": "Emailing Bob Smith…"})
+    assert said == "Make widget: Emailing Bob Smith"
+    report = _format_output("Sent.", [(said, "ok"), (said, "ok"), ("Make widget", "error")])
+    assert "- Make widget: Emailing Bob Smith — ok (×2)" in report
+    assert "- Make widget — error" in report
 
 
 def test_a_failing_offered_counts_as_not_offered() -> None:

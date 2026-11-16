@@ -124,3 +124,49 @@ def test_nothing_is_posted_outside_a_chat_turn() -> None:
     assert turn_live.watching() is False
     assert turn_live.say("Finding sailings") is False
     assert turn_live.post({"type": "note"}) is False
+
+
+def test_a_stopped_turn_cancels_the_running_tools() -> None:
+    """The reader of the feed stops early (Stop, a dropped client): the
+    round's tools are cancelled, not left running against no one."""
+
+    async def go() -> bool:
+        feed = turn_live.Feed()
+        started = asyncio.Event()
+
+        async def slow() -> None:
+            turn_live.say("Working on step one")
+            started.set()
+            await asyncio.sleep(10)
+
+        with feed.bound():
+            task = asyncio.ensure_future(slow())
+        # Unbound again: only the task sees the feed.
+        assert turn_live.watching() is False
+        reader = feed.until(task)
+        first = await anext(reader)
+        assert first["label"] == "Working on step one…"
+        await reader.aclose()
+        return task.cancelled()
+
+    assert asyncio.run(go()) is True
+
+
+def test_a_long_line_is_cut_to_one_line() -> None:
+    async def go() -> list[dict[str, Any]]:
+        feed = turn_live.Feed()
+
+        async def talk() -> None:
+            turn_live.say("  Finding\nsailings  " + "x" * 200)
+            turn_live.say("Done.")
+            turn_live.say("   ")
+
+        with feed.bound():
+            task = asyncio.ensure_future(talk())
+        return [event async for event in feed.until(task)]
+
+    events = asyncio.run(go())
+    assert len(events) == 2
+    assert len(events[0]["label"]) == turn_live.MAX_LINE_CHARS and events[0]["label"].endswith("…")
+    assert "\n" not in events[0]["label"]
+    assert events[1]["label"] == "Done…"
