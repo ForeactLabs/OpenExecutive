@@ -261,7 +261,6 @@ def _speaker(session: Any, alert: Any) -> tuple[Any, bool] | str:
         or getattr(session, "shared_chat", False) is True
         or getattr(session, "email_from", "")
         or getattr(session, "sender_off_team", False)
-        or getattr(session, "from_mcp_client", False) is True
         or getattr(session, "from_host", False) is True
     ):
         return "Cards can be answered only in the person's own conversation. Point them at the card."

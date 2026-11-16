@@ -4760,6 +4760,8 @@ export interface DepartmentConfig {
   specialist_key: string | null;
   charter: DepartmentCharter;
   authority_level: "auto_execute" | "propose_only" | "escalate";
+  // Its Approvals level by name: Careful, Balanced or Hands-off.
+  approvals: string;
   head_person_id: number | null;
   head_persona_slug: string | null;
   cadences: Record<string, string>;
@@ -5663,6 +5665,8 @@ export interface DepartmentBriefItem {
   slug: string;
   title: string;
   authority_level: string;
+  // Its Approvals level by name; "" on the row of goals with no department.
+  approvals?: string;
   goal_count: number;
   at_risk_count: number;
   off_track_count: number;

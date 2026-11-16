@@ -342,42 +342,31 @@ claude mcp add --transport http open-executive http://localhost:8000/mcp \
   --header "x-api-key: YOUR_BACKEND_SHARED_SECRET"
 ```
 
-Connected clients get eight read-only resources (company profile, today's
-briefing and activity, people roster, department state, and episodic memory for
-decisions, initiatives and advice) and four tools: `consult_specialist` (domain
-analysis from any of the ten specialists, each grounded in your company's
-knowledge base), `search_knowledge`, `list_workflows` and `ask_executive`. The
-full inventory is on the **MCP Server** section of the `/architecture` page.
+Connected clients get read-only resources (company profile, today's brief,
+Needs you cards, Done for you, tasks, watches, Approvals, people, departments,
+and episodic memory for decisions, initiatives and advice) and six tools:
+`consult_specialist` (domain analysis from any of the ten specialists, each
+grounded in your company's knowledge base), `search_knowledge`,
+`list_workflows`, `run_workflow`, `answer_card` (Approve, Skip or reply to a
+Needs you card) and `ask_executive`. The full inventory is on the **MCP
+Server** section of the `/architecture` page.
 
 `/mcp` answers as the caller the API verified, by the web app's rules. With no
 `x-caller-email` (open mode) the client is the owner, as the CLI is. A request
 that carries a signed-in person (a deployment that puts its own sign-in in
 front of `/mcp` and stamps the caller as the web UI's proxy does; see
-[signed callers](docs/auth.md#signed-callers)) gets that person's answers: the
-owner's episodic memory and recent activity go to the owner alone, the briefing
-and roster to someone on the roster (the briefing narrowed as the web app
-narrows it), and the company profile, departments, specialists, knowledge and
-workflow catalog to anyone. With signed callers on, a client holding only the
-shared secret is a service: never the owner, and `ask_executive` asks as no
-one. By default `ask_executive` only reads and advises: on its turn the
-Executive is not offered anything that sends, posts, books, schedules, runs or
-changes stored data, and of the connected MCP servers' tools only the reads.
+[signed callers](docs/auth.md#signed-callers)) gets that person's answers. The
+resources read through the same routes as the web app, so each one shows what
+that person sees there. With signed callers on, a client holding only the
+shared secret is a service: never the owner, and its turns ask as no one.
 
-A client can let it act by sending `x-mcp-client-actions: on` (honored only on a
-request the `BACKEND_SHARED_SECRET` authenticated; with no secret set the header
-is ignored and `MCP_CLIENT_ACTIONS=true` turns it on for every request). Then it
-makes the person's own changes inside Open Executive (alerts, tasks,
-follow-ups, the watch list, goals, decision outcomes, remembered facts and the
-company profile), each under the same permissions as in the web app. It never
-changes the People list; a new contact goes on a card that always waits.
-A message or a meeting is left on an Approve card instead of sent: it waits
-for the person's tap, or goes on its own only where their As you and
-Approvals already let it (never on Careful, and below Hands-off only to people
-who have been on the People list for a while). It still
-never runs scripts or workflows, loads MCP servers or reads their mailbox, and
-every action is recorded as coming from the AI app. On a server without signed
-callers (`CALLER_ASSERTION_PUBLIC_KEYS`), acting mode trusts whoever holds the
-shared secret to say who is asking.
+`ask_executive`, `answer_card` and `run_workflow` are the person's own turn, the
+same as typing in the web chat. Every step goes through the same three checks
+as every other channel: Approvals (Careful, Balanced or Hands-off), Your rules,
+and In training. A step that has to wait is left on a Needs you card. Every
+action is recorded as coming from the AI app. On a server without signed
+callers (`CALLER_ASSERTION_PUBLIC_KEYS`), whoever holds the shared secret says
+who is asking.
 
 This is the inverse of the `MCP_ENABLED` and `MCP_SERVERS_CONFIG_PATH` settings
 under [Configuration](#configuration), which configure the MCP *gateway*: Open

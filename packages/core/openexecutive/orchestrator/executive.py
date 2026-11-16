@@ -56,10 +56,6 @@ from openexecutive.orchestrator import (
     turn_progress,
 )
 from openexecutive.orchestrator import pushback as pushback_mod
-from openexecutive.orchestrator.action_card_tools import (
-    ACTION_CARD_TOOL_HANDLERS,
-    ACTION_CARD_TOOLS,
-)
 from openexecutive.orchestrator.action_chips import summarize_action
 from openexecutive.orchestrator.activity_labels import (
     fallback_activity,
@@ -177,19 +173,17 @@ from openexecutive.orchestrator.router import (
     route_parallel,
 )
 from openexecutive.orchestrator.schedule_tools import (
-    MCP_CLIENT_ACTING_WITHHELD_TOOLS,
-    MCP_CLIENT_WITHHELD_TOOLS,
     PRIVATE_TURN_WITHHELD_TOOLS,
+    READ_ONLY_WITHHELD_TOOLS,
     SCHEDULE_TOOL_HANDLERS,
     SCHEDULE_TOOLS,
     SHARED_CHAT_WITHHELD_TOOLS,
     UNATTENDED_WITHHELD_TOOLS,
     current_session,
     filter_tools_for_workspace_mode,
-    mcp_client_acting,
-    mcp_client_withholds,
-    mcp_rules_turn,
     private_turn_withholds,
+    read_only_turn,
+    read_only_withholds,
     shared_chat_withholds,
     tools_withheld_in_mode,
     withheld_tool_error,
@@ -2567,24 +2561,15 @@ class Executive:
         # Python jobs need the sandbox the API image installs: without it the
         # tool is not offered (fixed per process, so the prefix stays stable).
         sandbox_missing = frozenset() if python_job.available() else frozenset({python_job.TOOL_NAME})
-        # Another AI app asking over Open Executive's MCP server
-        # (`Session.from_mcp_client`): it reads and advises, and nothing that
-        # sends, posts, books, schedules, runs or changes stored state is
-        # offered or run (`MCP_CLIENT_WITHHELD_TOOLS`) — a fixed set, so the
-        # variant keeps a stable tool prefix of its own. A scheduled run a
-        # teammate queued gets the same (`read_only_turn`): the runner sends
-        # what it writes. An AI app's turn that may act
-        # (`Session.mcp_client_may_act`) runs the speaker's own changes inside
-        # Open Executive and is denied the smaller fixed
-        # `MCP_CLIENT_ACTING_WITHHELD_TOOLS` instead; what reaches another
-        # person it proposes on an approval card (propose_actions, below).
-        mcp_client = mcp_rules_turn(current_session.get())
-        mcp_acting = mcp_client_acting(current_session.get())
-        mcp_client_withheld = (
-            (MCP_CLIENT_ACTING_WITHHELD_TOOLS if mcp_acting else MCP_CLIENT_WITHHELD_TOOLS)
-            if mcp_client
-            else frozenset()
-        )
+        # A turn that may only read and advise (`read_only_turn`: a page in
+        # another app, or a scheduled run a teammate queued, whose message the
+        # runner sends): nothing that sends, posts, books, schedules, runs or
+        # changes stored state runs without the owner's card
+        # (`READ_ONLY_WITHHELD_TOOLS`, `levels.READ_ONLY`). Another AI app's
+        # turn is the signed-in person's own: Approvals decides it like the
+        # web chat.
+        mcp_client = read_only_turn(current_session.get())
+        mcp_client_withheld = READ_ONLY_WITHHELD_TOOLS if mcp_client else frozenset()
         # A shared web chat someone other than its owner has written into
         # since the owner last did (`Session.others_spoke_last`): nothing
         # that sends to people or changes contacts (`SHARED_CHAT_WITHHELD_TOOLS`,
@@ -2627,12 +2612,6 @@ class Executive:
             if ghostwrite_offered
             else _ALL_SKILL_HANDLERS
         )
-        # An AI app's turn that may act: of Act as me's tools, only the
-        # approval card (no mailbox), always offered so the variant's prefix
-        # is stable; its handler checks the speaker (action_card_tools).
-        if mcp_acting and not replaying:
-            delegation_tools = [*ACTION_CARD_TOOLS]
-            turn_handlers = {**turn_handlers, **ACTION_CARD_TOOL_HANDLERS}
         # Always in the loop: recall_history joins the same way, only on a
         # turn whose speaker may read their own notes here (history_tools).
         history_offered = (
@@ -3057,9 +3036,9 @@ class Executive:
                     return levels.PRIVATE
                 if mcp_client and (
                     name in mcp_client_withheld or is_script
-                    or (is_mcp and mcp_client_withholds(name, given, acting=mcp_acting))
+                    or (is_mcp and read_only_withholds(name, given))
                 ):
-                    return levels.AI_APP
+                    return levels.READ_ONLY
                 if others_spoke and (name in shared_withheld or (is_mcp and shared_chat_withholds(name, given))):
                     return levels.SHARED
                 return None

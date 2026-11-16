@@ -419,17 +419,11 @@ def _row_to_config(row: sqlite3.Row) -> DepartmentConfig:
         cadences = json.loads(row["cadences_json"]) or {}
     except (ValueError, TypeError):
         cadences = {}
-    # A future migration or hand-edited DB row could carry an unknown
-    # authority_level token; default to the safest level (propose_only) and
-    # warn rather than 500ing every read of `list_departments`.
-    try:
-        authority_level = AuthorityLevel(row["authority_level"])
-    except ValueError:
-        logger.warning(
-            "departments: unknown authority_level=%r on slug=%s — defaulting to propose_only",
-            row["authority_level"], row["slug"],
-        )
-        authority_level = AuthorityLevel.PROPOSE_ONLY
+    # The stored authority_level ("How it acts") no longer decides anything:
+    # every read says the level the department's work runs at now.
+    from openexecutive.departments.authority import department_level
+
+    authority_level = department_level(row["slug"])
     # Channel columns are nullable and were added via additive ALTER in
     # _migrate_add_channel_columns; row indexing via sqlite3.Row tolerates
     # missing columns by raising IndexError, so use getattr-style access.

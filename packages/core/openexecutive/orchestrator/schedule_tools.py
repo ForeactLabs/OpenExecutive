@@ -2237,14 +2237,11 @@ def private_turn_withheld_error(tool_name: str) -> str:
     })
 
 
-# What a turn asked from another AI app over Open Executive's own MCP server
-# (`Session.from_mcp_client`, set by `mcp_server.ask_executive`) is never
-# offered, unless the request may act (`MCP_CLIENT_ACTING_WITHHELD_TOOLS`
-# below). Such a turn reads and advises; it never sends, posts, books,
-# schedules, runs or changes anything, because nobody is in Open Executive to
-# see it happen and the other app's text is whatever that app put there. It
-# starts from everything a turn private to the principal and an unattended
-# run are denied, and adds every other tool that reaches someone or writes:
+# What a turn that may only read and advise (``read_only_turn``: a page in
+# another app, or a scheduled run a teammate queued) is never offered: it
+# never sends, posts, books, schedules, runs or changes anything. It starts
+# from everything a turn private to the principal and an unattended run are
+# denied, and adds every other tool that reaches someone or writes:
 # - message_person, send_slack_dm, send_discord_dm, send_telegram_message:
 #   direct messages.
 # - ack_alert, create_alert, leave_out_of_brief: change the briefing.
@@ -2253,13 +2250,10 @@ def private_turn_withheld_error(tool_name: str) -> str:
 # - remove_watchlist_entry, tune_watchlist_entry: monitoring writes.
 # - draft_workflow: drafts a definition only save_workflow (withheld) keeps.
 # - propose_form_values: fills a form on a screen this turn has none of.
-# The Act as me tools (`propose_actions`, `ghostwrite_email`, the mailbox
-# reads), recall_history and extension tools are not offered either: the chat
-# loop leaves those registries out of such a turn. Of the gateway tools, only
-# the reads in `MCP_CLIENT_MCP_TOOLS`. The loop drops this set before the
-# sort, so the variant has a stable tool prefix of its own, and refuses a call
-# the model emits anyway (`mcp_client_withholds`, `mcp_client_withheld_error`).
-MCP_CLIENT_WITHHELD_TOOLS: frozenset[str] = PRIVATE_TURN_WITHHELD_TOOLS | UNATTENDED_WITHHELD_TOOLS | frozenset({
+# The Act as me tools, recall_history and extension tools are not offered
+# either. Of the gateway tools, only the reads in `READ_ONLY_MCP_TOOLS`. A
+# call the model emits anyway waits on the owner's card (`levels.READ_ONLY`).
+READ_ONLY_WITHHELD_TOOLS: frozenset[str] = PRIVATE_TURN_WITHHELD_TOOLS | UNATTENDED_WITHHELD_TOOLS | frozenset({
     "ack_alert",
     "answer_card",
     "archive_person",
@@ -2282,68 +2276,18 @@ MCP_CLIENT_WITHHELD_TOOLS: frozenset[str] = PRIVATE_TURN_WITHHELD_TOOLS | UNATTE
 
 # The gateway tools such a turn may call: the private-turn reads, without the
 # mail tools that send or leave a draft in a mailbox.
-MCP_CLIENT_MCP_TOOLS: frozenset[str] = PRIVATE_TURN_MCP_TOOLS - frozenset({
+READ_ONLY_MCP_TOOLS: frozenset[str] = PRIVATE_TURN_MCP_TOOLS - frozenset({
     "google_workspace__draft_gmail_message",
     "google_workspace__send_gmail_message",
     "microsoft_365__create-draft-email",
     "microsoft_365__send-mail",
 })
 
-MCP_CLIENT_REFUSAL = (
-    "This conversation comes from another AI app, so here you can read and "
-    "advise but can't send, post, book or change anything. Tell the person to "
-    "ask for it in Open Executive itself."
+READ_ONLY_REFUSAL = (
+    "On this turn you can read and advise but can't send, post, book or "
+    "change anything. Tell the person to ask for it in Open Executive itself."
 )
 
-
-# A turn from another AI app that may act (`Session.mcp_client_may_act`):
-# what it still never gets. It runs the speaker's own changes inside Open
-# Executive directly (`MCP_CLIENT_RUNS_WHEN_ACTING`, each tool keeping its own
-# owner-only and person checks), and anything that reaches another person
-# goes on an approval card instead (`propose_actions`, which carries it out
-# on its own only by the speaker's Handle it for me). Withheld, as for a
-# read-only turn:
-# - message_person, send_slack_dm, send_discord_dm, send_telegram_message,
-#   create_calendar_event, cancel_calendar_event, create_instant_meeting,
-#   send_company_broadcast, send_department_message: they reach other
-#   people; a message or an invite is proposed as a card, the rest stay with
-#   Open Executive itself.
-# - upsert_person, archive_person, set_department_head: roster writes. A
-#   person added here would be someone a later card reaches; a new contact
-#   goes on a card instead (`add_contact`, which always waits for a tap).
-# - load_mcp_server, run_script, run_python_job, list_saved_tools,
-#   save_workflow, draft_workflow, run_workflow, suggest_workflow,
-#   run_executive_research: they change the install or run code or work
-#   outside the turn.
-# - everything else a read-only turn is denied that is not listed below
-#   (propose_form_values, read_document, draft_artifact, mark_draft_sent,
-#   resolve_roster_request, ...): a new withheld tool stays withheld here
-#   until it is added to that list on purpose.
-# Of the gateway tools, still only the reads in `MCP_CLIENT_MCP_TOOLS`. A
-# fixed set, so the variant keeps a stable tool prefix of its own; the loop
-# refuses a call the model emits anyway (`mcp_client_withholds(acting=True)`).
-MCP_CLIENT_RUNS_WHEN_ACTING: frozenset[str] = frozenset({
-    "ack_alert",
-    "add_watchlist_entry",
-    "assign_open_loop",
-    "cancel_followup",
-    "close_open_loop",
-    "reopen_open_loop",
-    "update_open_loop",
-    "create_alert",
-    "create_goal",
-    "forget_fact",
-    "leave_out_of_brief",
-    "move_followup",
-    "record_decision_outcome",
-    "remember_fact",
-    "remove_watchlist_entry",
-    "schedule_followup",
-    "tune_watchlist_entry",
-    "update_company_profile",
-    "update_department_goal",
-})
-MCP_CLIENT_ACTING_WITHHELD_TOOLS: frozenset[str] = MCP_CLIENT_WITHHELD_TOOLS - MCP_CLIENT_RUNS_WHEN_ACTING
 
 HOST_REFUSAL = (
     "This conversation was written in, at least in part, from a page another "
@@ -2352,24 +2296,6 @@ HOST_REFUSAL = (
     "itself and ask there."
 )
 
-MCP_CLIENT_ACTING_REFUSAL = (
-    "This conversation comes from another AI app. From here you can make "
-    "changes inside Open Executive and leave a message or a meeting on a card "
-    "for them to approve (propose_actions), but not this. Tell the person to "
-    "do it in Open Executive itself."
-)
-
-
-def mcp_client_acting(session: Any) -> bool:
-    """Whether ``session`` is a turn from another AI app that may act
-    (``Session.from_mcp_client`` with ``Session.mcp_client_may_act``)."""
-    return (
-        session is not None
-        and getattr(session, "from_mcp_client", False) is True
-        and getattr(session, "mcp_client_may_act", False) is True
-    )
-
-
 def host_turn(session: Any) -> bool:
     """Whether ``session`` is a web chat turn a host origin's page sent
     (``Session.from_host``)."""
@@ -2377,58 +2303,42 @@ def host_turn(session: Any) -> bool:
 
 
 def read_only_turn(session: Any) -> bool:
-    """Whether ``session`` may only read and advise: a turn from another AI
-    app that may not act (``Session.from_mcp_client``), a turn a host origin's
+    """Whether ``session`` may only read and advise: a turn a host origin's
     page sent (``Session.from_host``), or a scheduled run a teammate queued
     (``Session.run_for_person_id``), whose text is theirs and whose message
-    the scheduler sends itself. All are denied ``MCP_CLIENT_WITHHELD_TOOLS``
-    and every gateway tool outside ``MCP_CLIENT_MCP_TOOLS``. A turn from an AI
-    app that may act is not read-only (``mcp_client_acting``), but
-    ``mcp_rules_turn`` still holds."""
+    the scheduler sends itself. Both are denied ``READ_ONLY_WITHHELD_TOOLS``
+    and every gateway tool outside ``READ_ONLY_MCP_TOOLS``. Another AI app's
+    turn is not: it is the signed-in person's own (``mcp_server``), and
+    Approvals decides each of its steps like the web chat's."""
     if session is None:
         return False
     if host_turn(session):
         return True
-    if getattr(session, "from_mcp_client", False) is True:
-        return not mcp_client_acting(session)
     run_for = getattr(session, "run_for_person_id", None)
     return isinstance(run_for, int) and not isinstance(run_for, bool)
 
 
-def mcp_rules_turn(session: Any) -> bool:
-    """Whether the MCP-client rules govern ``session``: a read-only turn
-    (``read_only_turn``) or a turn from an AI app that may act. Either way no
-    script, Act as me mailbox, recall_history or extension tool, and of the
-    gateway tools only ``MCP_CLIENT_MCP_TOOLS``."""
-    return read_only_turn(session) or mcp_client_acting(session)
+def read_only_allows_mcp_tool(tool_name: object) -> bool:
+    """Whether a read-only turn may call the gateway tool ``tool_name``: one
+    of ``READ_ONLY_MCP_TOOLS``, and nothing else."""
+    return isinstance(tool_name, str) and tool_name in READ_ONLY_MCP_TOOLS
 
 
-def mcp_client_allows_mcp_tool(tool_name: object) -> bool:
-    """Whether a turn from another AI app may call the gateway tool
-    ``tool_name``: one of ``MCP_CLIENT_MCP_TOOLS``, and nothing else."""
-    return isinstance(tool_name, str) and tool_name in MCP_CLIENT_MCP_TOOLS
-
-
-def mcp_client_withholds(tool_name: str, tool_input: Any, *, acting: bool = False) -> bool:
-    """Whether a turn from another AI app may not run this tool use: a tool
-    in ``MCP_CLIENT_WITHHELD_TOOLS`` (``MCP_CLIENT_ACTING_WITHHELD_TOOLS``
-    when it may act), or a gateway ``call_tool`` naming anything but
-    ``MCP_CLIENT_MCP_TOOLS`` or a OneDrive file read."""
-    if tool_name in (MCP_CLIENT_ACTING_WITHHELD_TOOLS if acting else MCP_CLIENT_WITHHELD_TOOLS):
+def read_only_withholds(tool_name: str, tool_input: Any) -> bool:
+    """Whether a read-only turn may not run this tool use: a tool in
+    ``READ_ONLY_WITHHELD_TOOLS``, or a gateway ``call_tool`` naming anything
+    but ``READ_ONLY_MCP_TOOLS`` or a OneDrive file read."""
+    if tool_name in READ_ONLY_WITHHELD_TOOLS:
         return True
     if tool_name != "call_tool":
         return False
     named = tool_input.get("name") if isinstance(tool_input, dict) else None
-    return not (mcp_client_allows_mcp_tool(named) or is_onedrive_file_read(tool_input))
+    return not (read_only_allows_mcp_tool(named) or is_onedrive_file_read(tool_input))
 
 
-def mcp_client_withheld_error(tool_name: str, *, acting: bool = False) -> str:
-    """The JSON error tool_result for a call a turn from another AI app may
-    not make (``acting``: one that may act), or a host origin's turn."""
-    if host_turn(current_session.get()):
-        refusal = HOST_REFUSAL
-    else:
-        refusal = MCP_CLIENT_ACTING_REFUSAL if acting else MCP_CLIENT_REFUSAL
+def read_only_withheld_error(tool_name: str) -> str:
+    """The JSON error tool_result for a call a read-only turn may not make."""
+    refusal = HOST_REFUSAL if host_turn(current_session.get()) else READ_ONLY_REFUSAL
     return json.dumps({
         "error": f"{tool_name} is not available on this turn. {refusal} Do not retry."
     })
@@ -2879,6 +2789,7 @@ def _may_search_alerts(session: Any) -> bool:
     return bool(
         session is not None
         and getattr(session, "principal_board_shown", False)
+        and getattr(session, "answering_card", None) is None
         and not getattr(session, "unattended", False)
         and not getattr(session, "email_from", "")
         and is_principal_on_verified_surface(session)

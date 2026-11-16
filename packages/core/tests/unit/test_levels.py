@@ -33,7 +33,7 @@ def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     people_registry.invalidate()
 
 
-@pytest.mark.parametrize("reason", sorted(levels.REASONS - {levels.STRANGER, levels.NOT_OWNER, levels.SHARED, levels.AI_APP}))
+@pytest.mark.parametrize("reason", sorted(levels.REASONS - {levels.STRANGER, levels.NOT_OWNER, levels.SHARED, levels.READ_ONLY}))
 def test_hands_off_runs_every_noticed_step(reason: str) -> None:
     assert levels.decide(reason, mode=outside_mode.TRUST) == levels.RUN
 
@@ -49,14 +49,13 @@ def test_a_strangers_mail_is_a_card_at_every_level(mode: str) -> None:
     assert levels.decide(levels.STRANGER, mode=mode) == levels.CARD
 
 
-@pytest.mark.parametrize("reason", [levels.NOT_OWNER, levels.AI_APP])
+@pytest.mark.parametrize("reason", [levels.NOT_OWNER, levels.READ_ONLY])
 @pytest.mark.parametrize("mode", sorted(outside_mode.MODES))
 def test_someone_elses_words_are_a_card_at_every_level(mode: str, reason: str) -> None:
     assert levels.decide(reason, mode=mode) == levels.CARD
 
 
 @pytest.mark.parametrize("session", [
-    Session(from_mcp_client=True),
     Session(from_web_chat=True, from_host=True),
 ])
 def test_hands_off_is_not_for_anyone_outside_people(monkeypatch: pytest.MonkeyPatch, session: Session) -> None:
@@ -196,26 +195,12 @@ def test_a_skill_that_runs_more_steps_is_not_relaxed_by_its_tap() -> None:
     assert {"run_workflow", "run_executive_research"} <= levels.NOT_RELAXED_SKILLS
 
 
-def test_the_owners_own_ai_app_follows_their_level(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Another AI app the owner is signed in to and allowed to act is them:
-    Hands-off runs what it asks, like the web app. Any other stays a card."""
-    from openexecutive.orchestrator import people_tools
-    from openexecutive.orchestrator.schedule_tools import current_session
-
+@pytest.mark.parametrize("person_id", [1, 2])
+def test_an_ai_app_follows_the_signed_in_persons_level(monkeypatch: pytest.MonkeyPatch, person_id: int) -> None:
+    """Another AI app is the person signed in to it, the owner or a teammate:
+    the company's level, as in the web app. Nothing is noticed for the app."""
     monkeypatch.setattr(outside_mode, "get_mode", lambda **_: outside_mode.TRUST)
-    monkeypatch.setattr(people_tools, "is_principal_on_verified_surface", lambda _s: True)
-    own = Session(from_mcp_client=True, mcp_client_may_act=True, caller_person_id=1)
-    assert outside_mode.for_turn(own) == outside_mode.TRUST
-    token = current_session.set(own)
-    try:
-        assert levels.decide(levels.AI_APP, mode=outside_mode.TRUST) == levels.RUN
-        assert levels.decide(levels.AI_APP, mode=outside_mode.OUTSIDERS) == levels.CARD
-    finally:
-        current_session.reset(token)
-    read_only = Session(from_mcp_client=True, caller_person_id=1)
-    assert outside_mode.for_turn(read_only) == outside_mode.OUTSIDERS
-    monkeypatch.setattr(people_tools, "is_principal_on_verified_surface", lambda _s: False)
-    assert outside_mode.for_turn(own) == outside_mode.OUTSIDERS
+    assert outside_mode.for_turn(Session(from_mcp_client=True, caller_person_id=person_id)) == outside_mode.TRUST
 
 
 def test_hold_many_is_one_card_for_them_all(monkeypatch: pytest.MonkeyPatch) -> None:

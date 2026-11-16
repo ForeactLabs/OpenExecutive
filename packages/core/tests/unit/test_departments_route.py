@@ -413,7 +413,10 @@ def test_patch_invalidates_registry_cache(client: TestClient) -> None:
     # Warm the cache, then assert the warm state actually populated module
     # state — otherwise this test would pass even if the cache were broken.
     before = registry.list_states()
-    assert all(s.config.authority_level.value == "propose_only" for s in before)
+    # Every read says the level that applies now (the company's Approvals).
+    from openexecutive.departments.authority import department_level
+
+    assert all(s.config.authority_level == department_level(s.config.slug) for s in before)
     assert registry._cache is not None
     assert registry._cache_expires_at > 0.0
 
@@ -443,7 +446,9 @@ def test_create_department(client: TestClient) -> None:
     assert body["config"]["slug"] == "customer-success"
     assert body["config"]["title"] == "Customer Success"
     assert body["config"]["specialist_key"] is None
-    assert body["config"]["authority_level"] == "propose_only"
+    from openexecutive.departments.authority import department_level
+
+    assert body["config"]["authority_level"] == department_level("customer-success").value
     assert body["goals"] == []
 
 
