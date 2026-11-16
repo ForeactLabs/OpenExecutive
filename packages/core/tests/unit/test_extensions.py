@@ -351,7 +351,7 @@ def test_a_tool_can_keep_its_dispatch_row_private_and_name_its_activity() -> Non
 
 def test_a_tool_can_say_what_each_call_does_in_plain_words() -> None:
     from openexecutive.orchestrator.activity_labels import summarize_activity
-    from openexecutive.workflows.action_step import action_name, progress_line
+    from openexecutive.workflows.action_step import progress_line
 
     def describe(arguments: dict[str, Any]) -> str | None:
         if arguments.get("boom"):
@@ -367,23 +367,18 @@ def test_a_tool_can_say_what_each_call_does_in_plain_words() -> None:
     assert "Making the blue widget for Dana" in str(
         summarize_activity([{"id": "tu-1", "name": "make_widget", "input": said}])
     )
-    # A workflow's progress and its report say the same.
+    # A workflow's progress line says the same.
     assert progress_line("oe__make_widget", said) == "Making the blue widget for Dana…"
-    # The report keeps the kind of call beside the model's words.
-    assert action_name("oe__make_widget", said) == "Make widget: Making the blue widget for Dana"
-    assert action_name("oe__make_widget", {}) == "Make widget"
-    assert action_name("oe__make_widget", {"boom": True}) == "Make widget"
+    assert progress_line("oe__make_widget", {"boom": True}) != ""
 
 
-def test_a_runs_report_keeps_the_words_a_tool_gave() -> None:
-    from openexecutive.workflows.action_step import _format_output, action_name
+def test_a_runs_report_names_the_tool_and_counts_repeats() -> None:
+    """The model's words go to the live line only: the report keeps the
+    tool's plain name, so repeats still collapse to one line."""
+    from openexecutive.workflows.action_step import _format_output
 
-    extensions.register_tool(_tool(describe=lambda a: a.get("doing")))
-    said = action_name("oe__make_widget", {"doing": "Emailing Bob Smith…"})
-    assert said == "Make widget: Emailing Bob Smith"
-    report = _format_output("Sent.", [(said, "ok"), (said, "ok"), ("Make widget", "error")])
-    assert "- Make widget: Emailing Bob Smith — ok (×2)" in report
-    assert "- Make widget — error" in report
+    report = _format_output("Sent.", [("oe__make_widget", "ok"), ("oe__make_widget", "ok")])
+    assert "- Make widget — ok (×2)" in report
 
 
 def test_a_failing_offered_counts_as_not_offered() -> None:

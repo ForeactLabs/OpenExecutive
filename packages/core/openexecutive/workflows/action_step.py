@@ -688,7 +688,7 @@ class _StepCalls:
                     # Stopped mid-call (a script's clock, or the run): it may
                     # have taken effect, so it still gets its audit row.
                     _audit(self._workflow_name, self._step_id, name, "cancelled (may have run)", targets)
-                    self._actions.append((action_name(name, arguments), "cancelled (may have run)"))
+                    self._actions.append((name, "cancelled (may have run)"))
                     raise
                 outcome = "error" if is_error else "ok"
                 # A call that failed did nothing to pause for: its error stands.
@@ -720,7 +720,7 @@ class _StepCalls:
                 ):
                     self._note_repeat(name, arguments, content)
         _audit(self._workflow_name, self._step_id, name, outcome, targets)
-        self._actions.append((action_name(name, arguments), outcome))
+        self._actions.append((name, outcome))
         return content, is_error
 
 
@@ -948,7 +948,7 @@ async def run_action_step(
                 # The script's own calls were audited one by one as they ran;
                 # this row adds how many and how long (script_summary).
                 _audit(workflow_name, step.id, step_script.RUN_SCRIPT_TOOL, outcome, stats=stats)
-                actions.append((plain_tool_name(step_script.RUN_SCRIPT_TOOL), outcome))
+                actions.append((step_script.RUN_SCRIPT_TOOL, outcome))
             else:
                 content, is_error = await calls.call(name, arguments)
             for event in calls.drain():
@@ -975,7 +975,7 @@ async def run_action_step(
 
     # Out of turns without a final report: the goal may be half done, so this
     # is a failure — but say exactly what was already done.
-    done = ", ".join(f"{label} ({outcome})" for label, outcome in actions) or "nothing"
+    done = ", ".join(f"{plain_tool_name(name)} ({outcome})" for name, outcome in actions) or "nothing"
     yield (
         "error",
         f"step {step.id!r} did not finish within its turn limit; tools already "
@@ -1202,19 +1202,6 @@ def _described(name: str, arguments: Any) -> str | None:
     return extensions.described(name[len(BUILTIN_PREFIX):], arguments)
 
 
-def action_name(name: str, arguments: Any) -> str:
-    """How a run's report names one call: the tool's plain name, with what
-    it did in the tool's own plain words when it says ("Browser click:
-    Adding the blue hat to your cart"). The model writes those words, so
-    the kind of call stays beside them. Never raises."""
-    try:
-        said = _described(name, arguments)
-    except Exception:
-        said = None
-    plain = plain_tool_name(name)
-    return f"{plain}: {said.rstrip('…').strip()}" if said else plain
-
-
 def plain_tool_name(name: str) -> str:
     """A tool's name in plain words for the person reading a run: an app's
     tool reads "Google Workspace: get events", a built-in one "Send telegram
@@ -1298,8 +1285,8 @@ def _format_output(report: str, actions: list[tuple[str, str]]) -> str:
         for action in actions:
             counts[action] = counts.get(action, 0) + 1
         lines += [
-            f"- {label} — {outcome}" + (f" (×{n})" if n > 1 else "")
-            for (label, outcome), n in counts.items()
+            f"- {plain_tool_name(name)} — {outcome}" + (f" (×{n})" if n > 1 else "")
+            for (name, outcome), n in counts.items()
         ]
     else:
         lines.append("- No tools were called.")
