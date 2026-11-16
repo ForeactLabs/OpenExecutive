@@ -36,6 +36,10 @@ def alerts_db(monkeypatch: pytest.MonkeyPatch, db: Path) -> Iterator[None]:
 
     monkeypatch.setattr(wf_persistence, "DB_PATH", db)
     wf_persistence.initialize_runs_db(db)
+    # Balanced, unless a test picks Careful: it holds every step on its own.
+    from openexecutive.orchestrator import outside_mode
+
+    monkeypatch.setattr(outside_mode, "get_mode", lambda **_k: outside_mode.OUTSIDERS)
     yield
 
 
@@ -138,6 +142,46 @@ def test_the_owners_own_ask_skips_rules(owner: Any, monkeypatch: pytest.MonkeyPa
     assert ttl.asked_checks_apply(SimpleNamespace(unattended=False)) is False
     monkeypatch.setattr(content_trust, "principal_speaking", lambda _s: False)
     assert ttl.asked_checks_apply(SimpleNamespace(unattended=False)) is True
+
+
+def test_careful_holds_even_the_owners_own_ask(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Careful asks before anything goes: the owner's own chat ask waits on
+    a card too, a teammate's as well, and on Balanced the owner's goes."""
+    from openexecutive.orchestrator import content_trust, outside_mode
+
+    monkeypatch.setattr(content_trust, "principal_speaking", lambda _s: True)
+    seen, call_tool = _calls()
+    asked = ttl.asked_call_tool(call_tool)
+    step = {"name": SEND, "arguments": {"to": "x@far.example", "subject": "Prices", "body": "Q4 prices hold."}}
+    token = current_session.set(SimpleNamespace(unattended=False))  # type: ignore[arg-type]
+    try:
+        monkeypatch.setattr(outside_mode, "get_mode", lambda **_k: outside_mode.ASK)
+        assert ttl.asked_checks_apply(current_session.get()) is True
+        held = json.loads(asyncio.run(asked(step)))
+        assert held["status"] == "waiting_for_approval" and "Careful" in held["message"] and seen == []
+        # The owner's card, even when the step's words would route it to a
+        # delegate (a board range): Careful's hold is never someone else's.
+        from openexecutive.memory.decision_ledger import get_decision_instance
+
+        monkeypatch.setattr(ttl, "_team_only", lambda *_a, **_k: True)
+        monkeypatch.setattr(ttl, "_approver_for", lambda *_a, **_k: 999)
+        board = json.loads(asyncio.run(asked({"name": SEND, "arguments": {"to": OWNER, "cc": "x@far.example", "body": "The board"}})))
+        row = get_decision_instance(board["decision_instance_id"])
+        assert row is not None and row.approver_person_id == owner.id
+        # Mail only to the owner still goes.
+        assert asyncio.run(asked({"name": SEND, "arguments": {"to": OWNER, "body": "Hi"}})) == "Email sent!"
+        # A teammate's ask waits on Careful too.
+        monkeypatch.setattr(content_trust, "principal_speaking", lambda _s: False)
+        assert json.loads(asyncio.run(asked(step)))["status"] == "waiting_for_approval"
+        # Balanced: the owner's own ask skips the checks, and a rule alone
+        # doesn't hold it.
+        monkeypatch.setattr(content_trust, "principal_speaking", lambda _s: True)
+        monkeypatch.setattr(outside_mode, "get_mode", lambda **_k: outside_mode.OUTSIDERS)
+        ttl.add_rule(ttl.SCOPE_COMPANY, "words", "Prices", created_by="t")
+        assert ttl.asked_checks_apply(current_session.get()) is False
+        assert ttl._asked_hit(SEND, step["arguments"], mcp=True) is None
+    finally:
+        current_session.reset(token)
 
 
 def _card(address: str, headline: str, suffix: str = "") -> int:
@@ -271,3 +315,14 @@ def test_a_send_a_later_check_put_on_a_card_is_not_done(owner: Any, monkeypatch:
     assert "waiting_for_approval" in result
     assert len([d for d in ttl.done([ttl.SCOPE_EXECUTIVE], days=1) if d.status == "done"]) == 3
 
+
+
+def test_a_level_that_cant_be_read_holds_and_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.orchestrator import levels, outside_mode
+
+    def _broken(*_: object) -> str:
+        raise RuntimeError("settings unreadable")
+
+    monkeypatch.setattr(levels, "turn_level", _broken)
+    monkeypatch.setattr(outside_mode, "get_mode", _broken)
+    assert ttl._careful_turn() == "your Approvals level couldn't be read"

@@ -58,6 +58,9 @@ def _reply(rounds: list[FinalMsg]) -> str:
             ):
                 if isinstance(item, str) and item != Executive._THINKING:
                     text.append(item)
+                elif item == {"type": "rewrite"}:
+                    # As every reader does: the retry replaces what came before.
+                    text.clear()
 
     asyncio.run(go())
     return "".join(text)
@@ -92,9 +95,9 @@ def test_one_round_is_untouched_and_a_silent_round_adds_nothing() -> None:
     assert reply == "ITEM-1 has 12."
 
 
-def test_a_claim_check_retry_starts_one_new_paragraph(monkeypatch: pytest.MonkeyPatch) -> None:
-    # The retry round's break came twice: the loop's own "\n\n" before the
-    # retry, then _round_separator's, which never saw it (PR #562 review).
+def test_a_claim_check_retry_replaces_the_first_reply(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The retry writes the reply again, whole, with no break or trace of the
+    # first: it never trails it as a correction.
     from openexecutive.orchestrator import claim_check
 
     async def unbacked(model: str, turn: str) -> dict[str, Any]:
@@ -104,9 +107,9 @@ def test_a_claim_check_retry_starts_one_new_paragraph(monkeypatch: pytest.Monkey
     monkeypatch.setattr(claim_check, "_call_model", unbacked)
     reply = _reply([
         FinalMsg([TextBlock("Done.")], "end_turn"),
-        FinalMsg([TextBlock("Actually I haven't removed it yet.")], "end_turn"),
+        FinalMsg([TextBlock("I haven't removed it yet.")], "end_turn"),
     ])
-    assert reply == "Done.\n\nActually I haven't removed it yet."
+    assert reply == "I haven't removed it yet."
 
 
 def test_a_collected_reply_is_rewritten_not_corrected(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -114,7 +117,6 @@ def test_a_collected_reply_is_rewritten_not_corrected(monkeypatch: pytest.Monkey
     # Executive.chat collects replaces the first reply instead of trailing a
     # "Correction:" after its sign-off.
     from openexecutive.orchestrator import claim_check
-    from openexecutive.orchestrator import executive as executive_mod
 
     async def unbacked(model: str, turn: str) -> dict[str, Any]:
         return {"unbacked": True, "claim": "Added Avery"}
@@ -128,20 +130,16 @@ def test_a_collected_reply_is_rewritten_not_corrected(monkeypatch: pytest.Monkey
     out: list[Any] = []
 
     async def go() -> None:
-        token = executive_mod._COLLECTING.set(True)
-        try:
-            with (
-                patch("openexecutive.orchestrator.executive.get_provider", return_value=provider),
-                patch("openexecutive.orchestrator.executive.audit_log", lambda *_a, **_k: None),
-                set_session(Session()),
+        with (
+            patch("openexecutive.orchestrator.executive.get_provider", return_value=provider),
+            patch("openexecutive.orchestrator.executive.audit_log", lambda *_a, **_k: None),
+            set_session(Session()),
+        ):
+            async for item in Executive()._stream_agent_loop(
+                system_blocks=[], messages=[{"role": "user", "content": "x"}],
+                model="claude-test", workspace_mode="team", principal_role_tag="", turn_id="t-1",
             ):
-                async for item in Executive()._stream_agent_loop(
-                    system_blocks=[], messages=[{"role": "user", "content": "x"}],
-                    model="claude-test", workspace_mode="team", principal_role_tag="", turn_id="t-1",
-                ):
-                    out.append(item)
-        finally:
-            executive_mod._COLLECTING.reset(token)
+                out.append(item)
 
     asyncio.run(go())
     marker = out.index({"type": "rewrite"})
@@ -149,5 +147,24 @@ def test_a_collected_reply_is_rewritten_not_corrected(monkeypatch: pytest.Monkey
     assert "I've added Avery" not in after and "on this week's plan" in after
     nudge = provider.calls[1]["messages"][-1]["content"][0]["text"]
     assert "write your whole reply again" in nudge
-    assert claim_check.nudge("x") != claim_check.nudge("x", rewrite=True)
 
+
+
+def test_a_rewrite_that_writes_nothing_keeps_the_first_reply() -> None:
+    """An empty retry (or a stop before its first word) never leaves a blank
+    reply: the first one streams again, so it is saved and shown."""
+    from openexecutive.orchestrator.executive import _kept_if_unwritten
+
+    async def collect(items: list[Any]) -> list[Any]:
+        async def stream() -> Any:
+            for item in items:
+                yield item
+
+        return [i async for i in _kept_if_unwritten(stream(), Executive._THINKING)]
+
+    rewrite = {"type": "rewrite"}
+    out = asyncio.run(collect(["I sent ", "it.", rewrite, Executive._THINKING]))
+    assert out[-1] == "I sent it."
+    # A retry that wrote something stands as it is.
+    out = asyncio.run(collect(["I sent it.", rewrite, "It waits on approval."]))
+    assert out[-1] == "It waits on approval." and out.count("I sent it.") == 1

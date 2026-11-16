@@ -2105,8 +2105,10 @@ def hold(
     summary = summarize(tool, tool_input, mcp=mcp)
     training = hit.kind == TRAINING
     grant = allowance(tool, tool_input, mcp=mcp) if training else None
-    if training:
-        # Teaching it is the principal's: only they can allow anything.
+    if training or (hit.kind == "level" and source == "chat"):
+        # Teaching it is the principal's: only they can allow anything. So is
+        # a step Careful held on a turn someone is in, the owner's own ask
+        # included: never a delegate's card.
         approver = _principal_id()
     elif _team_only(tool, tool_input):
         approver = _approver_for(hit.kind, "\n".join(_strings(tool_input)), hit.reason)
@@ -2233,6 +2235,22 @@ def _careful() -> bool:
     except Exception:
         logger.warning("take_the_lead: couldn't read the level — holding the action", exc_info=True)
         return True
+
+
+def _careful_turn() -> str | None:
+    """Why the turn in progress waits on its level: it runs at Careful (its
+    person's own level where they have one), or the level couldn't be read.
+    None when it doesn't. Never raises: an error holds, and says so."""
+    try:
+        from openexecutive.orchestrator import levels, outside_mode
+        from openexecutive.orchestrator.schedule_tools import current_session
+
+        session = current_session.get()
+        level = levels.turn_level(session) if session is not None else outside_mode.get_mode()
+        return "Approvals is on Careful" if level == outside_mode.ASK else None
+    except Exception:
+        logger.warning("take_the_lead: couldn't read the turn's level — holding the step", exc_info=True)
+        return "your Approvals level couldn't be read"
 
 
 def _hit(name: str, tool_input: dict[str, Any], *, mcp: bool) -> tuple[Hit | None, Allowed | Rule | None]:
@@ -2450,14 +2468,16 @@ def gated_call_tool(call_tool: _Handler, *, source: str) -> _Handler:
 # --------------------------------------------------------------------------- #
 # Approvals (orchestrator.levels) decides first on every turn. On a turn
 # someone is in, what it lets run still meets the owner's Waits rules, then
-# In training, as an unattended run's steps do (``_hit``). The owner's own ask
-# is the yes: their turns skip both. Unattended runs go through ``_gated``.
+# Careful, then In training, as an unattended run's steps do (``_hit``). The
+# owner's own ask is the yes, except on Careful, which asks before anything
+# goes: their turns meet Careful alone. Unattended runs go through ``_gated``.
 
 
 def asked_checks_apply(session: Any) -> bool:
-    """Whether this turn's steps meet Your rules and In training here: a
+    """Whether this turn's steps meet the checks here (``_asked_hit``): a
     turn someone is in (a teammate, a contact's mail, a shared chat) that is
-    not the owner's own ask. Fails closed: no session, or an error, is yes."""
+    not the owner's own ask, or any turn on Careful. Fails closed: no
+    session, or an error, is yes."""
     if session is None:
         return True
     if getattr(session, "unattended", False) is True:
@@ -2465,16 +2485,25 @@ def asked_checks_apply(session: Any) -> bool:
     try:
         from openexecutive.orchestrator.content_trust import principal_speaking
 
-        return not principal_speaking(session)
+        return not principal_speaking(session) or _careful_turn() is not None
     except Exception:
         logger.warning("take_the_lead: couldn't tell who asked — checking the rules", exc_info=True)
         return True
 
 
 def _asked_hit(name: str, tool_input: dict[str, Any], *, mcp: bool) -> Hit | None:
-    """Why an asked-for step waits: a Waits rule, then In training. Never
-    raises: an error holds."""
+    """Why an asked-for step waits: a Waits rule, then Careful (it asks
+    before anything goes, even what the person asked for), then In
+    training. The owner's own ask meets Careful alone. Never raises: an
+    error holds."""
     try:
+        from openexecutive.orchestrator.content_trust import principal_speaking
+        from openexecutive.orchestrator.schedule_tools import current_session
+
+        session = current_session.get()
+        if session is not None and principal_speaking(session):
+            careful = _careful_turn()
+            return Hit("level", careful) if careful else None
         lead = get(SCOPE_EXECUTIVE)
         rules = list_rules([SCOPE_COMPANY])
         addresses, names = _rule_targets(name, tool_input)
@@ -2486,6 +2515,9 @@ def _asked_hit(name: str, tool_input: dict[str, Any], *, mcp: bool) -> Hit | Non
         rule = _rule_hit(rules, text, recipients)
         if rule is not None:
             return rule
+        careful = _careful_turn()
+        if careful:
+            return Hit("level", careful)
         if lead.training:
             grant = allowance(name, tool_input, mcp=mcp)
             if (find_allowed(grant[0]) if grant is not None else None) is None:

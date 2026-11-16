@@ -224,10 +224,6 @@ from openexecutive.workflows.python_job import PYTHON_JOB_TOOL_HANDLERS, PYTHON_
 
 logger = logging.getLogger(__name__)
 
-# Set while ``Executive.chat`` collects a reply whole (an email or a chat
-# app's answer), so a claim-check retry rewrites it instead of adding a
-# correction after it.
-_COLLECTING: ContextVar[bool] = ContextVar("executive_collecting", default=False)
 
 # Bound by ``Executive.chat`` to a list that a round the model refused
 # (stop_reason "refusal") appends to, so the collected reply never sends what
@@ -1251,6 +1247,28 @@ EMPTY_ROUND_NOTE = (
     "call again if you still need it, or answer from what you have."
 )
 
+async def _kept_if_unwritten(stream: AsyncIterator[Any], thinking: str) -> AsyncIterator[Any]:
+    """``stream`` as is, except that a ``rewrite`` whose new reply writes
+    nothing (an empty round, a stop or a cut-off before its first word)
+    streams the first reply again, so every reader (the saved reply, the web
+    and phone chats, an email or chat app) ends with words, never a blank."""
+    since: list[str] = []
+    before: list[str] = []
+    rewritten = False
+    async for item in stream:
+        if item == {"type": "rewrite"}:
+            # A second rewrite keeps the newest words anyone saw.
+            if "".join(since).strip():
+                before = since
+            since, rewritten = [], True
+        elif isinstance(item, str) and item != thinking:
+            since.append(item)
+        yield item
+    if rewritten and not "".join(since).strip() and before:
+        # Exactly as it streamed, so a reader can tell it from a new reply.
+        yield "".join(before)
+
+
 def _round_separator(tail: str, text: str) -> str:
     """What goes between the text already streamed (its last characters,
     ``tail``) and a new round's first ``text``: a paragraph break, less what
@@ -1694,7 +1712,7 @@ class Executive:
             consulted: list[str] = []
             turn_calls: list[tuple[str, str]] = []
             try:
-                async for item in self._stream_agent_loop(
+                async for item in _kept_if_unwritten(self._stream_agent_loop(
                     system_blocks,
                     messages,
                     model=effective_model,
@@ -1708,9 +1726,12 @@ class Executive:
                     workspace_mode=workspace_mode,
                     principal_role_tag=principal_role_context(principal_role),
                     inbox=inbox,
-                ):
+                ), self._THINKING):
                     if isinstance(item, str) and item != self._THINKING:
                         full_response += item
+                    elif item == {"type": "rewrite"}:
+                        # Written again whole: the history keeps only the new reply.
+                        full_response = ""
                     yield item
             finally:
                 outside_content.end_turn(outside_turn)
@@ -2129,7 +2150,7 @@ class Executive:
         draft_refused: list[int] = []
         refusing = _REFUSED.set(draft_refused)
         try:
-            async for item in self._stream_agent_loop(
+            async for item in _kept_if_unwritten(self._stream_agent_loop(
                 system_blocks,
                 messages,
                 model=effective_model,
@@ -2144,13 +2165,16 @@ class Executive:
                 workspace_mode=workspace_mode,
                 principal_role_tag=principal_role_context(principal_role),
                 inbox=inbox,
-            ):
+            ), self._THINKING):
                 # Swallow draft text and the THINKING sentinel — the user sees
                 # only the revised stream. Pass debug-event dicts through so the
                 # UI still gets specialist routing visibility.
                 if isinstance(item, str):
                     if item != self._THINKING:
                         draft += item
+                elif item == {"type": "rewrite"}:
+                    # The draft is written again whole: reviewers see only that.
+                    draft = ""
                 else:
                     yield item
         finally:
@@ -2909,14 +2933,14 @@ class Executive:
                     private=private_turn,
                 )
                 current_messages.append({"role": "assistant", "content": response_content})
-                # A collected reply (an email, a chat app) is read whole, so
-                # the retry writes the whole reply again and it replaces the
-                # first instead of trailing it as a correction.
-                rewrite = _COLLECTING.get()
-                if rewrite:
-                    yield {"type": "rewrite"}
+                # The retry writes the whole reply again and it replaces the
+                # first, never trailing it as a correction: a collected reply
+                # (an email, a chat app) drops it before it is sent, and the
+                # web chat swaps it out on ``rewrite``.
+                yield {"type": "rewrite"}
+                streamed_tail = ""
                 nudge: list[dict[str, Any]] = [
-                    {"type": "text", "text": claim_check.nudge(claim, rewrite=rewrite)}
+                    {"type": "text", "text": claim_check.nudge(claim)}
                 ]
                 # The retry is the last round, which runs no tool: say so,
                 # so it says it can't rather than try a call it won't get.
@@ -4162,10 +4186,9 @@ class Executive:
             else self.stream_chat(**common_kwargs)
         )
         result = ""
-        rewritten, before = False, ""
+        rewritten = False
         refused: list[int] = []
         refusing = _REFUSED.set(refused)
-        collecting = _COLLECTING.set(True)
         try:
             with turn_files.bind(offered or None) if offered else contextlib.nullcontext():
                 async for chunk in stream:
@@ -4173,17 +4196,17 @@ class Executive:
                         result += chunk
                     elif isinstance(chunk, dict) and chunk.get("type") == "rewrite":
                         # The next round writes the reply again.
-                        before, result, rewritten = result, "", True
+                        result, rewritten = "", True
                     elif cards is not None and isinstance(chunk, dict) and chunk.get("type") == "action_taken":
                         decision_id = chunk.get("decision_id")
                         if isinstance(decision_id, int) and not isinstance(decision_id, bool) and decision_id not in cards:
                             cards.append(decision_id)
         finally:
-            _COLLECTING.reset(collecting)
             _REFUSED.reset(refusing)
         if rewritten:
-            # A retry that wrote nothing keeps the first reply.
-            result = result.lstrip() or before
+            # A retry that wrote nothing streams the first reply again
+            # (_kept_if_unwritten).
+            result = result.lstrip()
         if refused:
             # Nothing the refused round began ("You're") is sent. What the
             # earlier rounds said stays (what their tools did), then a plain

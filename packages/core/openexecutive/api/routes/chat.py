@@ -339,7 +339,7 @@ class _StreamStep(NamedTuple):
 _SSE_KEEPALIVE = ": keepalive\n\n"
 # The steps of a reply the other pages of a shared chat follow live
 # (``chat_live.turn_event``), besides its text and the thinking pings.
-_LIVE_STEPS = frozenset({"activity", "action_taken", "phase"})
+_LIVE_STEPS = frozenset({"activity", "action_taken", "phase", "rewrite"})
 
 
 async def _cancel_stream_step(anext_task: asyncio.Task[Any], turn_id: str) -> None:
@@ -1522,6 +1522,9 @@ async def _run_chat_turn(
         )
 
         full_response = ""
+        # The reply as it stood before the Executive wrote it again: it
+        # stands when the turn ends before the new one has a word.
+        first_reply = ""
         # Messages folded into this turn (POST /chat/add), filled once the
         # turn's inbox closes and persisted with it.
         added_texts: list[str] = []
@@ -1789,6 +1792,13 @@ async def _run_chat_turn(
                                 # A draft written again in this reply replaces
                                 # the earlier one's chip and card.
                                 action_chips[:] = drop_replaced([*action_chips, item])
+                            elif isinstance(item, dict) and item.get("type") == "rewrite":
+                                # The reply is written again whole: what
+                                # streamed so far is dropped here (the saved
+                                # reply) and by every page showing it.
+                                if full_response.strip():
+                                    first_reply = full_response
+                                full_response = ""
                             if (
                                 live_turn
                                 and isinstance(item, dict)
@@ -1860,6 +1870,17 @@ async def _run_chat_turn(
                 if aclose is not None:
                     with contextlib.suppress(Exception):
                         await aclose()
+
+            if first_reply and not full_response.strip():
+                # Stopped, timed out or cut off after a rewrite began but
+                # before it wrote anything: the first reply stands, saved and
+                # back on every page showing it.
+                full_response = first_reply
+                kept_evt = {"type": "chunk", "content": first_reply, "session_id": session.session_id}
+                if live_turn:
+                    chat_live.turn_event(session.session_id, live_key, kept_evt)
+                if not client_disconnected:
+                    yield f"data: {json.dumps(kept_evt)}\n\n"
 
             if not turn_sources.is_empty():
                 answer_sources = turn_sources.payload()

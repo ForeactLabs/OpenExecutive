@@ -115,7 +115,10 @@ def test_unbacked_claim_gets_one_more_round_with_the_nudge() -> None:
     second = provider.calls[1]["messages"]
     assert second[-2] == {"role": "assistant", "content": [{"type": "text", "text": "Done."}]}
     nudge = second[-1]["content"][0]["text"]
-    assert "“Done”" in nudge and "no tool call" in nudge
+    assert "“Done”" in nudge and "no tool call" in nudge and "write your whole reply again" in nudge
+    # The retry replaces the first reply wherever it is read, web and phone
+    # included: they drop what streamed on ``rewrite``.
+    assert {"type": "rewrite"} in items
     # The break between the two replies comes from the next round's text
     # (test_reply_rounds.py); the retry itself streams nothing of its own.
     assert "\n\n" not in items
@@ -204,3 +207,58 @@ def test_the_check_sees_what_each_call_was_given() -> None:
     assert len(long) < claim_check.CALL_INPUT_CHARS + 40
     rendered = claim_check.render_calls([(label, "Successfully updated range 'A9:B10'")])
     assert "=SUM(B2:B9)" in rendered
+
+
+def test_every_call_of_a_long_turn_is_shown() -> None:
+    """A save early in a long turn still backs "I saved it": no call is cut,
+    the lines get shorter instead."""
+    calls = [("save_file {\"name\": \"Logistics pack\"}", "Saved to Documents")]
+    calls += [(f"update_department_plan {{\"step_id\": {i}}}", "ok " * 200) for i in range(40)]
+    rendered = claim_check.render_calls(calls)
+    lines = rendered.splitlines()
+    assert len(lines) == 41 and "Logistics pack" in lines[0] and "Saved to Documents" in lines[0]
+    assert all(len(line) <= max(claim_check.CALL_MIN_CHARS, claim_check.CALLS_BUDGET_CHARS // 41) for line in lines)
+
+
+def test_a_claim_about_before_this_reply_is_never_unbacked() -> None:
+    reply = "Earlier today I also sent Sam approval cards for the other quotes. I sent the quote just now."
+    earlier = {
+        "unbacked": True,
+        "claim": "Earlier today I also sent Sam approval cards for the other quotes.",
+        "when": claim_check.WHEN_BEFORE,
+    }
+    assert claim_check.accept_claim(earlier, reply) is None
+    now = {"unbacked": True, "claim": "I sent the quote just now.", "when": claim_check.WHEN_THIS_REPLY}
+    assert claim_check.accept_claim(now, reply) == "I sent the quote just now."
+    # The judge must say when; a time word in the claim alone decides nothing.
+    assert claim_check._TOOL["input_schema"]["required"] == ["unbacked", "claim", "when"]
+    noted = {"unbacked": True, "claim": "I saved the notes from yesterday's call.", "when": claim_check.WHEN_THIS_REPLY}
+    assert claim_check.accept_claim(noted, "I saved the notes from yesterday's call.") is not None
+
+
+def test_a_very_long_turn_drops_its_middle_calls() -> None:
+    """Past the budget, with no reads to drop, the middle goes, never the
+    start or the end."""
+    calls = [("save_file {\"name\": \"Logistics pack\"}", "Saved to Documents")]
+    calls += [(f"update_step {{\"id\": {i}}}", "ok " * 200) for i in range(500)]
+    calls += [("send_email {\"to\": \"sam@example.com\"}", "sent")]
+    rendered = claim_check.render_calls(calls)
+    lines = rendered.splitlines()
+    most = claim_check.CALLS_BUDGET_CHARS // claim_check.CALL_MIN_CHARS
+    assert len(lines) == most
+    assert "Logistics pack" in lines[0] and "sam@example.com" in lines[-1]
+    assert any(f"{len(calls) - most + 1} more calls left out" in line for line in lines)
+    assert len(rendered) <= claim_check.CALLS_BUDGET_CHARS + 2 * claim_check.CALL_MIN_CHARS + len(lines)
+
+
+def test_a_long_turn_drops_reads_before_any_change() -> None:
+    """A save in the middle of 150 calls still backs "I saved it": the reads
+    go first."""
+    calls = [(f"list_open_loops {{\"page\": {i}}}", "x " * 100) for i in range(150)]
+    calls.insert(60, ("save_file {\"name\": \"Dock door plan\"}", "Saved to Documents"))
+    rendered = claim_check.render_calls(calls)
+    lines = rendered.splitlines()
+    assert len(lines) == claim_check.CALLS_BUDGET_CHARS // claim_check.CALL_MIN_CHARS
+    assert "Dock door plan" in rendered and "Saved to Documents" in rendered
+    assert sum("more calls left out" in line for line in lines) == 1
+
