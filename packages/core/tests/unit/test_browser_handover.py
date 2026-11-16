@@ -250,6 +250,40 @@ def test_the_bar_answers_only_done_or_stop_on_an_open_one(client: TestClient) ->
     assert client.post(f"/browser/hand-over/{other.id}", json={"outcome": "done"}).status_code == 404
 
 
+def test_a_press_on_the_chats_ask_before_its_step_starts_is_kept_for_it(client: TestClient) -> None:
+    pid = client.pid  # type: ignore[attr-defined]
+    early = browser_handover.reserve(pid, "s1", "sign in")
+    # Pressed while an earlier step of the round still runs: not a 404.
+    got = client.post(f"/browser/hand-over/{early}", json={"outcome": "stop"})
+    assert got.status_code == 200 and got.json()["carried_on"] is False
+    # Only the person it was asked of, and only a real ask.
+    assert client.post("/browser/hand-over/nope", json={"outcome": "done"}).status_code == 404
+    theirs = browser_handover.reserve(pid + 1, "s9", "sign in")
+    assert client.post(f"/browser/hand-over/{theirs}", json={"outcome": "done"}).status_code == 404
+    assert browser_handover.start(pid, "sign in", in_chat="s1").early == "stop"
+
+
+async def test_a_step_answered_early_on_the_chat_hands_nothing_over(
+    chat_turn: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ran: list[Any] = []
+
+    async def run(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        ran.append(args)
+        return {"ok": True}
+
+    monkeypatch.setattr(browser_relay, "run", run)
+    hid = browser_handover.reserve(7, "s1", "sign in")
+    assert browser_handover.answer_early(hid, 7, "done")
+    out = json.loads(await browser_tools._hand_over(7, {"need": "sign in"}, None))
+    assert out["done"] is True and not ran and browser_handover.get(hid) is None
+    # A later round clears what an earlier one kept.
+    left = browser_handover.reserve(7, "s1", "sign in")
+    assert browser_handover.answer_early(left, 7, "stop")
+    browser_handover.new_round(7, "s1")
+    assert not browser_handover._early
+
+
 def test_done_on_the_bar_picks_up_a_waiting_workflow_run_and_stop_stops_it(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -277,6 +311,31 @@ def test_done_on_the_bar_picks_up_a_waiting_workflow_run_and_stop_stops_it(
         "ok": True, "carried_on": False,
     }
     assert calls == [("resume", "handover:1:a"), ("stop", "handover:1:b")]
+
+
+def test_done_on_a_workflow_bar_before_its_run_waits_stays_pressable(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openexecutive.api.routes import browser as route
+    from openexecutive.workflows import resumer
+
+    picked = [0]
+
+    async def resume(key: str, db_path: Any = None) -> int:
+        return picked[0]
+
+    monkeypatch.setattr(resumer, "resume_waiting", resume)
+    monkeypatch.setattr(route, "WORKFLOW_TRIES", 1)
+    pid = client.pid  # type: ignore[attr-defined]
+    # As _hand_over_in_workflow starts it: the run waits on the bar, never on
+    # a Needs you card, so there is no card for Done to close.
+    handover = browser_handover.start(pid, "sign in", workflow_key="handover:1:a")
+    got = client.post(f"/browser/hand-over/{handover.id}", json={"outcome": "done"}).json()
+    assert got["kept"] is True and browser_handover.get(handover.id) is handover
+    assert handover.card_id is None and not handover.outcome
+    picked[0] = 1
+    got = client.post(f"/browser/hand-over/{handover.id}", json={"outcome": "done"}).json()
+    assert got == {"ok": True, "carried_on": True}
 
 
 def test_after_the_turn_ended_the_bar_never_carries_on_by_itself(
@@ -453,3 +512,189 @@ async def test_the_card_is_seen_only_by_the_person_it_was_handed_to(alerts_db: P
     assert handover.card_id not in ids(None)
     browser_handover.finish(handover.id, 7, "stop")
     await run
+
+
+# --- The chat asks first; the hand-over owns its card ----------------------
+
+
+def _ask(need: str = "enter the code from your phone") -> dict[str, Any]:
+    events = browser_tools.hand_over_asks(
+        [{"id": "t1", "name": "browser_hand_over", "input": {"need": need}}], "s1"
+    )
+    assert len(events) == 1
+    return events[0]
+
+
+async def _start_in_chat(need: str) -> tuple[asyncio.Task[str], dict[str, Any]]:
+    await browser_relay.next_step(7, wait=0)
+    run = asyncio.create_task(browser_tools._handler("browser_hand_over")({"need": need}))
+    step = await _take(7, {"ok": True, "url": "https://login.example.com/", "sign_in": False})
+    return run, step
+
+
+async def test_the_chat_asks_first_and_the_card_waits(
+    alerts_db: Path, chat_turn: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(browser_relay, "on", lambda: True)
+    monkeypatch.setattr(browser_relay, "connected", lambda _pid: True)
+    ask = _ask()
+    assert ask["type"] == "hand_over" and ask["session_id"] == "s1"
+    assert ask["text"] == "Waiting on you: enter the code from your phone"
+    assert ask["done_label"] == "Done" and ask["stop_label"] == "Stop" and ask["detail"]
+    run, step = await _start_in_chat("enter the code from your phone")
+    # The hand-over took the id the chat was shown, so the chat's Done answers it.
+    assert step["args"]["id"] == ask["id"]
+    handover = browser_handover.get(ask["id"])
+    assert handover is not None and handover.in_chat
+    await asyncio.sleep(0.05)
+    assert handover.card_id is None  # the chat's ask goes first
+    browser_handover.finish(ask["id"], 7, "done")
+    assert json.loads(await run)["done"] is True
+    await asyncio.sleep(0.05)
+    # Answered in the chat: no card, so no push either.
+    assert handover.card_id is None
+    assert not [a for a in alert_store.list_alerts() if a.source == browser_handover.SOURCE]
+
+
+async def test_an_ask_left_unanswered_puts_the_card_up(
+    alerts_db: Path, chat_turn: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(browser_relay, "on", lambda: True)
+    monkeypatch.setattr(browser_relay, "connected", lambda _pid: True)
+    monkeypatch.setattr(browser_handover, "CARD_AFTER_S", 0.05)
+    ask = _ask()
+    run, _step = await _start_in_chat("enter the code from your phone")
+    handover = browser_handover.get(ask["id"])
+    assert handover is not None
+    for _ in range(200):
+        if handover.card_id is not None:
+            break
+        await asyncio.sleep(0.01)
+    assert handover.card_id is not None
+    assert alert_store.get_alert(handover.card_id).status == "unread"  # type: ignore[union-attr]
+    browser_handover.finish(ask["id"], 7, "done")
+    await run
+    assert alert_store.get_alert(handover.card_id).status == "ack"  # type: ignore[union-attr]
+
+
+async def test_stopping_the_chat_turn_ends_the_hand_over_and_closes_its_card(
+    alerts_db: Path, chat_turn: None
+) -> None:
+    run, step = await _handed({"need": "sign in to Shop"})
+    handover = browser_handover.get(step["args"]["id"])
+    assert handover is not None and handover.card_id is not None
+    run.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await run
+    assert browser_handover.get(handover.id) is None
+    assert alert_store.get_alert(handover.card_id).status == "dismissed"  # type: ignore[union-attr]
+    ended = await _take(7, {"ok": True})
+    assert ended["action"] == "hand_over_end" and ended["args"]["id"] == handover.id
+
+
+def test_a_card_made_after_the_hand_over_ended_closes_at_once(alerts_db: Path) -> None:
+    handover = browser_handover.start(7, "sign in")
+    browser_handover.finish(handover.id, 7, "stop")
+    card = alert_store.insert_alert(
+        source=browser_handover.SOURCE, external_id="x", severity="high", headline="Waiting on you: sign in",
+        body="b", routed_to_person_id=7,
+    )
+    browser_handover.place_card(handover, card)
+    assert alert_store.get_alert(card).status == "dismissed"  # type: ignore[arg-type,union-attr]
+
+
+def test_a_newer_hand_over_pushing_one_out_closes_its_card(alerts_db: Path) -> None:
+    card = alert_store.insert_alert(
+        source=browser_handover.SOURCE, external_id="old", severity="high", headline="Waiting on you: a",
+        body="b", routed_to_person_id=7,
+    )
+    browser_handover.start(7, "a", card_id=card)
+    for i in range(browser_handover.MAX_PER_PERSON):
+        browser_handover.start(7, f"n{i}")
+    assert alert_store.get_alert(card).status == "dismissed"  # type: ignore[arg-type,union-attr]
+
+
+def test_cards_left_by_a_restart_close_at_start_up(alerts_db: Path) -> None:
+    left = alert_store.insert_alert(
+        source=browser_handover.SOURCE, external_id="left", severity="high", headline="Waiting on you: a",
+        body="b", routed_to_person_id=7,
+    )
+    other = alert_store.insert_alert(
+        source="manual", external_id="other", severity="high", headline="Something else", body="b",
+    )
+    assert browser_handover.close_leftover_cards() == 1
+    assert alert_store.get_alert(left).status == "dismissed"  # type: ignore[arg-type,union-attr]
+    assert alert_store.get_alert(other).status == "unread"  # type: ignore[arg-type,union-attr]
+
+
+def test_no_chat_ask_outside_the_persons_own_chat(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(browser_relay, "on", lambda: True)
+    token = current_session.set(SimpleNamespace(
+        caller_person_id=7, from_web_chat=False, from_host=False, from_mcp_client=False,
+        from_meeting=False, unattended=False, session_id="s1",
+    ))
+    try:
+        assert browser_tools.hand_over_asks(
+            [{"id": "t1", "name": "browser_hand_over", "input": {"need": "sign in"}}], "s1"
+        ) == []
+    finally:
+        current_session.reset(token)
+    assert not browser_handover._reserved
+
+
+def test_done_on_the_bar_after_the_turn_ended_leaves_the_card_for_its_done(alerts_db: Path) -> None:
+    card = alert_store.insert_alert(
+        source=browser_handover.SOURCE, external_id="late", severity="high", headline="Waiting on you: a",
+        body="b", routed_to_person_id=7,
+    )
+    handover = browser_handover.start(7, "a", card_id=card)
+    assert browser_handover.finish(handover.id, 7, "done") == (handover, False)
+    # Done on the card carries the work on now, so it stays open for that.
+    assert alert_store.get_alert(card).status == "unread"  # type: ignore[arg-type,union-attr]
+
+
+def test_a_reservation_is_taken_only_in_its_chat_and_only_that_round() -> None:
+    hid = browser_handover.reserve(7, "s1", "sign in")
+    assert browser_handover.start(7, "sign in").id != hid  # not asked in the chat: a fresh id
+    assert browser_handover.start(7, "sign in", in_chat="s2").id != hid  # another chat of theirs
+    assert browser_handover.start(7, "sign in", in_chat="s1").id == hid
+    left = browser_handover.reserve(7, "s1", "sign in")
+    browser_handover.new_round(7, "s1")  # the chat's next round: nothing took it
+    late = browser_handover.start(7, "sign in", in_chat="s1")
+    assert late.id != left and not late.in_chat
+
+
+async def test_the_ask_holds_however_long_the_rounds_other_steps_take(
+    alerts_db: Path, chat_turn: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(browser_relay, "on", lambda: True)
+    monkeypatch.setattr(browser_relay, "connected", lambda _pid: True)
+    (ask,) = browser_tools.hand_over_asks(
+        [{"id": "t1", "name": "browser_hand_over", "input": {"need": "sign in"}}], "s1"
+    )
+    # No clock on it: a slow page load earlier in the round doesn't matter.
+    handover = browser_handover.start(7, "sign in", in_chat=browser_tools._chat_id())
+    assert handover.id == ask["id"] and handover.in_chat
+
+
+def test_only_the_rounds_first_hand_over_is_asked_in_the_chat(chat_turn: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(browser_relay, "on", lambda: True)
+    monkeypatch.setattr(browser_relay, "connected", lambda _pid: True)
+    tu = {"name": "browser_hand_over", "input": {"need": "sign in"}}
+    (ask,) = browser_tools.hand_over_asks([{**tu, "id": "a"}, {**tu, "id": "b"}], "s1")
+    assert browser_handover.start(7, "sign in", in_chat="s1").id == ask["id"]
+    # The second wasn't shown, so it isn't in the chat: its card goes out at once.
+    assert not browser_handover.start(7, "sign in", in_chat="s1").in_chat
+    # One with nothing to ask doesn't take the round's ask from the next.
+    (ask,) = browser_tools.hand_over_asks(
+        [{**tu, "id": "c", "input": {"need": ""}}, {**tu, "id": "d", "input": {"need": "enter the code"}}], "s1"
+    )
+    assert ask["text"] == "Waiting on you: enter the code"
+
+
+def test_no_chat_ask_while_the_browser_isnt_connected(chat_turn: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(browser_relay, "on", lambda: True)
+    monkeypatch.setattr(browser_relay, "connected", lambda _pid: False)
+    assert browser_tools.hand_over_asks(
+        [{"id": "t1", "name": "browser_hand_over", "input": {"need": "sign in"}}], "s1"
+    ) == []

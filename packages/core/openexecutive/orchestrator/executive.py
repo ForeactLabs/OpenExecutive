@@ -3233,6 +3233,18 @@ class Executive:
             # label it saw captioning this round with the previous round's
             # work; an honest "Working…" beats a stale name.
             yield activity or fallback_activity(iteration=iteration)
+            # A step in their browser only they can do is asked in the chat
+            # they're typing in, with Done and Stop, before it runs
+            # (browser.tools.hand_over_asks).
+            try:
+                from openexecutive.browser import tools as browser_tools
+
+                for ask in browser_tools.hand_over_asks(
+                    tool_uses, getattr(current_session.get(), "session_id", None)
+                ):
+                    yield ask
+            except Exception:
+                logger.warning("hand_over_ask_failed iteration=%d", iteration, exc_info=True)
 
             # Signal that tool calls are in flight so the client can show progress.
             yield self._THINKING

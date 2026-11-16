@@ -2012,8 +2012,11 @@ def _build_activity(
         personal = alert.source in PERSONAL_SOURCES
         if is_private_alert(alert) or (not personal and not visible_alert(alert, None)):
             continue  # the rail is shown to everyone
-        if personal and not everyone and (viewer is None or alert.routed_to_person_id != viewer):
-            continue  # only the person it was handed to
+        if personal and (viewer is None or alert.routed_to_person_id != viewer):
+            # Only the person it was handed to, even in the Executive's own
+            # reasoning (``everyone``): the review quotes what it reads onto
+            # team cards.
+            continue
         if not _theirs(owners.of_alert(alert)):
             continue  # a card for one person ("Waiting on you: sign in to …")
         items.append(ActivityItem(

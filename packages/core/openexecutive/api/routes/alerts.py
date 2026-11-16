@@ -10,7 +10,13 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, computed_field
 
 from openexecutive.alerts import approvals, lifecycle, store
-from openexecutive.alerts.models import ARTIFACT_SOURCE, Alert, is_private_alert, visible_alert
+from openexecutive.alerts.models import (
+    ARTIFACT_SOURCE,
+    PERSONAL_SOURCES,
+    Alert,
+    is_private_alert,
+    visible_alert,
+)
 
 # The standalone alerts UI (panel, live toast stream, mute/severity settings,
 # feedback) was removed — those items now surface only through the briefing
@@ -312,6 +318,8 @@ def _audit_approval(
             **extra,
         },
         private=is_private_alert(alert),
+        # A personal card's words are its person's alone (PERSONAL_SOURCES).
+        private_to_person=alert.routed_to_person_id if alert.source in PERSONAL_SOURCES else None,
     )
 
 
