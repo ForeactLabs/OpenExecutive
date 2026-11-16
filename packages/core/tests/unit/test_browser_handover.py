@@ -313,6 +313,31 @@ def test_done_on_the_bar_picks_up_a_waiting_workflow_run_and_stop_stops_it(
     assert calls == [("resume", "handover:1:a"), ("stop", "handover:1:b")]
 
 
+def test_done_on_a_workflow_bar_before_its_run_waits_stays_pressable(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openexecutive.api.routes import browser as route
+    from openexecutive.workflows import resumer
+
+    picked = [0]
+
+    async def resume(key: str, db_path: Any = None) -> int:
+        return picked[0]
+
+    monkeypatch.setattr(resumer, "resume_waiting", resume)
+    monkeypatch.setattr(route, "WORKFLOW_TRIES", 1)
+    pid = client.pid  # type: ignore[attr-defined]
+    # As _hand_over_in_workflow starts it: the run waits on the bar, never on
+    # a Needs you card, so there is no card for Done to close.
+    handover = browser_handover.start(pid, "sign in", workflow_key="handover:1:a")
+    got = client.post(f"/browser/hand-over/{handover.id}", json={"outcome": "done"}).json()
+    assert got["kept"] is True and browser_handover.get(handover.id) is handover
+    assert handover.card_id is None and not handover.outcome
+    picked[0] = 1
+    got = client.post(f"/browser/hand-over/{handover.id}", json={"outcome": "done"}).json()
+    assert got == {"ok": True, "carried_on": True}
+
+
 def test_after_the_turn_ended_the_bar_never_carries_on_by_itself(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
