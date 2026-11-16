@@ -23,7 +23,7 @@ from contextvars import ContextVar
 from typing import Any
 
 # One line in the chat: the same cap as a round's activity label.
-MAX_LINE_CHARS = 90
+MAX_LINE_CHARS = 60
 # A run that posts faster than the chat reads keeps only the newest.
 MAX_WAITING = 200
 # Control characters and the marks that reorder text on screen.
