@@ -162,6 +162,12 @@ def test_a_teammate_taken_out_while_their_turn_waits_is_refused(
     assert r.status_code == 404
     assert seen == []
     assert [m["content"] for m in session_store.load_messages(sid)] == ["question", "answer"]
+    # The refused turn let go of the chat: the owner's next turn runs.
+    monkeypatch.setattr(chat_route, "_acquire_session_turn", real)
+    r = client.post("/chat", json={"message": "carry on", "session_id": sid}, headers=ALEX_HDR)
+    assert r.status_code == 200
+    r.read()
+    assert len(seen) == 1
 
 
 def test_a_chat_of_one_withholds_nothing(
