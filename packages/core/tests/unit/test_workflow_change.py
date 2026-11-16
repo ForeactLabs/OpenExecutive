@@ -283,6 +283,21 @@ def test_a_needs_you_card_is_shown_only_to_its_person(owner: Any) -> None:
     assert ben is not None
 
 
+def test_the_owners_needs_you_card_is_theirs_alone_too(owner: Any) -> None:
+    from openexecutive.alerts.models import visible_alert
+    from openexecutive.orchestrator.artifact_records import viewer_for_person
+
+    ben_id = people_store.upsert_person(full_name="Ben Teammate", email="ben@co.example")
+    people_registry.invalidate()
+    _stored()
+    card = _needs_you_card(_save_fix(_one_on_one(owner))["decision_id"])
+    assert card is not None and card.routed_to_person_id == owner.id
+    assert visible_alert(card, viewer_for_person(owner.id)) is True
+    # Not a teammate's board, nor a turn with no viewer (a brief, a channel).
+    assert visible_alert(card, viewer_for_person(ben_id)) is False
+    assert visible_alert(card, None) is False
+
+
 def test_a_card_that_cant_go_on_needs_you_isnt_left_and_the_tool_says_so(
     owner: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
