@@ -10056,9 +10056,12 @@ integrations:
     gmail.readonly + gmail.compose; the API serves no OAuth callback, as
     for the exec token). Never in WORKSPACE_MCP_CREDENTIALS_DIR:
     workspace-mcp picks a credential there by address, which would hand the
-    model the mailbox. gmail_status re-checks on every use that the
-    credential opens the mailbox on the person's People email, and refuses
-    the exec address outright (shared_mailbox). Drafts are threaded
+    model the mailbox. The file is filed under the person's People email;
+    they may sign in to any mailbox of theirs, and the connect scripts save
+    the address it opened as the file's mailbox when it differs
+    (mailbox_of). gmail_status re-checks on every use that the credential
+    opens that mailbox, and refuses the exec address outright
+    (shared_mailbox). Drafts are threaded
     (In-Reply-To, References, threadId) and stamped X-OE-Ghostwritten; no
     send method. email_poller.sender_new_text (the poller's quoted-reply
     stripper, made public) keeps only each sender's own words for the voice
@@ -12393,8 +12396,15 @@ delegation:
     whose due time passed, a timed meeting on the cached calendar that
     ended; one wake for all of them. Home's Watching next (GET /today
     watching, POST /today/watching/stop) lists the pending ad_hoc and
-    proactive_nudge follow-ups (all for the owner, only their own for a
-    teammate) and the standing jobs, with Stop on each line.
+    proactive_nudge follow-ups (for the owner the team's and their own by
+    api.own_rows, never one a teammate asked for; only their own for a
+    teammate) and the standing work, with Stop on each line. The Schedule
+    page (GET /schedule, api/routes/schedule.py; Work → Schedule on web and
+    phone) reads the same lines through today._watching (with a higher
+    limit) and adds the scheduled custom workflows, the enabled watches and
+    what it always does (owner's briefs, department check-ins), soonest
+    first, each with where it is managed. Users see "standing work", never
+    "standing jobs"; the table and kinds keep the old names.
   state: |
     delegation_settings, delegation_voice, delegation_voice_history,
     delegation_drafts, delegation_inbox_watch, delegation_inbox_messages,

@@ -3324,7 +3324,7 @@ def test_done_for_you_says_how_why_and_what_came_of_what_it_did_as_me(
         "By email, as me · When the goal “Ramp gate” slipped · Sent"
     )
     line = rows["Messaged Riley Park"]
-    assert "For your standing job: Keep the dealer onboarding moving" in line
+    assert "For your standing work: Keep the dealer onboarding moving" in line
     assert "Riley answered at" in line
     # A teammate's job never names itself to the owner.
     take_the_lead.add_job("Chase my expense report", created_by="person:99")
@@ -3371,22 +3371,23 @@ def test_done_for_you_says_how_why_and_what_came_of_what_it_did_as_me(
 def test_watching_next_lists_follow_ups_and_standing_jobs_and_stop_ends_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The owner sees every follow-up it will send and the standing jobs; a
-    teammate sees only what they asked for and can stop only that; Stop
+    """The owner sees the team's follow-ups and their own (never one a
+    teammate asked for) and the standing jobs; a teammate sees only what
+    they asked for and can stop only that; Stop
     cancels that one thing."""
     from openexecutive.orchestrator import take_the_lead
 
     db = tmp_path / "watching.db"
     _setup_isolated_db(db, monkeypatch)
     monkeypatch.setenv("OE_LOCAL_LOGIN", "1")
-    people_store.upsert_person(full_name="Jordan", is_principal=True, email="jordan@example.com", db_path=db)
+    jordan = people_store.upsert_person(full_name="Jordan", is_principal=True, email="jordan@example.com", db_path=db)
     priya = people_store.upsert_person(full_name="Priya Nair", email="priya@example.com", db_path=db)
     sam = people_store.upsert_person(full_name="Sam Lee", email="sam@example.com", db_path=db)
     people_registry.invalidate()
     soon = (datetime.now(UTC) + timedelta(hours=18)).isoformat()
     owners = episodic.insert_scheduled_action(
         run_at=soon, channel="slack_dm", channel_ref="U1", intent_text="Ask Priya about the partners' pre-read",
-        assigned_to_person_id=priya,
+        assigned_to_person_id=priya, created_by_person_id=jordan,
     )
     sams = episodic.insert_scheduled_action(
         run_at=soon, channel="slack_dm", channel_ref="U2", intent_text="Remind Priya about the venue",
@@ -3406,11 +3407,13 @@ def test_watching_next_lists_follow_ups_and_standing_jobs_and_stop_ends_one(
     client = _make_client()
     owner = {"x-caller-email": "jordan@example.com"}
     lines = client.get("/today", headers=owner).json()["watching"]
+    # Sam's follow-up is Sam's alone: the owner neither sees nor stops it.
     assert [(w["key"], w["kind"]) for w in lines] == [
-        (f"action:{owners}", "follow_up"), (f"action:{sams}", "follow_up"), (f"job:{job.id}", "standing_job"),
+        (f"action:{owners}", "follow_up"), (f"job:{job.id}", "standing_job"),
     ]
+    assert client.post("/today/watching/stop", json={"key": f"action:{sams}"}, headers=owner).status_code == 404
     assert lines[0]["detail"] == "I follow up with Priya Nair" and lines[0]["at"] == soon
-    assert lines[2]["title"] == "Chase overdue tasks every morning"
+    assert lines[1]["title"] == "Chase overdue tasks every morning"
 
     teammate = {"x-caller-email": "sam@example.com"}
     assert [w["key"] for w in client.get("/today", headers=teammate).json()["watching"]] == [f"action:{sams}"]

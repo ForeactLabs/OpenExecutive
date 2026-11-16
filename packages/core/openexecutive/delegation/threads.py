@@ -41,8 +41,11 @@ def _shown_messages(thread: Any) -> list[Any]:
 
 def mine(message: Any, own: str) -> bool:
     """Whether the writer wrote ``message``: their own mailbox sent it. A
-    From header alone can name anyone."""
-    return message.from_addr == own and "SENT" in message.labels
+    From header alone can name anyone. ``own`` is their address; their mail
+    comes from their mailbox's (``gmail.mailbox_of``)."""
+    from openexecutive.delegation.gmail import mailbox_of
+
+    return message.from_addr == mailbox_of(own) and "SENT" in message.labels
 
 
 def thread_text(thread: Any, own: str) -> str:
@@ -85,9 +88,11 @@ def plan_reply(
     checked addresses) names who it goes to and, without ``message_id``,
     answers the latest message from one of them. Without either it answers the
     newest message from someone else; with no such message, their own latest,
-    to the people that went to."""
-    from openexecutive.delegation.gmail import references_header
+    to the people that went to. ``own`` is their address; their mail comes
+    from their mailbox's (``gmail.mailbox_of``)."""
+    from openexecutive.delegation.gmail import mailbox_of, references_header
 
+    own = mailbox_of(own)
     wanted = [a for a in dict.fromkeys(a.strip().lower() for a in to or []) if a and a != own]
     if to and not wanted:
         return "A reply can't go only to them. Pass who it goes to in `to`."

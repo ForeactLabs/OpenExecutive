@@ -978,7 +978,7 @@ async def _add_job(request: Any, item_id: str, value: str) -> str:
     from openexecutive.api.routes import take_the_lead as lead_route
 
     await _call(lead_route.add_job, request, lead_route.JobIn(text=value))
-    return f"Added the standing job {_q(' '.join(value.split()))}"
+    return f"Added to standing work: {_q(' '.join(value.split()))}"
 
 
 async def _stop_job(request: Any, job_id: str, value: str) -> str:
@@ -987,9 +987,9 @@ async def _stop_job(request: Any, job_id: str, value: str) -> str:
     try:
         number = int(job_id)
     except ValueError as exc:
-        raise Refused("That isn't one of the standing jobs.") from exc
+        raise Refused("That isn't on the standing work list.") from exc
     await _call(lead_route.stop_job, request, number)
-    return "Stopped the standing job"
+    return "Stopped that standing work"
 
 
 # --------------------------------------------------------------------------- #
@@ -1034,8 +1034,8 @@ _KINDS = (
     Kind("rule", "rule in Your rules", _find_rules),
     Kind("new_rule", "new rule in Your rules", _nothing, no_item=True),
     Kind("inbox", "inbox", _nothing, no_item=True),
-    Kind("standing_job", "standing job (something As me keeps doing)", _find_jobs),
-    Kind("new_standing_job", "new standing job", _nothing, no_item=True),
+    Kind("standing_job", "standing work (something As me keeps doing)", _find_jobs),
+    Kind("new_standing_job", "new standing work", _nothing, no_item=True),
 )
 
 _ACTIONS = (
@@ -1136,10 +1136,10 @@ _ACTIONS = (
            card="Remove the rule {title}"),
     # Standing jobs: each step for one still goes through Approvals.
     Action("add_standing_job", "new_standing_job",
-           "Give As me a standing job, something to keep doing in its own name (use id \"new\")",
+           "Give As me standing work, something to keep doing in its own name (use id \"new\")",
            _add_job, confirm=True, value="what to keep doing, in the person's words",
-           card="Give As me the standing job: {value}"),
-    Action("stop_standing_job", "standing_job", "Stop a standing job", _stop_job),
+           card="Give As me this standing work: {value}"),
+    Action("stop_standing_job", "standing_job", "Stop some standing work", _stop_job),
     Action("check_inbox_now", "inbox", "Check the person's inbox for emails to draft replies to now (use id \"inbox\")",
            _check_inbox),
 )

@@ -41,8 +41,9 @@ Design notes
   by the ``MCP_CLIENT_ACTIONS`` setting, and the header is ignored. Such a
   turn runs the speaker's own changes inside Open Executive under each
   tool's own checks, proposes anything that reaches another person on an
-  approval card (``propose_actions``, carried out on its own only by their
-  Handle it for me), is still never offered
+  approval card (``propose_actions``, carried out on its own only where
+  their As you and Approvals let it, ``action_cards.on_its_own_refusal``),
+  is still never offered
   ``MCP_CLIENT_ACTING_WITHHELD_TOOLS``, and every audit row it writes names
   the app (``audit.via_app``).
 
@@ -507,11 +508,11 @@ async def ask_executive(message: str) -> str:
     in, drawing on the specialists, company knowledge and memory. By default
     it reads and advises only: it does not send, post, book or change
     anything. When this server allows it to act, it can also make changes
-    inside Open Executive for that person (alerts, open loops, follow-ups,
+    inside Open Executive for that person (alerts, tasks, follow-ups,
     the watch list, goals, decisions, remembered facts and the company
     profile, as their own permissions allow; never the People list), and it leaves a message
     or a meeting on a card for them to approve, which goes on its own only
-    when their Handle it for me covers it. It never runs scripts or
+    where their As you and Approvals let it. It never runs scripts or
     workflows, connects servers or changes the install. The conversation is
     recorded in Open Executive's memory. Non-streaming.
 

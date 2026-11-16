@@ -181,6 +181,12 @@ const WORK_TABS: NavItem[] = [
     icon: "eye",
     description: "External monitors — tickers, feeds, status pages — that raise alerts.",
   },
+  {
+    href: "/schedule",
+    label: "Schedule",
+    icon: "calendar",
+    description: "Everything it does without being asked, soonest first.",
+  },
 ];
 
 // Delegate: one page (app/delegate/page.tsx) in three blocks: As you (Act
@@ -216,7 +222,7 @@ export function buildHubs({
     key: "work",
     label: "Work",
     icon: "briefcase",
-    description: "Tasks, workflows, finished documents and the watch list.",
+    description: "Tasks, workflows, finished documents, the watch list and the schedule.",
     tabs: WORK_TABS,
   };
   const people: Hub =

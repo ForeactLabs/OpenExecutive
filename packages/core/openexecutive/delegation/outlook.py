@@ -89,6 +89,7 @@ from openexecutive.delegation.gmail import (
     clean_header,
     credential_path,
     html_to_text,
+    mailbox_of,
     normalize_email,
 )
 
@@ -581,6 +582,11 @@ class DelegateOutlook:
         self._sent_folder = ""
 
     @property
+    def mailbox(self) -> str:
+        """The address this mailbox sends from (``gmail.mailbox_of``)."""
+        return mailbox_of(self.email, directory=self._directory)
+
+    @property
     def personal(self) -> bool:
         cred = self._credential or load_credential(self.email, directory=self._directory)
         return bool(cred and cred.personal)
@@ -699,7 +705,7 @@ class DelegateOutlook:
         return self._sent_folder
 
     def _parse(self, raw: object) -> MailMessage:
-        return parse_message(raw if isinstance(raw, dict) else {}, self._sent_folder, self.email)
+        return parse_message(raw if isinstance(raw, dict) else {}, self._sent_folder, self.mailbox)
 
     @staticmethod
     def _directory_address(me: dict[str, Any]) -> str:
@@ -917,7 +923,7 @@ class DelegateOutlook:
         for raw in data.get("value") or []:
             if not isinstance(raw, dict) or not valid_id(raw.get("id")):
                 continue
-            if _address(raw.get("from"))[1] == self.email:
+            if _address(raw.get("from"))[1] == self.mailbox:
                 continue
             out.append((str(raw["id"]), str(raw.get("conversationId") or "")))
         return out
