@@ -2,17 +2,20 @@
 
 ``alerts.store.insert_alert`` calls :func:`place` for every card it writes.
 The cards that take part are the ones a turn makes for someone to read: a
-held step's Approve card, and a card a turn raised (``create_alert``,
-through the alerts pipeline). Cards a feature writes with buttons of their
-own (a meeting's, a passed-on message, a sign-in hand-over, a phishing
-warning, a document) keep to themselves, and so does a card whose approval
-carries out its own text (needs 'ok'). The check notes what the card is
-about, then joins it with an open card on the same topic:
+held step's Approve card, a card a turn raised (``create_alert``, through
+the alerts pipeline), and a message passed on to one person. Cards a
+feature writes with buttons of their own (a meeting's, a sign-in
+hand-over, a phishing warning, a document) keep to themselves, and so does
+a card whose approval carries out its own text (needs 'ok'). The check
+notes what the card is about, then joins it with an open card on the same
+topic:
 
 * the same reader (who the card is for, and whether it is private), and
-* one of: written on the same turn; about the same mail thread with the
-  same person, unless the model said it is another matter; or the model
-  said it is the same matter (``create_alert``'s ``joins_card``).
+* one of: written on the same turn; about the same conversation (a mail
+  thread, or for a passed-on message the chat it was said in,
+  :func:`chat_conversation`) with the same person, unless the model said
+  it is another matter; or the model said it is the same matter
+  (``create_alert``'s ``joins_card``).
 
 How two cards on one topic become one:
 
@@ -88,12 +91,17 @@ _given: ContextVar[dict[str, Any] | None] = ContextVar("one_card_given", default
 @contextlib.contextmanager
 def about(
     *, thread: str = "", step: str = "", joins: int | None = None, raised: bool = False,
+    own_words: bool = False,
 ) -> Iterator[None]:
     """Cards written inside the block take part in the check: a held step's
     Approve card (about ``thread``, holding ``step``), or a card a turn
     raised (``raised``; ``joins`` is the open card the model said it is the
-    same matter as, 0 when it said it is another one)."""
-    token = _given.set({"thread": thread, "step": step, "joins": joins, "raised": raised})
+    same matter as, 0 when it said it is another one). An ``own_words`` card
+    (a teammate's message) joins only by its conversation, never by turn, so
+    its words never mix with a card the Executive wrote on the same turn."""
+    token = _given.set({
+        "thread": thread, "step": step, "joins": joins, "raised": raised, "own_words": own_words,
+    })
     try:
         yield
     finally:
@@ -261,6 +269,21 @@ def _turn_thread(session: Any) -> str:
     return mail_thread(str(getattr(session, "email_thread_id", "") or ""))
 
 
+def chat_conversation(session: Any = None) -> str:
+    """The conversation a message passed on from this turn belongs to: its
+    mail thread on a turn answering mail, else the chat it was said in.
+    Messages one person passes on from one chat to the same reader are one
+    card while it is open. Empty off a turn."""
+    session = session if session is not None else _session()
+    if session is None:
+        return ""
+    mail = _turn_thread(session)
+    if mail:
+        return mail
+    session_id = str(getattr(session, "session_id", "") or "").strip()
+    return f"chat:{session_id}" if session_id else ""
+
+
 def _turn_id() -> str:
     try:
         from openexecutive.audit.context import get_active_turn_id
@@ -334,11 +357,19 @@ def _with_then(existing: str, joined: str) -> str:
     return _with_follow_up(existing, joined)
 
 
-def _said(card: _Card) -> str:
+# Who raised a teammate's card, as its text opens (``alerts.pipeline``).
+_RAISED_BY = re.compile(r"^Raised by [^.\n]{1,120}\.\s+")
+
+
+def _said(card: _Card, survivor_body: str = "") -> str:
     """What a joining card adds to the one it joins: its headline, and its
-    text when that says more."""
+    text when that says more. A "Raised by" label the card it joins already
+    opens with isn't said twice."""
     body = " ".join(card.body.split())
     head = " ".join(card.headline.split())
+    label = _RAISED_BY.match(body)
+    if label and survivor_body.startswith(label.group(0).strip()):
+        body = body[label.end():]
     if not body or body.startswith(head[:60]):
         return body or head
     return f"{head}: {body}"
@@ -351,7 +382,7 @@ def _join(conn: sqlite3.Connection, card: _Card, into: _Card) -> None:
 
     survivor = conn.execute("SELECT body, needs, severity FROM alerts WHERE id = ?", (into.id,)).fetchone()
     joining = conn.execute("SELECT severity FROM alerts WHERE id = ?", (card.id,)).fetchone()
-    body = _with_then(str(survivor["body"] or ""), _said(card))
+    body = _with_then(str(survivor["body"] or ""), _said(card, str(survivor["body"] or "")))
     # A graver card (a fraud warning) makes the card it joins as grave.
     severity = max(
         (str(survivor["severity"]), str(joining["severity"])), key=lambda sev: SEVERITY_RANK.get(sev, 0),
@@ -458,9 +489,9 @@ def _place(alert_id: int, db_path: Path | None) -> int:
         return alert_id
     given = _given.get() or {}
     tags = list(row.topic_tags or [])
-    # Only a held step's Approve card and a card a turn raised take part:
-    # cards a feature writes (a meeting's, a passed-on message, a sign-in
-    # hand-over, a phishing warning) keep their own buttons and readers.
+    # Only a held step's Approve card and a card a turn raised (a passed-on
+    # message included) take part: cards a feature writes (a meeting's, a
+    # sign-in hand-over, a phishing warning) keep their own buttons and readers.
     if not (given.get("raised") or (row.source == _APPROVE_SOURCE and _decision_of(tags) is not None)):
         return alert_id
     if row.needs == _OWN_ACTION:
@@ -475,7 +506,8 @@ def _place(alert_id: int, db_path: Path | None) -> int:
             "INSERT OR REPLACE INTO card_topics (alert_id, reader, person, turn, thread, step, decision_id, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                alert_id, _reader(row.routed_to_person_id, tags), person_key(session), _turn_id(),
+                alert_id, _reader(row.routed_to_person_id, tags), person_key(session),
+                "" if given.get("own_words") else _turn_id(),
                 _conversation(conn, str(given.get("thread") or "") or _turn_thread(session)),
                 str(given.get("step") or ""),
                 _decision_of(tags), _now(),
