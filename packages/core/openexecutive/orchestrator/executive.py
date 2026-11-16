@@ -1271,7 +1271,8 @@ async def _kept_if_unwritten(stream: AsyncIterator[Any], thinking: str) -> Async
             since.append(item)
         yield item
     if rewritten and not "".join(since).strip() and before:
-        yield "".join(before).lstrip()
+        # Exactly as it streamed, so a reader can tell it from a new reply.
+        yield "".join(before)
 
 
 def _round_separator(tail: str, text: str) -> str:

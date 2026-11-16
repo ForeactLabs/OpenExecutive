@@ -60,3 +60,13 @@ async def test_what_the_terminal_shows_is_what_it_returns(
     out = capsys.readouterr().out
     assert ("Corrected" in out) is corrected
     assert out.rstrip().endswith(final)
+
+
+@pytest.mark.asyncio
+async def test_a_kept_reply_that_began_with_a_newline_prints_once(capsys: pytest.CaptureFixture[str]) -> None:
+    """The replayed first reply is the same text, so nothing is corrected."""
+    from openexecutive.orchestrator.executive import _kept_if_unwritten
+
+    stream = _kept_if_unwritten(_stream("\nI saved the doc.", {"type": "rewrite"}), Executive._THINKING)
+    assert await cli.print_reply(stream) == "\nI saved the doc."
+    assert "Corrected" not in capsys.readouterr().out
