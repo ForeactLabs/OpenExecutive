@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import re
+import unicodedata
 from collections.abc import AsyncGenerator, Iterator
 from contextvars import ContextVar
 from typing import Any
@@ -26,8 +26,9 @@ from typing import Any
 MAX_LINE_CHARS = 60
 # A run that posts faster than the chat reads keeps only the newest.
 MAX_WAITING = 200
-# Control characters and the marks that reorder text on screen.
-_UNSAFE = re.compile("[\x00-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
+# Control characters and invisible format marks (Cc, Cf: joiners, the marks
+# that reorder text on screen, soft hyphens) are dropped from a live line.
+_UNSAFE_CATEGORIES = frozenset({"Cc", "Cf"})
 
 _feed: ContextVar[Feed | None] = ContextVar("turn_live_feed", default=None)
 
@@ -112,7 +113,8 @@ def plain_line(line: Any, cap: int) -> str:
     marks. "" when nothing is left."""
     if not isinstance(line, str):
         return ""
-    text = " ".join(_UNSAFE.sub("", " ".join(line.split())).split()).rstrip(".…").strip()
+    shown = "".join(ch for ch in " ".join(line.split()) if unicodedata.category(ch) not in _UNSAFE_CATEGORIES)
+    text = " ".join(shown.split()).rstrip(".…").strip()
     if not text:
         return ""
     if len(text) > cap - 1:
