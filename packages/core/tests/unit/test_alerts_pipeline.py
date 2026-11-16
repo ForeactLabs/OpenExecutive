@@ -706,3 +706,32 @@ def test_a_passed_on_message_never_joins_a_card_on_its_mail_thread(monkeypatch, 
     rows = {a.id: a for a in list_alerts(db_path=db)}
     assert rows[passed].superseded_by_alert_id is None
     assert rows[raised].body == "Ann asked for the signed contract."
+
+
+def test_a_teammates_message_never_joins_a_card_from_its_own_turn(monkeypatch, db: Path) -> None:
+    """A teammate's message joins only by its chat: a card the Executive
+    raised on the same turn keeps its own words."""
+    from openexecutive.alerts import dispatcher, one_card
+    from openexecutive.audit.context import set_turn
+    from openexecutive.orchestrator.schedule_tools import current_session
+
+    async def fake_dispatch(alert, channels, **kw):  # noqa: ARG001
+        return None
+
+    monkeypatch.setattr(dispatcher, "dispatch_all", fake_dispatch)
+    chat = _Chat("chat-sam", 2)
+    token = current_session.set(chat)
+    try:
+        with set_turn(session_id=chat.session_id, turn_id="t1"), one_card.about(raised=True):
+            raised = insert_alert(
+                source="executive", external_id="x1", severity="medium",
+                headline="Budget review is Friday", body="The budget review moved to Friday.",
+                routed_to_person_id=1, db_path=db,
+            )
+    finally:
+        current_session.reset(token)
+    passed = _pass_on(monkeypatch, db, chat, "t1", "m1", "From Sam: I'll bring the deck", "From Sam: I'll bring the deck.")
+    rows = {a.id: a for a in list_alerts(db_path=db)}
+    assert rows[passed].superseded_by_alert_id is None
+    assert rows[raised].superseded_by_alert_id is None
+    assert rows[raised].body == "The budget review moved to Friday."
