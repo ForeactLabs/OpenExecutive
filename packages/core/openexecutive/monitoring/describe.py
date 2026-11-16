@@ -500,12 +500,22 @@ def _every(minutes: int) -> str:
     return f"every {max(1, minutes)} minutes"
 
 
-def checks_line(signal_type: str, cadence: str) -> str:
-    """How often the watch is really checked, in words: its own cadence,
+def check_minutes(signal_type: str, cadence: str) -> int:
+    """How many minutes apart the watch is really checked: its own cadence,
     never faster than its source allows (the scan's rule)."""
     source = get_source_for_kind(signal_type)
     floor = source.default_poll_interval_minutes if source is not None else 15
-    return f"It checks {_every(max(floor, _CADENCE_MINUTES.get(cadence, 0)))}."
+    return max(floor, _CADENCE_MINUTES.get(cadence, 0))
+
+
+def checks_every(signal_type: str, cadence: str) -> str:
+    """How often the watch is checked, in words: "once a day"."""
+    return _every(check_minutes(signal_type, cadence))
+
+
+def checks_line(signal_type: str, cadence: str) -> str:
+    """How often the watch is really checked, as a sentence."""
+    return f"It checks {checks_every(signal_type, cadence)}."
 
 
 _TITLE_MAX = 60

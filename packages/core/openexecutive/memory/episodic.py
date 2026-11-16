@@ -1890,9 +1890,11 @@ def list_scheduled_actions(
     limit: int = 100,
     order: str = "asc",
     exclude_internal: bool = False,
+    kinds: Collection[str] | None = None,
     db_path: Path | None = None,
 ) -> list[ScheduledAction]:
-    """List scheduled actions, optionally filtered by status.
+    """List scheduled actions, optionally filtered by status (and ``kinds``,
+    in the query, so ``limit`` counts only what matches).
 
     ``exclude_internal`` drops ``__internal__``-channel rows in SQL, so a
     caller that only wants real sends (the activity feed) is not starved by
@@ -1919,6 +1921,12 @@ def list_scheduled_actions(
         clauses.append("channel != '__internal__'")
         clauses.append("kind != ?")
         params.append(BRIEF_DELIVERY_KIND)
+    if kinds is not None:
+        wanted = sorted(kinds)
+        if not wanted:
+            return []
+        clauses.append(f"kind IN ({','.join('?' * len(wanted))})")
+        params += wanted
     where = f"WHERE {' AND '.join(clauses)} " if clauses else ""
     with _get_conn(resolved) as conn:
         rows = conn.execute(
