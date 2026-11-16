@@ -2007,8 +2007,12 @@ def _google_chat_space_named(tool: str, tool_input: dict[str, Any]) -> str:
     try:
         from openexecutive.integrations import google_chat
 
+        # Only a listing already at hand: building a card never waits on Google.
+        spaces = google_chat.known_spaces()
+        if spaces is None:
+            return ""
         if tool == "send_company_broadcast":
-            space = google_chat.announce_space()
+            space = google_chat.announce_space(spaces)
         else:
             from openexecutive.departments.store import get_department
 
@@ -2016,7 +2020,7 @@ def _google_chat_space_named(tool: str, tool_input: dict[str, Any]) -> str:
             space = getattr(getattr(dept, "config", None), "google_chat_space", None)
         if not space:
             return ""
-        title = google_chat.space_title(space)
+        title = google_chat.space_title(space, spaces)
         return f"“{google_chat.card_safe(title)}”" if title else space
     except Exception:
         return ""

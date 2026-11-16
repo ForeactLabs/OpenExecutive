@@ -1324,12 +1324,14 @@ def test_where_a_message_goes() -> None:
 def test_a_google_chat_post_names_its_space(monkeypatch: pytest.MonkeyPatch) -> None:
     from openexecutive.integrations import google_chat
 
-    monkeypatch.setattr(google_chat, "announce_space", lambda: "spaces/ALL")
-    monkeypatch.setattr(google_chat, "space_title", lambda space: "All <hands>" if space == "spaces/ALL" else "")
+    monkeypatch.delenv("GOOGLE_CHAT_DEFAULT_SPACE", raising=False)
+    monkeypatch.setattr(google_chat, "known_spaces", lambda: [{"space": "spaces/ALL", "title": "All <hands>", "announce": True}])
+    monkeypatch.setattr(google_chat, "group_spaces", lambda **_: pytest.fail("a card never asks Google"))
     assert ttl.where("send_company_broadcast", {"integration": "google_chat", "text": "x"}) == (
         "On Google Chat, in \u201cAll \u2039hands>\u201d"
     )
-    monkeypatch.setattr(google_chat, "announce_space", lambda: None)
+    # No listing at hand: the plain line, not a wait on Google.
+    monkeypatch.setattr(google_chat, "known_spaces", lambda: None)
     assert ttl.where("send_company_broadcast", {"integration": "google_chat", "text": "x"}) == "On Google Chat"
 
 

@@ -1119,16 +1119,16 @@ def test_announce_space_is_the_default_else_the_only_space(monkeypatch: pytest.M
     assert gc_module.announce_space() == "spaces/DEFAULT"
     monkeypatch.delenv("GOOGLE_CHAT_DEFAULT_SPACE")
     one = [{"space": "spaces/ONLY", "title": "", "announce": False}]
-    monkeypatch.setattr(gc_module, "group_spaces", lambda: one)
+    monkeypatch.setattr(gc_module, "group_spaces", lambda **_: one)
     assert gc_module.announce_space() == "spaces/ONLY"
-    monkeypatch.setattr(gc_module, "group_spaces", lambda: one + [{"space": "spaces/TWO", "title": "", "announce": False}])
+    monkeypatch.setattr(gc_module, "group_spaces", lambda **_: one + [{"space": "spaces/TWO", "title": "", "announce": False}])
     assert gc_module.announce_space() is None
 
 
 def test_post_to_space_posts_only_in_the_apps_group_spaces(monkeypatch: pytest.MonkeyPatch) -> None:
     sent: list[tuple[str, str, str]] = []
     monkeypatch.setattr(gc_module, "send_reply", lambda space, thread, text, *a: sent.append((space, thread, text)))
-    monkeypatch.setattr(gc_module, "group_spaces", lambda: [{"space": "spaces/ALL", "title": "Everyone", "announce": True}])
+    monkeypatch.setattr(gc_module, "group_spaces", lambda **_: [{"space": "spaces/ALL", "title": "Everyone", "announce": True}])
     gc_module.post_to_space("spaces/ALL", "Q3 plan shipped: <https://evil.example|the plan>")
     # Link markup made inert: no words shown over a link that goes elsewhere.
     assert sent == [("spaces/ALL", "", "Q3 plan shipped: \u2039https://evil.example|the plan>")]
@@ -1138,3 +1138,24 @@ def test_post_to_space_posts_only_in_the_apps_group_spaces(monkeypatch: pytest.M
         with pytest.raises(ValueError):
             gc_module.post_to_space(space, "nope")
     assert len(sent) == 1
+
+
+def test_a_listing_is_reused_for_posts_and_cards_but_not_for_a_new_space(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gc_module, "_spaces_cache", None)
+    listings: list[int] = []
+    rows = [{"space": "spaces/ALL", "title": "Everyone", "announce": True}]
+
+    def _list() -> list[dict[str, Any]]:
+        listings.append(1)
+        return [dict(r) for r in rows]
+
+    monkeypatch.setattr(gc_module, "_list_spaces", _list)
+    monkeypatch.setattr(gc_module, "send_reply", lambda *a: None)
+    assert gc_module.known_spaces() is None  # nothing at hand: a card never asks
+    gc_module.post_to_space("spaces/ALL", "one")
+    gc_module.post_to_space("spaces/ALL", "two")
+    assert len(listings) == 1
+    assert gc_module.known_spaces() == rows
+    rows.append({"space": "spaces/NEW", "title": "New", "announce": False})
+    gc_module.post_to_space("spaces/NEW", "three")  # not in the cached listing: asked again
+    assert len(listings) == 2

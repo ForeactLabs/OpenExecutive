@@ -316,10 +316,11 @@ async def test_google_chat_post_goes_through_post_to_space(monkeypatch: pytest.M
     assert sent == [("spaces/AAAAx", "hello")]
 
     def _boom(space: str, text: str) -> None:
-        raise RuntimeError("403")
+        raise RuntimeError("403 https://chat.googleapis.com/v1/spaces/AAAAx/messages details")
 
     monkeypatch.setattr(google_chat, "post_to_space", _boom)
-    assert "error" in await broadcast_tools._post_google_chat_space("spaces/AAAAx", "hello")
+    # The raw error stays in the log, never in what the model reads.
+    assert await broadcast_tools._post_google_chat_space("spaces/AAAAx", "hello") == {"error": "google chat post failed"}
 
 
 def test_both_tools_offer_google_chat() -> None:
