@@ -1226,7 +1226,7 @@ _PROGRESS_MAX = 80
 
 def progress_line(name: str, arguments: Any) -> str:
     """What a running step is doing, in plain words, for the run's progress
-    card: "Opening example.com…", 'Searching my inbox for "invoice"…'. Reads
+    card: "Opening example.com…", 'Searching my email for "invoice"…'. Reads
     the same wording as the chat's activity line, never the raw tool name.
     The arguments are the model's, and a label must never fail a run, so any
     error falls back to the tool's plain name."""
