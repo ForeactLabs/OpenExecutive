@@ -37,6 +37,7 @@ def speaker(session: Any = None) -> Any:
         teammate_on_verified_surface,
     )
     from openexecutive.people.store import find_principal_person, get_person
+    from openexecutive.utils.deployment import is_local_login
 
     session = session if session is not None else _session()
     if (
@@ -44,6 +45,11 @@ def speaker(session: Any = None) -> Any:
         or getattr(session, "unattended", False) is True
         or getattr(session, "private_to_principal", False) is True
     ):
+        return None
+    if (
+        getattr(session, "from_web_chat", False) is True or getattr(session, "from_mcp_client", False) is True
+    ) and not (getattr(session, "web_caller_signed_in", False) is True or is_local_login()):
+        # A request that only holds the shared secret is not a sign-in.
         return None
     try:
         if is_principal_on_verified_surface(session):
@@ -64,6 +70,7 @@ def own_private_speaker(session: Any = None) -> Any:
     if (
         session is None
         or getattr(session, "meeting_call", False) is True
+        or getattr(session, "from_meeting", False) is True
         or bool(getattr(session, "email_from", None))
     ):
         # A call with others in it, or mail (which can carry cc's), is never

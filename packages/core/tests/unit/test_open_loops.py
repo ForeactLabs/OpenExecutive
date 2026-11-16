@@ -377,7 +377,7 @@ async def _list_as(caller: int | None, *, session_id: str = "s", web: bool = Fal
     channel, _, rest = session_id.partition(":")
     ref = rest.rpartition(":")[2] if channel != "telegram" else rest
     token = current_session.set(Session(
-        session_id=session_id, caller_person_id=caller, from_web_chat=web,
+        session_id=session_id, caller_person_id=caller, from_web_chat=web, web_caller_signed_in=web,
         origin_channel="" if web or not rest else channel, origin_channel_ref="" if web else ref,
     ))
     try:

@@ -47,7 +47,7 @@ def _call(person_id: int) -> Session:
 
 def test_the_same_person_on_every_private_surface(owner: int) -> None:
     surfaces = [
-        Session(session_id="web-1", from_web_chat=True, caller_person_id=owner),
+        Session(session_id="web-1", from_web_chat=True, caller_person_id=owner, web_caller_signed_in=True),
         Session(session_id="slack:dm:U_OWN", origin_channel="slack", origin_channel_ref="U_OWN",
                 caller_person_id=owner),
         _call(owner),
@@ -64,7 +64,8 @@ def test_a_teammate_in_their_own_call_is_themselves(teammate: int) -> None:
 def test_verified_but_where_others_read_is_not_private(owner: int) -> None:
     channel = Session(session_id="slack:channel:C1:U_OWN", origin_channel="slack",
                       origin_channel_ref="U_OWN", caller_person_id=owner)
-    shared = Session(session_id="web-1", from_web_chat=True, caller_person_id=owner, shared_chat=True)
+    shared = Session(session_id="web-1", from_web_chat=True, caller_person_id=owner, shared_chat=True,
+                     web_caller_signed_in=True)
     for session in (channel, shared):
         assert speaker(session) is not None
         assert own_private_speaker(session) is None
@@ -77,6 +78,23 @@ def test_nobody_speaks_on_a_run_mail_or_an_unverified_call(owner: int) -> None:
         Session(session_id="run-1", unattended=True, caller_person_id=owner),
         Session(session_id="brief", private_to_principal=True, caller_person_id=owner),
         unverified,
+        # A meeting anyone in it can speak in, even one marked private.
+        Session(session_id="meeting:m1", origin_channel="meeting", origin_channel_ref="m1", from_meeting=True,
+                caller_person_id=owner, private_chat=True, speaker_verified=True),
         None,
     ):
         assert own_private_speaker(session) is None
+
+
+def test_a_web_or_ai_app_turn_without_a_sign_in_is_nobody(owner: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.utils import deployment
+
+    monkeypatch.setattr(deployment, "is_local_login", lambda: False)
+    for session in (
+        Session(session_id="web-1", from_web_chat=True, caller_person_id=owner),
+        Session(session_id="mcp-1", from_mcp_client=True, caller_person_id=owner),
+    ):
+        assert speaker(session) is None
+    # A server people sign in to locally has no signed callers.
+    monkeypatch.setattr(deployment, "is_local_login", lambda: True)
+    assert getattr(speaker(Session(session_id="web-1", from_web_chat=True, caller_person_id=owner)), "id", None) == owner
