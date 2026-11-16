@@ -53,7 +53,7 @@ from ._agent_loop_fakes import FinalMsg, ScriptedProvider, TextBlock, ToolUseBlo
 # And again: Approvals is the one gate (no department authority, no "propose,
 # do not wait").
 # And again: a greeting gets a greeting back, not a status report.
-TEAM_PERSONA_SHA256 = "5dd334d9cf594cd70e8f1d80de714a0abb6bc744dfbe96789f57f0eeaf37796b"
+TEAM_PERSONA_SHA256 = "9caefa83683bb82deda5d2e49e1e05d57e22d8d3609811ce805cd62de40a227f"
 
 SOLO_HEADINGS = (
     "## You Work for One Person",
