@@ -135,6 +135,22 @@ def caller_is_principal(request: Request) -> bool:
         return False
 
 
+def caller_on_team(request: Request) -> bool:
+    """Whether the caller is the principal or someone on the team (not
+    archived). Fails closed."""
+    from openexecutive.api.routes.chat import _resolve_caller_person_id
+
+    if caller_is_principal(request):
+        return True
+    try:
+        caller = _resolve_caller_person_id(request)
+        person = people_store.get_person(caller) if caller is not None else None
+    except Exception:
+        logger.exception("people: team check failed")
+        return False
+    return person is not None and person.kind == "team" and not person.archived
+
+
 def _visible_person(person_id: int, request: Request) -> Person:
     """The person, or 404 — also for a contact when the caller is not the
     principal, exactly as for an id that does not exist."""

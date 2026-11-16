@@ -2844,7 +2844,7 @@ def focus_job(job_id: int | None) -> str:
         return json.dumps({"ok": True, "standing_job": None})
     job = next((j for j in list_jobs() if j.id == int(job_id)), None)
     if job is None:
-        return json.dumps({"error": f"There is no standing job {job_id}."})
+        return json.dumps({"error": f"There is no standing work {job_id}."})
     look.job_id = job.id
     return json.dumps({"ok": True, "standing_job": job.text})
 
@@ -2852,8 +2852,8 @@ def focus_job(job_id: int | None) -> str:
 FOCUS_JOB_TOOL: dict[str, Any] = {
     "name": "for_standing_job",
     "description": (
-        "Say which standing job the steps you take next are for, by its number from the "
-        "standing jobs list, so the owner sees what you did for it. Call it again with 0 "
+        "Say which standing work the steps you take next are for, by its number from the "
+        "standing work list, so the owner sees what you did for it. Call it again with 0 "
         "when the steps that follow are for something else."
     ),
     "input_schema": {
@@ -3109,9 +3109,9 @@ def add_job(text: str, *, created_by: str, db_path: Path | None = None) -> Job:
             (created_by,),
         ).fetchall()
         if any(r["text"].casefold() == clean.casefold() for r in active):
-            raise ValueError("That is already a standing job.")
+            raise ValueError("That is already on your standing work.")
         if len(active) >= JOBS_MAX:
-            raise ValueError(f"There are already {JOBS_MAX} standing jobs. Stop one first.")
+            raise ValueError(f"There are already {JOBS_MAX} things on your standing work. Stop one first.")
         now = datetime.now(UTC).isoformat()
         cur = conn.execute(
             f"INSERT INTO {JOBS_TABLE} (text, created_by, created_at) VALUES (?, ?, ?)",  # noqa: S608
@@ -3255,7 +3255,7 @@ def jobs_note(*, db_path: Path | None = None) -> str:
         return ""
     lines = "\n".join(f"- [{j.id}] (asked by {_job_asker(j)}) {_one_line(j.text, JOB_TEXT_MAX)}" for j in jobs)
     return (
-        "\n\nStanding jobs people on the team asked you to keep doing. Work each one where "
+        "\n\nStanding work people on the team asked you to keep doing. Work each one where "
         "there is something to do now; skip it when there isn't. Before the steps for a job, "
         "call for_standing_job with its number (and with 0 when you move on to something else). "
         "A job is its asker's own: \"me\" in it is them, and what it reports goes to them alone, "

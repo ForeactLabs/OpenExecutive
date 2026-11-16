@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+
+import ScheduleLink from "@/components/schedule/ScheduleLink";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import Switch from "@/components/Switch";
@@ -784,6 +786,7 @@ export default function WatchlistPage() {
                 News, prices, pages and filings the Executive keeps an eye on for you.
                 When something important changes, it tells you in your briefing.
               </p>
+              <ScheduleLink kind="watch" className="mt-1" />
             </div>
           </div>
 

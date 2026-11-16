@@ -6,6 +6,7 @@ import { getDone, type DoneRow } from "@/lib/api";
 import { doneLink, statusLabel } from "@/lib/doneForYou";
 import Icon from "@/components/Icon";
 import { upcomingLabel, whenLabel } from "@/lib/pulseView";
+import { scheduleHref } from "@/lib/schedule";
 import type { PulseData } from "./PulseHeader";
 import { Skeleton, metaFor } from "./shared";
 import { MonthCountLine } from "./ValueSection";
@@ -128,7 +129,7 @@ export function ComingUp({ pulse }: { pulse: PulseData }) {
   );
 
   return (
-    <PreviewCard title="Coming up" href="/memories?tab=schedule" linkLabel="Full schedule">
+    <PreviewCard title="Coming up" href={scheduleHref()} linkLabel="Full schedule">
       {loading ? (
         <RowsSkeleton />
       ) : next.length === 0 ? (

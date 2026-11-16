@@ -52,6 +52,7 @@ from openexecutive.api.routes import (
     reflection,
     review,
     saved_tools,
+    schedule,
     scheduled,
     sessions,
     setup_status,
@@ -1018,6 +1019,7 @@ def create_app() -> FastAPI:
     app.include_router(chat_directory.router, tags=["people"])
     app.include_router(today.router, tags=["today"])
     app.include_router(scheduled.router, tags=["scheduled"])
+    app.include_router(schedule.router, tags=["schedule"])
     app.include_router(executive.router, tags=["executive"])
     app.include_router(workspace.router, tags=["workspace"])
     app.include_router(notifications.router, tags=["notifications"])
