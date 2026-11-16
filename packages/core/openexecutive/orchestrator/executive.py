@@ -3419,8 +3419,11 @@ class Executive:
                         *(turn_handlers[tu["name"]](tu["input"]) for tu in skill_tool_uses),
                         return_exceptions=True,
                     ))
-                async for live in feed.until(skill_task):
-                    yield live
+                # Closed here, so a turn that stops at a yield cancels the
+                # tools at once, not when the generator is collected.
+                async with contextlib.aclosing(feed.until(skill_task)) as live_events:
+                    async for live in live_events:
+                        yield live
                 skill_results = skill_task.result()
                 # `raw` rather than `result` so the narrowed value keeps the
                 # plain `str` type the rest of this function's loops use.
