@@ -30,6 +30,8 @@ from openexecutive.workflows import approved_targets, dynamic_cadence, dynamic_s
 from openexecutive.workflows.dynamic_models import DynamicWorkflowDef
 
 GATEWAY_READ = "google_workspace__get_events"
+# The real check, before the fixture stands it in for every test.
+_REAL_PERSON_ASKED = wat._person_asked
 
 
 @pytest.fixture(autouse=True)
@@ -377,6 +379,29 @@ def test_its_creators_own_ask_changes_one_that_works_as_them_from_a_call(
     stored = dynamic_store.get_definition("meeting_prep")
     assert stored is not None and stored.steps[0].tools == ["oe__my_calendar"]  # type: ignore[union-attr]
     assert decision_ledger.list_instances("app_action") == []
+
+
+def test_after_reading_mail_or_a_page_the_creators_ask_still_waits_on_a_card(
+    owner: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.orchestrator import outside_content
+
+    _stored(owner=owner.id)
+    monkeypatch.setattr(wat, "_person_asked", _REAL_PERSON_ASKED)
+    mine = _prep(tools=["oe__my_calendar"])
+    args = {"definition": mine, "confirm_token": wat._canonical_token(mine), "overwrite": True}
+    for read in ({"sources": ("gmail",)}, {"flags": (("page", (), "x"),)}, {"pending": ("browser",)}):
+        state = SimpleNamespace(**{"flags": (), "sources": (), "pending": (), **read})
+        monkeypatch.setattr(outside_content, "current", lambda state=state: state)
+        out = _call(wat.handle_save_workflow, args, _one_on_one(owner))
+        # Held for a tap either way: a card, or the turn's own approval card.
+        assert out.get("status") == "waiting_for_approval" or "approval card" in out.get("error", ""), (read, out)
+    stored = dynamic_store.get_definition("meeting_prep")
+    assert stored is not None and stored.steps[0].tools == [GATEWAY_READ]  # type: ignore[union-attr]
+    # Nothing read: their own ask is the yes.
+    monkeypatch.setattr(outside_content, "current", lambda: None)
+    out = _call(wat.handle_save_workflow, args, _one_on_one(owner))
+    assert out.get("status") != "waiting_for_approval" and "error" not in out, out
 
 
 def test_someone_elses_ask_to_make_it_work_as_its_creator_waits_on_a_card(
