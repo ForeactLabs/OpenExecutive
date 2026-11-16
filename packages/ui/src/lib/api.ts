@@ -5786,6 +5786,59 @@ export interface ProposalItem {
   // Who else waits on this card: the teammate whose ask was held for your
   // OK. Home puts these cards first.
   waiting_on?: string;
+  // Where it came from (Alert.source).
+  source?: string;
+  // What the card shows, words and buttons, decided on the server
+  // (briefing/card_view.py). The card draws it as it is.
+  view?: CardView | null;
+}
+
+// One button on a card. `action` is how a press is carried out, the same on
+// every screen; `place` is where it sits (the one main button, the ⋯ menu,
+// apart on the right, or a row of answers in the card's body).
+export interface CardButton {
+  action: "approve" | "edit_approve" | "dismiss" | "snooze" | "rerun" | "open" | "open_url" | "chat" | "call";
+  label: string;
+  place: "primary" | "menu" | "side" | "answer";
+  href: string;
+  run_id: string;
+  prompt: string;
+  memory: string;
+  done: string;
+  busy_label: string;
+}
+
+export type CardTone = "neutral" | "amber" | "sky" | "rose" | "emerald";
+
+export interface CardChip {
+  label: string;
+  tone: CardTone;
+  title: string;
+}
+
+export interface CardView {
+  kind: "new_sender" | "lead" | "held" | "ask" | "rerun" | "document" | "signal" | "decision" | "proposal";
+  panel: "" | "new_sender" | "lead" | "held" | "ask";
+  routed_to: string;
+  need: string;
+  as_me: boolean;
+  source: string;
+  status: CardChip | null;
+  description: string;
+  long: boolean;
+  plan_title: string;
+  plan: string;
+  plan_reply: boolean;
+  steer: boolean;
+  waiting_because: string;
+  radar: string;
+  review: { title: string; text: string; tone: CardTone } | null;
+  chips: CardChip[];
+  surfaced: string;
+  tags: CardChip[];
+  document: boolean;
+  reviewed: string;
+  buttons: CardButton[];
 }
 
 // One autonomous alert-review move since the last delivered morning brief
@@ -6754,6 +6807,8 @@ export interface PlanResult {
   previous_plan: string;
   reply: string;
   changed: boolean;
+  // The heading the card now shows over its plan.
+  plan_title: string;
 }
 
 // Reply on a card to change what approving it does: the Executive rewrites
@@ -6772,6 +6827,17 @@ export async function changeCardPlan(alertId: number, text: string): Promise<Pla
 }
 
 // Undo change: the plan the last reply replaced.
+// A card's `call` button (CardButton.action "call"): POST to the path the
+// server gave, with no body. Throws the server's reason when it fails.
+export async function cardCall(path: string): Promise<void> {
+  if (!path.startsWith("/") || path.startsWith("//")) throw new Error("That didn't work.");
+  const res = await fetch(`${API_BASE}${path}`, { method: "POST" });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(body ? detailOf(body) : "That didn't work.");
+  }
+}
+
 export async function undoCardPlan(alertId: number): Promise<PlanResult> {
   const res = await fetch(`${API_BASE}/alerts/${alertId}/plan/undo`, { method: "POST" });
   if (!res.ok) {

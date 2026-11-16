@@ -415,17 +415,18 @@ def _line(fig: dict[str, Any]) -> str:
 def _their_own_turn(session: Any, person_id: int) -> bool:
     """Whether this turn is ``person_id``'s own, on a surface that verified
     it is them, in a conversation nobody else reads: the History notes' rule
-    (``history_chat.verified_speaker`` and ``private_chat``), which already
+    (``history_chat.verified_speaker`` and ``delegation.settings.private_conversation``), which already
     refuses email, unattended runs, another app's turns and host pages.
     Fails closed."""
     try:
-        from openexecutive.memory.history_chat import private_chat, verified_speaker
+        from openexecutive.delegation.settings import private_conversation
+        from openexecutive.memory.history_chat import verified_speaker
         from openexecutive.people.store import get_person
 
         if getattr(session, "shared_chat", False) is True:
             return False
         person = get_person(person_id)
-        return verified_speaker(session, person) and private_chat(session)
+        return verified_speaker(session, person) and private_conversation(session)
     except Exception:
         logger.debug("worked_out: couldn't tell whose turn this is", exc_info=True)
         return False

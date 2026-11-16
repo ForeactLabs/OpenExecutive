@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
+from openexecutive.briefing.card_view import CardView, attach_views
 from openexecutive.briefing.value_summary import ValueSummary
 from openexecutive.clients.cockpit import ClientCockpitCard, format_practice_for_today
 from openexecutive.departments.models import AuthorityLevel
@@ -185,6 +186,8 @@ def _roster_request_card(topic_tags: list[str]) -> RosterRequestCard | None:
 
 class ProposalItem(BaseModel):
     alert_id: int
+    # Where it came from (Alert.source): "triage", "roster_request", ...
+    source: str = ""
     headline: str
     # Full intent text behind the proposal. `headline` is a 160-char
     # excerpt used as the card title; `body` is the untruncated text
@@ -275,6 +278,68 @@ class ProposalItem(BaseModel):
     # Who else is waiting on this card: the teammate whose ask was held for
     # the reader's OK. Home puts these first. '' when nobody else waits.
     waiting_on: str = ""
+    # What the card shows, words and buttons (briefing.card_view): the web
+    # draws it as it is and decides none of it itself.
+    view: CardView | None = None
+
+
+def proposal_item(
+    alert: Alert,
+    *,
+    trust_by_slug: dict[str, float] | None = None,
+    superseded: int = 0,
+    now: datetime | None = None,
+) -> ProposalItem:
+    """One live alert as a Needs you card, before the board-wide marks
+    (plan changes, request groups, who waits) and its ``view``."""
+    from openexecutive.alerts.replan import plan_refusal
+    from openexecutive.briefing.ranking import score_and_categorize, watch_slug_of
+    from openexecutive.workflows.failure_alerts import SOURCE as FAILED_RUN_SOURCE
+    from openexecutive.workflows.failure_alerts import failed_run_id
+
+    item_score, item_category, item_reason = score_and_categorize(
+        alert, trust_by_slug=trust_by_slug, now=now
+    )
+    return ProposalItem(
+        alert_id=alert.id or 0,
+        source=alert.source or "",
+        headline=alert.headline,
+        body=_proposal_body(alert),
+        routed_to_person_id=alert.routed_to_person_id,
+        suggested_action=alert.suggested_action,
+        created_at=alert.created_at,
+        topic_tags=alert.topic_tags or [],
+        score=item_score,
+        category=item_category,
+        surfaced_reason=item_reason,
+        watch_slug=watch_slug_of(alert),
+        plan_editable=plan_refusal(alert) is None,
+        decision_instance_id=_parse_decision_instance_id(alert.topic_tags or []),
+        failed_run_id=(
+            failed_run_id(alert.topic_tags or [])
+            if alert.source == FAILED_RUN_SOURCE
+            else None
+        ),
+        roster_request=(
+            _roster_request_card(alert.topic_tags or [])
+            if alert.source == "roster_request" else None
+        ),
+        occurrence_count=alert.occurrence_count,
+        last_seen_at=alert.last_seen_at,
+        last_reviewed_at=alert.last_reviewed_at,
+        review_verdict=alert.review_verdict,
+        review_note=alert.review_note,
+        recommended_move=alert.recommended_move,
+        why_now=alert.why_now,
+        due_at=alert.due_at,
+        superseded_count=superseded,
+        suggested_workflow=alert.suggested_workflow,
+        needs=alert.needs,
+        question=alert.question,
+        choices=alert.choices,
+        artifact_format=alert.artifact_format if alert.source == "artifact" else None,
+        artifact_url=alert.artifact_url if alert.source == "artifact" else None,
+    )
 
 
 def _proposal_body(alert: Alert) -> str:
@@ -1233,11 +1298,7 @@ def _build_today(
 
     from openexecutive.alerts import lifecycle as lifecycle_module
     from openexecutive.alerts.lifecycle import list_live_alerts
-    from openexecutive.alerts.replan import plan_refusal
     from openexecutive.alerts.store import count_superseded_by
-    from openexecutive.briefing.ranking import score_and_categorize, watch_slug_of
-    from openexecutive.workflows.failure_alerts import SOURCE as FAILED_RUN_SOURCE
-    from openexecutive.workflows.failure_alerts import failed_run_id
 
     # Live = unread AND inside its TTL AND not snoozed — the read-side twin of
     # the scheduler's expiry sweep, so the page is right before the sweep runs.
@@ -1271,47 +1332,11 @@ def _build_today(
         #
         # Score + categorize so the UI can lead with genuinely-actionable
         # items and collapse low-signal monitoring noise.
-        item_score, item_category, item_reason = score_and_categorize(
-            alert, trust_by_slug=trust_by_slug, now=now
-        )
-        proposal_items.append(ProposalItem(
-            alert_id=alert.id or 0,
-            headline=alert.headline,
-            body=_proposal_body(alert),
-            routed_to_person_id=alert.routed_to_person_id,
-            suggested_action=alert.suggested_action,
-            created_at=alert.created_at,
-            topic_tags=alert.topic_tags or [],
-            score=item_score,
-            category=item_category,
-            surfaced_reason=item_reason,
-            watch_slug=watch_slug_of(alert),
-            plan_editable=plan_refusal(alert) is None,
-            decision_instance_id=_parse_decision_instance_id(alert.topic_tags or []),
-            failed_run_id=(
-                failed_run_id(alert.topic_tags or [])
-                if alert.source == FAILED_RUN_SOURCE
-                else None
-            ),
-            roster_request=(
-                _roster_request_card(alert.topic_tags or [])
-                if alert.source == "roster_request" else None
-            ),
-            occurrence_count=alert.occurrence_count,
-            last_seen_at=alert.last_seen_at,
-            last_reviewed_at=alert.last_reviewed_at,
-            review_verdict=alert.review_verdict,
-            review_note=alert.review_note,
-            recommended_move=alert.recommended_move,
-            why_now=alert.why_now,
-            due_at=alert.due_at,
-            superseded_count=superseded_counts.get(alert.id or -1, 0),
-            suggested_workflow=alert.suggested_workflow,
-            needs=alert.needs,
-            question=alert.question,
-            choices=alert.choices,
-            artifact_format=alert.artifact_format if alert.source == "artifact" else None,
-            artifact_url=alert.artifact_url if alert.source == "artifact" else None,
+        proposal_items.append(proposal_item(
+            alert,
+            trust_by_slug=trust_by_slug,
+            superseded=superseded_counts.get(alert.id or -1, 0),
+            now=now,
         ))
 
     # Action items first (sharpest by score), monitoring noise after; ties
@@ -1325,6 +1350,7 @@ def _build_today(
     proposal_items.sort(key=lambda p: (0 if p.category == "action" else 1, -p.score))
     _group_requests(proposal_items)
     _mark_waiting(proposal_items)
+    attach_views(proposal_items, {p.id: p.full_name for p in person_items}, now=now)
 
     response = TodayResponse(
         departments=dept_items,

@@ -63,7 +63,7 @@ import {
   addReads,
   addStep,
   applyProgress,
-  showSteps,
+  liveLineKind,
   type ReadCounts,
   type TurnProgress,
 } from "@/lib/turnSteps";
@@ -1018,16 +1018,27 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
     fallbackLabel: FALLBACK_ACTIVITY_LABEL,
   });
 
-  const stepsShown = isLoading && (turnProgress !== null || showSteps(turnSteps)) && !committeePhase;
-  const turnStepsLine = (
-    <TurnSteps
-      progress={turnProgress}
-      reads={turnReads}
-      liveLine={writingReply ? "Writing the answer" : liveLine}
-      elapsed={status.elapsed}
-      handingOver={handingOver}
-    />
-  );
+  // One "still working" line a turn: the steps line on a long turn, else the
+  // plain status. Never both (lib/turnSteps.ts liveLineKind).
+  const liveKind = liveLineKind({
+    isLoading,
+    steps: turnSteps,
+    hasProgress: turnProgress !== null,
+    inCommittee: committeePhase !== null,
+    statusShown: status.show,
+  });
+  const liveStatus =
+    liveKind === "steps" ? (
+      <TurnSteps
+        progress={turnProgress}
+        reads={turnReads}
+        liveLine={writingReply ? "Writing the answer" : liveLine}
+        elapsed={status.elapsed}
+        handingOver={handingOver}
+      />
+    ) : liveKind === "status" ? (
+      <TurnStatusRow status={status} committeePhase={committeePhase} showMark={Boolean(streamingContent)} />
+    ) : null;
 
   // Fill the composer with the suggestion without sending it, so the user
   // can edit first. The suggestion is kept: clearing the box shows it again.
@@ -1402,45 +1413,27 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
                 </div>
               ))}
 
-              {stepsShown &&
-                (streamingContent ? (
-                  <div className="pl-12">{turnStepsLine}</div>
-                ) : (
-                  <div className="flex gap-4">
+              {streamingContent ? (
+                <Message
+                  role="assistant"
+                  content={streamingContent}
+                  isStreaming
+                  paused={status.show}
+                  actions={streamingActions.length > 0 ? streamingActions : undefined}
+                  status={liveStatus ?? undefined}
+                />
+              ) : (
+                liveStatus && (
+                  <div className="flex gap-4 mb-8">
                     <div className="flex-shrink-0 mt-1">
                       <BrandMark size="md" consulting />
                     </div>
                     <div className="flex-1 pt-1.5">
                       <div className="text-xs text-fg-muted mb-3 font-medium tracking-wide uppercase">{executiveName}</div>
-                      {turnStepsLine}
+                      {liveStatus}
                     </div>
                   </div>
-                ))}
-
-              {streamingContent && (
-                <Message
-                  role="assistant"
-                  content={streamingContent}
-                  isStreaming
-                  actions={streamingActions.length > 0 ? streamingActions : undefined}
-                  status={
-                    status.show ? (
-                      <TurnStatusRow status={status} committeePhase={committeePhase} />
-                    ) : undefined
-                  }
-                />
-              )}
-
-              {status.show && !streamingContent && !stepsShown && (
-                <div className="flex gap-4 mb-8">
-                  <div className="flex-shrink-0 mt-1">
-                    <BrandMark size="md" consulting />
-                  </div>
-                  <div className="flex-1 pt-1.5">
-                    <div className="text-xs text-fg-muted mb-3 font-medium tracking-wide uppercase">{executiveName}</div>
-                    <TurnStatusRow status={status} committeePhase={committeePhase} showMark={false} />
-                  </div>
-                </div>
+                )
               )}
 
               {/* Someone else's turn, as it happens. */}

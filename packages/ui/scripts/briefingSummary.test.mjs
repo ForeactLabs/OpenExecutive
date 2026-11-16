@@ -7,7 +7,6 @@ import {
   greeting,
   handAsks,
   homeHeadline,
-  proposalStatusChip,
   teamOffTrack,
   waitingOnTeam,
 } from "../src/lib/briefingSummary.ts";
@@ -75,24 +74,6 @@ test("ageLabel and daysUntil", () => {
   assert.equal(daysUntil(null, now), null);
 });
 
-test("a collapsed card keeps one status chip: deadline, then stale, then age", () => {
-  const now = new Date(2026, 9, 3, 12, 0);
-  const created = new Date(2026, 9, 1, 12, 0).toISOString();
-  assert.deepEqual(
-    proposalStatusChip({ created_at: created, due_at: new Date(2026, 9, 2, 12, 0).toISOString() }, now),
-    { label: "Overdue", tone: "rose" },
-  );
-  assert.deepEqual(
-    proposalStatusChip({ created_at: created, due_at: new Date(2026, 9, 6, 13, 0).toISOString() }, now),
-    { label: "Due in 3d", tone: "amber" },
-  );
-  assert.deepEqual(
-    proposalStatusChip({ created_at: created, review_verdict: "likely_stale" }, now),
-    { label: "Likely stale", tone: "amber" },
-  );
-  assert.deepEqual(proposalStatusChip({ created_at: created }, now), { label: "2d old", tone: "neutral" });
-  assert.equal(proposalStatusChip({ created_at: "" }, now), null);
-});
 
 test("Home's headline says what needs you, then what it handled and watches", () => {
   assert.deepEqual(homeHeadline(1, 6, 2), {

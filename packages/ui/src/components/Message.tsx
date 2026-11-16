@@ -42,6 +42,9 @@ interface MessageProps {
   // Shown under the text while the reply streams, e.g. the "still working"
   // line when the Executive goes quiet mid-reply to run a tool.
   status?: ReactNode;
+  // The reply is waiting on a step: the typing cursor hides until the words
+  // flow again.
+  paused?: boolean;
   // The chat's last reply only: take the turn back and ask again.
   onRetry?: () => void;
   // The user's last message only: put it back in the composer to change.
@@ -271,6 +274,7 @@ export default function Message({
   feedback,
   onFeedback,
   status,
+  paused,
   onRetry,
   onEdit,
   author,
@@ -362,7 +366,7 @@ export default function Message({
           >
             {linkCardMentions(content)}
           </ReactMarkdown>
-          {isStreaming && (
+          {isStreaming && !paused && (
             <span className="inline-block w-0.5 h-4 bg-accent cursor-blink ml-0.5 align-text-bottom rounded-full" />
           )}
         </div>

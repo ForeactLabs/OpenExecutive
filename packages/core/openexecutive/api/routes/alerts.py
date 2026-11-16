@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 from openexecutive.alerts import approvals, lifecycle, store
 from openexecutive.alerts.models import ARTIFACT_SOURCE, Alert, is_private_alert, visible_alert
@@ -501,6 +501,14 @@ class PlanResponse(BaseModel):
     previous_plan: str
     reply: str
     changed: bool
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def plan_title(self) -> str:
+        """The heading the card now shows over its plan (briefing.card_view)."""
+        from openexecutive.briefing.card_view import plan_title
+
+        return plan_title(self.changed)
 
 
 def _may_approve(alert: Alert, request: Request) -> bool:

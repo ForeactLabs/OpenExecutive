@@ -184,13 +184,14 @@ def test_nothing_is_read_or_kept_on_a_turn_that_is_not_theirs_alone(
 
 
 def test_a_verified_speaker_in_a_channel_others_read_gets_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.delegation import settings
     from openexecutive.memory import history_chat
 
     monkeypatch.setattr(history_chat, "verified_speaker", lambda session, person: True)
-    monkeypatch.setattr(history_chat, "private_chat", lambda session: False)
+    monkeypatch.setattr(settings, "private_conversation", lambda session: False)
     monkeypatch.setattr(people_store, "get_person", lambda pid: SimpleNamespace(id=pid))
     assert wo._their_own_turn(_session(), 1) is False
-    monkeypatch.setattr(history_chat, "private_chat", lambda session: True)
+    monkeypatch.setattr(settings, "private_conversation", lambda session: True)
     assert wo._their_own_turn(_session(), 1) is True
     assert wo._their_own_turn(_session(shared_chat=True), 1) is False
 

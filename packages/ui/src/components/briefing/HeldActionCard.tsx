@@ -23,10 +23,6 @@ import CardTopRow from "./CardTopRow";
 // The tag such a card carries (department_gate.DECISION_CLASS).
 export const HELD_ACTION_TAG = "decision_class:department_action";
 
-export function isHeldAction(proposal: ProposalItem): boolean {
-  return proposal.decision_instance_id != null && (proposal.topic_tags ?? []).includes(HELD_ACTION_TAG);
-}
-
 export default function HeldActionCard({
   proposal,
   onResolved,

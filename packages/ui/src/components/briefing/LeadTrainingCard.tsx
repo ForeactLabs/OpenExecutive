@@ -26,14 +26,6 @@ import CardTopRow from "./CardTopRow";
 // The tag a training card carries (orchestrator.take_the_lead.TRAINING_TAG).
 export const LEAD_TRAINING_TAG = "take_the_lead:training";
 
-// Every Take the lead card carries its class (take_the_lead.DECISION_CLASS).
-export const LEAD_ACTION_TAG = "decision_class:take_the_lead_action";
-
-export function isLeadCard(proposal: ProposalItem): boolean {
-  const tags = proposal.topic_tags ?? [];
-  return proposal.decision_instance_id != null && (tags.includes(LEAD_TRAINING_TAG) || tags.includes(LEAD_ACTION_TAG));
-}
-
 export default function LeadTrainingCard({
   proposal,
   onResolved,
