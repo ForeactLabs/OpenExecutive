@@ -171,7 +171,16 @@ def test_a_search_of_sent_mail_says_so(raw: str, arguments: dict[str, str]) -> N
 
 @pytest.mark.parametrize(
     "arguments",
-    [{"query": "invoice"}, {"query": "-in:sent invoice"}, {"query": "sent items report"}, None],
+    [
+        {"query": "invoice"},
+        {"query": "-in:sent invoice"},
+        {"query": "sent items report"},
+        {"query": "from:me.smith@example.com"},
+        {"query": "from:me@example.com"},
+        {"query": "in:sent OR in:inbox"},
+        {"query": "{in:sent in:inbox}"},
+        None,
+    ],
 )
 def test_any_other_mail_search_is_my_email(arguments: dict[str, str] | None) -> None:
     assert tool_labels.labels_for("google_workspace__search_gmail_messages", arguments) == (

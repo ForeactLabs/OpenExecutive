@@ -143,7 +143,10 @@ _MAIL_SEARCHES = frozenset({
 })
 _SENT_LABELS = ("Checked email I sent", "Checking email I sent")
 # Gmail's sent operators, and Microsoft 365's Sent Items folder by name.
-_SENT_RE = re.compile(r"(?<![\w-])(?:in:sent|label:sent|from:me)\b|^sent ?items$", re.IGNORECASE)
+_SENT_RE = re.compile(r"(?<![\w-])(?:in:sent|label:sent|from:me)(?=[\s)]|$)|^sent ?items$", re.IGNORECASE)
+# A query that also reaches other mail ("in:sent OR in:inbox", "{…}") stays
+# "my email": a wrong "email I sent" is worse than the plain line.
+_ANY_OF_RE = re.compile(r"\sOR\s|[{}]")
 
 GENERIC_DONE = "Used a connected tool"
 GENERIC_DOING = "Using a connected tool"
@@ -188,7 +191,9 @@ def _searches_sent(arguments: Any) -> bool:
     if not isinstance(arguments, dict):
         return False
     return any(
-        isinstance(value, str) and _SENT_RE.search(value.strip())
+        isinstance(value, str)
+        and _SENT_RE.search(value.strip()) is not None
+        and _ANY_OF_RE.search(value) is None
         for value in arguments.values()
     )
 
