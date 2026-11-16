@@ -249,6 +249,17 @@ def test_about_me_is_refused_when_the_speaker_cant_be_told(
     assert facts.list_facts() == []
 
 
+def test_newer_team_facts_never_crowd_out_an_about_me_fact(
+    roster: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    facts.record_fact(subject="Sign-off", statement="Sam signs as Sam, Head of Sales.", source_quote="q",
+                      private_to_person_id=roster.sam)
+    for n in range(3):
+        facts.record_fact(subject=f"Site {n}", statement=f"Site {n} has {n} units.", source_quote="q")
+    monkeypatch.setattr(facts, "RANK_POOL_FACTS", 2)
+    assert "Head of Sales" in facts.render_facts_for_draft("Lunch on Friday?", reader=roster.sam)
+
+
 def _waiting(conn: sqlite3.Connection, **row: Any) -> int:
     cols = {"kind": "fact", "subject": "Cedar Court unit count", "subject_key": "cedar court unit count",
             "statement": "Cedar Court has 38 units.", "created_at": datetime.now(UTC).isoformat(),

@@ -903,7 +903,9 @@ def render_facts_for_draft(
     seen, seen_args = _seen_by(reader)
     rows = _read_only_rows(
         f"SELECT * FROM facts WHERE status='active' AND kind!='profile' AND {seen} "  # noqa: S608 - fixed clause
-        "ORDER BY created_at DESC, id DESC LIMIT ?",
+        # The writer's own private rows first, so newer team facts never
+        # crowd an old sign-off out of the pool.
+        "ORDER BY private_to_person_id IS NOT NULL DESC, created_at DESC, id DESC LIMIT ?",
         (*seen_args, RANK_POOL_FACTS),
         db_path,
     )
