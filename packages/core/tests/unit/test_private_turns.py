@@ -1483,6 +1483,30 @@ def test_load_mcp_server_on_a_private_turn_is_told_not_dropped(roster: SimpleNam
     gateway.load_mcp_server.assert_awaited_once()
 
 
+@pytest.mark.parametrize("tool", ["run_python_job", "find_in_app"])
+def test_a_step_only_the_turn_reads_never_waits_on_a_card(roster: SimpleNamespace, tool: str) -> None:
+    # A run nobody is chatting in (doing what an email asks) calls a step
+    # whose result only that turn reads: by the time anyone could tap
+    # Approve, the turn is over. It is told, and no card is made.
+    from openexecutive.orchestrator import executive as executive_module
+
+    handler = AsyncMock(return_value=json.dumps({"stdout": "the rest"}))
+    session = Session(session_id="inbox:t1", unattended=True, caller_person_id=roster.principal)
+    tool_use = SimpleNamespace(type="tool_use", id="tu-1", name=tool, input={"file": "mail:abc#1"})
+    with (
+        patch.dict(executive_module._ALL_SKILL_HANDLERS, {tool: handler}),
+        patch("openexecutive.orchestrator.levels.hold_many", side_effect=AssertionError("no card")),
+        # The tests have no sandbox (python_job.available).
+        patch("openexecutive.workflows.python_job.available", return_value=True),
+    ):
+        provider = _run_loop(session, [tool_use])
+    handler.assert_not_awaited()
+    result = json.loads(provider.calls[1]["messages"][-1]["content"][0]["content"])
+    assert "can't wait on a card" in result["error"]
+    rows = [e for e in _audit().query(event_type="tool_invocation", limit=100) if e.details.get("held")]
+    assert len(rows) == 1 and rows[0].details["card"] is False
+
+
 # --- MCP tools: Google Workspace reads and the gated Gmail send only --------
 
 

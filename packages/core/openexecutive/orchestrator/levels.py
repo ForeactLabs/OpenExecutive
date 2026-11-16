@@ -343,13 +343,28 @@ def only_to_owner(tool_name: str, tool_input: Any) -> bool:
         return False
 
 
+# Steps whose result is only for the turn that asked: it reads the answer
+# and goes on. By the time anyone taps Approve that turn has ended, so a card
+# could only show the output to someone who never asked for it. Held, the
+# turn is told instead (``not_carriable_error``) and works without it.
+TURN_OWN: frozenset[str] = frozenset({
+    "find_in_app",
+    "list_saved_tools",
+    "read_document",
+    "run_python_job",
+})
+
+
 def carriable(tool: str, *, mcp: bool) -> bool:
     """Whether an Approve tap can carry out ``tool`` exactly: a connected
-    app's call, or a skill the Executive runs. A script or a new server is
-    the turn's own and can't wait on a card. An extension's tool marked
-    ``card`` too (``extensions.card_handler``)."""
+    app's call, or a skill the Executive runs. A script, a new server or a
+    step only the turn reads (``TURN_OWN``) is the turn's own and can't wait
+    on a card. An extension's tool marked ``card`` too
+    (``extensions.card_handler``)."""
     if mcp:
         return True
+    if tool in TURN_OWN:
+        return False
     try:
         from openexecutive.orchestrator import extensions
         from openexecutive.orchestrator.executive import _ALL_SKILL_HANDLERS

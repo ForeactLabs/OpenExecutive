@@ -30,6 +30,8 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _PAGES_RE = re.compile(r"^\s*(\d+)\s*(?:-\s*(\d+))?\s*$")
+# What the "from character" and "cut off" notes on a part need.
+_NOTES_ROOM = 200
 
 READ_DOCUMENT_TOOL: dict[str, Any] = {
     "name": "read_document",
@@ -43,7 +45,8 @@ READ_DOCUMENT_TOOL: dict[str, Any] = {
         "get_drive_file_download_url for a Drive PDF whose content could not be "
         "read — or `filename` for a company document, or `file` for any file by "
         "its handle (mail:<message_id>#<n>, drive:<file_id>, file:<name>). For a long PDF, pass "
-        "`pages` (e.g. '1-20') to read part of it."
+        "`pages` (e.g. '1-20') to read part of it. A long file of any kind comes back in parts: "
+        "pass the `start` its cut-off note gives to read on."
     ),
     "input_schema": {
         "type": "object",
@@ -63,6 +66,10 @@ READ_DOCUMENT_TOOL: dict[str, Any] = {
             "pages": {
                 "type": "string",
                 "description": "PDF page range to read, e.g. '5' or '1-20'. Default: all.",
+            },
+            "start": {
+                "type": "integer",
+                "description": "Character to start from, to read on where the last read was cut off. Default: 0.",
             },
         },
     },
@@ -168,6 +175,9 @@ async def _read_path(resolved: Path, tool_input: dict[str, Any]) -> str:
     from openexecutive.knowledge.loader import read_document_text
 
     pages_raw = str(tool_input.get("pages") or "").strip()
+    start = tool_input.get("start") or 0
+    if isinstance(start, bool) or not isinstance(start, int) or start < 0:
+        return _err("start must be a whole number, 0 or more")
     scope = ""
     try:
         if pages_raw and resolved.suffix.lower() == ".pdf":
@@ -195,11 +205,21 @@ async def _read_path(resolved: Path, tool_input: dict[str, Any]) -> str:
         header.append(f" — {result.note}")
     header.append("]")
 
-    text = result.text
-    cap = get_settings().tool_result_max_chars
-    if len(text) > cap:
-        text = text[:cap] + "\n…[truncated — pass `pages` to read the rest]"
-    return "".join(header) + "\n" + text
+    # A long file comes back in parts, whatever its kind: the note names
+    # where to read on, so the rest is one more call (not a Python job). A
+    # part leaves room under the turn's per-result cap for the header and the
+    # notes, so that cap never cuts the note off.
+    total = len(result.text)
+    if start >= total:
+        return _err(f"that file has only {total} characters")
+    head = "".join(header)
+    end = start + max(500, get_settings().tool_result_max_chars - len(head) - _NOTES_ROOM)
+    text = result.text[start:end]
+    if start:
+        text = f"…[from character {start} of {total}]\n" + text
+    if end < total:
+        text += f"\n…[cut off at character {end} of {total} — call again with start={end} to read on]"
+    return head + "\n" + text
 
 
 DOCUMENT_TOOL_HANDLERS: dict[str, Callable[[dict[str, Any]], Awaitable[str]]] = {

@@ -134,8 +134,38 @@ async def test_long_text_is_capped(dirs, monkeypatch) -> None:
 
     out = await handle_read_document({"path": str(downloads / "long.txt")})
 
-    assert "[truncated — pass `pages` to read the rest]" in out
-    assert len(out) < 1200
+    # The part leaves room for the note, so the turn's own cap never cuts it.
+    assert len(out) <= 1000
+    assert "call again with start=" in out
+
+
+async def test_a_long_word_file_is_read_on_in_parts(dirs, monkeypatch) -> None:
+    # A long file of any kind, not only a PDF, reads on from where the last
+    # part was cut off, so its end never needs a Python job.
+    import re
+
+    monkeypatch.setenv("TOOL_RESULT_MAX_CHARS", "1000")
+    downloads, _ = dirs
+    text = "".join(f"line {i:04d}\n" for i in range(500))
+    (downloads / "psa.txt").write_text(text)
+
+    read, start = "", 0
+    for _ in range(20):
+        out = await handle_read_document({"path": str(downloads / "psa.txt"), "start": start})
+        body = out.split("\n", 1)[1]
+        body = re.sub(r"^…\[from character \d+ of \d+\]\n", "", body)
+        cut = re.search(r"\n…\[cut off at character (\d+) of \d+ — call again with start=(\d+) to read on\]$", body)
+        if cut is None:
+            read += body
+            break
+        read += body[: cut.start()]
+        start = int(cut.group(2))
+    assert read == text
+
+    past = await handle_read_document({"path": str(downloads / "psa.txt"), "start": len(text)})
+    assert _error(past) == f"that file has only {len(text)} characters"
+    bad = await handle_read_document({"path": str(downloads / "psa.txt"), "start": -1})
+    assert "start must be" in _error(bad)
 
 
 def test_is_registered_on_the_executive_and_withheld_on_private_turns() -> None:
