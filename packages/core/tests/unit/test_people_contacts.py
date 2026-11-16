@@ -984,7 +984,7 @@ def test_contact_mail_is_audited_like_any_outside_sender_but_privately(
     assert [row[:3] for row in as_contact] == [row[:3] for row in as_stranger]
     assert {row[3] for row in as_contact} == {True}
     assert {row[3] for row in as_stranger} == {False}
-    assert any(d.get("outcome") == "accepted_non_roster" for _t, _s, d, _p in as_contact)
+    assert any(d.get("outcome") == "accepted_outside_team" for _t, _s, d, _p in as_contact)
     assert "contact" not in json.dumps(as_contact)
 
 
