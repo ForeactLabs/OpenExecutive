@@ -330,7 +330,7 @@ def card_view(
         else None
     )
     workflow = (
-        button("open", f"Run {item.suggested_workflow.replace('_', ' ')}", href=f"/jobs/{item.suggested_workflow}")
+        button("open", f"Run {item.suggested_workflow.replace('_', ' ')}", href=f"/jobs/{quote(item.suggested_workflow, safe='')}")
         if item.recommended_move == "suggest_workflow" and item.suggested_workflow
         and not artifact and not monitoring
         else None
