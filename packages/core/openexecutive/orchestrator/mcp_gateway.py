@@ -3521,13 +3521,18 @@ def _note_sent_for(
             subject, thread_id = arguments.get("subject"), arguments.get("thread_id")
         elif normalized == _M365_RECORD_SEND_TOOL:
             subject, thread_id = _ci_get(_ci_get(_ci_get(arguments, "body"), "message"), "subject"), ""
-        elif normalized == _M365_FORWARD_TOOL and sent_by_id:
+        elif normalized in _M365_SENT_BY_ID_TOOLS and not sent_by_id:
+            # The read before the send failed: nothing names the message,
+            # so it can't be kept, and it shows to everyone. Say so.
+            logger.warning("note_sent_for: %s went out unread, so it is not kept as anyone's", normalized)
+            return
+        elif normalized == _M365_FORWARD_TOOL and sent_by_id is not None:
             recipients = {
                 a.lower() for t in _iter_arg_strings_skipping(arguments, _M365_FREE_TEXT_KEYS)
                 for a in _EMAIL_RE.findall(t)
             }
             subject, thread_id = f"Fwd: {_ci_get(sent_by_id, 'subject') or ''}", ""
-        elif normalized in _M365_SENT_BY_ID_TOOLS and sent_by_id:
+        elif normalized in _M365_SENT_BY_ID_TOOLS and sent_by_id is not None:
             recipients = {a.strip().lower() for a in _m365_implied_recipients(normalized, sent_by_id) if a.strip()}
             subject = str(_ci_get(sent_by_id, "subject") or "")
             replying = normalized in _M365_SENT_REPLY_TOOLS or teammate_mail.is_reply_subject(subject)
