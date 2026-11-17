@@ -171,7 +171,7 @@ def test_a_sheet_update_shows_the_sheet_by_name_its_cells_and_a_table(monkeypatc
     assert shown[0] == {"field": "Sheet", "value": "Launch tracker", "href": f"https://drive.google.com/open?id={_SHEET_ID}"}
     assert shown[1] == {"field": "Cells", "value": "Rows 1 to 3, columns A to C (A1:C3)"}
     assert shown[2]["field"] == "Values"
-    assert shown[2]["table"] == _SHEET_CALL["values"]
+    assert shown[2]["table"] == _SHEET_CALL["values"] and shown[2]["header"] is True
     # Where a table can't be drawn (a chat app), every cell as a line.
     assert shown[2]["value"].splitlines() == [
         "3 rows", "Workstream | Status | Owner", "Launch date | Nov 16 passed | Sam", "Waitlist | Wave 1 | Ari",
@@ -283,3 +283,16 @@ def test_a_chat_app_card_names_the_sheet_and_lists_its_rows(monkeypatch) -> None
     assert "Cells: Rows 1 to 3, columns A to C (A1:C3)" in text
     assert "Launch date | Nov 16 passed | Sam" in text
     assert "[[" not in text
+
+
+def test_rows_written_below_row_one_have_no_header(monkeypatch) -> None:
+    _names(monkeypatch, {})
+    call = {**_SHEET_CALL, "range_name": "Sheet1!A5:C7"}
+    assert card_details.plain("google_workspace__modify_sheet_values", call)[2]["header"] is False
+
+
+def test_an_emptied_field_is_shown_never_dropped() -> None:
+    shown = card_details.plain("crm__update_deal", {"properties": {"owner": "", "closedate": None, "amount": 1}})
+    assert shown == [{"field": "Properties", "value": "Owner: (empty)\nClosedate: (empty)\nAmount: 1"}]
+    flat = card_details.plain("google_workspace__find_and_replace_doc", {"find_text": "Acme Corp", "replace_text": ""})
+    assert {"field": "Replace with", "value": "(nothing: it deletes what it finds)"} in flat

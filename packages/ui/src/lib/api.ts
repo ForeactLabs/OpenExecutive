@@ -7376,6 +7376,7 @@ export interface LeadCardField {
   // A Drive file shown by its name links to it; a sheet's rows draw as a table.
   href?: string;
   table?: string[][];
+  header?: boolean;
 }
 
 // What a Take the lead card holds (its decision's payload), for the card's
@@ -7398,8 +7399,16 @@ export interface LeadCardPayload {
 // each is {field: "To", value}, the field being its label. Older cards kept
 // {field, label, long}. Either way the card shows the label, and a message
 // (or anything long) as a block.
-function leadDetail(d: { field?: unknown; label?: unknown; long?: unknown; value?: unknown; href?: unknown; table?: unknown }): LeadCardField {
-  const { value, href, table } = cardDetail(d);
+function leadDetail(d: {
+  field?: unknown;
+  label?: unknown;
+  long?: unknown;
+  value?: unknown;
+  href?: unknown;
+  table?: unknown;
+  header?: unknown;
+}): LeadCardField {
+  const { value, href, table, header } = cardDetail(d);
   const label = String(d.label ?? d.field ?? "");
   return {
     field: String(d.field ?? label),
@@ -7409,7 +7418,7 @@ function leadDetail(d: { field?: unknown; label?: unknown; long?: unknown; value
       : typeof d.long === "boolean" ? d.long : /^message$/i.test(label) || value.includes("\n") || value.length > 120,
     value,
     ...(href ? { href } : {}),
-    ...(table ? { table } : {}),
+    ...(table ? { table, header } : {}),
   };
 }
 

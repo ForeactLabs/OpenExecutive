@@ -154,6 +154,9 @@ def _lines(value: Any, indent: str = "") -> list[str]:
         out: list[str] = []
         for key, item in value.items():
             if item is None or item == "" or item == [] or item == {}:
+                # Often the point of the call (clear a field, replace with
+                # nothing): Approve sends it, so the card says so.
+                out.append(f"{indent}{_label(str(key))}: (empty)")
                 continue
             if _scalar(item) or (isinstance(item, list) and all(_scalar(v) for v in item)):
                 out.append(f"{indent}{_label(str(key))}: {_text(item)}")
@@ -379,6 +382,9 @@ def plain(tool: str, tool_input: Any) -> list[dict[str, Any]]:
         if norm in _REFS and value not in (None, "", [], {}):
             refs.append({"field": _label(key), "value": _text(value)})
             continue
+        if norm == "replace_text" and value == "":
+            out.append({"field": _label(key), "value": "(nothing: it deletes what it finds)"})
+            continue
         if (google and norm in _GOOGLE_ACCOUNT) or norm in _HIDDEN or value is None or value == "" or value == [] or value == {}:
             continue
         if norm in _SHOWN_UNLESS_DEFAULT and str(value).strip().lower() in _SHOWN_UNLESS_DEFAULT[norm]:
@@ -401,7 +407,11 @@ def plain(tool: str, tool_input: Any) -> list[dict[str, Any]]:
             # A sheet's rows: a table on the page, every cell as a line where
             # a table can't be drawn.
             field, text = _label(key), _rows_text(rows)
-            extra = {"table": rows}
+            # The first row is a header only when the rows start at row 1.
+            area = next((tool_input[k] for k in _RANGE_KEYS if isinstance(tool_input.get(k), str)), "")
+            start = _CELLS.fullmatch(str(area).rpartition("!")[2].strip())
+            header = start is None or not start["r1"] or start["r1"] == "1"
+            extra = {"table": rows, "header": header}
         else:
             # Words are shown whole: Approve does exactly what the card shows.
             field, text = _label(key), _text(value)
