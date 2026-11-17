@@ -467,6 +467,17 @@ def readable_text(
     return f"{own}\n\n{FORWARDED_HEADING}\n{inner}".strip()
 
 
+def _first_unattributed_quote(lines: list[str]) -> int | None:
+    """The index of the first ">" line, None when there is none or a reply
+    attribution opens before it."""
+    for i, line in enumerate(lines):
+        if _attribution_end(lines, i) is not None:
+            return None
+        if line.lstrip().startswith(">"):
+            return i
+    return None
+
+
 def split_forward(
     body: str, subject: str = "", *, max_chars: int | None = None, forwarded_chars: int | None = None,
 ) -> tuple[str, str]:
@@ -478,10 +489,16 @@ def split_forward(
     block is the forwarded message."""
     lines = body.splitlines()
     kept, cut_at, forwarded = _scan_new_text(lines)
+    is_forward = _FORWARD_SUBJECT_RE.match(subject or "") is not None
+    if cut_at is None and is_forward:
+        # A forward whose marker is in another language ("Anfang der
+        # weitergeleiteten Nachricht:"): its first ">" run, when no reply
+        # attribution comes before it, is the forwarded email.
+        cut_at = _first_unattributed_quote(lines)
     own = "\n".join(kept).strip()
     if max_chars is not None:
         own = own[:max_chars]
-    if cut_at is None or not (forwarded or _FORWARD_SUBJECT_RE.match(subject or "")):
+    if cut_at is None or not (forwarded or is_forward):
         return own, ""
     rest = lines[cut_at:]
     if rest and rest[0].lstrip().startswith(">"):

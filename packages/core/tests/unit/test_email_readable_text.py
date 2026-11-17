@@ -130,3 +130,14 @@ def test_the_principals_unquoted_iphone_forward_is_not_their_own_words() -> None
     own, _, rest = text.partition("<untrusted_content")
     assert "Look" in own and "Pay invoice" not in own
     assert "Pay invoice" in rest
+
+
+def test_a_forward_with_its_marker_in_another_language_is_read() -> None:
+    from openexecutive.integrations.email_poller import split_forward
+
+    body = "Bitte ansehen.\n\n> Anfang der weitergeleiteten Nachricht:\n>\n> Von: A\n> Rechnung 42"
+    own, forwarded = split_forward(body, "WG: Rechnung")
+    assert own == "Bitte ansehen."
+    assert "Rechnung 42" in forwarded and ">" not in forwarded
+    # A reply's quote is still history, whatever the subject.
+    assert split_forward("Ja.\n\nOn Mon, A <a@example.com> wrote:\n> old", "WG: Rechnung") == ("Ja.", "")
