@@ -371,14 +371,17 @@ def stop(card_id: int) -> bool:
     halted = _QUEUED.pop(card_id, None) is not None or card_id in _WAITING
     if halted:
         # Their Stop also ends the run that was to start next (queued, or
-        # about to start once the run going now ends): what that run
-        # handed back waits for them.
+        # about to start once the run going now ends).
         if card_id in _WAITING:
             _HALTED.add(card_id)
         _NEXT.discard(card_id)
-        _hand_back_unfinished(card_id)
     task = _TASK.get(card_id)
-    if task is None or task.done() or card_id not in _RUNNING or card_id in _HANDED:
+    stopping = not (task is None or task.done() or card_id not in _RUNNING or card_id in _HANDED)
+    if halted or stopping:
+        # Whatever happens next, the reply waits for them: it never goes
+        # on its own after they pressed Stop.
+        _hand_back_unfinished(card_id)
+    if not stopping or task is None:
         return halted
     _ENDING[card_id] = STOPPED
     task.cancel()
@@ -395,7 +398,7 @@ async def redirect(person: Any, card_id: int, ask: str, *, gmail: Any = None) ->
         try:
             if card_id not in _HANDED:
                 # Their words, or (no words) a newer email that joined the card.
-                _ENDING[card_id] = CHANGED if ask.strip() else NEWER
+                _ENDING.setdefault(card_id, CHANGED if ask.strip() else NEWER)
                 task.cancel()
             # A run that handed back already finishes settling first, sending
             # nothing on its own: the new run decides.

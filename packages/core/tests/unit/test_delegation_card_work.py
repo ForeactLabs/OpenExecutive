@@ -1192,3 +1192,30 @@ def test_stop_while_a_newer_email_waits_on_the_run_starts_nothing(
     finally:
         card_work._RUNNING.discard(card.id)
     assert started == [] and card.id not in card_work._NEXT and card.id not in card_work._HALTED
+
+
+def test_stop_takes_a_reply_back_before_a_newer_email_restarts_the_work(
+    db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mailbox, card = _card(owner)
+    held: list[str | None] = []
+    monkeypatch.setattr(inbox, "_hand_back", lambda c, reason: held.append(reason))
+    monkeypatch.setattr(ledger, "get_decision_instance", _with_gate(ledger.get_decision_instance))
+    monkeypatch.setattr(card_work, "start", lambda *_a, **_k: True)
+
+    async def go() -> None:
+        card_work._RUNNING.add(card.id)
+        card_work._TASK[card.id] = asyncio.create_task(asyncio.sleep(10))
+        assert card_work._set_work(card.id, card_work.WORKING)
+        assert card_work.stop(card.id)
+        # A newer email joins before the stopped run has unwound.
+        assert await card_work.redirect(owner, card.id, "", gmail=mailbox)
+        assert card_work._ENDING.get(card.id) == card_work.STOPPED
+        card_work._close(card.id)
+
+    try:
+        asyncio.run(go())
+    finally:
+        card_work._RUNNING.discard(card.id)
+    assert held and held[0] == "work_unfinished"
+    assert inbox.card_payload(_fresh(card))["conversation"][-1]["text"] == "Stopped."
