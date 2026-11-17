@@ -535,6 +535,26 @@ def test_a_newer_email_from_the_same_sender_joins_their_card(
     assert "t2" in card_work.prompt_for(owner, payload, card.id)
 
 
+def test_a_follow_up_read_in_the_same_scan_joins_the_earlier_card(
+    db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def redirect(*_a: Any, **_k: Any) -> bool:
+        return True
+
+    monkeypatch.setattr(card_work, "redirect", redirect)
+    models["verdicts"]["<their_open_email>"] = {
+        "needs_reply": False, "kind": "fyi", "asked_of_them": True, "confidence": 0.9, "continues_open": True,
+    }
+    mailbox = FakeInbox()
+    # Both came in before a scan saw either (a missed poll).
+    mailbox.add(_msg("m1", "t1", minutes_ago=50, text="Can you sort my renewals? I will send you last year's list."))
+    mailbox.add(_msg("m2", "t2", minutes_ago=40, text="Here it is."))
+    _scan(owner, mailbox)
+    cards = inbox.open_cards(owner.id)
+    assert len(cards) == 1
+    assert card_work.threads(inbox.card_payload(cards[0])) == ["t1", "t2"]
+
+
 def test_another_matter_or_an_unproven_sender_gets_its_own_card(
     db: Path, owner: Any, models: dict[str, Any],
 ) -> None:
@@ -924,3 +944,39 @@ def test_a_joined_email_is_checked_before_the_reply_goes_on_its_own(
     monkeypatch.setattr(ledger, "get_decision_instance", _with_gate(ledger.get_decision_instance))
     asyncio.run(card_work.finished(owner, card.id, gmail=mailbox))
     assert "Payment" in seen and held == ["sensitive"]
+
+
+def test_a_joined_email_takes_back_a_reply_already_settling(
+    db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mailbox, card = _card(owner)
+    held: list[str | None] = []
+    monkeypatch.setattr(inbox, "_hand_back", lambda c, reason: held.append(reason))
+    monkeypatch.setattr(ledger, "get_decision_instance", _with_gate(ledger.get_decision_instance))
+    monkeypatch.setattr(card_work, "start", lambda *_a, **_k: True)
+
+    async def go() -> None:
+        settling = asyncio.Event()
+
+        async def run() -> None:
+            await settling.wait()
+            # By the time the run settles, the reply waits for the person.
+            assert held == ["work_unfinished"]
+
+        card_work._RUNNING.add(card.id)
+        card_work._TASK[card.id] = asyncio.create_task(run())
+        assert card_work._set_work(card.id, card_work.WORKING)
+        await card_work.apply(card.id, owner, body="The figure is 14k.", note="Done.", files=[], gmail=mailbox)
+        # A correction joins while the handed-back run is still settling.
+        joining = asyncio.create_task(card_work.redirect(owner, card.id, "", gmail=mailbox))
+        await asyncio.sleep(0)
+        settling.set()
+        assert await joining
+        await card_work._TASK[card.id]
+
+    try:
+        asyncio.run(go())
+    finally:
+        card_work._RUNNING.discard(card.id)
+        card_work._close(card.id)
+    assert held == ["work_unfinished"]

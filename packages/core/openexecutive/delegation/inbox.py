@@ -1184,7 +1184,9 @@ async def _scan(person: Any, client: Any, watch: InboxWatch, now: datetime) -> S
         candidates.append((message_id, thread_id))
         if len(candidates) >= SCAN_THREADS:
             break
-    for message_id, thread_id in candidates:
+    # Looked at oldest first: an earlier email has its card before a
+    # follow-up from the same sender is read, so the follow-up can join it.
+    for message_id, thread_id in reversed(candidates):
         if result.drafted >= DRAFTS_PER_SCAN:
             break
         if len(cards) + result.drafted >= OPEN_CARDS_MAX:

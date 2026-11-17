@@ -696,7 +696,8 @@ def test_per_sender_and_stranger_limits(db: Path, owner: Any, models: dict[str, 
         mailbox.add(_msg(f"m{i}", f"t{i}", minutes_ago=60 - i))
     result = _scan(owner, mailbox)
     assert result.drafted == 2  # two a day from one sender
-    assert "m0" not in _ledger(db) or _ledger(db)["m0"][0] != "drafted"
+    # Oldest first: the newest waits for a later scan, unrecorded.
+    assert _ledger(db)["m0"][0] == "drafted" and "m2" not in _ledger(db)
 
     stranger = FakeInbox()
     for i in range(2):

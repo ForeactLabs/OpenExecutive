@@ -371,6 +371,7 @@ async def redirect(person: Any, card_id: int, ask: str, *, gmail: Any = None) ->
     """Do the work on ``card_id`` the way ``ask`` says: a run going now
     ends (shown as stopped, with what it did), and a new one starts with
     their words. False when the card isn't waiting."""
+    take_back(card_id)
     task = _TASK.get(card_id)
     if task is not None and not task.done() and card_id in _RUNNING:
         if card_id not in _HANDED:
@@ -380,6 +381,15 @@ async def redirect(person: Any, card_id: int, ask: str, *, gmail: Any = None) ->
         # A run that handed back already finishes settling first.
         await ended(card_id)
     return start(person, card_id, gmail=gmail, ask=ask)
+
+
+def take_back(card_id: int) -> None:
+    """A reply set to go on its own whose work is still running waits on its
+    card for the person instead: whatever comes next (their words, a newer
+    email that joined) changes the work, so what it wrote before never goes
+    out on its own, even from a run that already handed back."""
+    if card_id in _RUNNING:
+        _hand_back_unfinished(card_id)
 
 
 async def ended(card_id: int, *, timeout: float = 10) -> None:
