@@ -250,19 +250,14 @@ def _drive_link(key: str, value: Any) -> str | None:
 
 
 def file_name(file_id: str) -> str:
-    """A Drive file's name, from what a Google answer or an earlier step
-    called it, or "" when nothing has. Never raises."""
+    """A Drive file's name, from what Drive's own metadata called it, or ""
+    when nothing has. Never raises."""
     if not file_id:
         return ""
     try:
         from openexecutive.memory import drive_reads
 
-        name = drive_reads.name_of(file_id)
-        if name:
-            return name
-        from openexecutive.orchestrator import take_the_lead
-
-        return take_the_lead._known_file_name(file_id)
+        return drive_reads.name_of(file_id)
     except Exception:
         return ""
 
