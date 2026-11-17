@@ -480,8 +480,10 @@ def test_a_document_the_work_attached_says_why_it_was_made(
 @pytest.fixture(autouse=True)
 def _no_running() -> Any:
     card_work._RUNNING.clear()
+    card_work._HANDED.clear()
     yield
     card_work._RUNNING.clear()
+    card_work._HANDED.clear()
 
 
 _ = (db, models, owner, local_login, NOW, timedelta)
@@ -800,3 +802,31 @@ def test_a_run_stopped_before_its_first_step_still_ends(
     assert not card_work.running(card.id)
     payload = inbox.card_payload(_fresh(card))
     assert payload[card_work.WORK_KEY] == "" and payload["conversation"][-1]["text"] == "Stopped."
+
+
+def test_stop_never_cuts_off_a_run_that_already_handed_back(db: Path, owner: Any, models: dict[str, Any]) -> None:
+    mailbox, card = _card(owner)
+
+    async def go() -> tuple[bool, bool]:
+        settling = asyncio.Event()
+
+        async def run() -> None:
+            await settling.wait()
+
+        card_work._RUNNING.add(card.id)
+        card_work._TASK[card.id] = asyncio.create_task(run())
+        assert card_work._set_work(card.id, card_work.WORKING)
+        await card_work.apply(card.id, owner, body="", note="Done.", files=[], gmail=mailbox)
+        # It handed back and is settling (a send on its own): Stop leaves it be.
+        stopped = card_work.stop(card.id)
+        cancelled = card_work._TASK[card.id].cancelled()
+        settling.set()
+        await card_work._TASK[card.id]
+        card_work._close(card.id)
+        return stopped, cancelled
+
+    try:
+        assert asyncio.run(go()) == (False, False)
+    finally:
+        card_work._RUNNING.discard(card.id)
+    assert card.id not in card_work._HANDED

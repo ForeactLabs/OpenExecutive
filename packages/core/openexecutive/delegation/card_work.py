@@ -97,6 +97,9 @@ _STARTED: dict[int, datetime] = {}
 # the person's Stop; "changed": they said to do it another way).
 _TASK: dict[int, asyncio.Task[None]] = {}
 _ENDING: dict[int, str] = {}
+# Runs that already handed their result back (apply): what is left of them
+# (settling, a send on its own) is never cut off by Stop or new words.
+_HANDED: set[int] = set()
 CHANGED = "changed"
 NEWER = "newer"  # a run ended because a newer email joined the card
 
@@ -347,7 +350,7 @@ def stop(card_id: int) -> bool:
     """End the work running on ``card_id`` (the person's Stop). False when
     none is running. The card shows the run as stopped."""
     task = _TASK.get(card_id)
-    if task is None or task.done() or card_id not in _RUNNING:
+    if task is None or task.done() or card_id not in _RUNNING or card_id in _HANDED:
         return False
     _ENDING[card_id] = STOPPED
     task.cancel()
@@ -360,9 +363,11 @@ async def redirect(person: Any, card_id: int, ask: str, *, gmail: Any = None) ->
     their words. False when the card isn't waiting."""
     task = _TASK.get(card_id)
     if task is not None and not task.done() and card_id in _RUNNING:
-        # Their words, or (no words) a newer email that joined the card.
-        _ENDING[card_id] = CHANGED if ask.strip() else NEWER
-        task.cancel()
+        if card_id not in _HANDED:
+            # Their words, or (no words) a newer email that joined the card.
+            _ENDING[card_id] = CHANGED if ask.strip() else NEWER
+            task.cancel()
+        # A run that handed back already finishes settling first.
         await ended(card_id)
     return start(person, card_id, gmail=gmail, ask=ask)
 
@@ -385,6 +390,7 @@ def start(person: Any, card_id: int, *, gmail: Any = None, ask: str = "") -> boo
         if card_id in _RUNNING or not _set_work(card_id, WORKING, asked=ask):
             return False
         _RUNNING.add(card_id)
+        _HANDED.discard(card_id)
         _STARTED[card_id] = datetime.now(UTC)
         task = keep(_run(person, card_id, gmail=gmail, ask=ask))
         _TASK[card_id] = task
@@ -545,6 +551,7 @@ def _close(card_id: int) -> None:
     would have gone on its own waits for them instead, since what the email
     asked wasn't done."""
     _RUNNING.discard(card_id)
+    _HANDED.discard(card_id)
     _STARTED.pop(card_id, None)
     _TASK.pop(card_id, None)
     ending = _ENDING.pop(card_id, "")
@@ -629,6 +636,8 @@ async def apply(
         raise
     from openexecutive.delegation.inbox import _audit
 
+    if card_id in _RUNNING:
+        _HANDED.add(card_id)
     _audit("delegation_reply_work", f"Did what an email asked on person {person.id}'s reply card", {
         "person_id": person.id, "decision_id": card_id, "rewrote": bool(words), "files": len(files),
     })
