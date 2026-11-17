@@ -152,6 +152,7 @@ def hold(
     # The title says what it does in a few words ("Email Dana Price"); the
     # message itself shows in full under it.
     plain = take_the_lead.title(tool, tool_input, mcp=mcp, private=private)
+    plain = plain[:1].upper() + plain[1:]  # the title and the button say it alike
     listed = ""
     if more:
         summary = f"{each[0]} and {len(more)} more like it"
