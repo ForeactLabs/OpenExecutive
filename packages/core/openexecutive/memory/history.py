@@ -150,9 +150,9 @@ _COLUMNS = (
 _IRREGULAR_VERBS = frozenset({
     "said", "told", "sent", "gave", "took", "made", "wrote", "set", "put", "got",
     "kept", "left", "met", "paid", "bought", "sold", "chose", "thought", "felt",
-    "found", "brought", "began", "ran", "came", "went", "did", "had", "was",
+    "found", "brought", "began", "ran", "came", "went", "did", "had",
     "were", "let", "cut", "read", "built", "spent", "lent", "meant", "heard",
-    "held", "won", "quit", "forgot", "became", "knew", "saw", "showed", "shown",
+    "held", "won", "quit", "forgot", "became", "knew", "saw", "showed",
     "understood", "taught", "caught", "dealt", "drove", "flew", "fought", "hid",
     "lost", "rang", "rose", "shut", "sought", "spoke", "stood", "swore", "threw",
     "wore", "withdrew", "undertook", "overtook", "forgave", "forbade", "froze",
@@ -164,13 +164,22 @@ def shown_summary(summary: str) -> str:
     out Friday." A note is always about the person who owns it, and only
     they see it, so the summary is stored starting with the verb ("Said …")
     and the screens put "You" in front. Text that doesn't start with a
-    past-tense verb is shown as it is."""
+    past-tense verb, or that starts with a name and then the verb, is shown
+    as it is."""
     text = (summary or "").strip()
-    first = text.split(" ", 1)[0]
-    word = first.rstrip(",.;:").lower()
-    if not word or not first[:1].isupper() or not (word.endswith("ed") or word in _IRREGULAR_VERBS):
+    words = text.split(" ", 2)
+    first = words[0]
+    if not first[:1].isupper() or not _past_tense(first):
+        return summary
+    # "Fred asked …" or "Ahmed confirmed …": a name, then the verb.
+    if len(words) > 1 and words[1][:1].islower() and _past_tense(words[1]):
         return summary
     return "You " + first[:1].lower() + text[1:]
+
+
+def _past_tense(word: str) -> bool:
+    w = word.rstrip(",.;:").lower()
+    return bool(w) and (w.endswith("ed") or w in _IRREGULAR_VERBS)
 
 
 def _now(now: datetime | None) -> datetime:
