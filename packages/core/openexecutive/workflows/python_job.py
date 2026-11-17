@@ -98,7 +98,8 @@ TOOL_DEFINITION: dict[str, Any] = {
         "Run Python with real libraries, on attached files or on data you have or "
         "make up, when a job needs more than your tools: split or merge PDFs and read their pages (pypdf), read or build "
         "spreadsheets (openpyxl, pandas), analyse data (pandas, numpy), draw charts "
-        "(matplotlib), work with images (Pillow), and make documents, from scratch "
+        "(matplotlib; whenever the person asks for a chart, graph or plot, draw it "
+        "here as a PNG, never as text bars or characters), work with images (Pillow), and make documents, from scratch "
         "or from files: Word (python-docx, imported as docx), PowerPoint "
         "(python-pptx, as pptx), laid-out PDFs (fpdf2, as fpdf), Excel with charts "
         "(openpyxl, xlsxwriter). These make files to download; for a Google Doc, "
@@ -799,7 +800,9 @@ async def _keep(files: dict[str, bytes]) -> dict[str, Any]:
             for n, d in sorted(files.items())
         ],
         "note": (
-            "Give the person each file's link as a markdown link. A file's handle "
+            "Show each image file (.png, .jpg, .gif, .webp) in the answer as a "
+            "markdown image, ![what it shows](link), so it appears in the chat; give "
+            "every other file's link as a markdown link. A file's handle "
             "attaches it to a draft (ghostwrite_email files) or saves it to a "
             "Drive folder (save_file): do that yourself when they asked for it."
         ),

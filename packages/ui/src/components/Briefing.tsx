@@ -685,7 +685,7 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
 
   return (
     <div className="flex flex-col h-full bg-surface">
-      <main className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
           <header className="mb-6">
             <p className="text-sm font-medium text-fg-muted">{showHeadline ? `${hello} · ${dateLabel}` : dateLabel}</p>
@@ -953,7 +953,7 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
             </>
           )}
         </div>
-      </main>
+      </div>
     </div>
   );
 }
