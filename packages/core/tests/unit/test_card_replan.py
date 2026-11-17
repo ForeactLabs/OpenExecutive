@@ -424,3 +424,19 @@ def test_today_names_who_changed_a_plan_for_everyone_else(db: Path, monkeypatch:
     today._mark_plan_changes([mine], Viewer(person_id=sam))
     assert theirs.plan_changed and theirs.plan_changed_by == "Sam Rivera"
     assert mine.plan_changed and mine.plan_changed_by is None
+
+
+def test_a_changed_plan_drops_the_buttons_words(
+    client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The button never names a step the card no longer takes."""
+    aid = _card(db, action_label="Ask Alex")
+    card = alert_store.get_alert(aid)
+    assert card is not None and card.action_label == "Ask Alex"
+    _model(monkeypatch, {"plan": NEW, "reply": "Sharing the folder instead."})
+    assert client.post(f"/alerts/{aid}/plan", json={"text": "Share the folder."}).status_code == 200
+    card = alert_store.get_alert(aid)
+    assert card is not None and card.action_label == ""
+    assert client.post(f"/alerts/{aid}/plan/undo").status_code == 200
+    card = alert_store.get_alert(aid)
+    assert card is not None and card.suggested_action == OLD and card.action_label == ""

@@ -295,8 +295,9 @@ def test_no_step_is_nothing_to_approve() -> None:
     assert v.need == "For you to know"
     assert shown(v)[0] == ("primary", "dismiss", "Got it")
     assert all(b.action != "approve" for b in v.buttons)
+    # A card that says it needs an OK keeps its Approve.
     v = view(suggested_action="", needs="ok")
-    assert v.need == "For you to know"
+    assert shown(v)[0] == ("primary", "approve", "Approve")
 
 
 def test_a_card_without_approve_has_no_plan_box() -> None:

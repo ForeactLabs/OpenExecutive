@@ -321,7 +321,7 @@ def card_view(
     # No step to do is nothing to approve. Approve does the card's step
     # (``suggested_action``); a card without one is for them to know, unless
     # it asks, nudges, suggests a workflow or keeps its own buttons.
-    stepless = not (item.suggested_action or "").strip() and not asks and not (
+    stepless = not (item.suggested_action or "").strip() and not asks and needs != "ok" and not (
         artifact or monitoring or failed_run or handed_over or decision
         or item.recommended_move in ("nudge", "suggest_workflow")
     )

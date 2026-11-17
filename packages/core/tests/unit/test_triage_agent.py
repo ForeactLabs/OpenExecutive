@@ -180,3 +180,11 @@ def test_triage_prompt_external_section_covers_every_registered_adapter() -> Non
         assert kind in section, (
             f"triage '## External Signals' section omits registered adapter {kind!r}"
         )
+
+
+def test_parse_decision_reads_the_buttons_words() -> None:
+    decision = _parse_decision(
+        {"alert": True, "severity": "medium", "suggested_action": "Email Dana to renew", "action_label": "Email Dana"}
+    )
+    assert decision.action_label == "Email Dana"
+    assert _parse_decision({"alert": True, "severity": "medium"}).action_label == ""

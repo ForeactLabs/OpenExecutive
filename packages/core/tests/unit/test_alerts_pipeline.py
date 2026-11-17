@@ -789,3 +789,28 @@ def test_a_teammates_message_card_is_not_offered_for_the_executive_to_join(monke
     monkeypatch.setattr(dispatcher, "dispatch_all", fake_dispatch)
     _pass_on(monkeypatch, db, _Chat("chat-sam", 2), "t1", "m1", "From Sam: running late", "From Sam: running late.")
     assert one_card.open_cards_from("person:2", turn="t2", reader="1", db_path=db) == []
+
+
+def test_a_step_the_grounding_rewrote_loses_its_buttons_words(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.alerts import pipeline
+    from openexecutive.alerts.models import TriageDecision
+    from openexecutive.briefing import grounding
+
+    event = AlertEvent(source="email", external_id="g-1", subject="Renewal", body="Dana asked about renewal")
+    decision = TriageDecision(
+        alert=True, headline="Renewal", body="b", suggested_action="Email Dana and Sam",
+        action_label="Email Dana and Sam",
+    )
+
+    def rewrite(headline: str, body: str, action: str, **_: object) -> tuple[str, str, str, bool]:
+        return headline, body, "Email Dana", True
+
+    monkeypatch.setattr(grounding, "ground_alert_text", rewrite)
+    grounded = pipeline._ground_decision(decision, event, [])
+    assert (grounded.suggested_action, grounded.action_label) == ("Email Dana", "")
+
+    def keep(headline: str, body: str, action: str, **_: object) -> tuple[str, str, str, bool]:
+        return headline, "other body", action, True
+
+    monkeypatch.setattr(grounding, "ground_alert_text", keep)
+    assert pipeline._ground_decision(decision, event, []).action_label == "Email Dana and Sam"

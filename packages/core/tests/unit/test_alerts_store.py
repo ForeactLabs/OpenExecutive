@@ -298,3 +298,33 @@ def test_list_artifact_alerts_keeps_to_one_owner(db: Path) -> None:
     assert heads(owner_person_id=7) == {"mine"}
     assert heads(owner_person_id=7, include_unowned=True) == {"mine", "unowned"}
     assert heads(owner_person_id=None) == set()
+
+
+def test_the_button_label_is_short_one_line_and_follows_its_step(db: Path) -> None:
+    from openexecutive.alerts import store
+
+    assert store.clean_label("  Email   Dana.  ") == "Email Dana"
+    assert store.clean_label("Reply!") == "Reply"
+    assert store.clean_label("x" * 41) == ""
+    aid = store.insert_alert(
+        source="triage", external_id="lbl-1", severity="medium", headline="h", body="",
+        suggested_action="Email Dana to renew", action_label="Email Dana.", db_path=db,
+    )
+    assert aid is not None
+    card = store.get_alert(aid, db_path=db)
+    assert card is not None and card.action_label == "Email Dana"
+    # No step: no button words.
+    bare = store.insert_alert(
+        source="triage", external_id="lbl-2", severity="medium", headline="h", body="",
+        action_label="Email Dana", db_path=db,
+    )
+    assert bare is not None
+    bare_card = store.get_alert(bare, db_path=db)
+    assert bare_card is not None and bare_card.action_label == ""
+    # A new step without new words clears the old ones.
+    store.update_alert_content(aid, suggested_action="Call Dana instead", db_path=db)
+    card = store.get_alert(aid, db_path=db)
+    assert card is not None and card.action_label == ""
+    store.update_alert_content(aid, suggested_action="Call Dana", action_label="Call Dana", db_path=db)
+    card = store.get_alert(aid, db_path=db)
+    assert card is not None and card.action_label == "Call Dana"
