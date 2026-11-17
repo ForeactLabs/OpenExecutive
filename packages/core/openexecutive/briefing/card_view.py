@@ -374,11 +374,6 @@ def card_view(
     )
     link = safe_https(item.artifact_url) if artifact and item.artifact_format == "link" else ""
     open_in_app = button("open_url", f"Open in app ({_host(link)})", href=link) if link else None
-    person_page = (
-        button("open", f"Open {first}'s page", href=f"/people/{item.routed_to_person_id}")
-        if assignee_name and item.routed_to_person_id is not None
-        else None
-    )
     snooze = None if artifact else button("snooze", "Snooze")
 
     primary: CardButton | None
@@ -398,7 +393,7 @@ def card_view(
     buttons: list[CardButton] = []
     if primary is not None:
         buttons.append(primary.model_copy(update={"place": "primary"}))
-    for b in (rerun, open_run, nudge, workflow, approve, edit_approve, snooze, open_in_app, person_page):
+    for b in (rerun, open_run, nudge, workflow, approve, edit_approve, snooze, open_in_app):
         if b is not None and b is not primary:
             buttons.append(b)
     if dismiss is not primary:

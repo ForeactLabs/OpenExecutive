@@ -1007,17 +1007,6 @@
           "run_id": ""
         },
         {
-          "action": "open",
-          "busy_label": "",
-          "done": "",
-          "href": "/people/4",
-          "label": "Open Sam's page",
-          "memory": "",
-          "place": "menu",
-          "prompt": "",
-          "run_id": ""
-        },
-        {
           "action": "dismiss",
           "busy_label": "",
           "done": "",
@@ -1228,17 +1217,6 @@
           "done": "",
           "href": "",
           "label": "Snooze",
-          "memory": "",
-          "place": "menu",
-          "prompt": "",
-          "run_id": ""
-        },
-        {
-          "action": "open",
-          "busy_label": "",
-          "done": "",
-          "href": "/people/4",
-          "label": "Open Sam's page",
           "memory": "",
           "place": "menu",
           "prompt": "",

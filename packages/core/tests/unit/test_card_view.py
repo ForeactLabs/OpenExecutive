@@ -54,10 +54,11 @@ def test_a_plain_proposal() -> None:
     ]
 
 
-def test_routed_to_someone_offers_their_page() -> None:
+def test_a_routed_card_has_no_link_to_their_page() -> None:
+    """The card names who has it; a link to their People page helps no one
+    act on it, and on your own card it pointed at you."""
     v = view(routed_to_person_id=4, assignee_name="Sam Okafor")
-    assert ("menu", "open", "Open Sam's page") in shown(v)
-    assert next(b for b in v.buttons if b.label == "Open Sam's page").href == "/people/4"
+    assert not any(b.href == "/people/4" for b in v.buttons)
 
 
 def test_a_nudge_leads_with_nudge() -> None:
