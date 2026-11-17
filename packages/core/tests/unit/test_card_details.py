@@ -313,3 +313,7 @@ def test_rows_appended_to_whole_columns_have_no_header(monkeypatch) -> None:
 
 def test_an_empty_item_in_a_list_still_shows() -> None:
     assert card_details._text([{"a": 1}, {}, [], "x"]) == "- A: 1\n- (empty)\n- (empty)\n- x"
+
+
+def test_a_cell_with_a_bar_or_line_break_stays_one_cell() -> None:
+    assert card_details._rows_text([["c|d", "e\nf"]]) == "1 row\nc\\|d | e ⏎ f"

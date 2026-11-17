@@ -212,7 +212,13 @@ def _rows_text(rows: list[list[str]]) -> str:
     """The rows as plain lines, for where a table can't be drawn (a chat
     app): every cell, so Approve does what the card shows."""
     count = f"{len(rows)} row{'' if len(rows) == 1 else 's'}"
-    return "\n".join([count, *(" | ".join(row) for row in rows)])
+    return "\n".join([count, *(" | ".join(map(_cell, row)) for row in rows)])
+
+
+def _cell(text: str) -> str:
+    """One cell on one line: a "|" or a line break inside it would read as
+    another cell or row."""
+    return text.replace("|", "\\|").replace("\r\n", " ⏎ ").replace("\n", " ⏎ ").replace("\r", " ⏎ ")
 
 
 def cells(text: str) -> str:
