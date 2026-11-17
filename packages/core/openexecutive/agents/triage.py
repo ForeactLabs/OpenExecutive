@@ -319,7 +319,8 @@ def _no_decision(
             severity=AlertSeverity.MEDIUM,
             channels=[AlertChannel.WEB, AlertChannel.PERSISTED],
             headline=headline,
-            body=(event.body or "")[:2000],
+            # Outside text the review never rewrote shows as a short preview.
+            body=(event.body or "")[: 2000 if event.from_executive else 280],
             dedup_key=_kept_key(event),
             topic_tags=topic_tags[:8],
         )
@@ -359,13 +360,13 @@ def _kept_key(event: AlertEvent) -> str:
 
 
 def _names_muted_topic(event: AlertEvent, mute_patterns: list[str]) -> bool:
-    """Whether a mute pattern starts a word in the event's subject or body:
-    with no review there are no topic tags to match, so the words stand in.
-    A word's start, so "newsletter" holds "newsletters" back but a short
-    mute like "ai" never hits "email"."""
+    """Whether a mute pattern is a word (or its plural) in the event's
+    subject or body: with no review there are no topic tags to match, so
+    the words stand in. "newsletter" holds "newsletters" back, but a short
+    mute like "ai" never hits "email" or "air"."""
     text = f"{event.subject}\n{event.title or ''}\n{event.body}".lower()
     return any(
-        p.strip() and re.search(rf"(?<!\w){re.escape(p.strip().lower())}", text)
+        p.strip() and re.search(rf"(?<!\w){re.escape(p.strip().lower())}(?:e?s)?(?!\w)", text)
         for p in mute_patterns
     )
 

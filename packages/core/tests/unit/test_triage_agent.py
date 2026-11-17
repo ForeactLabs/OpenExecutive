@@ -186,7 +186,7 @@ def test_a_muted_topic_stays_muted_when_review_fails() -> None:
 
 def test_a_short_mute_only_holds_back_whole_words() -> None:
     """A mute of "ai" doesn't hold back a card that says "emailed"."""
-    event = AlertEvent(source="email", external_id="m-6", subject="Leo emailed about Friday",
+    event = AlertEvent(source="email", external_id="m-6", subject="Leo emailed about the air freight",
                        body="Open Friday afternoon?", from_executive=True)
     decision = asyncio.run(TriageAgent().triage(
         event, mute_patterns=["ai"], client=_client(side_effect=RuntimeError("boom")),
