@@ -681,10 +681,6 @@ def _cap_reason(person_id: int, now: datetime, db_path: Path | None = None) -> s
 # What an asked-for draft's slot is taken against: nothing holds it.
 _NO_CAP = 10**9
 
-# Limits that hold for the rest of the scan, not just this sender.
-_SCAN_STOPPING_LIMITS = frozenset({"classify_limit", "inbox_limit", "daily_limit", "uncountable"})
-
-
 def card_flags(message: Any, plan: dict[str, Any], *, own: set[str], exec_address: str) -> list[str]:
     """What the card warns about, besides the draft's own flags."""
     flags = [f for f in plan.get("flags", []) if f != "you_replied_last"]
@@ -1289,10 +1285,8 @@ async def _consider(
     limit = _cap_reason(person.id, now)
     if limit is not None:
         # Not recorded: a later scan tries again once the limit allows.
-        if limit in _SCAN_STOPPING_LIMITS:
-            result.status = "daily_limit"
-            return True
-        return False
+        result.status = "daily_limit"
+        return True
     if not _claim(person.id, message, relation=relation, outcome=PROCESSING, now=now):
         return False
     _note_mail(person.id, message, relation=relation)
