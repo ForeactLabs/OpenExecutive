@@ -518,7 +518,7 @@ def _addresses(text: str) -> list[str]:
 
 
 def _theirs(unit: str, headers: str, sides: _Sides, *, ids: list[str] | None = None,
-            subject: str | None = None, when: datetime | None = None) -> bool:
+            subject: str | None = None, when: datetime | None = None, in_thread: bool = False) -> bool:
     """Whether ``unit`` is someone else's mail and none of the reader's
     addresses is in ``headers``: an address of another teammate is anywhere
     in it, or the Executive sent it for someone else (rule 4)."""
@@ -526,11 +526,11 @@ def _theirs(unit: str, headers: str, sides: _Sides, *, ids: list[str] | None = N
         return False
     if any(a in sides.others for a in _addresses(unit)):
         return True
-    return _sent_for_other(unit, headers, sides, ids=ids, subject=subject, when=when)
+    return _sent_for_other(unit, headers, sides, ids=ids, subject=subject, when=when, in_thread=in_thread)
 
 
 def _sent_for_other(unit: str, headers: str, sides: _Sides, *, ids: list[str] | None = None,
-                    subject: str | None = None, when: datetime | None = None) -> bool:
+                    subject: str | None = None, when: datetime | None = None, in_thread: bool = False) -> bool:
     """Whether the Executive sent ``unit`` for someone other than the
     reader, or it answers one (rule 4): it is a kept send's message (by id,
     or by its subject and a recipient at the send's own time), or it is
@@ -561,13 +561,16 @@ def _sent_for_other(unit: str, headers: str, sides: _Sides, *, ids: list[str] | 
         subject = match.group(1) if match else ""
     key = _subject_key(subject)
     reply = is_reply_subject(subject)
+    # A message that shows its Gmail thread is a send's reply only by that
+    # thread, so a later "Re: Meeting" in someone else's thread isn't one.
+    threaded = in_thread or "Thread ID:" in unit
     on_it = set(_addresses(headers.lower()))
 
     def answers(rows: list[_Sent]) -> bool:
         return any(
             when >= r.at - _SKEW
             and r.subject and r.subject == key and bool(r.recipients & on_it)
-            and (when <= r.at + _SKEW or (r.started and r.recent and reply))
+            and (when <= r.at + _SKEW or (r.started and r.recent and reply and not (r.thread_id and threaded)))
             for r in rows
         )
 
@@ -726,7 +729,7 @@ def _filter_thread(text: str, sides: _Sides) -> str:
     kept = [
         m for m in messages
         if not _theirs(m, _text_headers(m), sides, ids=[*head_ids, *_LISTED_ID_RE.findall(m)],
-                       subject=_subject_or(m, subject))
+                       subject=_subject_or(m, subject), in_thread="Thread ID:" in head)
     ]
     dropped = len(messages) - len(kept)
     if not dropped:

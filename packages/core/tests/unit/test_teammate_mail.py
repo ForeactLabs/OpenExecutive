@@ -700,6 +700,16 @@ def test_a_new_message_with_the_same_subject_is_no_reply(roster: SimpleNamespace
         assert "withheld" in _run(FakeMailbox({READ: reply}), READ, message_id="r7")
 
 
+def test_a_gmail_send_finds_replies_by_its_thread_not_its_subject(roster: SimpleNamespace) -> None:
+    # Ben's "Meeting" started thread s1; Dana's later "Re: Meeting" is in
+    # another thread, the principal's own.
+    _send_for(roster.ben, mid="s1", subject="Meeting")
+    roster.session.mail_ids_seen.add(f"{roster.owner}:r9")
+    other = _sent_by_exec("r9", "Re: Meeting", EXEC, sender=DANA) + "Thread ID: t9\n"
+    with _reader(roster.owner):
+        assert "withheld" not in _run(FakeMailbox({READ: other}), READ, message_id="r9")
+
+
 def test_a_reply_sent_into_a_thread_takes_only_itself(roster: SimpleNamespace) -> None:
     with _reader(roster.ben):
         tm.note_sent(subject="Re: Taxes", recipients={DANA}, thread_id="t1", result="Email sent! Message ID: s9")
