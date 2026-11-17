@@ -4291,8 +4291,8 @@ departments:
     it becomes the `workspace` key of the POST /fixtures/{name}/load and
     /fixtures/unload responses, which do not check the caller); the user snapshot
     writes one (every field, so the role round-trips), and a load while the live state is the user's own (no fixture, no
-    client active) rewrites `_user_backup/workspace.yaml` even when an
-    older backup is reused — unload keeps `_user_backup`; an unload from a
+    client active) takes the whole snapshot again, so an older backup is
+    never reused — unload keeps `_user_backup`; an unload from a
     backup with no workspace.yaml (one that predates it) leaves the current
     settings as they are instead of resetting them. The
     lifespan skips check_org_completeness in solo (it only warns about

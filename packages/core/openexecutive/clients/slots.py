@@ -305,13 +305,13 @@ async def _restore_slot_state(
 
     # 1. SQLite state — whole-DB restore (or factory wipe for blank slots),
     #    with operator-level tables carried across.
-    preserved = _dump_global_tables()
     if is_blank:
+        preserved = _dump_global_tables()
         _wipe_per_client_tables()
+        _ensure_schemas()
+        _restore_global_tables(preserved)
     else:
-        _restore_db_from_file(slot / "state.db")
-    _ensure_schemas()
-    _restore_global_tables(preserved)
+        restore_company_db(slot / "state.db")
     seeded: dict[str, Any] = {}
     if is_blank:
         # Generated (seed) slots carry people.yaml / departments.yaml /
@@ -384,6 +384,16 @@ def _seed_from_slot_files(settings: Any, slot: Path) -> dict[str, Any]:
     if (slot / "departments.yaml").exists():
         out["departments_seeded"] = _seed_departments(slot / "departments.yaml")
     return out
+
+
+def restore_company_db(state_src: Path) -> None:
+    """Make a saved copy of the company database live, carrying the
+    operator-level rows (``_GLOBAL_TABLES``) across. Used by a client switch
+    and by unload, which puts the user's own saved database back."""
+    preserved = _dump_global_tables()
+    _restore_db_from_file(state_src)
+    _ensure_schemas()
+    _restore_global_tables(preserved)
 
 
 def _restore_db_from_file(state_src: Path) -> None:
@@ -895,16 +905,18 @@ async def activate_client_slot(
             else:
                 _save_slot_state(settings, previous_slot)
         else:
-            # Mirror the fixture switcher's first-load behavior: preserve the
-            # user's original company before replacing it. Best-effort — an
-            # empty environment has nothing worth snapshotting.
-            if not (settings.company_profile_path.parent / "_user_backup" / "profile.yaml").exists():
-                try:
-                    snapshot_user_state(settings)
-                except Exception:
-                    logger.exception(
-                        "client-slots: pre-activation user snapshot failed"
-                    )
+            # The live state is the user's own company (no client, no
+            # fixture): save all of it before it is replaced, every time, so
+            # unload brings back this copy and not an older one. The snapshot
+            # holds the whole database, so a blank switch's sweep loses
+            # nothing. Best-effort — an empty environment has nothing worth
+            # snapshotting.
+            try:
+                snapshot_user_state(settings)
+            except Exception:
+                logger.exception(
+                    "client-slots: pre-activation user snapshot failed"
+                )
 
         summary = await _restore_slot_state(settings, slot, app_state=app_state)
         forget_company_caches()

@@ -336,26 +336,20 @@ async def _load_from_dir(
         # (mkdir succeeded but profile.yaml never landed) does not permanently
         # disable auto-snapshot. The sentinel guards the inverse: if a previous
         # fixture is already active, current state is NOT the user's company.
-        backup_dir = _user_backup_dir(settings)
+        # Save the user's own company before the fixture replaces it: on the
+        # first load, and again on every load while the live state is still
+        # theirs, so unload never brings back an older copy. The sentinel
+        # guards the inverse: if a fixture is already active, the live state
+        # is NOT the user's company and the earlier snapshot stays.
         auto_snapshot_taken = False
-        if not (backup_dir / "profile.yaml").exists() and not sentinel.exists():
+        if live_is_users:
             try:
                 snapshot_user_state(settings)
                 auto_snapshot_taken = True
             except Exception:
                 # Best-effort: do not block the fixture load if snapshot fails
                 # on a truly empty environment. User can call snapshot manually.
-                pass
-        elif live_is_users and backup_dir.is_dir():
-            # An earlier snapshot is being reused (unload keeps _user_backup),
-            # but the workspace settings are the user's own right now and may
-            # have changed since — refresh them, or unload would restore
-            # stale ones (or, from a backup that predates workspace.yaml,
-            # none at all).
-            try:
-                _dump_workspace(backup_dir / "workspace.yaml")
-            except Exception:
-                logger.exception("fixture load: refreshing the backed-up workspace settings failed")
+                logger.exception("fixture load: snapshot of the user's company failed")
 
         summary = await _apply_state_from_source(fixture_dir, settings)
 
@@ -645,6 +639,15 @@ async def unload_fixture(settings: Any) -> dict[str, Any]:
             summary_client = None
 
         summary = await _apply_state_from_source(backup, settings)
+        if (backup / "state.db").exists():
+            # The whole saved database goes back over what the files above
+            # seeded, so every table is the user's again, not only the ones
+            # a fixture has. Same restore as a client switch.
+            from openexecutive.clients.slots import restore_company_db
+
+            restore_company_db(backup / "state.db")
+            forget_company_caches()
+            summary["database_restored"] = True
         if summary_client is not None:
             summary["client_saved"] = summary_client
 
@@ -1207,6 +1210,22 @@ def snapshot_user_state(settings: Any, *, force: bool = False) -> dict[str, Any]
 
     # ── 6. workspace.yaml — so unload restores the user's mode and zone ───
     _dump_workspace(backup_dir / "workspace.yaml")
+
+    # ── 7. state.db — the whole company database, every table. The files
+    #       above only hold what a fixture also has; unload puts this copy
+    #       back last, so a table they don't cover (facts, contact notes,
+    #       saved tools, ...) comes back as it was. VACUUM INTO gives a
+    #       consistent copy while other connections hold the DB open.
+    from openexecutive.memory.episodic import DB_PATH as EPISODIC_DB_PATH
+
+    state_dst = backup_dir / "state.db"
+    state_dst.unlink(missing_ok=True)
+    if EPISODIC_DB_PATH.exists():
+        conn = sqlite3.connect(str(EPISODIC_DB_PATH))
+        try:
+            conn.execute("VACUUM INTO ?", (str(state_dst),))
+        finally:
+            conn.close()
 
     # Clear active-fixture marker — this state IS the user's company now.
     _fixture_active_sentinel(settings).unlink(missing_ok=True)

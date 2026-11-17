@@ -678,3 +678,61 @@ async def test_blank_switch_empties_a_table_nobody_listed(env: SimpleNamespace) 
     await activate_client_slot(env.settings, "beta")
     with sqlite3.connect(str(env.db_path)) as conn:
         assert conn.execute("SELECT COUNT(*) FROM brand_new_feature").fetchone()[0] == 0
+
+
+async def test_blank_switch_then_unload_brings_every_table_back(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The first switch from your own company into a blank client sweeps
+    every table; unload must bring all of them back, not only the ones the
+    snapshot files cover."""
+    from openexecutive.cli import fixture_loader
+    from openexecutive.knowledge.store import ChromaDBStore
+
+    monkeypatch.setattr("openexecutive.audit.log_event", lambda *a, **k: None)
+
+    class _NoStore:
+        def __init__(self, *a: Any, **k: Any) -> None: ...
+
+        def __getattr__(self, _name: str) -> Any:
+            return lambda *a, **k: None
+
+    for name in dir(ChromaDBStore):
+        if name.endswith("_COLLECTION"):
+            setattr(_NoStore, name, getattr(ChromaDBStore, name))
+    monkeypatch.setattr("openexecutive.knowledge.store.ChromaDBStore", _NoStore)
+
+    _seed_live_company(env, "My Real Co")
+    with sqlite3.connect(str(env.db_path)) as conn:
+        conn.execute("CREATE TABLE brand_new_feature (note TEXT)")
+        conn.execute("INSERT INTO brand_new_feature VALUES ('mine')")
+    await create_client_slot(env.settings, display_name="Beta", source="blank")
+    await activate_client_slot(env.settings, "beta")
+    with sqlite3.connect(str(env.db_path)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM brand_new_feature").fetchone()[0] == 0
+
+    summary = await fixture_loader.unload_fixture(env.settings)
+
+    assert summary["database_restored"] is True
+    with sqlite3.connect(str(env.db_path)) as conn:
+        assert conn.execute("SELECT note FROM brand_new_feature").fetchall() == [("mine",)]
+    assert _decision_summaries(env.db_path) == ["My Real Co decision"]
+    assert get_active_client(env.settings) is None
+
+
+async def test_every_first_activation_saves_your_company_again(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An older backup is never reused: unload must bring back the company
+    as it was when you left it, not as it was the first time."""
+    _seed_live_company(env, "My Real Co")
+    backup = env.company / "_user_backup"
+    backup.mkdir()
+    (backup / "profile.yaml").write_text("name: Older copy\n")
+    snapshots: list[str] = []
+    monkeypatch.setattr(slots, "snapshot_user_state", lambda s: snapshots.append("taken"))
+
+    await create_client_slot(env.settings, display_name="Beta", source="blank")
+    await activate_client_slot(env.settings, "beta")
+
+    assert snapshots == ["taken"]
