@@ -332,11 +332,6 @@ async def _load_from_dir(
             live_is_users = False
             logger.exception("fixture load: client save-back failed (continuing)")
 
-        # Auto-snapshot user state on first ever fixture load. Use the same
-        # condition as `has_snapshot` so a partial/failed snapshot directory
-        # (mkdir succeeded but profile.yaml never landed) does not permanently
-        # disable auto-snapshot. The sentinel guards the inverse: if a previous
-        # fixture is already active, current state is NOT the user's company.
         # Save the user's own company before the fixture replaces it: on the
         # first load, and again on every load while the live state is still
         # theirs, so unload never brings back an older copy. The sentinel

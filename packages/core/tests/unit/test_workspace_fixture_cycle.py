@@ -184,3 +184,40 @@ def test_load_and_unload_forget_cached_agent_overrides(
         _cached_then_gone(_unload)
     finally:
         overrides.invalidate_cache()
+
+
+def test_a_failed_snapshot_stops_the_load(
+    settings: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without a fresh copy, unload would bring back an older one, so the
+    load doesn't go ahead and nothing live changes."""
+
+    def _fail(*_a: object, **_k: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(fixture_loader, "snapshot_user_state", _fail)
+    with pytest.raises(OSError):
+        _load(settings)
+    assert not fixture_loader._fixture_active_sentinel(settings).exists()
+    assert "My Co" in settings.company_profile_path.read_text()
+
+
+def test_unload_brings_back_work_done_between_two_loads(settings: Any) -> None:
+    """Each load saves the company again, so a second unload brings back
+    what changed after the first one, not the copy from the first load."""
+    import sqlite3
+
+    db = episodic.DB_PATH
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute("CREATE TABLE only_in_the_database (note TEXT)")
+    _load(settings)
+    _unload(settings)
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute("INSERT INTO only_in_the_database VALUES ('written after the first demo')")
+    _load(settings)
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute("DELETE FROM only_in_the_database")  # what a demo might do
+    _unload(settings)
+    with sqlite3.connect(str(db)) as conn:
+        rows = conn.execute("SELECT note FROM only_in_the_database").fetchall()
+    assert rows == [("written after the first demo",)]
