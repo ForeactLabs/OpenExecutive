@@ -165,13 +165,13 @@ _REGULAR_VERBS = frozenset({
     "tested", "used", "wanted", "warned", "worked",
 })
 _IRREGULAR_VERBS = frozenset({
-    "said", "told", "sent", "gave", "took", "made", "wrote", "set", "put", "got",
-    "kept", "left", "met", "paid", "bought", "sold", "chose", "thought", "felt",
+    "said", "told", "sent", "gave", "took", "made", "wrote", "put", "got",
+    "kept", "met", "paid", "bought", "sold", "chose", "thought", "felt",
     "found", "brought", "began", "ran", "came", "went", "did", "had",
-    "were", "let", "cut", "read", "built", "spent", "lent", "meant", "heard",
-    "held", "won", "quit", "forgot", "became", "knew", "saw", "showed",
+    "were", "let", "built", "spent", "lent", "meant", "heard",
+    "held", "quit", "forgot", "became", "knew", "saw", "showed",
     "understood", "taught", "caught", "dealt", "drove", "flew", "fought", "hid",
-    "lost", "rang", "shut", "sought", "spoke", "stood", "swore", "threw",
+    "lost", "rang", "sought", "spoke", "stood", "swore", "threw",
     "wore", "withdrew", "undertook", "overtook", "forgave", "forbade", "froze",
 })
 
