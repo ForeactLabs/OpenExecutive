@@ -1,0 +1,116 @@
+"""A round cut off at the output limit (stop_reason "max_tokens") must not
+end the turn: the half-written tool call never runs, the model is told to
+make it again in a shorter form, and the step is named as writing, not as
+the read before it. A card's work otherwise stopped with "couldn't finish"
+while writing a long spreadsheet."""
+from __future__ import annotations
+
+import asyncio
+from typing import Any
+from unittest.mock import patch
+
+import pytest
+
+from openexecutive.orchestrator.executive import (
+    CUT_OFF_LABEL,
+    CUT_OFF_NOTE,
+    CUT_OFF_RESULT,
+    MAX_OUTPUT_TOKENS,
+    Executive,
+)
+from tests.unit.test_tool_result_cap import _FinalMsg, _ScriptedProvider, _TextBlock, _ToolUseBlock
+
+
+@pytest.fixture(autouse=True)
+def _no_audit_writes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("openexecutive.orchestrator.executive.audit_log", lambda *_a, **_k: None)
+
+
+async def _run(provider: _ScriptedProvider, handlers: dict[str, Any] | None = None) -> list[Any]:
+    items: list[Any] = []
+    with patch("openexecutive.orchestrator.executive.get_provider", return_value=provider), patch.dict(
+        "openexecutive.orchestrator.executive._ALL_SKILL_HANDLERS", handlers or {},
+    ):
+        async for item in Executive()._stream_agent_loop(
+            system_blocks=[], messages=[{"role": "user", "content": "make the sheet"}], model="claude-test",
+        ):
+            items.append(item)
+    return items
+
+
+def test_every_round_may_write_more_than_8192() -> None:
+    provider = _ScriptedProvider([_FinalMsg([_TextBlock("Done.")], "end_turn")])
+    asyncio.run(_run(provider))
+    assert provider.calls[0]["max_tokens"] == MAX_OUTPUT_TOKENS > 8192
+
+
+def test_cut_off_tool_call_never_runs_and_the_turn_carries_on() -> None:
+    ran: list[dict[str, Any]] = []
+
+    async def _draft(tool_input: dict[str, Any], *_a: Any, **_k: Any) -> str:
+        ran.append(tool_input)
+        return "published"
+
+    provider = _ScriptedProvider(
+        [
+            # The round ran out of room while writing the spreadsheet.
+            _FinalMsg([_ToolUseBlock("big", "draft_artifact", {"title": "Tax bills", "sheets": []})], "max_tokens"),
+            _FinalMsg([_TextBlock("Done.")], "end_turn"),
+        ]
+    )
+    items = asyncio.run(_run(provider, {"draft_artifact": _draft}))
+
+    assert ran == [], "a half-written call must not run"
+    assert len(provider.calls) == 2
+    results = provider.calls[1]["messages"][-1]["content"]
+    answered = {b["tool_use_id"]: b["content"] for b in results if b.get("type") == "tool_result"}
+    assert answered["big"] == CUT_OFF_RESULT
+    labels = [i["label"] for i in items if isinstance(i, dict) and i.get("type") == "activity"]
+    assert labels == [CUT_OFF_LABEL]
+
+
+def test_cut_off_reply_text_carries_on() -> None:
+    provider = _ScriptedProvider(
+        [
+            _FinalMsg([_TextBlock("Here is the first half")], "max_tokens"),
+            _FinalMsg([_TextBlock(" and the rest.")], "end_turn"),
+        ]
+    )
+    asyncio.run(_run(provider))
+
+    assert len(provider.calls) == 2
+    sent = provider.calls[1]["messages"]
+    assert sent[-2]["role"] == "assistant"
+    assert sent[-1] == {"role": "user", "content": [{"type": "text", "text": CUT_OFF_NOTE}]}
+    assert sent[-2]["content"] == [{"type": "text", "text": "Here is the first half"}]
+
+
+def test_cut_off_on_the_last_round_ends_as_written() -> None:
+    provider = _ScriptedProvider([_FinalMsg([_TextBlock("All I could write")], "max_tokens")])
+
+    async def _go() -> None:
+        with patch("openexecutive.orchestrator.executive.get_provider", return_value=provider):
+            async for _ in Executive()._stream_agent_loop(
+                system_blocks=[], messages=[{"role": "user", "content": "x"}], model="claude-test",
+                max_iterations=1,
+            ):
+                pass
+
+    asyncio.run(_go())
+    assert len(provider.calls) == 1
+
+
+def test_cut_off_call_dropped_by_the_provider_is_named_as_writing() -> None:
+    provider = _ScriptedProvider(
+        [
+            _FinalMsg([], "max_tokens"),
+            _FinalMsg([_TextBlock("Done.")], "end_turn"),
+        ]
+    )
+    items = asyncio.run(_run(provider))
+
+    sent = provider.calls[1]["messages"]
+    assert all(m["content"] for m in sent), "no message may go out empty"
+    assert sent[-1]["content"][0]["text"] == CUT_OFF_NOTE
+    labels = [i["label"] for i in items if isinstance(i, dict) and i.get("type") == "activity"]
+    assert labels == [CUT_OFF_LABEL]

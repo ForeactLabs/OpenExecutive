@@ -5399,6 +5399,19 @@ today:
     Read-side only — no writes happen here.
 
 chat:
+  round_cut_off: |
+    Each Executive round (and the committee revision) may write
+    MAX_OUTPUT_TOKENS (32,000; was 8192) in orchestrator/executive.py. A
+    round that reaches it (stop_reason max_tokens) no longer ends the turn:
+    the tool call it was still writing (the last one) is answered with
+    CUT_OFF_RESULT and never runs, since its input is unfinished; with no
+    call left (cut reply text, or a call the provider dropped whole) the
+    loop adds CUT_OFF_NOTE and carries on. The round's activity label is
+    CUT_OFF_LABEL ("Writing it in shorter parts…"), so a card's step list
+    names the real stop. Why: a reply card writing a long spreadsheet as one
+    draft_artifact call was cut at 8192 twice and showed "couldn't finish"
+    with the mark on the read before it. The last round (no tools) keeps
+    what it wrote.
   chats_preview: |
     GET /sessions (no q) gives each chat a preview: the last message as
     one plain line (Markdown marks stripped, cut at a word near 120

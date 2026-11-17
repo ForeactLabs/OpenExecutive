@@ -1239,6 +1239,35 @@ LAST_ROUND_NOTE = (
 )
 
 
+# The most one round of the Executive may write. A round that reaches it is
+# cut off mid-answer (stop_reason "max_tokens"): a long file (a spreadsheet,
+# a document) written as one tool call stopped the whole turn before this was
+# raised from 8192. Every Executive round and the committee revision use it.
+MAX_OUTPUT_TOKENS = 32_000
+
+# Answers a tool call the model was still writing when its round was cut off
+# at MAX_OUTPUT_TOKENS: the call never ran (its input is unfinished), and the
+# turn carries on so it can make it again in a shorter form.
+CUT_OFF_RESULT = (
+    "That call was cut off at the length limit before you finished writing "
+    "it, so it did not run. Make it again in a shorter form, or in smaller "
+    "steps (for example, fewer rows or columns first, then the rest)."
+)
+
+# Said after a round cut off at MAX_OUTPUT_TOKENS with no tool call left to
+# answer (cut in its reply text, or a cut call the provider dropped whole).
+CUT_OFF_NOTE = (
+    "Your last answer was cut off at the length limit before it finished. If "
+    "you were writing a tool call, it did not run: make it again in a shorter "
+    "form, or in smaller steps. If you were writing your reply, carry on from "
+    "where it stopped, without repeating what you already wrote."
+)
+
+# What the person sees for a round that was cut off: the step it was on was
+# writing something long, not the read before it.
+CUT_OFF_LABEL = "Writing it in shorter parts…"
+
+
 # Said in place of a round's results when nothing came back to put there (a
 # round the model ended on a tool call the loop had no call for). The API
 # refuses a user message with no content, which would end the whole turn
@@ -2313,7 +2342,7 @@ class Executive:
         revision_final_msg: Any = None
         async with get_provider(effective_model).messages_stream(
             model=effective_model,
-            max_tokens=8192,
+            max_tokens=MAX_OUTPUT_TOKENS,
             system=system_blocks,  # type: ignore[arg-type]
             messages=revision_messages,  # type: ignore[arg-type]
         ) as stream:
@@ -2789,7 +2818,7 @@ class Executive:
             stream_model = model or self._settings.default_model
             async with get_provider(stream_model).messages_stream(
                 model=stream_model,
-                max_tokens=8192,
+                max_tokens=MAX_OUTPUT_TOKENS,
                 system=system_blocks,  # type: ignore[arg-type]
                 tools=tools_with_cache,  # type: ignore[arg-type,list-item]
                 messages=current_messages,  # type: ignore[arg-type]
@@ -2891,7 +2920,25 @@ class Executive:
                         },
                     )
 
-            if final_msg.stop_reason != "tool_use":
+            # Cut off at MAX_OUTPUT_TOKENS mid-answer: carry on rather than
+            # end the turn on half a step. A cut tool call is answered with
+            # CUT_OFF_RESULT below and never runs; cut text gets CUT_OFF_NOTE.
+            # The last round runs no tool, so its reply stands as written.
+            cut_off = final_msg.stop_reason == "max_tokens" and iteration < max_iterations
+            if cut_off:
+                logger.warning(
+                    "round %d cut off at max_tokens=%d; carrying on", iteration, MAX_OUTPUT_TOKENS,
+                )
+                if not tool_uses:
+                    if not any(b.get("type") == "text" and str(b.get("text", "")).strip() for b in response_content):
+                        # Nothing was said: the step was writing something
+                        # long (a call the provider dropped whole).
+                        yield {"type": "activity", "label": CUT_OFF_LABEL, "tool": "", "iteration": iteration}
+                    if response_content:
+                        current_messages.append({"role": "assistant", "content": response_content})
+                    current_messages.append({"role": "user", "content": [{"type": "text", "text": CUT_OFF_NOTE}]})
+                    continue
+            if final_msg.stop_reason != "tool_use" and not cut_off:
                 # A reply with no tool call still gets the queued files and
                 # synced excerpts checked, so what they tried is flagged to
                 # the person (outside_content.settle).
@@ -2968,7 +3015,12 @@ class Executive:
             # show_progress is answered here too: nothing runs, and the chat
             # gets it before this round's activity label.
             group_results: dict[str, str] = {}
+            # The call the round was still writing when it was cut off is the
+            # last one; its input is unfinished, so nothing reads or runs it.
+            cut_id = tool_uses[-1]["id"] if cut_off and tool_uses else None
             for i, tu in enumerate(tool_uses):
+                if tu["id"] == cut_id:
+                    continue
                 if tu["name"] == turn_progress.SHOW_PROGRESS:
                     result, progress_event, shown_progress = turn_progress.apply(
                         tu["input"],
@@ -2995,6 +3047,8 @@ class Executive:
                     own = _own_tool_call(tu, turn_handlers)
                     if own is not None:
                         tool_uses[i] = own
+            if cut_id is not None:
+                group_results[cut_id] = CUT_OFF_RESULT
             # The turn's one full re-read of a result the reading budget cut
             # is answered from that result, never by running the tool again
             # (it may have been a write).
@@ -3216,7 +3270,8 @@ class Executive:
             try:
                 # The progress call is not what the round is doing.
                 round_work = [
-                    tu for tu in tool_uses if tu["name"] != turn_progress.SHOW_PROGRESS
+                    tu for tu in tool_uses
+                    if tu["name"] != turn_progress.SHOW_PROGRESS and tu["id"] != cut_id
                 ]
                 activity = summarize_activity(round_work, iteration=iteration)
                 # What the round read, by kind, for the card when the turn
@@ -3224,6 +3279,10 @@ class Executive:
                 reads = turn_reads.add(round_work)
                 if activity is not None and reads:
                     activity["reads"] = reads
+                if cut_id is not None:
+                    # The step was writing something long, not the call's own
+                    # kind of work (which never ran).
+                    activity = {**(activity or fallback_activity(iteration=iteration)), "label": CUT_OFF_LABEL}
             except Exception:
                 logger.warning(
                     "activity_label_failed iteration=%d", iteration, exc_info=True
