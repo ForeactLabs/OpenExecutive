@@ -758,6 +758,15 @@ async def test_blank_switch_then_unload_brings_every_table_back(
         run_at="2099-01-01T00:00:00+00:00", channel="__internal__", channel_ref="practice",
         intent_text="Rotate clients", kind="client_rotation",
     )
+    # Pending when saved, its time passed before unload: it would fire late.
+    overdue_id = episodic.insert_scheduled_action(
+        run_at="2020-01-01T00:00:00+00:00", channel="email", channel_ref="pat@example.com",
+        intent_text="Follow up with Pat", kind="ad_hoc",
+    )
+    future_id = episodic.insert_scheduled_action(
+        run_at="2099-01-01T00:00:00+00:00", channel="email", channel_ref="pat@example.com",
+        intent_text="Renewal reminder", kind="ad_hoc",
+    )
     with sqlite3.connect(str(env.db_path)) as conn:
         conn.execute(
             "UPDATE scheduled_actions SET status = 'running' "
@@ -807,6 +816,13 @@ async def test_blank_switch_then_unload_brings_every_table_back(
         assert conn.execute(
             "SELECT status FROM scheduled_actions WHERE id = ?", (rotation_id,)
         ).fetchall() == [("cancelled",)]
+        # Overdue rows are closed; one still to come stays the user's.
+        assert conn.execute(
+            "SELECT status FROM scheduled_actions WHERE id = ?", (overdue_id,)
+        ).fetchall() == [("cancelled",)]
+        assert conn.execute(
+            "SELECT status FROM scheduled_actions WHERE id = ?", (future_id,)
+        ).fetchall() == [("pending",)]
 
 
 async def test_every_first_activation_saves_your_company_again(

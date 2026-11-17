@@ -1654,25 +1654,34 @@ def requeue_orphaned_running(db_path: Path | None = None) -> int:
         return int(cursor.rowcount)
 
 
-def close_restored_running(db_path: Path | None = None) -> int:
-    """Close the 'running' rows of a database copy that was just made live.
+def settle_restored_queue(db_path: Path | None = None) -> int:
+    """Settle the job queue of a database copy that was just made live.
 
-    The copy was taken while those jobs ran, and they finished in this
-    process against the database it replaced, so running them again would
-    do the work twice (a rotation, a send). Nothing would ever claim them
-    either, so they are marked 'cancelled' with the reason. Returns the
-    count closed.
+    A row that was 'running' when the copy was saved finished in this
+    process against the database it replaced, so running it again would do
+    the work twice (a rotation, a send). A 'pending' row whose time passed
+    while the copy sat saved would fire late, all of them on the next tick
+    (a days-old follow-up, a morning brief at 3 PM). Both are marked
+    'cancelled' with the reason; a pending row still to come is left to
+    run. The caller seeds the recurring jobs again. Returns the count closed.
     """
     resolved = _resolve_db_path(db_path)
     if not resolved.exists():
         return 0
+    now = datetime.now(UTC).isoformat()
     with _get_conn(resolved) as conn:
-        cursor = conn.execute(
+        running = conn.execute(
             "UPDATE scheduled_actions SET status = 'cancelled', "
             "last_error = 'was running when this copy was saved' "
             "WHERE status = 'running'"
-        )
-        return int(cursor.rowcount)
+        ).rowcount
+        overdue = conn.execute(
+            "UPDATE scheduled_actions SET status = 'cancelled', "
+            "last_error = 'its time passed while this copy was saved' "
+            "WHERE status = 'pending' AND run_at <= ?",
+            (now,),
+        ).rowcount
+        return int(running) + int(overdue)
 
 
 def claim_due_actions(
