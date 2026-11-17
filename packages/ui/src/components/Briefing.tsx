@@ -414,17 +414,20 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
   // What Right now's rows open: the email (and its reply card, shared with
   // Needs you). ✕ on a row clears it at once; the server keeps it out until
   // something newer lands on it.
+  // A pull already under way may predate the change, so its answer is dropped.
   const onDismissRow = useCallback((row: RightNowRow) => {
+    pulls.changedHere();
     setToday((t) => t && { ...t, right_now: (t.right_now ?? []).filter((r) => r.key !== row.key) });
     dismissRightNowRow(row.key)
       .then((kept) => {
         if (!kept) return pullToday();
       })
       .catch((e) => console.error("Dismissing a Right now row failed", e));
-  }, [pullToday]);
+  }, [pulls, pullToday]);
   const onRowGone = useCallback((row: RightNowRow) => {
+    pulls.changedHere();
     setToday((t) => t && { ...t, right_now: (t.right_now ?? []).filter((r) => r.key !== row.key) });
-  }, []);
+  }, [pulls]);
   const rightNowActions = { replies, onContinue, onDismiss: onDismissRow, onGone: onRowGone };
 
   const dateLabel = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });

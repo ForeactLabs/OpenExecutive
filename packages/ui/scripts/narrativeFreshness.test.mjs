@@ -53,6 +53,15 @@ test("an older answer still shows while the newer pull hasn't landed or failed",
   assert.equal(pulls.accept(later), true);
 });
 
+test("a change made on the page drops every pull already under way", () => {
+  const pulls = newestAnswer();
+  const timed = pulls.begin(); // left before the row was dismissed
+  pulls.changedHere();
+  assert.equal(pulls.accept(timed), false);
+  const next = pulls.begin();
+  assert.equal(pulls.accept(next), true);
+});
+
 test("updated label reads as recency, then as a local clock time", () => {
   // Local-time constructors, so the labels hold in any test-runner time zone.
   const written = new Date(2026, 8, 28, 14, 4);

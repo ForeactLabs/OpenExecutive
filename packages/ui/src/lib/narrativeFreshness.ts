@@ -41,8 +41,10 @@ export function shouldRefreshOnTick(lastFetchMs: number, nowMs: number): boolean
 /** Orders overlapping pulls of /today: `begin` numbers a pull as it starts,
  * and `accept` says whether its answer may be shown when it lands. An answer
  * older than one already shown is dropped (it would put old counts back); an
- * older one still shows while the newer pull hasn't landed or has failed. */
-export function newestAnswer(): { begin(): number; accept(seq: number): boolean } {
+ * older one still shows while the newer pull hasn't landed or has failed.
+ * `changedHere` drops every pull already under way, for a change made on the
+ * page itself (a dismissed row) that those answers would undo. */
+export function newestAnswer(): { begin(): number; accept(seq: number): boolean; changedHere(): void } {
   let started = 0;
   let shown = 0;
   return {
@@ -51,6 +53,9 @@ export function newestAnswer(): { begin(): number; accept(seq: number): boolean 
       if (seq <= shown) return false;
       shown = seq;
       return true;
+    },
+    changedHere: () => {
+      shown = started;
     },
   };
 }
