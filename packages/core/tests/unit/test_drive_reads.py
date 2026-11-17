@@ -304,3 +304,11 @@ def test_text_anyone_can_write_never_renames_a_file(db: Path) -> None:
     drive_reads.remember_names(SEARCH, listing, db_path=db)
     assert drive_reads.name_of("1PayrollSheet00", db_path=db) == "Payroll 2026"
     assert drive_reads.name_of("1NotesFile0000", db_path=db) == "Notes"
+
+
+def test_names_are_not_kept_from_a_turn_private_to_the_principal() -> None:
+    assert drive_reads.may_remember_names(None) is True
+    assert drive_reads.may_remember_names(Session(session_id="s1", caller_person_id=7)) is True
+    private = Session(session_id="s2", caller_person_id=1)
+    private.private_to_principal = True
+    assert drive_reads.may_remember_names(private) is False

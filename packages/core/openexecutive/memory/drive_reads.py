@@ -443,6 +443,17 @@ _NAME_LINES: dict[str, re.Pattern[str]] = {
 _MAX_NAMES_KEPT = 5000
 
 
+def may_remember_names(session: Any) -> bool:
+    """Whether this call's file names may be kept company-wide: not on a
+    turn private to the principal, nor one that touched the speaker's own
+    mailbox. Background work (no session) may."""
+    if session is None:
+        return True
+    from openexecutive.delegation.settings import turn_touched_delegate_mail
+
+    return getattr(session, "private_to_principal", False) is not True and not turn_touched_delegate_mail(session)
+
+
 def remember_names(tool_name: str, result_text: str, db_path: Path | None = None) -> int:
     """Keep each file a Drive metadata answer names with its id; how many.
     Never raises."""
