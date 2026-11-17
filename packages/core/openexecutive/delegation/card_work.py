@@ -400,7 +400,7 @@ async def redirect(person: Any, card_id: int, ask: str, *, gmail: Any = None) ->
     ends (shown as stopped, with what it did), and a new one starts with
     their words. False when the card isn't waiting."""
     task = _TASK.get(card_id)
-    if task is not None and not task.done() and card_id in _RUNNING:
+    while task is not None and not task.done() and card_id in _RUNNING:
         _NEXT.add(card_id)
         try:
             if card_id not in _HANDED:
@@ -418,15 +418,18 @@ async def redirect(person: Any, card_id: int, ask: str, *, gmail: Any = None) ->
             if halted:
                 # They pressed Stop while this waited: nothing starts.
                 _NEXT.discard(card_id)
-            elif card_id in _RUNNING:
+            elif card_id in _RUNNING and _TASK.get(card_id) is task:
                 # Still settling: the new run starts as it closes (their
                 # words stay the ask when a newer email comes after them).
                 if ask.strip() or card_id not in _QUEUED:
                     _QUEUED[card_id] = (person, gmail, ask)
-            else:
+            elif card_id not in _RUNNING:
                 _NEXT.discard(card_id)
         if halted or card_id in _QUEUED:
             return True
+        # Another redirect started a run while this one waited: that run is
+        # ended the same way, so the latest ask is the one that runs.
+        task = _TASK.get(card_id)
     return start(person, card_id, gmail=gmail, ask=ask)
 
 

@@ -1102,6 +1102,49 @@ def test_a_joined_email_waits_for_a_slow_settling_run_then_starts(
     assert started == ["Use 40k"] and card.id not in card_work._NEXT and card.id not in card_work._QUEUED
 
 
+def test_two_changes_at_once_end_with_the_latest_running(
+    owner: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    card_id = 7
+    started: list[str] = []
+    runs: list[asyncio.Task[Any]] = []
+
+    def run() -> asyncio.Task[Any]:
+        task = asyncio.create_task(asyncio.Event().wait())
+        task.add_done_callback(lambda _t: card_work._RUNNING.discard(card_id))
+        card_work._RUNNING.add(card_id)
+        card_work._TASK[card_id] = task
+        runs.append(task)
+        return task
+
+    def fake_start(_p: Any, _id: int, **k: Any) -> bool:
+        started.append(k.get("ask", ""))
+        run()
+        return True
+
+    monkeypatch.setattr(card_work, "start", fake_start)
+
+    async def go() -> None:
+        run()
+        await asyncio.gather(
+            card_work.redirect(owner, card_id, "Use 40k"),
+            card_work.redirect(owner, card_id, "Use 50k"),
+        )
+        for task in runs:
+            task.cancel()
+        await asyncio.gather(*runs, return_exceptions=True)
+
+    try:
+        asyncio.run(go())
+    finally:
+        card_work._TASK.pop(card_id, None)
+        card_work._ENDING.pop(card_id, None)
+    # The run the first change started is ended for the second: one run is
+    # left, with the latest words, and nothing waits behind it.
+    assert started == ["Use 40k", "Use 50k"]
+    assert runs[1].cancelled() and card_id not in card_work._QUEUED
+
+
 def test_a_joined_email_catches_up_with_mail_still_waiting_on_the_card(
     db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
