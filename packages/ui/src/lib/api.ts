@@ -5721,6 +5721,8 @@ export interface ProposalItem {
   headline: string;
   routed_to_person_id: number | null;
   suggested_action: string;
+  // The step Approve does, in a few words for its button ("" when none).
+  action_label?: string;
   created_at: string;
   topic_tags: string[];
   // Presentation signals from the backend (see briefing/ranking.py).

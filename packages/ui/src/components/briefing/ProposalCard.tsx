@@ -229,7 +229,7 @@ export default function ProposalCard({
         // A reply (or Undo) changed the step here: the button's words were for the old
         // one (the server drops them too), and the box shows the new step.
         return onApprove
-          ? [{ label: local ? "Approve" : b.label, onSelect: () => onApprove({ ...proposal, suggested_action: plan }) }]
+          ? [{ label: local && b.label === proposal.action_label ? "Approve" : b.label, onSelect: () => onApprove({ ...proposal, suggested_action: plan }) }]
           : [];
       case "edit_approve":
         return onApproveWithEdits ? [{ label: b.label, onSelect: startEditing }] : [];
