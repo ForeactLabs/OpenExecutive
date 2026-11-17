@@ -59,9 +59,8 @@ deliver it, with any files. Approvals decides each of its steps, and whether
 the reply then goes on its own.
 
 **Limits.** Per scan 5 drafts; per day ``DELEGATION_INBOX_MAX_DRAFTS_PER_DAY``
-within the shared daily limit (``delegation.caps``), 200 classifications, 2
-drafts per sender (1 for a stranger) and 10 for strangers in all; and never
-more than 25 open cards. A limit reached leaves the message for a later scan.
+within the shared daily limit (``delegation.caps``) and 200 classifications,
+with no count per sender; and never more than 25 open cards. A limit reached leaves the message for a later scan.
 
 **Order, and nothing lost.** Record the message → classify → write → save
 the draft in Gmail and store its id → create the card (a ``delegation_reply``
@@ -651,7 +650,7 @@ async def relation_of(address: str, gmail: Any, *, contacts: bool = True) -> str
     return "correspondent" if await gmail.has_written_to(address) else "stranger"
 
 
-def _cap_reason(person_id: int, message: Any, relation: str, now: datetime, db_path: Path | None = None) -> str | None:
+def _cap_reason(person_id: int, now: datetime, db_path: Path | None = None) -> str | None:
     """A daily limit this message would pass, or None. Checked before the
     message is recorded, so a limit only delays it."""
     from openexecutive.config import get_settings
@@ -1287,7 +1286,7 @@ async def _consider(
         return False
     known_as = await relation_of(message.from_addr, client, contacts=bool(person.is_principal))
     relation = handling_relation(known_as, message)
-    limit = _cap_reason(person.id, message, relation, now)
+    limit = _cap_reason(person.id, now)
     if limit is not None:
         # Not recorded: a later scan tries again once the limit allows.
         if limit in _SCAN_STOPPING_LIMITS:
