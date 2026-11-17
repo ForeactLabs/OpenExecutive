@@ -194,6 +194,17 @@ def shown_summary(summary: str) -> str:
     return "You " + first[:1].lower() + text[1:]
 
 
+def stored_text(text: str) -> str:
+    """The reverse of :func:`shown_summary`, for text the person saves: a
+    correction typed over "You told Dana …" is kept as "Told Dana …", since
+    the Executive reads corrections and its "you" is itself."""
+    words = (text or "").strip().split(" ", 2)
+    if len(words) > 1 and words[0].lower() == "you" and _past_tense(words[1]):
+        rest = " ".join(words[1:])
+        return rest[:1].upper() + rest[1:]
+    return text
+
+
 def _past_tense(word: str) -> bool:
     w = word.rstrip(",.;:").lower()
     return w in _REGULAR_VERBS or w in _IRREGULAR_VERBS
@@ -896,7 +907,7 @@ def correct_note(
         return None
     from openexecutive.delegation.ghostwriter import one_line
 
-    cleaned = one_line(text or "", MAX_CORRECTION_CHARS)
+    cleaned = one_line(stored_text(text or ""), MAX_CORRECTION_CHARS)
     conn = _connect(db_path)
     try:
         conn.execute(

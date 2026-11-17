@@ -87,6 +87,15 @@ def test_each_person_sees_only_their_own(client: TestClient, ids: dict[str, int]
     assert len(mine["notes"]) == 1 and mine["notes"][0]["quote"] == "I'll send the price list on Friday"
     # The note is the reader's own, so it reads "You told …".
     assert mine["notes"][0]["summary"] == "You told Dana Lee the price list comes Friday."
+    # Saving the shown text as a correction stores it without "You", since
+    # the Executive reads corrections and its "you" is itself.
+    nid = mine["notes"][0]["id"]
+    out = client.patch(f"/memories/history/{nid}", json={"correction": "You told Dana Lee the price list comes Monday."},
+                       headers=OWNER)
+    assert out.status_code == 200
+    assert h.get_note(ids["principal"], nid).correction == "Told Dana Lee the price list comes Monday."
+    shown = client.get("/memories/history", headers=OWNER).json()["notes"][0]
+    assert shown["correction"] == "You told Dana Lee the price list comes Monday."
     # Searching the words on screen finds it.
     assert len(client.get("/memories/history?q=you told dana", headers=OWNER).json()["notes"]) == 1
     # On for everyone on the team until they turn it off.
@@ -186,7 +195,7 @@ def test_pin_correct_and_forget_only_your_own(client: TestClient, ids: dict[str,
     out = client.patch(
         f"/memories/history/{nid}", json={"pinned": True, "correction": "Told Dana it comes Monday."}, headers=OWNER
     ).json()
-    assert out["pinned"] is True and out["expires_at"] is None and out["correction"] == "Told Dana it comes Monday."
+    assert out["pinned"] is True and out["expires_at"] is None and out["correction"] == "You told Dana it comes Monday."
     assert client.delete(f"/memories/history/{nid}", headers=OWNER).json() == {"forgotten": 1}
     assert client.delete(f"/memories/history/{nid}", headers=OWNER).status_code == 404
 
