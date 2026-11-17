@@ -750,3 +750,42 @@ async def test_every_first_activation_saves_your_company_again(
     await activate_client_slot(env.settings, "beta")
 
     assert snapshots == ["taken"]
+
+
+async def test_a_failed_snapshot_keeps_the_last_one_and_stops_the_switch(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The earlier backup stays until a new copy is complete, and a switch
+    that couldn't save your company doesn't go on to replace it."""
+    from openexecutive.cli import fixture_loader
+
+    _seed_live_company(env, "My Real Co")
+    fixture_loader.snapshot_user_state(env.settings)
+    saved = env.company / "_user_backup" / "state.db"
+    before = saved.read_bytes()
+
+    real_connect = sqlite3.connect
+
+    class _FailingVacuum:
+        def __init__(self, conn: sqlite3.Connection) -> None:
+            self._conn = conn
+
+        def execute(self, sql: str, *args: Any) -> Any:
+            if sql.startswith("VACUUM INTO"):
+                raise sqlite3.OperationalError("database or disk is full")
+            return self._conn.execute(sql, *args)
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(self._conn, name)
+
+    monkeypatch.setattr(
+        fixture_loader.sqlite3, "connect", lambda *a, **k: _FailingVacuum(real_connect(*a, **k))
+    )
+    await create_client_slot(env.settings, display_name="Beta", source="blank")
+    with pytest.raises(slots.ClientSlotError):
+        await activate_client_slot(env.settings, "beta")
+    monkeypatch.setattr(fixture_loader.sqlite3, "connect", real_connect)
+
+    assert saved.read_bytes() == before
+    assert get_active_client(env.settings) is None
+    assert _decision_summaries(env.db_path) == ["My Real Co decision"]

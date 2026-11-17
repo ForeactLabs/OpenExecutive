@@ -913,14 +913,15 @@ async def activate_client_slot(
             # fixture): save all of it before it is replaced, every time, so
             # unload brings back this copy and not an older one. The snapshot
             # holds the whole database, so a blank switch's sweep loses
-            # nothing. Best-effort — an empty environment has nothing worth
-            # snapshotting.
+            # nothing. A failed snapshot stops the switch, since the switch
+            # would replace data nothing has saved.
             try:
                 snapshot_user_state(settings)
-            except Exception:
-                logger.exception(
-                    "client-slots: pre-activation user snapshot failed"
-                )
+            except Exception as exc:
+                logger.exception("client-slots: pre-activation user snapshot failed")
+                raise ClientSlotError(
+                    "Couldn't save your company before switching. Nothing was changed."
+                ) from exc
 
         summary = await _restore_slot_state(settings, slot, app_state=app_state)
         forget_company_caches()

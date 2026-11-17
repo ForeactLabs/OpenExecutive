@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import shutil
 import sqlite3
@@ -341,15 +342,12 @@ async def _load_from_dir(
         # theirs, so unload never brings back an older copy. The sentinel
         # guards the inverse: if a fixture is already active, the live state
         # is NOT the user's company and the earlier snapshot stays.
+        # A failed snapshot stops the load: unload would otherwise bring back
+        # an older copy over the user's newer work.
         auto_snapshot_taken = False
         if live_is_users:
-            try:
-                snapshot_user_state(settings)
-                auto_snapshot_taken = True
-            except Exception:
-                # Best-effort: do not block the fixture load if snapshot fails
-                # on a truly empty environment. User can call snapshot manually.
-                logger.exception("fixture load: snapshot of the user's company failed")
+            snapshot_user_state(settings)
+            auto_snapshot_taken = True
 
         summary = await _apply_state_from_source(fixture_dir, settings)
 
@@ -630,6 +628,9 @@ async def unload_fixture(settings: Any) -> dict[str, Any]:
         # Unload is also the "exit client mode" path: if a client slot is
         # active (no fixture in play), save its live state back to the slot
         # before the backup restore replaces it.
+        from openexecutive.clients.slots import get_active_client
+
+        client_was_active = get_active_client(settings) is not None
         try:
             from openexecutive.clients.slots import park_active_client
 
@@ -650,7 +651,7 @@ async def unload_fixture(settings: Any) -> dict[str, Any]:
             from openexecutive.clients.slots import _BLANK_KEEPS, restore_company_db
 
             carry = set(RESET_KEEPS)
-            if summary_client is None:
+            if not client_was_active:
                 carry |= set(_BLANK_KEEPS) | {"audit_log"}
             restore_company_db(backup / "state.db", carry=carry)
             forget_company_caches()
@@ -1224,14 +1225,20 @@ def snapshot_user_state(settings: Any, *, force: bool = False) -> dict[str, Any]
     #       consistent copy while other connections hold the DB open.
     from openexecutive.memory.episodic import DB_PATH as EPISODIC_DB_PATH
 
+    #       The copy is written beside the old one and replaces it only once
+    #       it is complete, so a failed copy never loses the earlier backup.
     state_dst = backup_dir / "state.db"
-    state_dst.unlink(missing_ok=True)
     if EPISODIC_DB_PATH.exists():
+        state_tmp = backup_dir / "state.db.tmp"
+        state_tmp.unlink(missing_ok=True)
         conn = sqlite3.connect(str(EPISODIC_DB_PATH))
         try:
-            conn.execute("VACUUM INTO ?", (str(state_dst),))
+            conn.execute("VACUUM INTO ?", (str(state_tmp),))
         finally:
             conn.close()
+        os.replace(state_tmp, state_dst)
+    else:
+        state_dst.unlink(missing_ok=True)
 
     # Clear active-fixture marker — this state IS the user's company now.
     _fixture_active_sentinel(settings).unlink(missing_ok=True)
