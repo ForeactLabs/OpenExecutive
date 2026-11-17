@@ -605,6 +605,7 @@ async def _apply_state_from_source(source_dir: Path, settings: Any) -> dict[str,
             "fixture: clear_research_run_history failed (non-fatal)"
         )
 
+    forget_company_caches()
     return {
         "display_name": profile.name,
         "profile": profile.model_dump(),
@@ -994,11 +995,25 @@ async def reset_all_state(
                 persist_directory=settings.vector_store_path
             )
 
+        forget_company_caches()
         return {
             "reset": True,
             "departments_seeded": departments_seeded,
             "cleared": cleared,
         }
+
+
+def forget_company_caches() -> None:
+    """Drop every in-memory copy of company data, so the next read sees the
+    tables as a reset, fixture load or client switch just left them: the
+    agent overrides (no expiry of their own), departments and people."""
+    from openexecutive.agents.overrides import invalidate_cache
+    from openexecutive.departments import registry as dept_registry
+    from openexecutive.people import registry as people_registry
+
+    invalidate_cache()
+    dept_registry.invalidate()
+    people_registry.invalidate()
 
 
 def _delete_every_table(db_path: Path, *, keep: Collection[str]) -> dict[str, int]:

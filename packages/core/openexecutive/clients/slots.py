@@ -42,6 +42,7 @@ from typing import Any
 from openexecutive.cli.fixture_loader import (
     _FIXTURE_OP_LOCK,
     _SAFE_NAME_RE,
+    forget_company_caches,
     get_fixture_status,
     snapshot_user_state,
 )
@@ -1059,6 +1060,7 @@ async def activate_client_slot(
                     )
 
         summary = await _restore_slot_state(settings, slot, app_state=app_state)
+        forget_company_caches()
         _active_client_sentinel(settings).parent.mkdir(parents=True, exist_ok=True)
         _active_client_sentinel(settings).write_text(slug, encoding="utf-8")
         workspace = _set_honcho_client_workspace(slug)

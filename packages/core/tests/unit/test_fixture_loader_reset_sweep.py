@@ -148,3 +148,17 @@ def test_sweep_empties_a_search_table_without_breaking_it(tmp_path: Path) -> Non
         conn.execute("INSERT INTO notes_fts (body) VALUES ('new company plan')")
         hits = conn.execute("SELECT body FROM notes_fts WHERE notes_fts MATCH 'new'").fetchall()
     assert hits == [("new company plan",)]
+
+
+def test_reset_forgets_the_old_agent_overrides(
+    db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openexecutive.agents import overrides
+
+    monkeypatch.setattr(overrides, "DB_PATH", db)
+    overrides.initialize_overrides_db(db)
+    overrides.set_override("finance", instructions="Old company voice.", instructions_set=True)
+    assert overrides.get_override("finance") is not None  # now in memory
+    _reset(tmp_path)
+    assert overrides.get_override("finance") is None
+    overrides.invalidate_cache()
