@@ -284,3 +284,9 @@ def test_a_noun_that_reads_like_a_verb_is_left_alone() -> None:
     from openexecutive.memory.history import shown_summary
 
     assert shown_summary("Used car quote came in.") == "Used car quote came in."
+
+
+def test_a_correction_with_a_present_looking_verb_keeps_you() -> None:
+    from openexecutive.memory.history import note_form
+
+    assert note_form("You put Dana in charge of the launch.") == "You put Dana in charge of the launch."

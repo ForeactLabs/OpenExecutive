@@ -202,13 +202,22 @@ def shown_summary(summary: str) -> str:
     return "You " + first[:1].lower() + text[1:]
 
 
+# Past tenses spelled like the present: as the first word they read as an order.
+_SAME_AS_PRESENT = frozenset({"put", "let", "quit"})
+
+
 def note_form(text: str) -> str:
     """Text as the Executive reads it: a note, never "You said …". The
     screens put "You" in front of a note (:func:`shown_summary`), so a
     correction typed over that text starts with "You told …"; the Executive
-    reads it as "Told …", the way it reads every note."""
+    reads it as "Told …", the way it reads every note. A verb spelled like
+    its present ("You put Dana in charge") keeps "You", or the note would
+    read as an order ("Put Dana in charge")."""
     words = (text or "").strip().split(" ", 2)
-    if len(words) > 1 and words[0].lower() == "you" and _past_tense(words[1]):
+    if (
+        len(words) > 1 and words[0].lower() == "you" and _past_tense(words[1])
+        and words[1].rstrip(",.;:").lower() not in _SAME_AS_PRESENT
+    ):
         rest = " ".join(words[1:])
         return rest[:1].upper() + rest[1:]
     return text

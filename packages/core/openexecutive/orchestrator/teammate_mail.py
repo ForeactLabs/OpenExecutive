@@ -205,6 +205,16 @@ class _Sides:
     # the reader, whose own sends win.
     sent: list[_Sent] = field(default_factory=list)
     own: list[_Sent] = field(default_factory=list)
+    # Their message ids and started threads, looked up per message; only
+    # the subject rows are scanned.
+    sent_ids: set[str] = field(default_factory=set)
+    own_ids: set[str] = field(default_factory=set)
+    sent_threads: set[str] = field(default_factory=set)
+    own_threads: set[str] = field(default_factory=set)
+
+    @property
+    def has_sent(self) -> bool:
+        return bool(self.sent or self.sent_ids or self.sent_threads)
     # Off only outside any session (a scheduled workflow step), which has
     # nowhere to keep what it was shown; its searches and reads stay filtered.
     gate_ids: bool = True
@@ -358,8 +368,12 @@ def _sides(session: Any) -> _Sides | None:
         reader_id=reader_id,
         reader_is_principal=any(p.is_principal for p in reader),
         seen=seen if isinstance(seen, set) else set(),
-        sent=sent,
-        own=own,
+        sent=[r for r in sent if r.subject],
+        own=[r for r in own if r.subject],
+        sent_ids={r.message_id for r in sent if r.message_id},
+        own_ids={r.message_id for r in own if r.message_id},
+        sent_threads={r.thread_id for r in sent if r.started and r.thread_id},
+        own_threads={r.thread_id for r in own if r.started and r.thread_id},
         gate_ids=session is not None,
     )
 
@@ -520,18 +534,18 @@ def _sent_for_other(unit: str, headers: str, sides: _Sides, *, ids: list[str] | 
     dated after a send that started its conversation and is in that thread
     or is a reply with its subject and one of the people it went to. The
     reader's own sends win."""
-    if not sides.sent:
+    if not sides.has_sent:
         return False
     found = set(ids if ids is not None else _LISTED_ID_RE.findall(unit))
-    if any(r.message_id in found for r in sides.own if r.message_id):
+    if found & sides.own_ids:
         return False
-    if any(r.message_id in found for r in sides.sent if r.message_id):
+    if found & sides.sent_ids:
         return True
     # A thread a send started holds nothing from before it: every message in
     # it answers the send, dated or not.
-    if any(r.thread_id in found for r in sides.own if r.started and r.thread_id):
+    if found & sides.own_threads:
         return False
-    if any(r.thread_id in found for r in sides.sent if r.started and r.thread_id):
+    if found & sides.sent_threads:
         return True
     block = re.split(r"\n[ \t]*\n", unit.lstrip("\n"), maxsplit=1)[0]
     if when is None:
@@ -778,7 +792,7 @@ def _filter(name: str, text: str, sides: _Sides) -> str:
     if n == _GW_PREFIX + "search_gmail_messages":
         listing = _filter_listing(text, sides)
         return text if listing is None else listing
-    if not any(a in sides.others for a in _addresses(text)) and not sides.sent:
+    if not any(a in sides.others for a in _addresses(text)) and not sides.has_sent:
         return text
     if "batch" in n:
         # Decided message by message: one of the reader's in the batch must
@@ -888,7 +902,7 @@ def guard_call_tool(call: CallTool) -> CallTool:
         sides = _sides(session)
         if sides is None:
             return _refusal(ROSTER_NOTE.format(tool=name))
-        if (not sides.other_addresses and not sides.sent) or not isinstance(
+        if (not sides.other_addresses and not sides.has_sent) or not isinstance(
             arguments, dict,
         ):
             return await call(tool_input)
