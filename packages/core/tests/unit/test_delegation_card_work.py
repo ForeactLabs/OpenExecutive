@@ -485,9 +485,13 @@ def test_a_document_the_work_attached_says_why_it_was_made(
 def _no_running() -> Any:
     card_work._RUNNING.clear()
     card_work._HANDED.clear()
+    card_work._NEXT.clear()
+    card_work._QUEUED.clear()
     yield
     card_work._RUNNING.clear()
     card_work._HANDED.clear()
+    card_work._NEXT.clear()
+    card_work._QUEUED.clear()
 
 
 _ = (db, models, owner, local_login, NOW, timedelta)
@@ -1057,3 +1061,37 @@ def test_a_join_that_fails_before_it_lands_is_tried_again(
     monkeypatch.setattr(ledger, "update_open_payload", real)
     _scan(owner, mailbox)
     assert card_work.threads(inbox.card_payload(_fresh(card))) == ["t1", "t2"]
+
+
+def test_a_joined_email_waits_for_a_slow_settling_run_then_starts(
+    db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mailbox, card = _card(owner)
+    started: list[str] = []
+    monkeypatch.setattr(card_work, "start", lambda _p, _id, **k: started.append(k.get("ask", "")) or True)
+
+    async def gave_up(_card_id: int, **_k: Any) -> None:
+        return None  # the wait ran out while the run still settles
+
+    monkeypatch.setattr(card_work, "ended", gave_up)
+
+    async def go() -> bool:
+        settling = asyncio.Event()
+        card_work._RUNNING.add(card.id)
+        card_work._TASK[card.id] = asyncio.create_task(settling.wait())
+        assert card_work._set_work(card.id, card_work.WORKING)
+        await card_work.apply(card.id, owner, body="The figure is 14k.", note="Done.", files=[], gmail=mailbox)
+        assert await card_work.redirect(owner, card.id, "Use 40k", gmail=mailbox)
+        assert await card_work.redirect(owner, card.id, "", gmail=mailbox)
+        queued = started == [] and card.id in card_work._NEXT
+        settling.set()
+        await card_work._TASK[card.id]
+        card_work._close(card.id)
+        return queued
+
+    try:
+        assert asyncio.run(go())
+    finally:
+        card_work._RUNNING.discard(card.id)
+    # It starts as the old run closes, with their words.
+    assert started == ["Use 40k"] and card.id not in card_work._NEXT and card.id not in card_work._QUEUED

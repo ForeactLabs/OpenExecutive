@@ -102,6 +102,9 @@ _HANDED: set[int] = set()
 # Cards whose run is ending for a new one (``redirect``): what the run
 # ending wrote never goes on its own, since the new run decides.
 _NEXT: set[int] = set()
+# The next run of a card whose run hadn't ended yet when ``redirect`` gave
+# up waiting: it starts as that run closes.
+_QUEUED: dict[int, tuple[Any, Any, str]] = {}
 CHANGED = "changed"
 NEWER = "newer"  # a run ended because a newer email joined the card
 
@@ -385,7 +388,15 @@ async def redirect(person: Any, card_id: int, ask: str, *, gmail: Any = None) ->
             # nothing on its own: the new run decides.
             await ended(card_id)
         finally:
-            _NEXT.discard(card_id)
+            if card_id in _RUNNING:
+                # Still settling: the new run starts as it closes (their
+                # words stay the ask when a newer email comes after them).
+                if ask.strip() or card_id not in _QUEUED:
+                    _QUEUED[card_id] = (person, gmail, ask)
+            else:
+                _NEXT.discard(card_id)
+        if card_id in _QUEUED:
+            return True
     return start(person, card_id, gmail=gmail, ask=ask)
 
 
@@ -592,6 +603,11 @@ def _close(card_id: int) -> None:
         # A run ended for a newer email leaves the card as it was: the new
         # run's own ending decides whether the reply goes on its own.
         _hand_back_unfinished(card_id)
+    _NEXT.discard(card_id)
+    queued = _QUEUED.pop(card_id, None)
+    if queued is not None:
+        person, gmail, ask = queued
+        start(person, card_id, gmail=gmail, ask=ask)
 
 async def apply(
     card_id: int, person: Any, *, body: str, note: str, files: list[tuple[str, str, bytes]],
