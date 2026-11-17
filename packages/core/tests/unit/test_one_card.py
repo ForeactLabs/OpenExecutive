@@ -210,6 +210,15 @@ def test_a_grave_card_makes_the_card_it_joins_as_grave() -> None:
     assert kept.severity == "high" and "possible invoice fraud" in kept.body
 
 
+def test_a_card_another_joins_no_longer_names_one_step_on_its_button() -> None:
+    with set_turn(session_id="s", turn_id="turn-1"):
+        card, _ = _approve()
+        alerts_store.update_alert_content(card, suggested_action="Send it.", action_label="Email Leo Park")
+        assert _get(card).action_label == "Email Leo Park"
+        _note("Also email Sam the price list")
+    assert _get(card).action_label == ""
+
+
 def test_a_card_from_no_turn_is_left_alone() -> None:
     first = _note("Weekly digest")
     second = _note("Weekly digest again")

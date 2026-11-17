@@ -399,9 +399,11 @@ def _join(conn: sqlite3.Connection, card: _Card, into: _Card) -> None:
     severity = max(
         (str(survivor["severity"]), str(joining["severity"])), key=lambda sev: SEVERITY_RANK.get(sev, 0),
     )
-    # Text the reader hasn't seen makes an opened card new again.
+    # Text the reader hasn't seen makes an opened card new again. Holding
+    # more than its own step, its button no longer names just one.
     conn.execute(
-        "UPDATE alerts SET body = ?, severity = ?, occurrence_count = COALESCE(occurrence_count, 1) + 1, "
+        "UPDATE alerts SET body = ?, severity = ?, action_label = '', "
+        "occurrence_count = COALESCE(occurrence_count, 1) + 1, "
         "last_seen_at = ?, status = CASE WHEN status = 'read' THEN 'unread' ELSE status END WHERE id = ?",
         (body, severity, _now(), into.id),
     )
