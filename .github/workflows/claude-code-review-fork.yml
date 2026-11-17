@@ -182,6 +182,7 @@ jobs:
           # elsewhere are not allowed (and so refused, with nobody to ask);
           # the explicit denies cover where secrets would be.
           claude_args: |
+            --model opus
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Read(./**)"
             --disallowedTools "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch,Task,Grep,Glob,Read(//proc/**),Read(//sys/**),Read(//tmp/**),Read(//home/runner/work/_temp/**)"
 
