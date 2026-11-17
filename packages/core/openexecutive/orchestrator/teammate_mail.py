@@ -95,7 +95,7 @@ _M365_ID_KEYS = frozenset({"messageid"})
 _M365_PATH_ID_RE = re.compile(r"/messages/([^/?$]+)", re.IGNORECASE)
 _M365_LIST_TOOLS = frozenset({"list_mail_messages", "list_mail_folder_messages"})
 _M365_PARTY_FIELDS = (
-    "id,conversationId,from,sender,toRecipients,ccRecipients,bccRecipients,receivedDateTime,sentDateTime"
+    "id,conversationId,subject,from,sender,toRecipients,ccRecipients,bccRecipients,receivedDateTime,sentDateTime"
 )
 _GRAPH_PARTY_KEYS = frozenset({
     "from", "sender", "torecipients", "ccrecipients", "bccrecipients", "replyto",
@@ -179,6 +179,8 @@ class _Sent:
     subject: str
     recipients: set[str]
     at: datetime
+    # Whether its subject still finds replies (``SUBJECT_MATCH_DAYS``).
+    recent: bool = True
 
 
 @dataclass
@@ -354,9 +356,10 @@ def _sides(session: Any) -> _Sides | None:
 
 
 def _sent_rows() -> list[_Sent]:
-    """Every kept send. Its subject counts only for ``SUBJECT_MATCH_DAYS``,
-    so a later unrelated "Invoice" from the same vendor is not taken for a
-    reply to it."""
+    """Every kept send. Its subject finds replies only for
+    ``SUBJECT_MATCH_DAYS``, so a later unrelated "Invoice" from the same
+    vendor is not taken for one; it finds the sent message itself (dated
+    with the send) for good, which an Outlook send, with no id, needs."""
     with _open() as conn:
         rows = conn.execute(
             f"SELECT person_id, message_id, thread_id, subject, recipients, at, "  # noqa: S608
@@ -367,7 +370,8 @@ def _sent_rows() -> list[_Sent]:
             person_id=int(r["person_id"]),
             message_id=str(r["message_id"] or ""),
             thread_id=str(r["thread_id"] or ""),
-            subject=str(r["subject"] or "") if r["recent"] else "",
+            subject=str(r["subject"] or ""),
+            recent=bool(r["recent"]),
             recipients=set(str(r["recipients"] or "").split()),
             at=datetime.fromisoformat(str(r["at"])).replace(tzinfo=UTC),
         )
@@ -508,7 +512,10 @@ def _sent_for_other(unit: str, headers: str, sides: _Sides, *, ids: list[str] | 
         return any(
             when >= r.at - _SKEW and (
                 (r.thread_id and r.thread_id in found)
-                or (r.subject and r.subject == key and bool(r.recipients & on_it))
+                or (
+                    r.subject and r.subject == key and bool(r.recipients & on_it)
+                    and (r.recent or when <= r.at + _SKEW)
+                )
             )
             for r in rows
         )

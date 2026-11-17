@@ -627,3 +627,21 @@ def test_the_executives_own_address_is_not_kept_as_a_recipient(
         tm.note_sent(subject="Weekly update", recipients={DANA, EXEC}, result="Email sent! Message ID: w1")
     [row] = tm._sent_rows()
     assert row.recipients == {DANA}
+
+
+def test_an_outlook_send_is_found_by_its_subject_even_with_a_narrow_select(roster: SimpleNamespace) -> None:
+    from datetime import UTC, datetime
+
+    with _reader(roster.ben):
+        tm.note_sent(subject="Crates on Monday", recipients={DANA}, result="")
+    with tm._open() as conn:
+        conn.execute(f"UPDATE {tm.SENT_TABLE} SET at = datetime('now', '-90 days')")
+    [row] = tm._sent_rows()
+    sent = {**_item(EXEC, "Crates on Monday", "o2"), "toRecipients": [{"emailAddress": {"address": DANA}}],
+            "receivedDateTime": row.at.astimezone(UTC).isoformat()}
+    assert datetime.fromisoformat(sent["receivedDateTime"]) == row.at
+    mailbox = FakeMailbox({OUTLOOK_LIST: json.dumps({"value": [sent]})})
+    with _reader(roster.owner):
+        out = json.loads(_run(mailbox, OUTLOOK_LIST, select="id,bodyPreview"))
+    assert "subject" in mailbox.calls[0]["arguments"]["select"]
+    assert out["value"] == []
