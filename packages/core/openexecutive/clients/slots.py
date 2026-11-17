@@ -545,56 +545,15 @@ def _ensure_schemas() -> None:
 
 
 def _reseed_blank_defaults() -> None:
-    """Blank slot = factory state: the boot-time scheduled rows.
+    """Blank slot = factory state: the recurring jobs, from the one list a
+    reset and a restart also use (``scheduler.runner.seed_recurring_jobs``),
+    so the new client's Today page doesn't stay blank until a restart. No
+    departments are created: a blank slot starts with none, like a new
+    install, and a generated seed slot's own departments (if any) are picked
+    up by the cadence seed. Never raises."""
+    from openexecutive.scheduler.runner import seed_recurring_jobs
 
-    Mirrors ``reset_all_state`` step 5/5a — without these the new client's
-    Today page stays blank until the next process restart. Every call is
-    idempotent and individually guarded. No departments are created: a blank
-    slot starts with none, like a new install, and a generated seed slot's
-    own departments (if any) are picked up by the cadence bootstrap.
-    """
-    from openexecutive.config import get_settings
-
-    try:
-        from openexecutive.scheduler.runner import seed_principal_briefs
-
-        seed_principal_briefs()
-    except Exception:
-        logger.exception("client-slots: seed_principal_briefs failed")
-    try:
-        from openexecutive.departments.cadence import bootstrap_cadences
-
-        bootstrap_cadences()
-    except Exception:
-        logger.exception("client-slots: bootstrap_cadences failed")
-    settings = get_settings()
-    if settings.nudge_scan_enabled:
-        try:
-            from openexecutive.scheduler.nudge_engine import bootstrap_nudge_scan
-
-            bootstrap_nudge_scan()
-        except Exception:
-            logger.exception("client-slots: bootstrap_nudge_scan failed")
-    if settings.external_monitor_enabled:
-        try:
-            from openexecutive.monitoring.pipeline import (
-                bootstrap_external_monitor_scan,
-            )
-
-            bootstrap_external_monitor_scan()
-        except Exception:
-            logger.exception("client-slots: bootstrap_external_monitor_scan failed")
-    if settings.watchlist_research_enabled:
-        try:
-            from openexecutive.monitoring.research.scheduler import (
-                bootstrap_watchlist_research_scan,
-            )
-
-            bootstrap_watchlist_research_scan()
-        except Exception:
-            logger.exception(
-                "client-slots: bootstrap_watchlist_research_scan failed"
-            )
+    seed_recurring_jobs()
 
 
 async def _rebuild_vector_state(settings: Any, app_state: Any | None) -> int:
