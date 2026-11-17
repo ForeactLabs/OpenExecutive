@@ -483,15 +483,17 @@ def _render_thread(messages: list[Any], first: int, own: str) -> str:
     anyone else's inside an untrusted block."""
     from openexecutive.delegation.ghostwriter import one_line
     from openexecutive.delegation.threads import mine
-    from openexecutive.integrations.email_poller import readable_text
+    from openexecutive.integrations.email_poller import FORWARDED_HEADING, split_forward
     from openexecutive.orchestrator.content_trust import wrap_untrusted
     from openexecutive.utils.prompt_blocks import no_tags, plain
 
     parts = []
     for i, m in enumerate(messages, first):
-        text = plain(readable_text(
+        own_words, forwarded = split_forward(
             m.text or "", m.subject, max_chars=READ_MESSAGE_CHARS, forwarded_chars=READ_FORWARDED_CHARS,
-        ))
+        )
+        own_words, forwarded = plain(own_words), plain(forwarded)
+        text = f"{own_words}\n\n{FORWARDED_HEADING}\n{forwarded}".strip() if forwarded else own_words
         date = one_line(m.date or m.received_at, 60)
         if "DRAFT" in m.labels:
             # Saved, never sent: whoever wrote it (them, Act as me, another
@@ -503,8 +505,12 @@ def _render_thread(messages: list[Any], first: int, own: str) -> str:
         if mine(m, own):
             # Outside any block, so it can neither open nor close a tag, nor
             # start what looks like another message.
-            safe = _MESSAGE_HEAD_RE.sub(r"\1> \2", no_tags(text))
+            safe = _MESSAGE_HEAD_RE.sub(r"\1> \2", no_tags(own_words))
             parts.append(f"[{i}] Yours — {date}\n{safe}")
+            if forwarded:
+                # What they forwarded is someone else's words: in its own
+                # block, never under Yours.
+                parts.append(wrap_untrusted(f"{FORWARDED_HEADING}\n{forwarded}", source="email", author="forwarded"))
             continue
         to = ", ".join([*m.to, *m.cc][:10])
         header = f"[{i}] From: {one_line(_sender(m), 160)} — {date}\nTo: {one_line(to, 400)}"

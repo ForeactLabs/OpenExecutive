@@ -458,34 +458,44 @@ def readable_text(
 ) -> str:
     """What an email says, to read it: its sender's own words
     (``sender_new_text``), then any message they forwarded, under
-    ``FORWARDED_HEADING`` with the forward's own ">" quoting taken off. Reply
-    history quoted below is still left out (each earlier message is its own
-    message in the thread), except in a forward (``subject`` Fwd:/Fw:),
-    where an Outlook-style header block is the forwarded message.
-    ``max_chars`` caps the sender's words, ``forwarded_chars`` (else
-    ``max_chars``) the forwarded message."""
+    ``FORWARDED_HEADING`` with the forward's own ">" quoting taken off
+    (``split_forward``). ``max_chars`` caps the sender's words,
+    ``forwarded_chars`` (else ``max_chars``) the forwarded message."""
+    own, inner = split_forward(body, subject, max_chars=max_chars, forwarded_chars=forwarded_chars)
+    if not inner:
+        return own
+    return f"{own}\n\n{FORWARDED_HEADING}\n{inner}".strip()
+
+
+def split_forward(
+    body: str, subject: str = "", *, max_chars: int | None = None, forwarded_chars: int | None = None,
+) -> tuple[str, str]:
+    """An email's sender's own words and the message they forwarded in it
+    ("" when none), apart, so a reader can keep someone else's forwarded
+    words out of what it marks as the sender's. Reply history quoted below
+    is left out (each earlier message is its own message in the thread),
+    except in a forward (``subject`` Fwd:/Fw:), where an Outlook-style header
+    block is the forwarded message."""
     lines = body.splitlines()
     kept, cut_at, forwarded = _scan_new_text(lines)
     own = "\n".join(kept).strip()
+    if max_chars is not None:
+        own = own[:max_chars]
     if cut_at is None or not (forwarded or _FORWARD_SUBJECT_RE.match(subject or "")):
-        return own[:max_chars] if max_chars is not None else own
+        return own, ""
     rest = lines[cut_at:]
     if all(not ln.strip() or ln.lstrip().startswith(">") for ln in rest):
         # Quoted as a whole (Apple Mail): one level of ">" off every line.
         rest = [re.sub(r"^(\s*)>\s?", r"\1", ln) for ln in rest]
-    if rest and _BEGIN_FORWARDED_RE.match(rest[0].strip()):
-        rest = rest[1:]  # the heading below says it
-    elif rest and (_FORWARDED_RE.match(rest[0].strip()) or _OUTLOOK_RULE_RE.match(rest[0].strip())):
-        rest = rest[1:]
+    if rest and (
+        _BEGIN_FORWARDED_RE.match(rest[0].strip())
+        or _FORWARDED_RE.match(rest[0].strip())
+        or _OUTLOOK_RULE_RE.match(rest[0].strip())
+    ):
+        rest = rest[1:]  # the reader's own heading says it
     inner = "\n".join(ln.rstrip() for ln in rest).strip()
-    if max_chars is not None:
-        own = own[:max_chars]
     cap = forwarded_chars if forwarded_chars is not None else max_chars
-    if cap is not None:
-        inner = inner[:cap]
-    if not inner:
-        return own
-    return f"{own}\n\n{FORWARDED_HEADING}\n{inner}".strip()
+    return own, inner[:cap] if cap is not None else inner
 
 
 def _email_memory_text(raw: str) -> str:

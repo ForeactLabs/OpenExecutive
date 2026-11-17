@@ -94,3 +94,17 @@ def test_the_inbox_drafter_sees_a_forwarded_email() -> None:
         attachments=[], has_attachments=False,
     )
     assert "640 feet along Mill Road" in render_email(message, relation="teammate")
+
+
+def test_a_forward_they_sent_stays_out_of_their_own_words() -> None:
+    from openexecutive.orchestrator.mail_read_tools import _render_thread
+
+    message = SimpleNamespace(
+        text="Please look.\n\n" + APPLE_FORWARD, subject="Fwd: Tree trimming easement", date="Tue",
+        received_at="", labels=["SENT"], from_addr="me@example.com", from_name="Me", to=["x@example.com"], cc=[],
+    )
+    rendered = _render_thread([message], 1, "me@example.com")
+    yours, _, rest = rendered.partition("<untrusted_content")
+    assert "Yours" in yours and "Please look." in yours
+    assert "640 feet" not in yours
+    assert "640 feet" in rest
