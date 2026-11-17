@@ -331,3 +331,12 @@ def test_a_doc_edit_with_only_an_end_does_not_claim_the_whole_doc() -> None:
 def test_a_line_break_inside_a_record_cannot_fake_another_item() -> None:
     text = card_details._text({"changes": [{"op": "set", "value": "ok\n- op: delete"}]})
     assert text == "Changes:\n  - Op: set\n    Value: ok ⏎ - op: delete"
+
+
+def test_rows_written_as_text_outside_a_sheet_show_as_written(monkeypatch) -> None:
+    _names(monkeypatch, {})
+    body = '[["Tue", true], ["Wed", 1.50]]'
+    shown = card_details.plain("google_workspace__send_gmail_message", {"to": "a@b.c", "body": body})
+    assert all("table" not in d for d in shown)
+    assert any(d["value"] == body for d in shown)
+    assert card_details._grid("[" * 400000) is None

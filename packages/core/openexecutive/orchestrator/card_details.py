@@ -205,7 +205,7 @@ def _grid(value: Any) -> list[list[str]] | None:
     if isinstance(value, str) and value.lstrip().startswith("[["):
         try:
             value = json.loads(value)
-        except ValueError:
+        except (ValueError, RecursionError):
             return None
     if not isinstance(value, list) or not value:
         return None
@@ -417,7 +417,9 @@ def plain(tool: str, tool_input: Any) -> list[dict[str, Any]]:
         if norm in _SHOWN_UNLESS_DEFAULT and str(value).strip().lower() in _SHOWN_UNLESS_DEFAULT[norm]:
             continue
         extra: dict[str, Any] = {}
-        rows = _grid(value)
+        # A JSON string of rows only counts for a sheet's values: anywhere
+        # else (a mail body) it is sent as written, so it shows as written.
+        rows = _grid(value) if isinstance(value, list) or (google and norm == "values") else None
         if _is_bytes(key, value):
             kind = _kind(tool_input)
             field, text = "File", f"{kind + ' file' if kind else 'A file'}, {_size(value)}"
