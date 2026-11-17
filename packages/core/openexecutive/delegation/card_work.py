@@ -297,7 +297,7 @@ def steps(payload: dict[str, Any]) -> list[str]:
 
 
 def _done_step(label: str) -> str:
-    """An activity label ("Reading an attachment…") as a step that is done."""
+    """An activity label ("Reading your email…") as a step that is done."""
     return label.rstrip(".… ").strip()
 
 
