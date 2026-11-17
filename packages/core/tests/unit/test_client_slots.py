@@ -724,6 +724,8 @@ async def test_blank_switch_then_unload_brings_every_table_back(
     summary = await fixture_loader.unload_fixture(env.settings)
 
     assert summary["database_restored"] is True
+    # Used once: a second unload can't roll your work back to it.
+    assert not (env.company / "_user_backup" / "state.db").exists()
     with sqlite3.connect(str(env.db_path)) as conn:
         assert conn.execute("SELECT note FROM brand_new_feature").fetchall() == [("mine",)]
     assert _decision_summaries(env.db_path) == ["My Real Co decision"]

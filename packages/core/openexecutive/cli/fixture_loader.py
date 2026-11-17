@@ -649,6 +649,10 @@ async def unload_fixture(settings: Any) -> dict[str, Any]:
             from openexecutive.clients.slots import restore_company_db
 
             restore_company_db(backup / "state.db", carry=RESET_KEEPS)
+            # Used up: the live data is the user's again and moves on from
+            # here, so a repeated unload must never roll it back to this copy.
+            # The next load or switch takes a fresh one.
+            (backup / "state.db").unlink()
             forget_company_caches()
             summary["database_restored"] = True
         if summary_client is not None:
