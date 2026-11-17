@@ -438,13 +438,17 @@ def note_sent(*, subject: object, recipients: list[str] | set[str], thread_id: o
         if person is None:
             return
         found = _SENT_ID_RE.search(result or "")
+        # The Executive's own address is on nearly every message it holds.
+        from openexecutive.config import get_settings
+
+        own = str(get_settings().exec_email_address or "").strip().lower()
         with _open() as conn:
             conn.execute(
                 f"INSERT INTO {SENT_TABLE} (person_id, message_id, thread_id, subject, recipients, at) "  # noqa: S608
                 "VALUES (?, ?, ?, ?, ?, datetime('now'))",
                 (
                     int(person), found.group(1) if found else "", str(thread_id or "").strip(),
-                    _subject_key(subject), " ".join(sorted({a.strip().lower() for a in recipients if a.strip()})),
+                    _subject_key(subject), " ".join(sorted({a.strip().lower() for a in recipients if a.strip()} - {own})),
                 ),
             )
     except Exception:

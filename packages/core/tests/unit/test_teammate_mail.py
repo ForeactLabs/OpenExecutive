@@ -617,3 +617,13 @@ def test_a_teammates_reply_into_a_shared_thread_hides_only_what_came_after(roste
     with _reader(roster.owner):
         out = _run(FakeMailbox({THREAD: text}), THREAD, thread_id="t1")
     assert "Original question." in out and "Ben's answer." not in out
+
+
+def test_the_executives_own_address_is_not_kept_as_a_recipient(
+    roster: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("openexecutive.config.get_settings", lambda: SimpleNamespace(exec_email_address=EXEC))
+    with _reader(roster.ben):
+        tm.note_sent(subject="Weekly update", recipients={DANA, EXEC}, result="Email sent! Message ID: w1")
+    [row] = tm._sent_rows()
+    assert row.recipients == {DANA}
