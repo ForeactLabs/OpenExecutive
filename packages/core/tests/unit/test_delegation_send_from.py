@@ -212,6 +212,15 @@ def test_a_rewrite_keeps_their_words_in_their_mailbox(
     saved = asyncio.run(card_drafts.edit(_fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, rewrite=write))
     there = mailbox.drafts[saved["draft_id"]].message.text
     assert "Friday works." in there and "asked me" not in there
+    # A change by hand on the card is the Executive's words: their draft
+    # keeps their own, and switching back finds the two the same.
+    edited = asyncio.run(card_drafts.edit(
+        _fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, text="Hi Dana,\n\nOlivia asked me: Friday.",
+    ))
+    assert edited["draft_body"] == "Hi Dana,\n\nOlivia asked me: Friday."
+    assert "asked me" not in mailbox.drafts[saved["draft_id"]].message.text
+    back = _switch(card, mailbox, owner, False)
+    assert back["draft_body"] == mailbox.drafts[saved["draft_id"]].message.text
 
 
 def test_a_chat_app_card_shows_who_it_goes_from_when_posted() -> None:
