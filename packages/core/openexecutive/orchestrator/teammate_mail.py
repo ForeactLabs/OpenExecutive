@@ -329,6 +329,13 @@ def _sides(session: Any) -> _Sides | None:
     # nobody, but the Executive's sends for the workflow's own person stay
     # in reach.
     mine = reader_id if session is not None else _workflow_person()
+    if mine is None and str(getattr(session, "origin_channel", "") or "") == "email":
+        # Mail from someone outside the team is answered for the principal:
+        # the sends they asked for are that turn's own thread.
+        from openexecutive.people.store import find_principal_person
+
+        principal = find_principal_person()
+        mine = principal.id if principal is not None else None
     try:
         rows = _sent_rows()
     except Exception:

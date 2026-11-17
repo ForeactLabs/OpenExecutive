@@ -645,3 +645,23 @@ def test_an_outlook_send_is_found_by_its_subject_even_with_a_narrow_select(roste
         out = json.loads(_run(mailbox, OUTLOOK_LIST, select="id,bodyPreview"))
     assert "subject" in mailbox.calls[0]["arguments"]["select"]
     assert out["value"] == []
+
+
+def test_an_outside_senders_email_turn_reads_the_principals_thread(roster: SimpleNamespace) -> None:
+    _send_for(roster.owner, mid="s1", subject="Crates on Monday")
+    roster.session.origin_channel = "email"
+    tm.allow_mail_ids(roster.session, "r5")
+    reply = _sent_by_exec("r5", "Re: Crates on Monday", EXEC, sender=DANA)
+    with _reader(None):
+        out = _run(FakeMailbox({READ: reply}), READ, message_id="r5")
+    assert "withheld" not in out
+
+
+def test_an_outside_senders_email_turn_still_leaves_a_teammates_send_out(roster: SimpleNamespace) -> None:
+    _send_for(roster.ben, mid="s1", subject="Crates on Monday")
+    roster.session.origin_channel = "email"
+    tm.allow_mail_ids(roster.session, "s1")
+    sent = _sent_by_exec("s1", "Crates on Monday", DANA)
+    with _reader(None):
+        out = json.loads(_run(FakeMailbox({READ: sent}), READ, message_id="s1"))
+    assert out["withheld"] is True
