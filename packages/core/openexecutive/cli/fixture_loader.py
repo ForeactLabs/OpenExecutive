@@ -132,6 +132,10 @@ while _REPO_ROOT.parent != _REPO_ROOT:
 FIXTURES_ROOT = _REPO_ROOT / "fixtures" / "companies"
 
 
+class FixtureSnapshotError(RuntimeError):
+    """Raised when the company couldn't be saved before a fixture load."""
+
+
 class FixtureNotFoundError(ValueError):
     pass
 
@@ -341,7 +345,13 @@ async def _load_from_dir(
         # an older copy over the user's newer work.
         auto_snapshot_taken = False
         if live_is_users:
-            await asyncio.to_thread(snapshot_user_state, settings)
+            try:
+                await asyncio.to_thread(snapshot_user_state, settings)
+            except Exception as exc:
+                logger.exception("fixture load: snapshot before load failed")
+                raise FixtureSnapshotError(
+                    "Couldn't save your company before loading. Nothing was changed."
+                ) from exc
             auto_snapshot_taken = True
 
         summary = await _apply_state_from_source(fixture_dir, settings)
@@ -644,7 +654,7 @@ async def unload_fixture(settings: Any) -> dict[str, Any]:
             # saved copy's own, since they describe the data saved with them.
             from openexecutive.clients.slots import restore_company_db
 
-            restore_company_db(backup / "state.db")
+            await asyncio.to_thread(restore_company_db, backup / "state.db")
             # Used up: the live data is the user's again and moves on from
             # here, so a repeated unload must never roll it back to this copy.
             # The next load or switch takes a fresh one.

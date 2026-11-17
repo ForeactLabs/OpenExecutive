@@ -196,7 +196,7 @@ def test_a_failed_snapshot_stops_the_load(
         raise OSError("disk full")
 
     monkeypatch.setattr(fixture_loader, "snapshot_user_state", _fail)
-    with pytest.raises(OSError):
+    with pytest.raises(fixture_loader.FixtureSnapshotError, match="Nothing was changed"):
         _load(settings)
     assert not fixture_loader._fixture_active_sentinel(settings).exists()
     assert "My Co" in settings.company_profile_path.read_text()
