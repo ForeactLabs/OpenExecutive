@@ -1831,16 +1831,21 @@ async def _reconcile_card(person: Any, client: Any, card: Any, *, now: datetime,
     except GmailNotFound:
         return int(_close_card(person.id, card.id, message_id, "thread_gone", CLOSED))
     later = later_messages(thread, payload, now=now)
+    # Only their reply on the card's own thread answers its ask (a "thanks,
+    # got it" to the email that joined it doesn't).
+    sent_by_them = [m for m in later if "SENT" in m.labels and m.from_addr in own]
     from openexecutive.delegation import card_work
 
     for joined in card_work.threads(payload)[1:]:
         # The emails that joined the card are its conversation too: newer
-        # mail or their own reply there counts as on its own thread.
+        # mail from others there brings the card up to date.
         try:
-            later += later_messages(await client.get_thread(joined), payload, now=now)
+            later += [
+                m for m in later_messages(await client.get_thread(joined), payload, now=now)
+                if not ("SENT" in m.labels and m.from_addr in own)
+            ]
         except GmailNotFound:
             continue
-    sent_by_them = [m for m in later if "SENT" in m.labels and m.from_addr in own]
     if draft is None and not card_only:
         if not sent_by_them:
             return int(_close_card(person.id, card.id, message_id, "draft_deleted", CLOSED))
