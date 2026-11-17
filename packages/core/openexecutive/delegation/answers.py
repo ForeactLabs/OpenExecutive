@@ -140,6 +140,12 @@ the LOI?", "what did we quote them?"), set question true and return the \
 draft as it was, word for word: a question never edits the reply. Answer it \
 in note, from what <draft>, <answers> and <recipients> say. When answering \
 needs looking something up, also set needs_tools true.
+13. When <change> only asks who the email goes from: from you, their \
+assistant, instead of them ("send it from you", "you send it and cc me"), \
+set send_from to "executive"; back from them ("send it as me"), set it to \
+"me". Return the draft as it was: the card switches who sends it and \
+rewrites it. When it asks for that and a change of words, do only the words \
+and still set send_from.
 
 Return the new body (and gist, note, questions) through rewrite_reply."""
 
@@ -154,6 +160,7 @@ _REWRITE_TOOL: dict[str, Any] = {
             "note": {"type": "string"},
             "needs_tools": {"type": "boolean"},
             "question": {"type": "boolean"},
+            "send_from": {"type": "string", "enum": ["executive", "me"]},
             "questions": {
                 "type": "array",
                 "items": {
@@ -179,6 +186,19 @@ class NeedsWork(Exception):
     def __init__(self, ask: str, *, question: bool = False) -> None:
         super().__init__(ask)
         self.question = question
+
+
+# Not kept on the card: how ``rewrite`` hands ``change`` who it goes from.
+_SEND_FROM_ASKED = "_send_from_asked"
+
+
+class SendFrom(Exception):
+    """What the person typed on the card asks who the reply goes from
+    (``delegation.send_from``): from the Executive when ``executive``."""
+
+    def __init__(self, *, executive: bool) -> None:
+        super().__init__("send_from")
+        self.executive = executive
 
 
 @dataclass(frozen=True)
@@ -548,6 +568,15 @@ async def rewrite(
         logger.warning("delegation.answers: the rewrite failed (%s)", type(exc).__name__)
         written = {}
     asked_only = bool(change and not pairs and not news and written.get("question") is True)
+    sender = written.get("send_from") if change and not pairs and not news else None
+    if sender in ("executive", "me") and not asked_only:
+        # Who it goes from is the card's to switch (it rewrites the words
+        # itself), after any change of words asked with it.
+        raw_words = written.get("body")
+        if not isinstance(raw_words, str) or raw_words.strip() == _split_tail(body, stored.profile.signature)[0].strip():
+            raise SendFrom(executive=sender == "executive")
+    else:
+        sender = None
     if change and not pairs and not news and written.get("needs_tools") is True:
         raise NeedsWork(change, question=asked_only)
     if asked_only:
@@ -587,6 +616,9 @@ async def rewrite(
         extra["gist"] = clean_gist(new_gist) if isinstance(new_gist, str) else ""
     if change or news:
         extra.update(_turns(payload, written, change=change, news=news or [], now=now))
+    if sender is not None:
+        # Asked with a change of words: ``change`` switches it after saving.
+        extra[_SEND_FROM_ASKED] = sender
     if news:
         extra.update(_new_questions(payload, written.get("questions")))
     return new_body, extra, changed_sentences(main, new_main)
@@ -702,16 +734,38 @@ async def change(
     the card's payload as it now is, and the sentences that are new. Their
     words and the Executive's line on what it changed join the card's
     conversation. Raises ``SendRefused``. Sends nothing."""
-    from openexecutive.delegation import card_drafts
+    from openexecutive.delegation import card_drafts, send_from
+    from openexecutive.delegation.reply_send import SendRefused
+    from openexecutive.memory.decision_ledger import get_decision_instance
 
     changed: list[str] = []
+    asked: list[str] = []
 
     async def write(person: Any, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         body, extra, new = await rewrite(person, payload, [], change=text, now=now)
         changed[:] = new
+        sender = extra.pop(_SEND_FROM_ASKED, None)
+        if isinstance(sender, str):
+            asked.append(sender)
         return body, extra
 
-    saved = await card_drafts.edit(instance, caller=caller, resolver=resolver, gmail=gmail, rewrite=write)
+    try:
+        saved = await card_drafts.edit(instance, caller=caller, resolver=resolver, gmail=gmail, rewrite=write)
+    except SendFrom as ask:
+        # Only who it goes from: the card switches, and says so.
+        saved = await send_from.switch(
+            instance, caller=caller, resolver=resolver, executive=ask.executive, gmail=gmail, asked=text,
+        )
+        return saved, []
+    if asked:
+        current = get_decision_instance(instance.id) or instance
+        try:
+            saved = await send_from.switch(
+                current, caller=caller, resolver=resolver, executive=asked[0] == "executive", gmail=gmail,
+            )
+        except SendRefused:
+            # The words changed and were saved; only who it goes from didn't.
+            saved = send_from.say(get_decision_instance(instance.id) or current, send_from.NOTE_NOT_SWITCHED) or saved
     return saved, changed
 
 

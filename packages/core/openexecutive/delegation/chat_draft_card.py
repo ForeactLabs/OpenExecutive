@@ -251,8 +251,10 @@ async def change(
     their tap. Returns its state, the sentences that are new, and a short
     line on what changed. Raises ``SendRefused``. Sends nothing."""
     from openexecutive.delegation.answers import (
+        _SEND_FROM_ASKED,
         CONVERSATION_KEY,
         NeedsWork,
+        SendFrom,
         changed_sentences,
         rewrite,
     )
@@ -264,6 +266,11 @@ async def change(
         body = str(current.get("body") or "")
         payload = {"draft_body": body, "draft_to": [*current.get("to", []), *current.get("cc", [])]}
         words, extra, _ = await rewrite(who, payload, [], change=text, now=now)
+        sender = extra.get(_SEND_FROM_ASKED)
+        if isinstance(sender, str):
+            # New words and who it goes from, asked together: not the words
+            # here and the rest dropped.
+            raise SendFrom(executive=sender == "executive")
         new[:] = changed_sentences(body, words)
         turns = extra.get(CONVERSATION_KEY)
         last = turns[-1] if isinstance(turns, list) and turns else {}
@@ -272,13 +279,18 @@ async def change(
 
     try:
         saved, note = await _save(person, row_id, caller=caller, gmail=gmail, now=now, words_for=rewritten)
-    except NeedsWork as work:
+    except (NeedsWork, SendFrom) as work:
         # Looking things up takes the Executive's tools, which this card
-        # doesn't have: the draft stays as it is.
-        what = "answer that" if work.question else "do that"
-        raise SendRefused(
-            409, "needs_work", f"I need to look things up to {what}. Ask me in the chat, and the draft stays as it is.",
-        ) from None
+        # doesn't have, and sending it from the Executive is done in the chat,
+        # where it writes the email from its own mailbox: the draft stays as
+        # it is.
+        what = "answer that" if isinstance(work, NeedsWork) and work.question else "do that"
+        message = (
+            "This draft goes from you. Ask me in the chat to send it from me, and the draft stays as it is."
+            if isinstance(work, SendFrom)
+            else f"I need to look things up to {what}. Ask me in the chat, and the draft stays as it is."
+        )
+        raise SendRefused(409, "needs_work", message) from None
     return saved, new, note
 
 

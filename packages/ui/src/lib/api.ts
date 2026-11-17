@@ -2287,6 +2287,11 @@ export interface ReplyCard {
   work_now?: string;
   // The files your reply carries, by name: attached when it is sent.
   files?: string[];
+  // Goes from the Executive's own mailbox with you on cc (setReplyFrom);
+  // false or missing: from you.
+  from_executive?: boolean;
+  // The Executive's name, for the From choice.
+  executive_name?: string;
 }
 
 // One thing a reply leaves you to decide (GET /delegation/replies).
@@ -2617,6 +2622,19 @@ export async function setReplyRecipients(id: number, everyone: boolean): Promise
     body: JSON.stringify({ everyone }),
   });
   if (!res.ok) throw await delegationError(res, "Couldn't change who it goes to.");
+  return (await res.json()) as ReplyCard;
+}
+
+// Send a reply from the Executive's own mailbox with you on cc, or from you
+// again: the words are rewritten as the Executive writing for you, or put
+// back as they were. Sends nothing.
+export async function setReplyFrom(id: number, executive: boolean): Promise<ReplyCard> {
+  const res = await fetch(`${API_BASE}/delegation/replies/${id}/from`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ executive }),
+  });
+  if (!res.ok) throw await delegationError(res, "Couldn't change who it's from.");
   return (await res.json()) as ReplyCard;
 }
 
