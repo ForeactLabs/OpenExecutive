@@ -126,7 +126,8 @@ def test_send_in_a_chat_app_sends_the_draft_as_its_person(owner: int, monkeypatc
     card = _reply(owner)
     line = asyncio.run(channel_cards.resolve(card, get_person(owner), approve=True))
     assert line == "Sent."
-    assert calls == [{"caller": ChatTap(OWNER), "resolver": owner, "confirm": {}, "allow": False}]
+    # Checked against when the card was posted (not here: "").
+    assert calls == [{"caller": ChatTap(OWNER), "resolver": owner, "confirm": {}, "allow": False, "shown_at": ""}]
 
 
 def test_a_send_that_needs_a_second_yes_says_where_to_give_it(owner: int, monkeypatch: pytest.MonkeyPatch) -> None:
