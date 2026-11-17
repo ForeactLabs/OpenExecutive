@@ -1618,8 +1618,13 @@ async def _run_teammate_followup(
         return True
 
     mark_action_done(action.id)
-    phase = "held" if held_ids else "delivered"
-    _audit(phase, f"{phase} to {name if to_self else action.channel_ref} via {action.channel}")
+    if to_self:
+        phase = "held" if held_ids else "delivered"
+        _audit(phase, f"{phase} to {name} via {action.channel}")
+    else:
+        # The run's own send went out or waits on an Approve card: the
+        # runner delivered nothing, so it does not say it did.
+        _audit("ran", f"ran for {name}: its message to {action.channel_ref} via {action.channel} is the run's own step")
     return True
 
 
