@@ -871,7 +871,11 @@ def test_who_a_goes_rule_lets_go_is_not_someone_new_on_balanced(monkeypatch: pyt
         ):
             assert send(to) is not None
         # A domain rule matches one plain address, never a list in one string.
-        assert "evil@x.example,ann@partner.example" not in gw._roster_allow_set()
+        assert "evil@x.example,ann@partner.example" not in gw._roster_allow_set(goes=True)
+        # A share always waits: a Goes rule never lets anyone be given access.
+        assert "ann@partner.example" not in gw._roster_allow_set()
+        share = {"action": "share", "scope_type": "user", "scope_value": "pat.lane@vendor.example"}
+        assert gw._check_calendar_share("google_workspace__manage_calendar", share) is not None
         # Careful: no Goes rule counts.
         level["now"] = outside_mode.ASK
         assert send("pat.lane@vendor.example") is not None
