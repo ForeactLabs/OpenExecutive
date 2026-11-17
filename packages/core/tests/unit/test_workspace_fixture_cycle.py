@@ -202,6 +202,38 @@ def test_a_failed_snapshot_stops_the_load(
     assert "My Co" in settings.company_profile_path.read_text()
 
 
+def test_a_failed_database_copy_leaves_the_earlier_backup_whole(
+    settings: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The database copy goes first, so a full disk can't leave today's
+    files next to an older database for unload to bring back."""
+    fixture_loader.snapshot_user_state(settings)
+    backup = _backup(settings)
+    saved_db = (backup / "state.db").read_bytes()
+    settings.company_profile_path.write_text("name: My Co Renamed\n")
+
+    real_connect = fixture_loader.sqlite3.connect
+
+    class _FullDisk:
+        def __init__(self, path: str) -> None:
+            self._conn = real_connect(path)
+
+        def execute(self, sql: str, *args: object) -> Any:
+            if sql.startswith("VACUUM INTO"):
+                raise OSError("disk full")
+            return self._conn.execute(sql, *args)
+
+        def close(self) -> None:
+            self._conn.close()
+
+    monkeypatch.setattr(fixture_loader.sqlite3, "connect", _FullDisk)
+    with pytest.raises(OSError):
+        fixture_loader.snapshot_user_state(settings)
+    monkeypatch.undo()
+    assert "My Co Renamed" not in (backup / "profile.yaml").read_text()
+    assert (backup / "state.db").read_bytes() == saved_db
+
+
 def test_unload_brings_back_work_done_between_two_loads(settings: Any) -> None:
     """Each load saves the company again, so a second unload brings back
     what changed after the first one, not the copy from the first load."""

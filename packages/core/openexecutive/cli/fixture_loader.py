@@ -1205,6 +1205,29 @@ def snapshot_user_state(settings: Any, *, force: bool = False) -> dict[str, Any]
     backup_dir = _user_backup_dir(settings)
     backup_dir.mkdir(parents=True, exist_ok=True)
 
+    # ── 0. state.db — the whole company database, every table. The files
+    #       below only hold what a fixture also has; unload puts this copy
+    #       back last, so a table they don't cover (facts, contact notes,
+    #       saved tools, ...) comes back as it was. VACUUM INTO gives a
+    #       consistent copy while other connections hold the DB open. It goes
+    #       first and is written beside the old one, replacing it only once
+    #       complete: a failed copy (a full disk) leaves the whole earlier
+    #       backup as it was, files and database together.
+    from openexecutive.memory.episodic import DB_PATH as EPISODIC_DB_PATH
+
+    state_dst = backup_dir / "state.db"
+    if EPISODIC_DB_PATH.exists():
+        state_tmp = backup_dir / "state.db.tmp"
+        state_tmp.unlink(missing_ok=True)
+        conn = sqlite3.connect(str(EPISODIC_DB_PATH))
+        try:
+            conn.execute("VACUUM INTO ?", (str(state_tmp),))
+        finally:
+            conn.close()
+        os.replace(state_tmp, state_dst)
+    else:
+        state_dst.unlink(missing_ok=True)
+
     # ── 1. profile.yaml ────────────────────────────────────────────────────
     src_profile = settings.company_profile_path
     dst_profile = backup_dir / "profile.yaml"
@@ -1239,28 +1262,6 @@ def snapshot_user_state(settings: Any, *, force: bool = False) -> dict[str, Any]
 
     # ── 6. workspace.yaml — so unload restores the user's mode and zone ───
     _dump_workspace(backup_dir / "workspace.yaml")
-
-    # ── 7. state.db — the whole company database, every table. The files
-    #       above only hold what a fixture also has; unload puts this copy
-    #       back last, so a table they don't cover (facts, contact notes,
-    #       saved tools, ...) comes back as it was. VACUUM INTO gives a
-    #       consistent copy while other connections hold the DB open.
-    from openexecutive.memory.episodic import DB_PATH as EPISODIC_DB_PATH
-
-    #       The copy is written beside the old one and replaces it only once
-    #       it is complete, so a failed copy never loses the earlier backup.
-    state_dst = backup_dir / "state.db"
-    if EPISODIC_DB_PATH.exists():
-        state_tmp = backup_dir / "state.db.tmp"
-        state_tmp.unlink(missing_ok=True)
-        conn = sqlite3.connect(str(EPISODIC_DB_PATH))
-        try:
-            conn.execute("VACUUM INTO ?", (str(state_tmp),))
-        finally:
-            conn.close()
-        os.replace(state_tmp, state_dst)
-    else:
-        state_dst.unlink(missing_ok=True)
 
     # Clear active-fixture marker — this state IS the user's company now.
     _fixture_active_sentinel(settings).unlink(missing_ok=True)
