@@ -999,7 +999,7 @@ async def say_on_card(alert_id: int, body: SayBody, request: Request) -> SayResp
     # A go runs the plan through the same Approve as a tap. Whether they
     # said go is read from their words and the plan alone, never from the
     # card, so text from outside on the card can't make its plan run.
-    go = new.go and await replan.said_go(plan, line)
+    go = new.go and await replan.said_go(plan, line, before=existing.suggested_action or "")
     reply = new.reply if go or not new.go else "Here's the plan now. Pick it to go ahead."
     card_talk.add_turn(alert_id, "you", line, person_id=person)
     approval = None
