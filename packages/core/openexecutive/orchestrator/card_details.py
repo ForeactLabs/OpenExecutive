@@ -177,6 +177,8 @@ def _lines(value: Any, indent: str = "") -> list[str]:
             if sub:
                 out.append(f"{indent}- {sub[0][len(indent) + 2:]}")
                 out.extend(sub[1:])
+            else:
+                out.append(f"{indent}- (empty)")
         return out
     return [f"{indent}{value}"]
 
