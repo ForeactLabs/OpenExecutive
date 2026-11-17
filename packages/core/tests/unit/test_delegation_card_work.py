@@ -894,3 +894,29 @@ def test_words_on_a_working_card_that_would_go_on_its_own_take_it_back(
         card_work._RUNNING.discard(card.id)
     # It waits on the card for them now, and the work takes their words.
     assert held == ["work_unfinished"] and redirected == ["Use only the 2025 rows"]
+
+
+def test_a_joined_email_is_checked_before_the_reply_goes_on_its_own(
+    db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.delegation import handle_it
+    from openexecutive.memory.decision_ledger import update_open_payload
+
+    mailbox, card = _card(owner)
+    payload = inbox.card_payload(_fresh(card))
+    news = {"kind": "news", "id": "m2", "subject": "Payment", "text": "Also confirm the new bank details."}
+    assert update_open_payload(card.id, {
+        **payload, "conversation": [*(payload.get("conversation") or []), news], card_work.WORK_KEY: card_work.DONE,
+    })
+    seen: list[str] = []
+
+    def hold(*texts: str, **_k: Any) -> str | None:
+        seen.extend(texts)
+        return "sensitive" if any("bank details" in t for t in texts) else None
+
+    held: list[str | None] = []
+    monkeypatch.setattr(handle_it, "content_hold", hold)
+    monkeypatch.setattr(inbox, "_hand_back", lambda c, reason: held.append(reason))
+    monkeypatch.setattr(ledger, "get_decision_instance", _with_gate(ledger.get_decision_instance))
+    asyncio.run(card_work.finished(owner, card.id, gmail=mailbox))
+    assert "Payment" in seen and held == ["sensitive"]

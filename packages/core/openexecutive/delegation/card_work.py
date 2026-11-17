@@ -725,6 +725,7 @@ async def _after(person: Any, card_id: int, *, gmail: Any) -> None:
             return
         held = handle_it.content_hold(
             str(payload.get("subject") or ""), str(payload.get("they_wrote") or ""),
+            *newer_words(payload),
             str(payload.get("draft_subject") or ""), str(payload.get("draft_body") or ""),
             link_texts=(str(payload.get("draft_body") or ""),),
             recipients=tuple(a for a in payload.get("draft_to") or [] if isinstance(a, str)),
@@ -735,6 +736,19 @@ async def _after(person: Any, card_id: int, *, gmail: Any) -> None:
         await _send_on_its_own(person, gmail, card_id, ScanResult(status="ok"), now=datetime.now(UTC))
     except Exception:
         logger.exception("delegation.card_work: couldn't settle card %s after the work", card_id)
+
+
+def newer_words(payload: dict[str, Any]) -> list[str]:
+    """The subject and words of every newer email on the card (its
+    ``news`` turns: an email that joined it, newer mail in its threads).
+    What goes on its own is checked against all of them, not only the
+    email the card began with."""
+    turns = payload.get("conversation")
+    out: list[str] = []
+    for turn in turns if isinstance(turns, list) else []:
+        if isinstance(turn, dict) and turn.get("kind") == "news":
+            out += [str(turn.get("subject") or ""), str(turn.get("text") or "")]
+    return out
 
 
 def last_state(payload: dict[str, Any]) -> str:
