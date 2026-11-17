@@ -148,6 +148,8 @@ def test_a_call_that_closed_before_the_cut_still_runs() -> None:
     results = provider.calls[1]["messages"][-1]["content"]
     answered = {b["tool_use_id"]: b["content"] for b in results if b.get("type") == "tool_result"}
     assert answered["ok"] != CUT_OFF_RESULT
+    # The cut text after it is carried on, and the model is told so.
+    assert {"type": "text", "text": CUT_OFF_NOTE} in results
 
 
 def test_a_cut_that_wrote_nothing_keeps_the_break_after_earlier_text() -> None:
@@ -299,3 +301,14 @@ def test_a_turn_that_keeps_being_cut_ends_after_max_cut_rounds() -> None:
     asyncio.run(_run(provider, {"draft_artifact": lambda *_a, **_k: "published"}))
 
     assert len(provider.calls) == MAX_CUT_ROUNDS + 1
+
+
+def test_text_cut_after_a_closed_call_runs_on() -> None:
+    from tests.unit._agent_loop_fakes import FinalMsg, TextBlock, ToolUseBlock
+    from tests.unit.test_reply_rounds import _reply
+
+    text = _reply([
+        FinalMsg([ToolUseBlock("t1", "nothing_here", {}), TextBlock("Revenue grew 12% in Q")], "max_tokens"),
+        FinalMsg([TextBlock("3, driven by renewals.")], "end_turn"),
+    ])
+    assert text == "Revenue grew 12% in Q3, driven by renewals."

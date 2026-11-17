@@ -4184,6 +4184,11 @@ class Executive:
                 content = tool_images.content(content, images_by_id.get(tu["id"]), sees=sees)
                 tool_results.append({"type": "tool_result", "tool_use_id": tu["id"], "content": content})
             tool_results.extend(cut_results)
+            # Cut in text written after a call that closed: the call ran, and the
+            # next round carries the text on where it stopped.
+            if cut_off and last_written is not None and last_written.get("type") == "text":
+                tool_results.append({"type": "text", "text": CUT_OFF_NOTE})
+                run_on = True
             # Messages the person sent since the last round ride in this
             # round's user message, after the tool results (which must come
             # first). Only this loop's own, newest message changes, so the
