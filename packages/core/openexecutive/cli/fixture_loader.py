@@ -847,6 +847,9 @@ async def reset_all_state(
         ):
             for table, count in _delete_every_table(db_path, keep=RESET_KEEPS | set(keep)).items():
                 cleared[table] = cleared.get(table, 0) + count
+        # Right away, so nothing read during the rest of the reset (or after
+        # a later step fails) serves the rows just deleted.
+        forget_company_caches()
 
         # 3c. Knowledge review state (same DB as the episodic rows above). A
         # "factory reset" that keeps the previous operator's approvals,
@@ -994,7 +997,6 @@ async def reset_all_state(
                 persist_directory=settings.vector_store_path
             )
 
-        forget_company_caches()
         return {
             "reset": True,
             "departments_seeded": departments_seeded,
