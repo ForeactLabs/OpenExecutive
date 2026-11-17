@@ -30,6 +30,10 @@ from typing import Any
 from openexecutive.orchestrator.card_answers import ANSWER_CARD_TOOL, handle_answer_card
 from openexecutive.orchestrator.disclosure import with_chat_line
 
+# How message_person says a person has no chat app it could use. The alert
+# review matches on it, so it is said in one place.
+NO_REACHABLE_CHANNEL = "no reachable channel"
+
 logger = logging.getLogger(__name__)
 
 
@@ -1737,7 +1741,7 @@ async def message_person(tool_input: dict[str, Any], *, alert_fallback: bool = T
         # the audit log, which every signed-in user can read.
         return json.dumps({"error": (
             f"could not deliver to person_id {person_id} on any configured chat "
-            f"channel ({last_error or 'no reachable channel'}). Email them "
+            f"channel ({last_error or NO_REACHABLE_CHANNEL}). Email them "
             "instead if they have an address."
         )})
 
@@ -1746,7 +1750,7 @@ async def message_person(tool_input: dict[str, Any], *, alert_fallback: bool = T
         # alert is read by more people than its recipient.
         return json.dumps({"error": (
             f"could not deliver to {person.full_name!r} on any configured chat "
-            f"channel ({last_error or 'no reachable channel'})"
+            f"channel ({last_error or NO_REACHABLE_CHANNEL})"
         )})
     # No channel delivered (none usable, or every attempt failed). Don't drop
     # the finding — surface it as a briefing alert routed to that person so it
@@ -1812,14 +1816,14 @@ async def _alert_undeliverable_person(
         logger.exception("message_person: alert fallback failed")
         return json.dumps({"error": (
             f"could not deliver to {person.full_name!r} on any configured "
-            f"channel ({last_error or 'no reachable channel'}); the alert "
+            f"channel ({last_error or NO_REACHABLE_CHANNEL}); the alert "
             f"fallback also failed: {exc}"
         )})
     return json.dumps({
         "status": "alerted",
         "reason": "dm_undeliverable",
         "person_id": person_id,
-        "detail": (last_error or "no reachable channel for this person"),
+        "detail": (last_error or f"{NO_REACHABLE_CHANNEL} for this person"),
     })
 
 

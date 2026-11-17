@@ -539,8 +539,6 @@ _HELD_DETAIL = "held for their quiet hours or brief"
 # `_dm`'s detail when the card is already on their list and they have no
 # chat app: the card is the message.
 ON_THEIR_LIST = "on their list"
-# How message_person says a person has no chat app it could use at all.
-_NO_CHANNEL = "no reachable channel"
 
 
 def _dm_text(headline: str, text: str) -> str:
@@ -569,7 +567,7 @@ async def _dm(
     import json
 
     from openexecutive.attunement.outcomes import SOURCE_ALERT_REVIEW, tag_proactive
-    from openexecutive.orchestrator.schedule_tools import message_person
+    from openexecutive.orchestrator.schedule_tools import NO_REACHABLE_CHANNEL, message_person
 
     try:
         with tag_proactive(SOURCE_ALERT_REVIEW, f"alert:{alert_id}" if alert_id else ""):
@@ -579,7 +577,7 @@ async def _dm(
         parsed = json.loads(raw)
     except Exception as exc:
         return False, f"dm failed: {exc}"
-    if theirs and isinstance(parsed, dict) and _NO_CHANNEL in str(parsed.get("error") or "") and _on_team(person_id):
+    if theirs and isinstance(parsed, dict) and NO_REACHABLE_CHANNEL in str(parsed.get("error") or "") and _on_team(person_id):
         # They have no chat app: the card on their list is the message. A
         # send that failed stays a failure, and a contact, who never signs
         # in, has no list.
