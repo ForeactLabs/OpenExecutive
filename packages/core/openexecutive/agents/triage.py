@@ -352,6 +352,8 @@ def _with_partial_delivery(kept: TriageDecision, raw: dict) -> TriageDecision:
         update["severity"] = said.severity
     if raw.get("channels") and said.channels != [AlertChannel.PERSISTED]:
         update["channels"] = said.channels
+        update["department_slug"] = said.department_slug
+        update["broadcast_integration"] = said.broadcast_integration
     return kept.model_copy(update=update) if update else kept
 
 

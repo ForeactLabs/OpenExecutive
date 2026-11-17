@@ -277,6 +277,16 @@ def test_a_cut_off_review_that_said_raise_isnt_muted_by_words() -> None:
     assert decision.alert is True
 
 
+def test_a_cut_off_review_keeps_the_room_it_named() -> None:
+    event = AlertEvent(source="monitoring", external_id="w-5", subject="Deal slipped", body="Acme moved to Q1.")
+    said = SimpleNamespace(type="tool_use", name="emit_alert_decision", input={
+        "alert": True, "channels": ["department_channel"], "department_slug": "sales", "broadcast_integration": "slack",
+    })
+    client = _client(return_value=SimpleNamespace(content=[said], stop_reason="max_tokens"))
+    decision = asyncio.run(TriageAgent().triage(event, client=client))
+    assert (decision.department_slug, decision.broadcast_integration) == ("sales", "slack")
+
+
 def test_triage_swallows_client_exceptions() -> None:
     """LLM error → quiet fallback for an ordinary event, never propagates."""
     client = SimpleNamespace(
