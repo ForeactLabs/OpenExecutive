@@ -395,6 +395,12 @@ def restore_company_db(state_src: Path, *, carry: Collection[str] = ()) -> None:
     _restore_db_from_file(state_src)
     _ensure_schemas()
     _restore_global_tables(preserved)
+    # The copy may have been taken while a job ran: nothing would ever claim
+    # its 'running' row again (only a scheduler start does), and a recurring
+    # job counts it as present, so it would never come back. Requeue them.
+    from openexecutive.memory.episodic import requeue_orphaned_running
+
+    requeue_orphaned_running(_episodic_db_path())
 
 
 def _restore_db_from_file(state_src: Path) -> None:
