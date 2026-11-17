@@ -2119,7 +2119,7 @@ export interface DelegationTeam {
 // on a card on Today (GET /delegation/replies).
 export interface InboxWatch {
   enabled: boolean;
-  // off, waiting, ok, checking, daily_limit, backlog_full, act_as_me_off,
+  // off, waiting, ok, checking, backlog_full, act_as_me_off,
   // client_slot, rate_limited, error, or why your Gmail can't be read.
   status: string;
   // The status in plain words, from the backend.
