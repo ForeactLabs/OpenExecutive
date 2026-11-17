@@ -155,3 +155,12 @@ def test_a_quoted_forward_under_a_reply_in_another_language_is_history() -> None
 def test_max_chars_alone_caps_the_whole_text() -> None:
     body = "x" * 50 + "\n\n---------- Forwarded message ---------\n" + "y" * 500
     assert len(readable_text(body, max_chars=100)) == 100
+
+
+def test_a_note_below_a_forward_in_another_language_shows_once() -> None:
+    from openexecutive.integrations.email_poller import split_forward
+
+    body = "FYI see below\n\n> Anfang der weitergeleiteten Nachricht:\n> Von: X\n> hello there\n\nThanks, Bob"
+    own, forwarded = split_forward(body, "WG: report")
+    assert own == "FYI see below\n\nThanks, Bob"
+    assert forwarded == "Anfang der weitergeleiteten Nachricht:\nVon: X\nhello there"

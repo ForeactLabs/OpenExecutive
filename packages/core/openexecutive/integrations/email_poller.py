@@ -515,6 +515,10 @@ def split_forward(
         # weitergeleiteten Nachricht:"): its first ">" run, when no reply
         # attribution comes before it, is the forwarded email.
         cut_at = _first_unattributed_quote(lines)
+        if cut_at is not None:
+            # The scan read past the quote: their words are what comes above
+            # it (and what comes below it, added back with the forward).
+            kept = _scan_new_text(lines[:cut_at])[0]
     own = "\n".join(kept).strip()
     if max_chars is not None:
         own = own[:max_chars]
