@@ -1268,6 +1268,10 @@ CUT_OFF_NOTE = (
 # What the person sees for a round that was cut off: the step it was on was
 # writing something long, not the read before it.
 CUT_OFF_LABEL = "Writing it in shorter parts…"
+# Cut rounds in a row a turn carries on through. One more cut than this ends
+# the turn as written: three tries at a shorter form all ran out of room, and
+# each further try would cost another full round.
+MAX_CUT_ROUNDS = 3
 
 
 # Said in place of a round's results when nothing came back to put there (a
@@ -2742,6 +2746,7 @@ class Executive:
         # Set by a round cut off mid-text: the next round's text carries it
         # on, so that round alone gets no paragraph break before its text.
         run_on = False
+        cut_rounds = 0
         specialists_consulted: list[str] = []
         # What this turn's tool results have put in the prompt so far: every
         # one is re-sent on each later call.
@@ -2932,8 +2937,14 @@ class Executive:
             # Cut off at MAX_OUTPUT_TOKENS mid-answer: carry on rather than
             # end the turn on half a step. A cut tool call is answered with
             # CUT_OFF_RESULT below and never runs; cut text gets CUT_OFF_NOTE.
-            # The last round runs no tool, so its reply stands as written.
-            cut_off = final_msg.stop_reason == "max_tokens" and iteration < max_iterations
+            # The last round runs no tool, so its reply stands as written,
+            # as does a cut after MAX_CUT_ROUNDS cut rounds in a row.
+            cut_rounds = cut_rounds + 1 if final_msg.stop_reason == "max_tokens" else 0
+            cut_off = (
+                final_msg.stop_reason == "max_tokens"
+                and iteration < max_iterations
+                and cut_rounds <= MAX_CUT_ROUNDS
+            )
             if cut_off:
                 logger.warning(
                     "round %d cut off at max_tokens=%d; carrying on", iteration, MAX_OUTPUT_TOKENS,

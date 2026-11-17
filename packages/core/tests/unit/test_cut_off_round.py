@@ -287,3 +287,15 @@ def test_the_cut_call_is_not_counted_as_a_call_made() -> None:
     assert [(b["tool_use_id"], b["content"]) for b in results if b.get("type") == "tool_result"] == [
         ("cut", CUT_OFF_RESULT)
     ]
+
+
+def test_a_turn_that_keeps_being_cut_ends_after_max_cut_rounds() -> None:
+    from openexecutive.orchestrator.executive import MAX_CUT_ROUNDS
+
+    provider = _ScriptedProvider(
+        [_FinalMsg([_ToolUseBlock(f"c{i}", "draft_artifact", {})], "max_tokens") for i in range(MAX_CUT_ROUNDS + 1)]
+        + [_FinalMsg([_TextBlock("never reached")], "end_turn")]
+    )
+    asyncio.run(_run(provider, {"draft_artifact": lambda *_a, **_k: "published"}))
+
+    assert len(provider.calls) == MAX_CUT_ROUNDS + 1

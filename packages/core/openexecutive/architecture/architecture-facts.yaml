@@ -5410,7 +5410,8 @@ chat:
     CUT_OFF_LABEL ("Writing it in shorter parts…"), so a card's step list
     names the real stop. Why: a reply card writing a long spreadsheet as one
     draft_artifact call was cut at 8192 twice and showed "couldn't finish"
-    with the mark on the read before it. The last round (no tools) keeps
+    with the mark on the read before it. After MAX_CUT_ROUNDS (3) cut
+    rounds in a row the turn ends as written. The last round (no tools) keeps
     what it wrote. A call whose block closed before the cut (cut in the
     text after it) is whole and runs as usual. Only Claude is asked for
     32,000: every non-Claude FeatureSpec (OpenRouter, OpenAI, unknown slugs)
