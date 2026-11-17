@@ -148,20 +148,21 @@ _COLUMNS = (
 
 # Past-tense verbs a note can start with. A known list, not any word ending
 # in "ed", so a name (Fred, Ahmed) or a noun (Seed) is never read as a verb.
+# Words often used as adjectives ("Expected revenue …") are left out.
 _REGULAR_VERBS = frozenset({
     "accepted", "added", "agreed", "announced", "answered", "approved", "asked",
     "assigned", "booked", "called", "cancelled", "canceled", "changed", "checked",
     "closed", "committed", "completed", "complained", "confirmed", "created",
     "decided", "declined", "delayed", "delegated", "delivered", "emailed",
-    "estimated", "expected", "explained", "finished", "fixed", "followed",
+    "explained", "finished", "fixed", "followed",
     "forwarded", "hired", "introduced", "invited", "launched", "liked",
     "listed", "mentioned", "moved", "needed", "noted", "offered", "opened",
-    "ordered", "owed", "planned", "postponed", "preferred", "priced",
-    "promised", "proposed", "published", "purchased", "quoted", "raised",
-    "received", "recommended", "reduced", "rejected", "released", "reminded",
-    "removed", "replied", "reported", "requested", "reviewed", "scheduled",
+    "ordered", "owed", "postponed", "priced",
+    "promised", "published", "purchased", "quoted", "raised",
+    "received", "recommended", "rejected", "reminded",
+    "removed", "replied", "reported", "requested", "reviewed",
     "shared", "shipped", "signed", "started", "submitted", "suggested",
-    "tested", "updated", "used", "wanted", "warned", "worked",
+    "tested", "used", "wanted", "warned", "worked",
 })
 _IRREGULAR_VERBS = frozenset({
     "said", "told", "sent", "gave", "took", "made", "wrote", "set", "put", "got",
