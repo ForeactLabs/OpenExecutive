@@ -156,8 +156,11 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
     };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
+    // A tick right after another refresh (focus, Approve) is skipped.
     const interval = setInterval(() => {
-      if (document.visibilityState === "visible") refreshToday();
+      if (document.visibilityState === "visible" && Date.now() - lastFetchRef.current >= BRIEFING_REFRESH_INTERVAL_MS / 2) {
+        refreshToday();
+      }
     }, BRIEFING_REFRESH_INTERVAL_MS);
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
