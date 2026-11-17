@@ -102,7 +102,7 @@ PER_CLIENT_CACHE_TABLES: tuple[str, ...] = (
 # (``reset_all_state``): bookkeeping that says a one-time migration already
 # ran (deleting it would run the migration again over the empty tables), and
 # the instance-level rows a client switch keeps too (``slots._GLOBAL_TABLES``:
-# saved simulator companies, the pause switch, background cadences), plus
+# saved simulator companies and the pause switch), plus
 # the eval scenarios people wrote. SQLite's own tables (``sqlite_*``) are never
 # touched, so ids are never handed out twice.
 RESET_KEEPS: frozenset[str] = frozenset({
@@ -113,7 +113,6 @@ RESET_KEEPS: frozenset[str] = frozenset({
     "dynamic_workflows_meta",
     "generated_fixtures",
     "executive_control",
-    "background_prefs",
     "eval_scenarios",
 })
 
