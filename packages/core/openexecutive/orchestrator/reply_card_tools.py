@@ -250,6 +250,16 @@ async def handle_update_reply_card(tool_input: dict[str, Any]) -> str:
         except file_refs.RefError as exc:
             return _error(f"Nothing was changed: {exc}.")
         files += [(f.name, f.mime, f.data) for f in resolved.items]
+    # Who it goes from first, while the card still shows it being worked on:
+    # a Send tapped before the switch would otherwise go as the person.
+    sender = tool_input.get("send_from")
+    if sender in ("executive", "me"):
+        from openexecutive.delegation import send_from
+
+        try:
+            await send_from.switch_for_work(card_id, writer.person, executive=sender == "executive", gmail=writer.mailbox)
+        except SendRefused as refused:
+            return _error(f"Nothing was changed: who it goes from couldn't be switched: {refused.message}")
     body = tool_input.get("body")
     try:
         await card_work.apply(
@@ -259,14 +269,6 @@ async def handle_update_reply_card(tool_input: dict[str, Any]) -> str:
         )
     except SendRefused as refused:
         return _error(f"Nothing was changed: {refused.message}")
-    sender = tool_input.get("send_from")
-    if sender in ("executive", "me"):
-        from openexecutive.delegation import send_from
-
-        try:
-            await send_from.switch_for_work(card_id, writer.person, executive=sender == "executive", gmail=writer.mailbox)
-        except SendRefused as refused:
-            return _error(f"The rest was saved, but who it goes from wasn't changed: {refused.message}")
     if artifact_ids:
         # Only the card's wording: it never stops the hand-back.
         try:
