@@ -1279,7 +1279,7 @@ async def _execute_action(
             f"<scheduled_intent>\n{action.intent_text}\n</scheduled_intent>\n\n"
             f"{_since_scheduled_block(action, _followup_owner(action))}"
             f"Action: send ONE message to the user via the {action.channel} "
-            f"channel (channel_ref={action.channel_ref}) using {send_tool_hint}. "
+            f"channel (channel_ref={_ref_for_prompt(action.channel_ref)}) using {send_tool_hint}. "
             f"For email channel_refs in the form 'address|thread_id', send only "
             f"to the address and use the thread_id when threading. Do NOT call "
             f"schedule_followup again unless the user's original intent "
@@ -1344,6 +1344,13 @@ async def _execute_action(
             **({"held_count": len(held_ids)} if held_ids else {}),
         },
     )
+
+
+def _ref_for_prompt(channel_ref: str) -> str:
+    """A row's address as one line for the run's prompt: it is stored text,
+    so whitespace is collapsed and it is capped, and it cannot open a new
+    paragraph of its own."""
+    return " ".join(str(channel_ref or "").split())[:320]
 
 
 def _send_tool_hint(channel: str) -> str:
@@ -1578,7 +1585,7 @@ async def _run_teammate_followup(
         else:
             synthetic_message += (
                 f"Using only what {name} may see, send ONE message via the "
-                f"{action.channel} channel (channel_ref={action.channel_ref}) "
+                f"{action.channel} channel (channel_ref={_ref_for_prompt(action.channel_ref)}) "
                 f"using {_send_tool_hint(action.channel)}. For email "
                 f"channel_refs in the form 'address|thread_id', send only to "
                 f"the address and use the thread_id when threading. Do NOT "
