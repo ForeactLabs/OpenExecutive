@@ -666,6 +666,26 @@ async def test_switch_forgets_the_old_clients_agent_overrides(
         overrides.invalidate_cache()
 
 
+async def test_every_slot_restore_forgets_the_cached_overrides(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rotation's recovery restores a slot without activate_client_slot,
+    so the restore itself must drop the cache."""
+    from openexecutive.agents import overrides
+
+    monkeypatch.setattr(overrides, "DB_PATH", env.db_path)
+    overrides.initialize_overrides_db(env.db_path)
+    _seed_live_company(env)
+    await create_client_slot(env.settings, display_name="Beta", source="blank")
+    overrides.set_override("finance", instructions="Acme's voice.", instructions_set=True)
+    assert overrides.get_override("finance") is not None  # now in memory
+    await slots._restore_slot_state(env.settings, slots._slot_dir(env.settings, "beta"))
+    try:
+        assert overrides.get_override("finance") is None
+    finally:
+        overrides.invalidate_cache()
+
+
 async def test_blank_switch_empties_a_table_nobody_listed(env: SimpleNamespace) -> None:
     """A blank slot gets the factory reset's sweep, so a table added later
     doesn't carry the previous client's rows into it."""

@@ -349,6 +349,11 @@ async def _restore_slot_state(
     # 3. Vector state — rebuild the company collections from the restored dirs.
     docs_indexed = await _rebuild_vector_state(settings, app_state)
 
+    # 4. Caches of the outgoing company's rows (agent overrides, departments,
+    #    people) — here, so every path that restores a slot drops them,
+    #    the rotation's recovery included.
+    forget_company_caches()
+
     return {
         "display_name": profile.name,
         "profile": profile.model_dump(),
@@ -924,7 +929,6 @@ async def activate_client_slot(
                 ) from exc
 
         summary = await _restore_slot_state(settings, slot, app_state=app_state)
-        forget_company_caches()
         _active_client_sentinel(settings).parent.mkdir(parents=True, exist_ok=True)
         _active_client_sentinel(settings).write_text(slug, encoding="utf-8")
         workspace = _set_honcho_client_workspace(slug)
