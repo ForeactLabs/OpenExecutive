@@ -11789,10 +11789,10 @@ delegation:
     not_addressed (not in To or Cc), too_many_recipients (over 10),
     you_replied (the person wrote last) and draft_exists. Not recorded, so
     a later scan looks again: a message under 10 minutes old (mail the
-    person answers at once never gets a card), one in a thread whose card
-    is open, and one a daily limit holds back. A thread gone between the
+    person answers at once never gets a card) and one in a thread whose
+    card is open. A thread gone between the
     listing and the read is recorded skipped (thread_gone). Order per
-    message: claim the row → classify → reserve the shared daily slot →
+    message: claim the row → classify →
     write → create_draft (from the send-as address the mail went to, when
     that was an alias rather than the primary) and store its id → create
     the card (idempotency key delegation_reply:{person}:{message}) →
