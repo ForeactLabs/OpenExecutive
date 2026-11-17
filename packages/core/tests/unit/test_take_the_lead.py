@@ -665,12 +665,11 @@ def test_approving_does_the_exact_action_once(client: TestClient, owner: Any, mo
     assert alert.external_id == f"decision:{decision_id}"
 
 
-def test_a_teammates_own_held_card_is_their_ok(
+def test_a_teammates_own_held_card_reaches_carry_out_as_theirs(
     client: TestClient, owner: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A step held on a teammate's own card (here by Careful) runs on their
-    tap with that tap as its OK, as the owner's is: the card is a held step
-    like any other."""
+    """A Take the lead card is checked for the asker's own tap like a
+    department card; ``carry_out`` then decides which tools that covers."""
     sam = people_store.upsert_person(full_name="Sam Team", email=SAM)
     people_registry.invalidate()
     seen: list[tuple[dict[str, Any], bool, bool]] = []
@@ -693,6 +692,25 @@ def test_a_teammates_own_held_card_is_their_ok(
     assert response.status_code == 200, response.text
     [(payload, by_principal, own_card)] = seen
     assert payload["held"] is True and by_principal is False and own_card is True
+
+
+def test_the_owners_tap_on_a_held_card_runs_it_as_approved(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The real ``carry_out``: a held card the owner taps runs inside
+    ``levels.approved`` for whoever asked, so the step acts for them."""
+    from openexecutive.orchestrator import executive, levels
+
+    seen: list[tuple[bool, int | None]] = []
+
+    async def assign(tool_input: dict[str, Any]) -> str:
+        seen.append((levels.is_approved(), levels.approved_requester()))
+        return "{}"
+
+    monkeypatch.setitem(executive._ALL_SKILL_HANDLERS, "assign_open_loop", assign)
+    payload = {"held": True, "tool": "assign_open_loop", "input": {"person_id": owner.id, "task": "x"},
+               "requested_by_person_id": owner.id}
+    asyncio.run(ttl.carry_out(payload, by_principal=True))
+    asyncio.run(ttl.carry_out({**payload, "held": False}, by_principal=True))
+    assert seen == [(True, owner.id), (False, None)]
 
 
 def test_a_held_step_is_marked_held(owner: Any) -> None:

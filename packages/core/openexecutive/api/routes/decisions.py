@@ -677,9 +677,10 @@ async def _carry_out_lead(
 
 def _own_card(instance: DecisionInstance, resolver: int | None, *, by_principal: bool) -> bool:
     """Whether the person who asked is approving a step held on their own
-    card: their tap is that step's OK, as the owner's is, for the tools
-    ``take_the_lead.carry_out`` lets them (one that only ever runs on their
-    own device). One check for every held card, whichever gate held it."""
+    card. Checked the same way for both card kinds; ``take_the_lead.carry_out``
+    decides which tools it covers (an extension's ``card`` tool, which only
+    ever runs on their own device), and for any other tool it changes
+    nothing."""
     payload = _parse_payload(instance)
     return (
         not by_principal
