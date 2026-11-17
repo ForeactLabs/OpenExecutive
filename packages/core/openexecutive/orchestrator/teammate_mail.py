@@ -515,6 +515,12 @@ def _sent_for_other(unit: str, headers: str, sides: _Sides, *, ids: list[str] | 
         return False
     if any(r.message_id in found for r in sides.sent if r.message_id):
         return True
+    # A thread a send started holds nothing from before it: every message in
+    # it answers the send, dated or not.
+    if any(r.thread_id in found for r in sides.own if r.started and r.thread_id):
+        return False
+    if any(r.thread_id in found for r in sides.sent if r.started and r.thread_id):
+        return True
     block = re.split(r"\n[ \t]*\n", unit.lstrip("\n"), maxsplit=1)[0]
     if when is None:
         dated = _DATE_RE.search(block)
@@ -530,13 +536,9 @@ def _sent_for_other(unit: str, headers: str, sides: _Sides, *, ids: list[str] | 
 
     def answers(rows: list[_Sent]) -> bool:
         return any(
-            when >= r.at - _SKEW and (
-                (r.started and r.thread_id and r.thread_id in found)
-                or (
-                    r.subject and r.subject == key and bool(r.recipients & on_it)
-                    and (when <= r.at + _SKEW or (r.started and r.recent and reply))
-                )
-            )
+            when >= r.at - _SKEW
+            and r.subject and r.subject == key and bool(r.recipients & on_it)
+            and (when <= r.at + _SKEW or (r.started and r.recent and reply))
             for r in rows
         )
 

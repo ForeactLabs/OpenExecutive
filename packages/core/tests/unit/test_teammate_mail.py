@@ -632,6 +632,16 @@ def _now() -> str:
     return format_datetime(datetime.now(UTC))
 
 
+def test_an_undated_reply_in_a_thread_the_send_started_is_left_out(roster: SimpleNamespace) -> None:
+    # The second entry is a reply in the thread Ben's send started (t2).
+    _send_for(roster.ben, mid="t2")
+    with _reader(roster.owner):
+        out = _run(FakeMailbox({SEARCH: _listing(VENDOR, DANA)}), SEARCH, query="q")
+    assert "Subject 1" in out and "Subject 2" not in out
+    with _reader(roster.ben):
+        assert "Subject 2" in _run(FakeMailbox({SEARCH: _listing(VENDOR, DANA)}), SEARCH, query="q")
+
+
 def test_a_new_message_with_the_same_subject_is_no_reply(roster: SimpleNamespace) -> None:
     _send_for(roster.ben, mid="s1", subject="Invoice")
     roster.session.mail_ids_seen.update({f"{roster.owner}:r6", f"{roster.owner}:r7"})
