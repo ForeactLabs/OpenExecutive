@@ -863,3 +863,34 @@ def test_stop_never_cuts_off_the_save_of_a_hand_back(
     finally:
         card_work._RUNNING.discard(card.id)
         card_work._TASK.pop(card.id, None)
+
+
+def test_words_on_a_working_card_that_would_go_on_its_own_take_it_back(
+    db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mailbox, card = _card(owner)
+    held: list[str | None] = []
+    real = ledger.get_decision_instance
+
+    def read(card_id: int, *a: Any, **k: Any) -> Any:
+        row = real(card_id, *a, **k)
+        return row.model_copy(update={"gate_mode": "auto_execute"}) if row is not None and not held else row
+
+    monkeypatch.setattr(ledger, "get_decision_instance", read)
+    monkeypatch.setattr(inbox, "_hand_back", lambda c, reason: held.append(reason))
+    redirected: list[str] = []
+
+    async def redirect(person: Any, card_id: int, ask: str, **_k: Any) -> bool:
+        redirected.append(ask)
+        return True
+
+    monkeypatch.setattr(card_work, "redirect", redirect)
+    card_work._RUNNING.add(card.id)
+    try:
+        assert asyncio.run(answers.to_work(
+            read(card.id), caller=_card_tests.LOCAL, resolver=owner.id, text="Use only the 2025 rows",
+        ))
+    finally:
+        card_work._RUNNING.discard(card.id)
+    # It waits on the card for them now, and the work takes their words.
+    assert held == ["work_unfinished"] and redirected == ["Use only the 2025 rows"]
