@@ -312,3 +312,26 @@ def test_text_cut_after_a_closed_call_runs_on() -> None:
         FinalMsg([TextBlock("3, driven by renewals.")], "end_turn"),
     ])
     assert text == "Revenue grew 12% in Q3, driven by renewals."
+
+
+def test_the_claim_check_reads_text_cut_after_a_closed_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    read: list[str] = []
+
+    async def _claim(_asked: str, reply: str, _calls: Any) -> None:
+        read.append(reply)
+        return None
+
+    async def _read(*_a: Any, **_k: Any) -> str:
+        return "rows"
+
+    monkeypatch.setattr("openexecutive.orchestrator.executive.claim_check.unbacked_claim", _claim)
+    provider = _ScriptedProvider(
+        [
+            _FinalMsg([_ToolUseBlock("r", "read_sheet", {}), _TextBlock("I've emailed the summary to Dana and")],
+                      "max_tokens"),
+            _FinalMsg([_TextBlock(" filed it.")], "end_turn"),
+        ]
+    )
+    asyncio.run(_run(provider, {"read_sheet": _read}))
+
+    assert read == ["I've emailed the summary to Dana and filed it."]

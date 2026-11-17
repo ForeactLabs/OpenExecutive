@@ -4189,6 +4189,11 @@ class Executive:
             if cut_off and last_written is not None and last_written.get("type") == "text":
                 tool_results.append({"type": "text", "text": CUT_OFF_NOTE})
                 run_on = True
+                # The claim check reads the cut text with the round that ends it.
+                last_call = max(n for n, blk in enumerate(response_content) if blk.get("type") == "tool_use")
+                cut_text = "".join(
+                    str(blk.get("text", "")) for blk in response_content[last_call + 1:] if blk.get("type") == "text"
+                )
             # Messages the person sent since the last round ride in this
             # round's user message, after the tool results (which must come
             # first). Only this loop's own, newest message changes, so the
