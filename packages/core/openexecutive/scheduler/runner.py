@@ -1972,6 +1972,7 @@ def seed_principal_briefs() -> int:
 _RECURRING_SEEDS: tuple[tuple[str, str | None, str, str], ...] = (
     ("principal briefs", None, "openexecutive.scheduler.runner", "seed_principal_briefs"),
     ("department check-ins", None, "openexecutive.departments.cadence", "bootstrap_cadences"),
+    ("workflow cadences", None, "openexecutive.workflows.dynamic_cadence", "seed_workflow_cadences"),
     ("client rotation", None, "openexecutive.clients.rotation", "seed_client_rotation"),
     ("nudge scan", "nudge_scan_enabled", "openexecutive.scheduler.nudge_engine", "bootstrap_nudge_scan"),
     ("external monitor", "external_monitor_enabled", "openexecutive.monitoring.pipeline",
@@ -1991,10 +1992,11 @@ _RECURRING_SEEDS: tuple[tuple[str, str | None, str, str], ...] = (
 def seed_recurring_jobs() -> None:
     """Enqueue every recurring job the system runs on its own, each only if
     none of its kind is pending: the principal's briefs and reflection,
-    department check-ins, nudges, monitoring and research, the alert review,
-    document syncs and client rotation (each when it is on). The one place that
-    knows them (``_RECURRING_SEEDS``): the scheduler calls it at start and a
-    reset calls it after emptying the queue. Never raises; a seed that fails,
+    department check-ins, workflow cadences, nudges, monitoring and research,
+    the alert review, document syncs and client rotation (each when it is
+    on). The one place that knows them (``_RECURRING_SEEDS``): the
+    scheduler calls it at start and a reset calls it after emptying the
+    queue. Never raises; a seed that fails,
     in its import too, is logged and the rest still run."""
     import importlib
 
