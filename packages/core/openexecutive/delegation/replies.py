@@ -79,6 +79,11 @@ class ReplyCard:
     work_now: str = ""
     # The files the reply carries, by name (delegation.card_work).
     files: list[str] = field(default_factory=list)
+    # Who it goes from (delegation.send_from): the Executive, from its own
+    # mailbox with the person on cc, or the person (False).
+    from_executive: bool = False
+    # The Executive's name, for the card's From choice.
+    executive_name: str = ""
 
 
 def _strings(value: Any) -> list[str]:
@@ -87,7 +92,7 @@ def _strings(value: Any) -> list[str]:
 
 def cards(person: Any) -> list[ReplyCard]:
     """``person``'s open reply cards, newest first."""
-    from openexecutive.delegation import card_work, training
+    from openexecutive.delegation import card_work, send_from, training
     from openexecutive.delegation.answers import conversation, questions_for
     from openexecutive.delegation.card_drafts import QUESTIONS_SETTLED, version
     from openexecutive.delegation.gmail import credential_provider, mailbox_link
@@ -148,6 +153,8 @@ def cards(person: Any) -> list[ReplyCard]:
                 str(f.get("name") or "") for f in payload.get(card_work.FILES_KEY) or []
                 if isinstance(f, dict) and f.get("name")
             ],
+            from_executive=send_from.is_from_executive(payload),
+            executive_name=send_from.executive_name(),
         ))
     return out
 
