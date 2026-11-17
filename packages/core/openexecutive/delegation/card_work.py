@@ -109,6 +109,9 @@ _QUEUED: dict[int, tuple[Any, Any, str]] = {}
 # the person stopped meanwhile: that redirect then starts nothing.
 _WAITING: set[int] = set()
 _HALTED: set[int] = set()
+# Cards stopped while the run that handed back was still saving: that save
+# finishes, and the reply then waits for the person instead of going.
+_HOLD: set[int] = set()
 CHANGED = "changed"
 NEWER = "newer"  # a run ended because a newer email joined the card
 
@@ -376,7 +379,11 @@ def stop(card_id: int) -> bool:
             _HALTED.add(card_id)
         _NEXT.discard(card_id)
     task = _TASK.get(card_id)
-    stopping = not (task is None or task.done() or card_id not in _RUNNING or card_id in _HANDED)
+    if card_id in _HANDED and card_id in _RUNNING:
+        # Its save isn't cut off; what it saved waits for them (``_after``).
+        _HOLD.add(card_id)
+        return True
+    stopping = not (task is None or task.done() or card_id not in _RUNNING)
     if halted or stopping:
         # Whatever happens next, the reply waits for them: it never goes
         # on its own after they pressed Stop.
@@ -607,8 +614,10 @@ def _close(card_id: int) -> None:
     (their Stop, their new words, a newer email) or stuck, and one that
     would have gone on its own waits for them instead, since what the email
     asked wasn't done."""
+    held = card_id in _HOLD
     _RUNNING.discard(card_id)
     _HANDED.discard(card_id)
+    _HOLD.discard(card_id)
     _STARTED.pop(card_id, None)
     _TASK.pop(card_id, None)
     ending = _ENDING.pop(card_id, "")
@@ -622,7 +631,7 @@ def _close(card_id: int) -> None:
             **_end_turn(p, state=STUCK, text="I stopped before finishing.", choices=[TRY_AGAIN]),
             WORK_KEY: "",
         })
-    if ended is not None and ending != NEWER:
+    if held or (ended is not None and ending != NEWER):
         # A run ended for a newer email leaves the card as it was: the new
         # run's own ending decides whether the reply goes on its own.
         _hand_back_unfinished(card_id)
@@ -770,6 +779,9 @@ async def _after(person: Any, card_id: int, *, gmail: Any) -> None:
     try:
         card = get_decision_instance(card_id)
         if card is None or card.status != STATUS_PROPOSED or getattr(card, "gate_mode", "") != "auto_execute":
+            return
+        if card_id in _HOLD:
+            _hand_back(card, "work_unfinished")  # they pressed Stop
             return
         if card_id in _NEXT:
             return  # a new run is about to start on it

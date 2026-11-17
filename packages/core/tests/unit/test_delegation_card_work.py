@@ -489,6 +489,7 @@ def _no_running() -> Any:
     card_work._QUEUED.clear()
     card_work._WAITING.clear()
     card_work._HALTED.clear()
+    card_work._HOLD.clear()
     yield
     card_work._RUNNING.clear()
     card_work._HANDED.clear()
@@ -496,6 +497,7 @@ def _no_running() -> Any:
     card_work._QUEUED.clear()
     card_work._WAITING.clear()
     card_work._HALTED.clear()
+    card_work._HOLD.clear()
 
 
 _ = (db, models, owner, local_login, NOW, timedelta)
@@ -849,7 +851,8 @@ def test_stop_never_cuts_off_a_run_that_already_handed_back(db: Path, owner: Any
         card_work._TASK[card.id] = asyncio.create_task(run())
         assert card_work._set_work(card.id, card_work.WORKING)
         await card_work.apply(card.id, owner, body="", note="Done.", files=[], gmail=mailbox)
-        # It handed back and is settling (a send on its own): Stop leaves it be.
+        # It handed back and is settling: Stop doesn't cut it off (the reply
+        # waits for them instead of going on its own).
         stopped = card_work.stop(card.id)
         cancelled = card_work._TASK[card.id].cancelled()
         settling.set()
@@ -858,7 +861,7 @@ def test_stop_never_cuts_off_a_run_that_already_handed_back(db: Path, owner: Any
         return stopped, cancelled
 
     try:
-        assert asyncio.run(go()) == (False, False)
+        assert asyncio.run(go()) == (True, False)
     finally:
         card_work._RUNNING.discard(card.id)
     assert card.id not in card_work._HANDED
@@ -891,7 +894,7 @@ def test_stop_never_cuts_off_the_save_of_a_hand_back(
         return stopped
 
     try:
-        assert asyncio.run(go()) is False
+        assert asyncio.run(go()) is True  # held for them, the save not cut off
     finally:
         card_work._RUNNING.discard(card.id)
         card_work._TASK.pop(card.id, None)
@@ -1246,3 +1249,32 @@ def test_a_join_that_fails_after_it_lands_warns_on_the_card(
     _scan(owner, mailbox)
     assert card_work.threads(inbox.card_payload(_fresh(card))) == ["t1", "t2"]
     assert ("m1", "thread_moved_on") in flags
+
+
+def test_stop_during_a_hand_back_save_keeps_the_reply_for_them(
+    db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.delegation import handle_it
+
+    mailbox, card = _card(owner)
+    held: list[str | None] = []
+    sent: list[int] = []
+
+    async def send(*_a: Any, **_k: Any) -> None:
+        sent.append(card.id)
+
+    monkeypatch.setattr(inbox, "_hand_back", lambda c, reason: held.append(reason))
+    monkeypatch.setattr(inbox, "_send_on_its_own", send)
+    monkeypatch.setattr(handle_it, "content_hold", lambda *a, **k: None)
+    monkeypatch.setattr(ledger, "get_decision_instance", _with_gate(ledger.get_decision_instance))
+    card_work._RUNNING.add(card.id)
+    try:
+        assert card_work._set_work(card.id, card_work.WORKING)
+        card_work._HANDED.add(card.id)  # apply has handed back, its save is going
+        assert card_work.stop(card.id)
+        card_work._HANDED.discard(card.id)
+        asyncio.run(card_work.apply(card.id, owner, body="The figure is 14k.", note="Done.", files=[], gmail=mailbox))
+        asyncio.run(card_work.finished(owner, card.id, gmail=mailbox))
+    finally:
+        card_work._close(card.id)
+    assert sent == [] and held and held[0] == "work_unfinished"
