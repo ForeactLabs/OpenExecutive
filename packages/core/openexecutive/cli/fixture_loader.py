@@ -628,9 +628,6 @@ async def unload_fixture(settings: Any) -> dict[str, Any]:
         # Unload is also the "exit client mode" path: if a client slot is
         # active (no fixture in play), save its live state back to the slot
         # before the backup restore replaces it.
-        from openexecutive.clients.slots import get_active_client
-
-        client_was_active = get_active_client(settings) is not None
         try:
             from openexecutive.clients.slots import park_active_client
 
@@ -644,16 +641,14 @@ async def unload_fixture(settings: Any) -> dict[str, Any]:
             # The whole saved database goes back over what the files above
             # seeded, so every table is the user's again, not only the ones
             # a fixture has. Same restore as a client switch.
-            # What isn't the company's stays as it is now: the instance-level
-            # rows a reset keeps. Leaving a fixture also keeps the workflows
-            # and the audit trail, which a fixture never swaps. Leaving a
-            # client doesn't: those were the client's and are in its slot.
-            from openexecutive.clients.slots import _BLANK_KEEPS, restore_company_db
+            # Only what isn't any company's stays as it is now: the
+            # instance-level rows a reset keeps. Everything else, workflows
+            # and the audit trail included, is the company's: what was done
+            # while a demo or a client was live went with that demo or into
+            # that client's slot, the same as a reset or a switch treats it.
+            from openexecutive.clients.slots import restore_company_db
 
-            carry = set(RESET_KEEPS)
-            if not client_was_active:
-                carry |= set(_BLANK_KEEPS) | {"audit_log"}
-            restore_company_db(backup / "state.db", carry=carry)
+            restore_company_db(backup / "state.db", carry=RESET_KEEPS)
             forget_company_caches()
             summary["database_restored"] = True
         if summary_client is not None:
