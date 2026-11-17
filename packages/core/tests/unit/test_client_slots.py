@@ -727,6 +727,7 @@ async def test_blank_switch_then_unload_brings_every_table_back(
         conn.execute("CREATE TABLE brand_new_feature (note TEXT)")
         conn.execute("INSERT INTO brand_new_feature VALUES ('mine')")
         conn.execute("CREATE TABLE IF NOT EXISTS eval_scenarios (note TEXT)")
+        conn.execute("INSERT INTO departments_meta (key, value) VALUES ('mine_only', 'x')")
         conn.execute("CREATE TABLE IF NOT EXISTS audit_log (note TEXT)")
         conn.execute("INSERT INTO audit_log VALUES ('mine')")
         conn.execute("CREATE TABLE IF NOT EXISTS dynamic_workflows (name TEXT)")
@@ -739,6 +740,10 @@ async def test_blank_switch_then_unload_brings_every_table_back(
         conn.execute("INSERT INTO eval_scenarios VALUES ('written meanwhile')")
         # The client's own: they stay in its slot, not in your company.
         conn.execute("INSERT INTO audit_log VALUES ('beta')")
+        # A one-time marker describes the data saved with it, so the saved
+        # copy's own comes back, not whatever is live at unload.
+        conn.execute("INSERT OR REPLACE INTO departments_meta (key, value) VALUES ('mine_only', 'x')")
+        conn.execute("DELETE FROM departments_meta WHERE key = 'mine_only'")
         conn.execute("INSERT INTO dynamic_workflows VALUES ('beta')")
 
     summary = await fixture_loader.unload_fixture(env.settings)
@@ -754,6 +759,9 @@ async def test_blank_switch_then_unload_brings_every_table_back(
         assert conn.execute("SELECT note FROM eval_scenarios").fetchall() == [("written meanwhile",)]
         assert conn.execute("SELECT note FROM audit_log").fetchall() == [("mine",)]
         assert conn.execute("SELECT name FROM dynamic_workflows").fetchall() == [("mine",)]
+        assert conn.execute(
+            "SELECT value FROM departments_meta WHERE key = 'mine_only'"
+        ).fetchall() == [("x",)]
 
 
 async def test_every_first_activation_saves_your_company_again(

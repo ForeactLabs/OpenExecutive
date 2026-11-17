@@ -637,13 +637,14 @@ async def unload_fixture(settings: Any) -> dict[str, Any]:
             # seeded, so every table is the user's again, not only the ones
             # a fixture has. Same restore as a client switch.
             # Only what isn't any company's stays as it is now: the
-            # instance-level rows a reset keeps. Everything else, workflows
-            # and the audit trail included, is the company's: what was done
-            # while a demo or a client was live went with that demo or into
-            # that client's slot, the same as a reset or a switch treats it.
+            # operator-level rows a client switch carries, plus the eval
+            # scenarios people wrote. Everything else is the company's:
+            # workflows and the audit trail done while a demo or a client was
+            # live went with it, and the one-time migration markers stay the
+            # saved copy's own, since they describe the data saved with them.
             from openexecutive.clients.slots import restore_company_db
 
-            restore_company_db(backup / "state.db", carry=RESET_KEEPS)
+            restore_company_db(backup / "state.db", carry=("eval_scenarios",))
             # Used up: the live data is the user's again and moves on from
             # here, so a repeated unload must never roll it back to this copy.
             # The next load or switch takes a fresh one.
