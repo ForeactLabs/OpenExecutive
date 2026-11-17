@@ -198,8 +198,8 @@ function NewsExtras({ turn, subject }: { turn: ReplyTurn; subject: string }) {
       )}
       {files.length > 0 && (
         <ul className="mt-1 flex flex-wrap gap-1.5" aria-label="Files">
-          {files.map((name) => (
-            <li key={name} className="rounded-lg border border-line-strong bg-surface px-2 py-0.5 text-[13px] text-fg">
+          {files.map((name, i) => (
+            <li key={`${i}-${name}`} className="rounded-lg border border-line-strong bg-surface px-2 py-0.5 text-[13px] text-fg">
               {name}
             </li>
           ))}
@@ -795,9 +795,9 @@ export function ReplyCardItem({
             </p>
             {(card.files ?? []).length > 0 && (
               <ul className="mt-2 flex flex-wrap gap-2" aria-label="Attached">
-                {(card.files ?? []).map((name) => (
+                {(card.files ?? []).map((name, i) => (
                   <li
-                    key={name}
+                    key={`${i}-${name}`}
                     className="max-w-full truncate rounded-lg border border-line-strong bg-surface-overlay px-2.5 py-1 text-[13px] text-fg"
                   >
                     {name}
