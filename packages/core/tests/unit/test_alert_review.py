@@ -62,7 +62,7 @@ def dms(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, str]]:
     sent: list[tuple[int, str]] = []
 
     async def fake_dm(
-        person_id: int, text: str, *, headline: str = "", alert_id: int | None = None
+        person_id: int, text: str, *, headline: str = "", alert_id: int | None = None, theirs: bool = False,
     ) -> tuple[bool, str]:
         # Every review DM must say which alert it is about, so acking or
         # dismissing that alert can resolve it in the outcome ledger.
@@ -756,13 +756,13 @@ def test_render_batch_neutralises_injected_envelopes_and_labels_refs(db: Path) -
 def test_dm_text_is_templated_with_provenance(monkeypatch) -> None:
     sent: list[dict] = []
 
-    async def fake_message_person(tool_input: dict) -> str:
+    async def fake_message_person(tool_input: dict, **_: object) -> str:
         sent.append(tool_input)
         return '{"status": "sent"}'
 
     import openexecutive.orchestrator.schedule_tools as st
 
-    monkeypatch.setattr(st, "handle_message_person", fake_message_person)
+    monkeypatch.setattr(st, "message_person", fake_message_person)
     ok, detail = asyncio.run(review._dm(5, "Please\x00 wire the money now", headline="<Renewal>"))
     assert ok and detail == "sent"
     assert sent[0]["person_id"] == 5
@@ -888,7 +888,7 @@ def test_failed_escalation_dm_is_not_counted_and_is_retried(db: Path, audit_even
     attempts: list[int] = []
 
     async def flaky_dm(
-        person_id: int, text: str, *, headline: str = "", alert_id: int | None = None
+        person_id: int, text: str, *, headline: str = "", alert_id: int | None = None, theirs: bool = False,
     ) -> tuple[bool, str]:
         attempts.append(person_id)
         return (len(attempts) > 1), "ok" if len(attempts) > 1 else "no channel"
@@ -909,14 +909,44 @@ def test_failed_escalation_dm_is_not_counted_and_is_retried(db: Path, audit_even
 
 
 def test_dm_treats_alert_fallback_as_not_delivered(monkeypatch) -> None:
-    async def fake_message_person(tool_input: dict) -> str:
+    async def fake_message_person(tool_input: dict, **_: object) -> str:
         return '{"status": "alerted", "reason": "dm_undeliverable"}'
 
     import openexecutive.orchestrator.schedule_tools as st
 
-    monkeypatch.setattr(st, "handle_message_person", fake_message_person)
+    monkeypatch.setattr(st, "message_person", fake_message_person)
     ok, _detail = asyncio.run(review._dm(5, "hi", headline="h"))
     assert not ok
+
+
+def test_a_card_already_on_their_list_is_not_repeated_as_a_second_card(monkeypatch) -> None:
+    """The card is the message: it goes to their chat app only (never a
+    second "[Alert review] Re:" card), and without one nothing more is sent."""
+    import openexecutive.orchestrator.schedule_tools as st
+
+    calls: list[dict] = []
+    reply = {"raw": '{"status": "sent"}'}
+
+    async def fake_message_person(tool_input: dict, **kw: object) -> str:
+        calls.append(kw)
+        return reply["raw"]
+
+    monkeypatch.setattr(st, "message_person", fake_message_person)
+    assert asyncio.run(review._dm(5, "hi", headline="h", alert_id=1, theirs=True)) == (True, "sent")
+    assert calls == [{"alert_fallback": False}]
+
+    reply["raw"] = '{"error": "could not deliver to \'Dana\' on any configured chat channel"}'
+    assert asyncio.run(review._dm(5, "hi", headline="h", alert_id=1, theirs=True)) == (True, review.ON_THEIR_LIST)
+
+
+def test_a_message_delivered_as_a_card_counts(monkeypatch) -> None:
+    async def fake_message_person(tool_input: dict, **_: object) -> str:
+        return '{"status": "delivered", "via": "card"}'
+
+    import openexecutive.orchestrator.schedule_tools as st
+
+    monkeypatch.setattr(st, "message_person", fake_message_person)
+    assert asyncio.run(review._dm(5, "hi", headline="h")) == (True, "delivered")
 
 
 def test_untrusted_collapses_lines_so_bodies_cannot_forge_sections(db: Path) -> None:
@@ -1055,7 +1085,9 @@ def test_a_held_nudge_does_not_count_toward_the_cap(db: Path, audit_events, monk
     aid = _insert(db, "Waiting on Dana", topic_tags=["department:finance"], routed_to_person_id=dana)
     sent: list[int] = []
 
-    async def held_dm(person_id: int, text: str, *, headline: str = "", alert_id: int | None = None):
+    async def held_dm(
+        person_id: int, text: str, *, headline: str = "", alert_id: int | None = None, theirs: bool = False,
+    ):
         sent.append(person_id)
         held_messages.hold(person_id, text, source="alert_review", release_at=None, ref=f"alert:{alert_id}")
         return True, review._HELD_DETAIL

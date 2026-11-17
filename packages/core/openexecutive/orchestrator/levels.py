@@ -348,6 +348,9 @@ def only_to_owner(tool_name: str, tool_input: Any) -> bool:
 # could only show the output to someone who never asked for it. Held, the
 # turn is told instead (``not_carriable_error``) and works without it.
 TURN_OWN: frozenset[str] = frozenset({
+    # A card asking to make a card helps no one: the reader would approve
+    # a note to themselves.
+    "create_alert",
     "find_in_app",
     "list_saved_tools",
     "read_document",
@@ -357,12 +360,16 @@ TURN_OWN: frozenset[str] = frozenset({
 
 def carriable(tool: str, *, mcp: bool) -> bool:
     """Whether an Approve tap can carry out ``tool`` exactly: a connected
-    app's call, or a skill the Executive runs. A script, a new server or a
-    step only the turn reads (``TURN_OWN``) is the turn's own and can't wait
-    on a card. An extension's tool marked ``card`` too
-    (``extensions.card_handler``)."""
+    app's call that sends or changes something, or a skill the Executive
+    runs. A script, a new server, a connected app's look-up ("Search gmail
+    messages": its answer is for the turn that asked, which has ended by the
+    time anyone taps) or a step only the turn reads (``TURN_OWN``) is the
+    turn's own and can't wait on a card. An extension's tool marked ``card``
+    too (``extensions.card_handler``)."""
     if mcp:
-        return True
+        from openexecutive.orchestrator import take_the_lead
+
+        return take_the_lead.mcp_tool_acts(tool)
     if tool in TURN_OWN:
         return False
     try:

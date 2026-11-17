@@ -94,6 +94,10 @@ def initialize_db(db_path: Path | None = None) -> None:
             ("needs", "TEXT NOT NULL DEFAULT ''"),
             ("question", "TEXT NOT NULL DEFAULT ''"),
             ("choices", "TEXT NOT NULL DEFAULT '[]'"),
+            # The step Approve does, in a few words for its button ("Send
+            # the reply"). Written with ``suggested_action`` and cleared when
+            # that changes without one, so it never names an older step.
+            ("action_label", "TEXT NOT NULL DEFAULT ''"),
         ):
             if col not in existing:
                 try:
@@ -137,6 +141,17 @@ def initialize_db(db_path: Path | None = None) -> None:
         ensure_replan_schema(conn)
 
 
+# An Approve button's words: a few, on one line.
+ACTION_LABEL_MAX = 40
+
+
+def clean_label(text: str) -> str:
+    """``text`` as a button's words: one line, no end stop, at most
+    ``ACTION_LABEL_MAX`` characters, else "" (the card keeps Approve)."""
+    label = " ".join(str(text or "").split()).rstrip(".!")
+    return label if 0 < len(label) <= ACTION_LABEL_MAX else ""
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -169,6 +184,7 @@ def insert_alert(
     needs: str = "",
     question: str = "",
     choices: list[str] | None = None,
+    action_label: str = "",
     db_path: Path | None = None,
 ) -> int | None:
     """Insert a new alert. Returns alert id, or None if a duplicate was skipped.
@@ -188,8 +204,8 @@ def insert_alert(
                 (external_id, source, severity, headline, body, suggested_action,
                  topic_tags, dedup_key, status, created_at, routed_to_person_id,
                  artifact_format, artifact_url, artifact_link_label, supersedes_id,
-                 owner_person_id, needs, question, choices)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'unread', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 owner_person_id, needs, question, choices, action_label)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'unread', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 external_id,
@@ -210,6 +226,7 @@ def insert_alert(
                 needs,
                 question,
                 json.dumps(choices or []),
+                clean_label(action_label) if suggested_action.strip() else "",
             ),
         )
         if cursor.rowcount == 0:
@@ -616,10 +633,13 @@ def update_alert_content(
     body: str | None = None,
     severity: str | None = None,
     suggested_action: str | None = None,
+    action_label: str | None = None,
     db_path: Path | None = None,
 ) -> bool:
     """Rewrite headline / body / severity / suggested_action in place (a
-    ``changed`` verdict, or a document's why once it found its use)."""
+    ``changed`` verdict, or a document's why once it found its use). A new
+    ``suggested_action`` takes ``action_label`` with it, or clears the old
+    one: a button never names a step the card no longer does."""
     sets: list[str] = []
     params: list[object] = []
     if headline is not None:
@@ -634,6 +654,8 @@ def update_alert_content(
     if suggested_action is not None:
         sets.append("suggested_action = ?")
         params.append(suggested_action)
+        sets.append("action_label = ?")
+        params.append(clean_label(action_label or "") if suggested_action.strip() else "")
     if not sets or not _resolve_db_path(db_path).exists():
         return False
     params.append(alert_id)

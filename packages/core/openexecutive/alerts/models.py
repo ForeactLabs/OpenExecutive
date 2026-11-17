@@ -193,6 +193,8 @@ class TriageDecision(BaseModel):
     headline: str = ""
     body: str = ""
     suggested_action: str = ""
+    # The step in ``suggested_action`` in a few words, for its button.
+    action_label: str = ""
     topic_tags: list[str] = Field(default_factory=list)
     dedup_key: str = ""
     reason_if_suppressed: str = ""
@@ -273,6 +275,9 @@ class Alert(BaseModel):
     needs: str = ""
     question: str = ""
     choices: list[str] = Field(default_factory=list)
+    # The step Approve does, in a few words for its button ("Send the
+    # reply"); "" keeps Approve (alerts.store.clean_label).
+    action_label: str = ""
 
 
 class UserPreferences(BaseModel):

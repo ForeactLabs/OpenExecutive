@@ -141,6 +141,15 @@ def test_a_step_that_cant_be_carried_out_is_told_not_dropped() -> None:
         assert tool in levels.TURN_OWN and not levels.carriable(tool, mcp=False)
 
 
+def test_a_look_up_or_a_card_is_never_put_on_a_card() -> None:
+    # Its answer is for the turn that asked, gone by the time anyone taps.
+    assert not levels.carriable("google_workspace__search_gmail_messages", mcp=True)
+    assert not levels.carriable("google_workspace__get_drive_file_content", mcp=True)
+    assert levels.carriable("google_workspace__update_drive_file", mcp=True)
+    # Approving a card that makes a card would only make a note to oneself.
+    assert not levels.carriable("create_alert", mcp=False)
+
+
 def test_hold_returns_the_card_and_the_chip_carries_it(monkeypatch: pytest.MonkeyPatch) -> None:
     from openexecutive.orchestrator import department_gate
 

@@ -145,7 +145,7 @@ export default function ProposalCard({
   const planTitle = local?.title ?? view?.plan_title ?? "";
   const description = view?.description ?? "";
   const clamp = Boolean(view?.long) && !expanded && !defaultBodyExpanded;
-  const suggestedActionBlock = plan ? (
+  const suggestedActionBlock = plan && planTitle ? (
     <div
       className={`rounded-xl border px-3.5 py-2.5 ${
         planChanged ? "border-accent/70 bg-accent/10" : "border-accent/30 bg-accent/5"
@@ -226,7 +226,11 @@ export default function ProposalCard({
     switch (b.action) {
       case "approve":
         // The plan as this card shows it, which the server checks.
-        return onApprove ? [{ label: b.label, onSelect: () => onApprove({ ...proposal, suggested_action: plan }) }] : [];
+        // A reply (or Undo) changed the step here: the button's words were for the old
+        // one (the server drops them too), and the box shows the new step.
+        return onApprove
+          ? [{ label: local ? "Approve" : b.label, onSelect: () => onApprove({ ...proposal, suggested_action: plan }) }]
+          : [];
       case "edit_approve":
         return onApproveWithEdits ? [{ label: b.label, onSelect: startEditing }] : [];
       case "dismiss":

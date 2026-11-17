@@ -6,7 +6,9 @@ the whole Launch folder") and says so in a line on the card. One fast model
 call turns that line, the card and its current plan into:
 
 - the card's new plan, which replaces ``suggested_action`` on the card, so
-  Approve then does exactly that (``api/routes/alerts.approve_alert``);
+  Approve then does exactly that (``api/routes/alerts.approve_alert``).
+  It drops the button's words for the old plan (``action_label``), so the
+  card shows the new plan in full, as Undo change does the old one;
 - a short reply in the Executive's voice saying what changed.
 
 Each change is kept in ``alert_plan_changes`` with the plan it replaced, so
@@ -155,7 +157,7 @@ def apply_change(
         if last is not None and last["status"] != STATUS_FAILED:
             return None
         cursor = conn.execute(
-            "UPDATE alerts SET suggested_action = ? "
+            "UPDATE alerts SET suggested_action = ?, action_label = '' "
             "WHERE id = ? AND status IN ('unread', 'read') AND COALESCE(suggested_action, '') = ?",
             (plan, alert_id, expected),
         )
@@ -229,7 +231,7 @@ def undo_last(alert_id: int, *, db_path: Path | None = None) -> PlanChange | Non
             return None
         change = PlanChange(**dict(row))
         cursor = conn.execute(
-            "UPDATE alerts SET suggested_action = ? "
+            "UPDATE alerts SET suggested_action = ?, action_label = '' "
             "WHERE id = ? AND status IN ('unread', 'read') AND COALESCE(suggested_action, '') = ?",
             (change.previous_plan, alert_id, change.plan),
         )

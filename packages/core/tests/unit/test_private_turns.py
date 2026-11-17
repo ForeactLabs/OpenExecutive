@@ -1654,8 +1654,14 @@ def test_a_private_turn_runs_reads_and_mail_to_the_owner_and_cards_the_rest(
         "google_workspace__send_gmail_message",
     ]
     assert called[1][1]["to"] == OWNER_EMAIL
-    # Everything that reaches someone else waits on an Approve card.
+    # Everything that reaches someone else waits on an Approve card; a
+    # fetch, whose page only the turn would read, is not run and the turn is
+    # told (a card approved after the turn ended would show it to no one).
+    fetch = 2 + [tool for tool, _ in _REFUSED_CALLS].index("fetch__fetch")
     for i in [*range(2, n), n + 2]:
+        if i == fetch:
+            assert "can't wait on a card" in json.loads(results[f"tu-{i}"])["error"]
+            continue
         assert _held(results[f"tu-{i}"]), results[f"tu-{i}"]
     assert all(e.private for e in _audit().query(limit=1000))
 

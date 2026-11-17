@@ -112,7 +112,9 @@ class CardView(BaseModel):
     # The text under the title, and whether it folds while the card is closed.
     description: str = ""
     long: bool = False
-    # What Approve does, and the box under it that changes it.
+    # What Approve does (``plan``, sent back with an Approve tap) and its
+    # heading; the box shows only when ``plan_title`` is set: not when the
+    # card's own text already says the step its button names.
     plan_title: str = ""
     plan: str = ""
     plan_reply: bool = False
@@ -226,6 +228,13 @@ def plan_title(changed: bool, changed_by: str | None = None) -> str:
     return f"If you approve · Updated by {changed_by}" if changed_by else "If you approve · Updated"
 
 
+def _said_on_card(plan: str, item: Any) -> bool:
+    """Whether the card's title or text already says ``plan`` in full."""
+    words = " ".join(plan.split()).casefold()
+    shown = " ".join(f"{item.headline or ''} {item.body or ''}".split()).casefold()
+    return bool(words) and words in shown
+
+
 def _description(item: Any, artifact: bool, monitoring: bool) -> str:
     if artifact:
         return (item.suggested_action or "").strip()
@@ -308,9 +317,16 @@ def card_view(
     failed_run = item.failed_run_id or ""
     needs = item.needs or ""
     asks = needs in ("answer", "choice")
-    no_approve = asks or needs == "fyi" or (signal and needs != "ok")
-    got_it = needs == "fyi" or (signal and not needs)
     handed_over = BROWSER_HANDOVER_TAG in tags
+    # No step to do is nothing to approve. Approve does the card's step
+    # (``suggested_action``); a card without one is for them to know, unless
+    # it asks, nudges, suggests a workflow or keeps its own buttons.
+    stepless = not (item.suggested_action or "").strip() and not asks and not (
+        artifact or monitoring or failed_run or handed_over or decision
+        or item.recommended_move in ("nudge", "suggest_workflow")
+    )
+    no_approve = asks or needs == "fyi" or (signal and needs != "ok") or stepless
+    got_it = needs == "fyi" or (signal and not needs) or stepless
     first = assignee_name.split(" ")[0] if assignee_name else ""
 
     def button(action: Action, label: str, **kw: Any) -> CardButton:
@@ -340,8 +356,11 @@ def card_view(
     open_run = (
         button("open", "Open the run", href=f"/jobs/runs/{quote(failed_run, safe='')}") if failed_run else None
     )
+    # The button names the step ("Reply to Dana") when the card has its
+    # words (``action_label``), else Approve.
+    label = (getattr(item, "action_label", "") or "").strip()
     approve = (
-        button("approve", "Done" if handed_over else "Approve")
+        button("approve", "Done" if handed_over else label or "Approve")
         if not no_approve and not monitoring and not artifact and not failed_run
         else None
     )
@@ -393,6 +412,8 @@ def card_view(
     # Executive is the one who'd do it).
     if artifact:
         need = ARTIFACT_BADGE.get(item.artifact_format or "", "Document")
+    elif stepless:
+        need = NEEDS_CHIP["fyi"]
     elif needs in NEEDS_CHIP:
         need = NEEDS_CHIP[needs]
     elif failed_run:
@@ -411,7 +432,16 @@ def card_view(
 
     kind = _kind(item, artifact, failed_run, asks, decision)
     plan = item.suggested_action or ""
-    show_plan = bool(plan) and not monitoring and not artifact
+    # What Approve does shows only on a card with Approve, and always in
+    # full unless the card already says it word for word: the button's few
+    # words ("Reply to Dana") never stand in for the step it carries out
+    # (who it copies, what it attaches). A browser hand-over's step is the
+    # Executive's own note. ``plan`` stays whenever there is Approve: it is
+    # what an Approve tap carries out.
+    show_plan = (
+        bool(plan) and approve is not None and not handed_over
+        and (not label or bool(item.plan_changed_by) or not _said_on_card(plan, item))
+    )
     review, chips, reviewed = _lifecycle(item, now)
     description = _description(item, artifact, monitoring)
     return CardView(
@@ -424,8 +454,11 @@ def card_view(
         status=None if monitoring else status_chip(item, now),
         description=description,
         long=len(description) > LONG_BODY_CHARS,
-        plan_title=plan_title(bool(item.plan_changed), item.plan_changed_by) if show_plan else "",
-        plan=plan if show_plan else "",
+        plan_title=(
+            ("What it does" if label and not item.plan_changed else plan_title(bool(item.plan_changed), item.plan_changed_by))
+            if show_plan else ""
+        ),
+        plan=plan if approve is not None else "",
         plan_reply=approve is not None and bool(item.plan_editable) and not decision and not handed_over,
         steer=bool(item.watch_slug) and not asks,
         waiting_because=item.waiting_because if approve is not None else "",

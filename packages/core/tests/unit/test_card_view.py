@@ -224,6 +224,8 @@ EXAMPLES_PATH = Path(__file__).resolve().parents[1] / "fixtures" / "card_views.j
 
 EXAMPLES: dict[str, dict[str, Any]] = {
     "proposal": {},
+    "labelled": {"action_label": "Email Dana"},
+    "stepless": {"suggested_action": ""},
     "routed": {"routed_to_person_id": 4, "assignee_name": "Sam Okafor"},
     "nudge": {"recommended_move": "nudge", "routed_to_person_id": 4, "assignee_name": "Sam Okafor"},
     "stale": {"review_verdict": "likely_stale"},
@@ -260,3 +262,44 @@ def test_the_example_cards_are_up_to_date() -> None:
     if os.environ.get("UPDATE_CARD_EXAMPLES"):
         EXAMPLES_PATH.write_text(want)
     assert EXAMPLES_PATH.read_text() == want, "Run UPDATE_CARD_EXAMPLES=1 pytest tests/unit/test_card_view.py"
+
+
+def test_the_button_names_the_step_and_the_step_shows_once() -> None:
+    """A card whose step has its words: the button says them. The step
+    itself still shows in full, unless the card already says it."""
+    v = view(action_label="Email Dana")
+    assert shown(v)[0] == ("primary", "approve", "Email Dana")
+    assert (v.plan_title, v.plan) == ("What it does", "Email Dana to renew for a year.")
+    assert v.plan_reply is True
+    # Said word for word in the card's text: not repeated in a box.
+    v = view(action_label="Email Dana", body="Renewal is due. Email Dana to renew for a year.")
+    assert (v.plan_title, v.plan) == ("", "Email Dana to renew for a year.")
+
+
+def test_a_short_button_never_hides_what_the_step_does() -> None:
+    """The label is a few words; what runs (who it copies, what it sends)
+    is always on the card."""
+    plan = "Reply to Dana confirming the date, attach the Q3 deck and cc ir@other.example"
+    v = view(action_label="Reply to Dana", suggested_action=plan)
+    assert v.plan_title == "What it does" and v.plan == plan
+
+
+def test_someone_elses_change_still_shows_what_approve_does() -> None:
+    v = view(action_label="Email Dana", plan_changed=True, plan_changed_by="Sam Rivera")
+    assert v.plan_title == "If you approve · Updated by Sam Rivera"
+
+
+def test_no_step_is_nothing_to_approve() -> None:
+    """A card with no step to do is for the reader to know: Got it, no box."""
+    v = view(suggested_action="")
+    assert v.need == "For you to know"
+    assert shown(v)[0] == ("primary", "dismiss", "Got it")
+    assert all(b.action != "approve" for b in v.buttons)
+    v = view(suggested_action="", needs="ok")
+    assert v.need == "For you to know"
+
+
+def test_a_card_without_approve_has_no_plan_box() -> None:
+    for kw in ({"needs": "fyi"}, {"needs": "answer", "question": "Which one?"}):
+        v = view(**kw)
+        assert (v.plan_title, v.plan) == ("", "")

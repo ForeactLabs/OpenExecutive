@@ -70,7 +70,16 @@ TRIAGE_TOOL: dict[str, Any] = {
                 "type": "string",
                 "description": (
                     "The single concrete action the Executive will take on approval "
-                    "(first-person imperative, <= 1 sentence). Empty string if none."
+                    "(first-person imperative, <= 1 sentence). Empty string if none: "
+                    "a card with nothing to approve is for the reader to know, or asks them."
+                ),
+            },
+            "action_label": {
+                "type": "string",
+                "description": (
+                    "The Approve button's words: suggested_action in 2-5 words, a verb "
+                    "first, naming who or what (\"Reply to Dana\", \"Book the Leo call\", "
+                    "\"Check Stripe's pricing\"). Empty when suggested_action is empty."
                 ),
             },
             "topic_tags": {
@@ -314,6 +323,7 @@ def _parse_decision(raw: dict) -> TriageDecision:
             headline=(raw.get("headline") or "")[:200],
             body=(raw.get("body") or "")[:2000],
             suggested_action=(raw.get("suggested_action") or "")[:500],
+            action_label=str(raw.get("action_label") or "")[:80],
             topic_tags=topic_tags[:8],
             dedup_key=(raw.get("dedup_key") or "")[:120],
             reason_if_suppressed=(raw.get("reason_if_suppressed") or "")[:200],

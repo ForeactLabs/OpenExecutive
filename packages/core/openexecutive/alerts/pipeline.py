@@ -133,8 +133,10 @@ def _ground_decision(
     )
     if not changed:
         return decision
+    # A step the check rewrote no longer matches its button's words.
+    label = decision.action_label if action == decision.suggested_action else ""
     return decision.model_copy(
-        update={"headline": headline, "body": body, "suggested_action": action}
+        update={"headline": headline, "body": body, "suggested_action": action, "action_label": label}
     )
 
 
@@ -403,6 +405,7 @@ def _insert(
         headline=decision.headline or (event.subject or event.title or event.source),
         body=decision.body,
         suggested_action=decision.suggested_action,
+        action_label=decision.action_label,
         # Only an extension's own code files a document in its collection
         # (orchestrator/extensions.py): a triaged alert never claims one.
         topic_tags=[t for t in topic_tags if not t.startswith("collection:")],

@@ -2148,6 +2148,8 @@ def hold(
     # A teammate's own ask: the card says they asked (web and phone show
     # "<name> asked"), not that the Executive wants to.
     asker = _teammate_asking() if source == "chat" else None
+    # The card is the asker's own: it doesn't repeat their name to them.
+    own = asker is not None and asker.id == approver
     private = _is_principal(approver)
     # What it would say quotes the Executive's context: on a card that sits
     # on the team's Today only the plain line shows; the approver reads the
@@ -2188,13 +2190,19 @@ def hold(
                 source=DECISION_ALERT_SOURCE,
                 external_id=external_id,
                 severity="medium",
+                # What it does, said once ("Email Leo Park"): the card's chip
+                # already says it needs an OK. Who asked only when it isn't
+                # the reader.
                 headline=(
-                    f"{asker.full_name} asked: {payload['headline']}" if asker is not None
-                    else f"The Executive wants to: {shown}"
+                    f"{asker.full_name} asked: {payload['headline']}" if asker is not None and not own
+                    else payload["headline"] or shown
                 )[:160],
                 body=f"{shown}\n\nIt waited because {hit.reason}."
                 + (f" Tick Do this on its own next time to let it do this from now on: {grant[1]}." if grant is not None else ""),
                 suggested_action=shown,
+                # The button names the step ("Email Leo Park"); a long one
+                # keeps Approve.
+                action_label=payload["headline"],
                 topic_tags=[
                     decision_instance_tag(decision_id),
                     f"decision_class:{DECISION_CLASS}",

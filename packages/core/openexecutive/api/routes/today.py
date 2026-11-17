@@ -196,6 +196,8 @@ class ProposalItem(BaseModel):
     body: str
     routed_to_person_id: int | None
     suggested_action: str
+    # The step Approve does, in a few words for its button (Alert.action_label).
+    action_label: str = ""
     created_at: str
     topic_tags: list[str]
     # Presentation signals (see openexecutive.briefing.ranking). `score` is
@@ -307,6 +309,7 @@ def proposal_item(
         body=_proposal_body(alert),
         routed_to_person_id=alert.routed_to_person_id,
         suggested_action=alert.suggested_action,
+        action_label=alert.action_label,
         created_at=alert.created_at,
         topic_tags=alert.topic_tags or [],
         score=item_score,
