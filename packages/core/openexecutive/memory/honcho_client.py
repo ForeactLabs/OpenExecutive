@@ -1131,8 +1131,8 @@ async def prefetch(
 
     On timeout or any failure we return an empty string so the turn still
     runs with whatever the builtin episodic block provides. Every outcome
-    (ok/empty/timeout/error/disabled/no_person) emits one `peer_memory`
-    audit row; ``empty`` means no block was produced — nothing to ask
+    that reached Honcho (ok/empty/timeout/error) emits one `peer_memory`
+    audit row; disabled/no_person write none. ``empty`` means no block was produced — nothing to ask
     (``reason: no_query``) or nothing known about the person yet.
     """
     t0 = time.monotonic()
@@ -1644,9 +1644,8 @@ async def _do_sync_body(
 # Person.id. Two reasons for the parallel-but-separate API rather than
 # overloading the existing functions with a `department_slug=` kwarg:
 #
-# 1. The disabled/no-owner short-circuits are different — `no_person`
-#    vs `no_department` make audit-grepping for "which scope skipped"
-#    cleanly separable.
+# 1. The disabled/no-owner short-circuits are different: a person turn
+#    needs a Person.id and a department turn needs a slug.
 # 2. Department turns naturally accumulate a *different* co-presence
 #    shape (other dept slugs join the session, not just people), so the
 #    write-path branches anyway. Keeping the functions split keeps each
