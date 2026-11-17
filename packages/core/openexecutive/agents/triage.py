@@ -224,9 +224,11 @@ class TriageAgent(BaseAgent):
         active_initiatives: list[Any] | None = None,
         client: anthropic.AsyncAnthropic | None = None,
     ) -> TriageDecision:
-        """Run triage and return a structured decision. Never raises — on
-        failure, returns a low-severity persisted-only decision so the event
-        still gets recorded."""
+        """Run triage and return a structured decision. Never raises. When
+        review makes no whole decision (the call failed, or its answer was
+        cut off or missing), a card the Executive raised itself is kept as
+        raised, unless a muted topic names it; any other event gets a
+        low-severity persisted-only decision so it is still recorded."""
         # The optional ``client`` parameter is a legacy hook for callers that
         # need to inject a specific Anthropic SDK instance (evals/runner.py
         # and a few unit tests). When unset, we route through the provider
@@ -262,7 +264,7 @@ class TriageAgent(BaseAgent):
                 message = await caller.messages_create(**create_kwargs)  # type: ignore[union-attr]
         except Exception:
             logger.exception("Triage LLM call failed for event %s", event.external_id)
-            return _kept_as_raised(event)
+            return _no_decision(event, mute_patterns or [], "triage_error")
         log_model_usage(message, model=self.effective_model(), actor="triage")
 
         # An answer cut off at max_tokens is a partial decision: its missing
@@ -273,24 +275,44 @@ class TriageAgent(BaseAgent):
                     return _parse_decision(block.input)
 
         logger.warning(
-            "Triage gave no whole decision for event %s; the card is kept as raised",
-            event.external_id,
+            "Triage gave no whole decision for event %s", event.external_id,
         )
-        return _kept_as_raised(event)
+        return _no_decision(event, mute_patterns or [], "no_decision")
 
 
-def _kept_as_raised(event: AlertEvent) -> TriageDecision:
-    """The card as it was raised, when review gave no decision (the model
-    call failed, or its answer was cut off or missing). A review that
-    couldn't run never loses a card: only a decision it made can."""
+def _no_decision(event: AlertEvent, mute_patterns: list[str], why: str) -> TriageDecision:
+    """What stands when review made no decision. A card the Executive chose
+    to raise (``AlertEvent.from_executive``) is kept as raised: a review that
+    couldn't run never loses it, only a decision it made can. A muted topic
+    it names stays muted. Anything else is recorded quietly, as before, so
+    an outage doesn't turn every chat line and newsletter into a card."""
+    headline = (event.subject or event.title or (event.body or "").strip().split("\n", 1)[0] or event.source)[:200]
+    if event.from_executive and not _names_muted_topic(event, mute_patterns):
+        return TriageDecision(
+            alert=True,
+            severity=AlertSeverity.MEDIUM,
+            channels=[AlertChannel.WEB, AlertChannel.PERSISTED],
+            headline=headline,
+            body=(event.body or "")[:2000],
+            dedup_key=f"kept-{event.source}-{event.external_id}",
+        )
     return TriageDecision(
-        alert=True,
-        severity=AlertSeverity.MEDIUM,
-        channels=[AlertChannel.WEB, AlertChannel.PERSISTED],
-        headline=(event.subject or event.title or event.source)[:200],
-        body=(event.body or "")[:2000],
-        dedup_key=f"kept-{event.source}-{event.external_id}",
+        alert=False,
+        severity=AlertSeverity.LOW,
+        channels=[AlertChannel.PERSISTED],
+        headline=headline,
+        body=(event.body or "")[:280],
+        dedup_key=f"{why}-{event.source}-{event.external_id}",
+        reason_if_suppressed=why,
     )
+
+
+def _names_muted_topic(event: AlertEvent, mute_patterns: list[str]) -> bool:
+    """Whether a mute pattern appears in the event's subject or body: with
+    no review there are no topic tags to match, so the words stand in."""
+    text = f"{event.subject}\n{event.title or ''}\n{event.body}".lower()
+    return any(p.strip() and p.strip().lower() in text for p in mute_patterns)
+
 
 def _parse_decision(raw: dict) -> TriageDecision:
     """Tolerantly coerce the tool input into a TriageDecision."""

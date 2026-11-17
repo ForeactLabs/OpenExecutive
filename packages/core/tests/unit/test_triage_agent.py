@@ -99,9 +99,9 @@ def test_triage_returns_parsed_decision_and_passes_context() -> None:
     assert call.kwargs["tools"] == [TRIAGE_TOOL]
 
 
-def test_triage_keeps_the_card_when_no_tool_use() -> None:
-    """If the model replies with text only (or anything non-tool_use), review
-    made no decision, so the card shows as raised: a card is never lost."""
+def test_triage_falls_back_when_no_tool_use() -> None:
+    """If the model replies with text only (or anything non-tool_use), an
+    ordinary event gets a quiet persisted-only fallback rather than a crash."""
     text_block = SimpleNamespace(type="text", text="Just chatting")
     client = SimpleNamespace(
         messages=SimpleNamespace(create=AsyncMock(return_value=SimpleNamespace(content=[text_block])))
@@ -113,34 +113,60 @@ def test_triage_keeps_the_card_when_no_tool_use() -> None:
             client=client,
         )
     )
+    assert decision.alert is False
+    assert decision.channels == [AlertChannel.PERSISTED]
+    assert decision.reason_if_suppressed == "no_decision"
+
+
+def _raised(**kw: object) -> AlertEvent:
+    """A card the Executive raised itself (create_alert)."""
+    return AlertEvent(source="email", external_id="m-4", subject="Leo asks about Friday",
+                      body="Open Friday afternoon?", from_executive=True, **kw)
+
+
+def _client(**reply: object) -> SimpleNamespace:
+    return SimpleNamespace(messages=SimpleNamespace(create=AsyncMock(**reply)))
+
+
+def test_triage_keeps_a_raised_card_when_its_answer_is_cut_off() -> None:
+    """An answer stopped at max_tokens is a partial decision whose missing
+    ``alert`` would read as "no card": a card the Executive raised shows as
+    raised instead."""
+    cut = SimpleNamespace(type="tool_use", name="emit_alert_decision", input={"severity": "medium"})
+    client = _client(return_value=SimpleNamespace(content=[cut], stop_reason="max_tokens"))
+    decision = asyncio.run(TriageAgent().triage(_raised(), client=client))
     assert decision.alert is True
     assert AlertChannel.WEB in decision.channels
-    assert (decision.headline, decision.body) == ("hi", "b")
-    assert decision.reason_if_suppressed == ""
-
-
-def test_triage_keeps_the_card_when_its_answer_is_cut_off() -> None:
-    """An answer stopped at max_tokens is a partial decision whose missing
-    ``alert`` would read as "no card": the card shows as raised instead."""
-    cut = SimpleNamespace(type="tool_use", name="emit_alert_decision", input={"severity": "medium"})
-    client = SimpleNamespace(
-        messages=SimpleNamespace(create=AsyncMock(
-            return_value=SimpleNamespace(content=[cut], stop_reason="max_tokens"),
-        ))
-    )
-    decision = asyncio.run(
-        TriageAgent().triage(
-            AlertEvent(source="email", external_id="m-4", subject="Leo asks about Friday", body="Open Friday?"),
-            client=client,
-        )
-    )
-    assert decision.alert is True
-    assert decision.headline == "Leo asks about Friday"
+    assert (decision.headline, decision.body) == ("Leo asks about Friday", "Open Friday afternoon?")
     assert client.messages.create.call_args.kwargs["max_tokens"] >= 1024
 
 
-def test_triage_keeps_the_card_on_client_exceptions() -> None:
-    """LLM error: the card shows as raised, and the error never propagates."""
+def test_triage_keeps_a_raised_card_when_review_fails() -> None:
+    decision = asyncio.run(TriageAgent().triage(_raised(), client=_client(side_effect=RuntimeError("boom"))))
+    assert decision.alert is True
+
+
+def test_a_failed_review_never_turns_chat_lines_into_cards() -> None:
+    """An outage fails review for every event: a chat line or a polled mail
+    is recorded quietly, not raised (only create_alert's cards are kept)."""
+    for event in (
+        AlertEvent(source="slack", external_id="s-1", body="lunch?"),
+        AlertEvent(source="email", external_id="m-5", subject="Weekly newsletter", body="..."),
+    ):
+        decision = asyncio.run(TriageAgent().triage(event, client=_client(side_effect=RuntimeError("down"))))
+        assert decision.alert is False
+        assert decision.channels == [AlertChannel.PERSISTED]
+
+
+def test_a_muted_topic_stays_muted_when_review_fails() -> None:
+    decision = asyncio.run(TriageAgent().triage(
+        _raised(), mute_patterns=["friday"], client=_client(side_effect=RuntimeError("boom")),
+    ))
+    assert decision.alert is False
+
+
+def test_triage_swallows_client_exceptions() -> None:
+    """LLM error → quiet fallback for an ordinary event, never propagates."""
     client = SimpleNamespace(
         messages=SimpleNamespace(create=AsyncMock(side_effect=RuntimeError("boom")))
     )
@@ -151,8 +177,8 @@ def test_triage_keeps_the_card_on_client_exceptions() -> None:
             client=client,
         )
     )
-    assert decision.alert is True
-    assert decision.headline == "x"
+    assert decision.alert is False
+    assert decision.reason_if_suppressed == "triage_error"
 
 
 def test_parse_decision_coerces_persisted_in_and_caps_lengths() -> None:

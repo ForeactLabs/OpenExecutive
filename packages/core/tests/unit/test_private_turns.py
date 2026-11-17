@@ -189,6 +189,8 @@ def test_a_private_alert_is_audited_privately(
     with _turn(_teammate_web(roster)):
         asyncio.run(handle_create_alert({"subject": "Server down", "body": "..."}))
     assert [e.private for e in events] == [True, False]
+    # Raised by the Executive itself: a review that makes no decision keeps it.
+    assert all(e.from_executive for e in events)
     assert _private_flags() == {"Alert: Jordan asked about pricing": True}
     # The teammate's own turn: its row is theirs.
     owned = _audit().query(owned_by=roster.teammate, only_owned=True)
