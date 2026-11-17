@@ -22,7 +22,6 @@ import {
   type DoneRow,
   type ProposalItem,
   type RightNowRow,
-  type SteerResult,
   type Today,
 } from "@/lib/api";
 import { greeting, homeHeadline, teamOffTrack, waitingOnTeam } from "@/lib/briefingSummary";
@@ -213,25 +212,6 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
   const handleAnswer = useCallback(async (proposal: ProposalItem, answer: string) => {
     await answerAlert(proposal.alert_id, answer);
     setActedAlertIds((prev) => new Set(prev).add(proposal.alert_id));
-    refreshToday();
-  }, [refreshToday]);
-
-  // A reply on a watch's card steered the watch and closed this card and
-  // maybe others. This one stays to show what changed (until the page
-  // reloads); the others go now. Undo brings them all back.
-  const handleSteered = useCallback((proposal: ProposalItem, result: SteerResult) => {
-    setActedAlertIds((prev) => {
-      const next = new Set(prev);
-      for (const id of result.closed_alert_ids) if (id !== proposal.alert_id) next.add(id);
-      return next;
-    });
-  }, []);
-  const handleSteerUndone = useCallback((_proposal: ProposalItem, result: SteerResult) => {
-    setActedAlertIds((prev) => {
-      const next = new Set(prev);
-      for (const id of result.closed_alert_ids) next.delete(id);
-      return next;
-    });
     refreshToday();
   }, [refreshToday]);
 
@@ -628,8 +608,6 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
             onRerun={handleRerun}
             onApproveWithEdits={handleApproveWithEdits}
             onAnswer={handleAnswer}
-            onSteered={handleSteered}
-            onSteerUndone={handleSteerUndone}
             defaultBodyExpanded={emphasized}
             emphasized={emphasized}
           />
@@ -934,8 +912,6 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
                       onRerun={handleRerun}
                       onApproveWithEdits={isPrincipalCaller ? handleApproveWithEdits : undefined}
                       onAnswer={isPrincipalCaller ? handleAnswer : undefined}
-                      onSteered={handleSteered}
-                      onSteerUndone={handleSteerUndone}
                     />
                   ))}
                   {otherProposals.length === 0 && (
@@ -952,8 +928,6 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
                   onContinue={onContinue}
                   onDismiss={handleDismiss}
                   onBulkDismiss={handleBulkDismiss}
-                  onSteered={handleSteered}
-                  onSteerUndone={handleSteerUndone}
                 />
               </SidePanel>
               {solo && (

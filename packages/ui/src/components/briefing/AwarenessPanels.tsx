@@ -5,9 +5,9 @@ import { useState } from "react";
 
 import Button, { buttonClass } from "@/components/ui/Button";
 import OverflowMenu from "@/components/ui/OverflowMenu";
-import type { ProposalItem, SteerResult } from "@/lib/api";
+import type { ProposalItem } from "@/lib/api";
 import { MEMORY_ACTIONS, briefingMemoryLine } from "@/lib/briefing-memory";
-import CardSteer from "./CardSteer";
+import { TellMe } from "./CardTalk";
 
 import {
   MONITORING_DISMISS_OLDER_THAN_DAYS,
@@ -27,18 +27,16 @@ function MonitoringRow({
   proposal,
   onContinue,
   onDismiss,
-  onSteered,
-  onSteerUndone,
 }: {
   proposal: ProposalItem;
   onContinue?: ContinueHandler;
   onDismiss?: (p: ProposalItem) => void;
-  onSteered?: (p: ProposalItem, result: SteerResult) => void;
-  onSteerUndone?: (p: ProposalItem, result: SteerResult) => void;
 }) {
   // A watch's signal can be corrected right here ("that's our own repo"):
-  // Correct it opens the reply box under the row (CardSteer).
+  // Correct it opens "Or tell me…" under the row, said on the card like any
+  // other (POST /alerts/{id}/say); what the Executive said back shows there.
   const [steering, setSteering] = useState(false);
+  const [reply, setReply] = useState<string | null>(null);
   const canSteer = Boolean(proposal.watch_slug && onDismiss);
   const seed = buildMonitoringSeed(proposal);
   const inner = (
@@ -67,7 +65,7 @@ function MonitoringRow({
             {inner}
           </Link>
         )}
-        {canSteer && !steering && (
+        {canSteer && !steering && !reply && (
           <button
             type="button"
             onClick={() => setSteering(true)}
@@ -84,15 +82,10 @@ function MonitoringRow({
           />
         )}
       </div>
-      {canSteer && steering && proposal.watch_slug && (
-        <CardSteer
-          alertId={proposal.alert_id}
-          watchSlug={proposal.watch_slug}
-          autoFocus
-          onSteered={(r) => onSteered?.(proposal, r)}
-          onUndone={(r) => onSteerUndone?.(proposal, r)}
-        />
+      {canSteer && steering && !reply && (
+        <TellMe alertId={proposal.alert_id} autoFocus onSaid={(r) => setReply(r.reply)} />
       )}
+      {reply && <p className="mt-2 text-sm leading-snug text-fg" aria-live="polite">{reply}</p>}
     </div>
   );
 }
@@ -104,15 +97,11 @@ export function MonitoringPanelBody({
   onContinue,
   onDismiss,
   onBulkDismiss,
-  onSteered,
-  onSteerUndone,
 }: {
   proposals: ProposalItem[];
   onContinue?: ContinueHandler;
   onDismiss?: (p: ProposalItem) => void;
   onBulkDismiss?: (ids: number[]) => void;
-  onSteered?: (p: ProposalItem, result: SteerResult) => void;
-  onSteerUndone?: (p: ProposalItem, result: SteerResult) => void;
 }) {
   const staleIds = olderThan(proposals, MONITORING_DISMISS_OLDER_THAN_DAYS);
   return (
@@ -131,8 +120,6 @@ export function MonitoringPanelBody({
               proposal={p}
               onContinue={onContinue}
               onDismiss={onDismiss}
-              onSteered={onSteered}
-              onSteerUndone={onSteerUndone}
             />
           ))}
         </div>

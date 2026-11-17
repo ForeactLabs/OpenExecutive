@@ -211,19 +211,20 @@ class ProposalItem(BaseModel):
     # severity (large stock move, etc.). Null for everything else; the UI
     # renders it as a small note so the promotion reads as deliberate.
     surfaced_reason: str | None = None
-    # The watch that raised this card, when a watch did: the card offers a
-    # reply that steers it (POST /alerts/{id}/steer) and links to its page.
+    # The watch that raised this card, when a watch did: what the person
+    # says on the card corrects it (POST /alerts/{id}/say), and the card
+    # links to its page.
     watch_slug: str | None = None
-    # The person changed this card's plan with a reply on it
-    # (POST /alerts/{id}/plan): it reads "If you approve · Updated" and
-    # offers Undo change (POST /alerts/{id}/plan/undo).
+    # Someone changed this card's plan by saying so on it, or by picking
+    # another of its options (POST /alerts/{id}/say, /approve).
     plan_changed: bool = False
     # Who made the last change, when it wasn't the reader: the card reads
-    # "Updated by <name>", so nobody approves someone else's plan as the
-    # Executive's own.
+    # "What I'll do · Changed by <name>", so nobody approves someone else's
+    # plan as the Executive's own.
     plan_changed_by: str | None = None
-    # Whether a reply on the card can change its plan (alerts/replan.py):
-    # only a card whose Approve carries its plan out as a chat turn.
+    # Whether what the person says on the card can change its plan
+    # (alerts/replan.py): only a card whose Approve carries its plan out as
+    # a chat turn, or one only for them to know.
     plan_editable: bool = False
     # Set when this proposal is backed by a decision_instance (a gated
     # calendar booking awaiting approval). The UI routes Approve/Reject to
@@ -492,6 +493,44 @@ def _watch_trust_by_slug(alerts: list[Any]) -> dict[str, float]:
     except Exception:
         logger.debug("today: watch trust lookup failed", exc_info=True)
         return {}
+
+
+def one_card(alert: Alert, viewer: Any = None) -> ProposalItem:
+    """One live card as Needs you shows it, view and all: what a reply on
+    the card hands back, so the card redraws from the server's words."""
+    from openexecutive.people import store as people_store
+
+    item = proposal_item(alert)
+    _mark_plan_changes([item], viewer)
+    names: dict[int, str] = {}
+    for pid in {alert.routed_to_person_id, getattr(viewer, "person_id", None)}:
+        if pid is not None:
+            person = people_store.get_person(pid)
+            if person is not None:
+                names[pid] = person.full_name
+    attach_views([item], names, talk=card_talks([alert], viewer))
+    return item
+
+
+def card_talks(alerts: list[Alert], viewer: Any = None) -> dict[int, Any]:
+    """Each card's line, options and the reader's own conversation on it
+    (alerts.card_talk); and the options of cards that have none yet start
+    being written. Best effort: a card reads without them if this fails."""
+    try:
+        from openexecutive.alerts import card_talk
+
+        talk = card_talk.read(alerts)
+        card_talk.fill_soon(alerts, talk)
+    except Exception:
+        logger.warning("today: couldn't read the cards' options", exc_info=True)
+        return {}
+    # What someone said on a card, and what was said back, is theirs: it
+    # shows only to them. Everyone else sees the plan as it stands, with who
+    # changed it.
+    reader = getattr(viewer, "person_id", None)
+    for t in talk.values():
+        t.turns = [line for line in t.turns if line.person_id == reader]
+    return talk
 
 
 def _mark_plan_changes(items: list[ProposalItem], viewer: Any = None) -> None:
@@ -1353,7 +1392,8 @@ def _build_today(
     proposal_items.sort(key=lambda p: (0 if p.category == "action" else 1, -p.score))
     _group_requests(proposal_items)
     _mark_waiting(proposal_items)
-    attach_views(proposal_items, {p.id: p.full_name for p in person_items}, now=now)
+    names = {p.id: p.full_name for p in person_items}
+    attach_views(proposal_items, names, talk=card_talks(raw_alerts, viewer), now=now)
 
     response = TodayResponse(
         departments=dept_items,

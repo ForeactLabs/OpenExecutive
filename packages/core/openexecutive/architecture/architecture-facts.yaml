@@ -4095,19 +4095,46 @@ departments:
     it, and if the tab closed before the turn ran the card was gone and
     nothing was done.
   card_plan_replies: |
-    openexecutive.alerts.replan + POST /alerts/{id}/plan and /plan/undo. A
-    reply on a card that waits for an OK changes what Approve does: one
-    forced `rewrite_plan` call on the utility-fast model (constant system
-    prompt; the card, its current plan and the person's line each fenced in
-    the user turn, and only the line may change the plan) returns the new
-    plan (<=600 chars) and a one-line reply as I. `replan.apply_change`
-    writes it to `suggested_action` in one BEGIN IMMEDIATE transaction only
-    while the card is open and still shows the plan the model read, and
-    keeps the change in `alert_plan_changes` (previous_plan, plan,
-    person_id); Undo change puts back the last one's previous_plan the same
-    way. Approve re-reads the card after its claim (which closes it to more
-    changes), tells the turn the plan is the person's own
-    (APPROVED_CHANGED_PLAN_NOTE, outside the quoted proposal) and runs a
+    openexecutive.alerts.replan + POST /alerts/{id}/say (the old /plan,
+    /plan/undo and /steer routes are gone, and with them Undo change and
+    the watch card's Undo). What the person says in a card's "Or tell me…"
+    (body {text}, at most 500 chars, 422 on an empty or longer line before
+    any lookup) goes the card's own way (`alerts.card_talk.kind_of`): "ask"
+    (needs answer or choice, not a decision or roster request card) takes
+    the same answer path as POST /alerts/{id}/answer; "watch" takes the
+    watch correction (see external_monitoring.steering); "plan" changes
+    what Approve does; "none" is 409. It answers {reply, card, approval}:
+    the /today item as it reads now (null once answered, closed or
+    approved) and the AlertApproval when it started work. For a "plan" card
+    one forced `rewrite_plan` call on the utility-fast model (constant
+    system prompt; the card, its current plan and the person's line each
+    fenced in the user turn, and only the line may change the plan) returns
+    the new plan (<=600 chars), a label for its button, go (they said to go
+    ahead now), a one-line reply as I and one or two other options.
+    `replan.apply_change` writes the plan and label to `suggested_action` /
+    `action_label` in one BEGIN IMMEDIATE transaction only while the card
+    is open and still shows the plan the model read, turns a
+    for-you-to-know card (needs fyi) into needs ok, keeps the change in
+    `alert_plan_changes` (previous_plan, plan, person_id), and the route
+    audits card_plan_changed. The card's options are kept for the new plan.
+    The rewrite's go alone runs nothing: the route also calls
+    replan.said_go(plan, line), a separate fast call (tool said_go, actor
+    card_go, constant GO_SYSTEM prompt) that sees only the new plan and the
+    person's words, never the card, and approves at once through the same
+    Approve as a tap (Approvals still decide) only when both say go;
+    otherwise the reply is "Here's the plan now. Pick it to go ahead."
+    Both what the person said and the reply are kept as the card's
+    conversation (alert_card_turns), each line with the person it is
+    between (person_id); /today and the say response show a reader only
+    their own lines, and others see the plan with "What I'll do · Changed
+    by <name>". POST /alerts/{id}/approve with body.plan set to another
+    option the card offers first makes that the plan (apply_change with the
+    option's label), then claims as before; a plan the card doesn't offer
+    is refused by the claim's check (409). Approve re-reads the card after
+    its claim (which closes it to more changes), tells the turn the plan is
+    the person's own (APPROVED_CHANGED_PLAN_NOTE, "I chose this plan on the
+    card before approving it (by saying what I wanted, or by picking one of
+    the ways you offered)…", outside the quoted proposal) and runs a
     card that held a scheduled action as a turn once its plan changed, since
     the held action is no longer what was asked. Approve carries the plan
     the card showed (body `plan`); `approvals.claim` compares it inside its
@@ -4117,15 +4144,45 @@ departments:
     `plan_changed_by` names them ("Updated by Sam"), so a teammate's plan
     never runs as the owner's own words. A line in the card's text that
     reads "Action to perform:" is relabelled so it can't pass for the plan.
-    A reply that leaves the plan as it was records nothing, and a card with
-    a running or done approval can't be changed or undone. Which cards
-    (`plan_refusal`, also /today's `plan_editable`): open cards whose Approve runs a turn, so not answer, choice,
-    fyi, decision-backed, watch (they steer the watch), document, roster,
-    or failed-run cards. Who: the approve
+    A line that leaves the plan as it was records nothing, and a card with
+    a running or done approval can't be changed. Which cards
+    (`plan_refusal`, also /today's `plan_editable` and the view's tell_me):
+    open cards whose Approve runs a turn, for-you-to-know cards included,
+    so not answer, choice, decision-backed, watch (a line corrects the
+    watch), document, roster, or failed-run cards. Who: the approve
     route's own check. Caps: 500-char line, 120 calls an hour, 30 per
     caller. No new gate: Approve goes through Approvals as before. Why: the
     owner wanted to steer a card in a line, without Discuss dropping the
     card into a chat; Discuss left the web card.
+  card_talk: |
+    openexecutive.alerts.card_talk. Every Needs you card reads the same
+    way: What happened, What I'll do, two or three options to pick before
+    anything happens (the first is always the card's own plan, labelled by
+    its action_label or the model), the reader's own conversation on the
+    card, and "Or tell me…" (POST /alerts/{id}/say). Tables:
+    alert_card_options (alert_id PK, plan, happened, options JSON, made_at)
+    and alert_card_turns (id, alert_id, who you|me, text, person_id, at).
+    One fast-model call per card and plan (tool card_options, constant
+    system prompt, actor card_options; the card, its plan and its question
+    fenced in the user turn) writes the What happened line and the options;
+    an asking card's options are its own choices or likely answers. /today
+    starts it in the background for a card not yet written for its plan
+    (fill_soon) and publishes SSE {"type": "card_options", "alert_id"} when
+    done; options show only while written for the plan the card shows now.
+    A call that came back empty is kept as written for that plan
+    (CardTalk.written), so the card isn't asked again on every read.
+    briefing/card_view's CardView carries happened, options (CardOption:
+    action approve|answer, label, plan), tell_me and turns (CardLine: who,
+    text; only the reader's own lines); plan_title is "What I'll do" or
+    "What I'll do · Changed by <name>"; the panel has no "ask" any more and
+    "approve" is not a button action (Approve is the first option); Dismiss
+    reads Skip on a card with options or Or tell me, and Edit & approve
+    stays only on a card without Or tell me. The web ProposalCard
+    (briefing/CardTalk.tsx) draws it, with each other option's plan in full
+    under its label (the first option's plan is under What I'll do) and
+    "On it…" while a line is sending; a watch row's Correct it uses the
+    same box. Nothing here gates anything: an option is carried out by the
+    same Approve or answer, under the same checks.
   cadence: |
     openexecutive.departments.cadence — supports `daily@HH:MM`,
     `weekly@DOW@HH:MM` or `weekly@DOW-HH:MM` (DOW is a 3-letter day,
@@ -6598,8 +6655,9 @@ external_monitoring:
     told it to skip this, so it stayed quiet." The query adapter gets the
     same notes, so the search leaves those results out in the first place.
   steering: |
-    `monitoring.steer` + `POST /alerts/{id}/steer` — the person replies on a
-    watch's card ("that's our own repo, we just moved it"). /today marks
+    `monitoring.steer`, reached through `POST /alerts/{id}/say` — the person
+    says on a watch's card, in its "Or tell me…", what is wrong ("that's our
+    own repo, we just moved it"). /today marks
     such cards with `watch_slug` (`briefing.ranking.watch_slug_of`: source
     is a watch adapter kind and an `external:<slug>` tag names the watch).
     One forced `steer_watch` call on the utility-fast model (constant system
@@ -6609,9 +6667,9 @@ external_monitoring:
     listed cards the reply also answers. The route writes the notes, marks
     this card and those `dismissed` WITHOUT record_ack_feedback (a
     correction does not lower trust_score), audits `watch_steered`, and
-    returns previous_notes + closed_alert_ids; the card's Undo is PATCH
-    /watchlist/{slug} with the old notes + POST /alerts/{id}/reopen. 60
-    calls an hour. No approval and no gate: it changes only the watch's
+    keeps the line and the reply as the card's conversation (shown only to
+    the person who said it); the card has no Undo any more. 60 calls an
+    hour. No approval and no gate: it changes only the watch's
     notes, the same field the watch page and tune_watchlist_entry edit.
   alerts_integration: |
     `promote_signal_to_alert` builds an `AlertEvent(source=signal_kind,

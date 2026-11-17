@@ -5758,15 +5758,15 @@ export interface ProposalItem {
   // external/watchlist signal was pulled into the action lane by its severity
   // (e.g. a large stock move). Null/absent for everything else.
   surfaced_reason?: string | null;
-  // The watch that raised this card, when a watch did: the card offers a
-  // reply that steers it (steerAlert) and links to its page.
+  // The watch that raised this card, when a watch did: what the person
+  // says on the card corrects it (sayOnCard), and the card links to its page.
   watch_slug?: string | null;
-  // The person changed the plan with a reply on the card: it reads "If you
-  // approve · Updated" and offers Undo change.
+  // Someone changed the plan by saying so on the card or picking another
+  // of its options.
   plan_changed?: boolean;
-  // Who changed it, when it wasn't the reader: "Updated by <name>".
+  // Who changed it, when it wasn't the reader: "What I'll do · Changed by <name>".
   plan_changed_by?: string | null;
-  // Whether a reply on the card can change its plan (POST /alerts/{id}/plan).
+  // Whether what the person says on the card can change its plan (sayOnCard).
   plan_editable?: boolean;
   // Set when this proposal is backed by a decision_instance (a gated calendar
   // booking awaiting approval). The briefing routes Approve/Reject to the
@@ -5828,7 +5828,7 @@ export interface ProposalItem {
 // every screen; `place` is where it sits (the one main button, the ⋯ menu,
 // apart on the right, or a row of answers in the card's body).
 export interface CardButton {
-  action: "approve" | "edit_approve" | "dismiss" | "snooze" | "rerun" | "open" | "open_url" | "chat" | "call";
+  action: "edit_approve" | "dismiss" | "snooze" | "rerun" | "open" | "open_url" | "chat" | "call";
   label: string;
   place: "primary" | "menu" | "side" | "answer";
   href: string;
@@ -5847,9 +5847,25 @@ export interface CardChip {
   title: string;
 }
 
+// One way to go on a card, picked before anything happens (the first is the
+// Executive's own pick). "approve": Approve with `plan`. "answer": send
+// `label` as the answer to the card's question.
+export interface CardOption {
+  action: "approve" | "answer";
+  label: string;
+  plan: string;
+}
+
+// One line of the reader's conversation on a card: theirs ("you") or the
+// Executive's ("me").
+export interface CardLine {
+  who: "you" | "me";
+  text: string;
+}
+
 export interface CardView {
   kind: "new_sender" | "lead" | "held" | "ask" | "rerun" | "document" | "signal" | "decision" | "proposal";
-  panel: "" | "new_sender" | "lead" | "held" | "ask";
+  panel: "" | "new_sender" | "lead" | "held";
   routed_to: string;
   need: string;
   as_me: boolean;
@@ -5857,10 +5873,15 @@ export interface CardView {
   status: CardChip | null;
   description: string;
   long: boolean;
+  // What happened, in one line ("" until it is written).
+  happened: string;
+  // What I'll do: shown under `plan_title` when that is set.
   plan_title: string;
   plan: string;
-  plan_reply: boolean;
-  steer: boolean;
+  options: CardOption[];
+  // "Or tell me…": the person can say anything on the card (sayOnCard).
+  tell_me: boolean;
+  turns: CardLine[];
   waiting_because: string;
   radar: string;
   review: { title: string; text: string; tone: CardTone } | null;
@@ -6784,8 +6805,8 @@ export interface DecisionInstance {
 
 // Approve a proposal card that has no decision behind it: the server records
 // who approved it, claims it and carries it out (alerts/approvals.py).
-// `plan` is the "If you approve" plan the card showed: the server goes ahead
-// only while the card still shows it (a reply can change it).
+// `plan` is the plan of the option picked on the card: the server goes ahead
+// only while the card still offers it (what someone says on it can change it).
 export async function approveAlert(alertId: number, editedBody?: string, plan?: string): Promise<AlertApproval> {
   const res = await fetch(`${API_BASE}/alerts/${alertId}/approve`, {
     method: "POST",
@@ -6799,20 +6820,19 @@ export async function approveAlert(alertId: number, editedBody?: string, plan?: 
   return res.json();
 }
 
-// What changed when the person replied to a watch's card. To undo it, put
-// the watch's notes back to `previous_notes` and reopen `closed_alert_ids`.
-export interface SteerResult {
+// What the Executive said back when the person said something on a card,
+// and the card as it reads now (null once it is gone). `approval` is set
+// when what they said started the work: getAlertApproval says how it ends.
+export interface SayResult {
   reply: string;
-  watch_slug: string;
-  watch_title: string;
-  notes: string;
-  previous_notes: string;
-  closed_alert_ids: number[];
+  card: ProposalItem | null;
+  approval: AlertApproval | null;
 }
 
-// Reply to a watch's card to correct or steer the watch.
-export async function steerAlert(alertId: number, text: string): Promise<SteerResult> {
-  const res = await fetch(`${API_BASE}/alerts/${alertId}/steer`, {
+// "Or tell me…" on any card: an answer, "ask Dan instead", "yes, send it
+// from you", "that's our own repo". The card takes it its own way.
+export async function sayOnCard(alertId: number, text: string): Promise<SayResult> {
+  const res = await fetch(`${API_BASE}/alerts/${alertId}/say`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text }),
@@ -6824,40 +6844,6 @@ export async function steerAlert(alertId: number, text: string): Promise<SteerRe
   return res.json();
 }
 
-// Undo a steer: the watch's notes as they were, and its closed cards back.
-export async function undoSteer(result: SteerResult): Promise<void> {
-  await patchWatchlistItem(result.watch_slug, { notes: result.previous_notes });
-  for (const id of result.closed_alert_ids) {
-    await reopenAlert(id);
-  }
-}
-
-// A card's plan after a reply changed it (or Undo change put one back).
-export interface PlanResult {
-  plan: string;
-  previous_plan: string;
-  reply: string;
-  changed: boolean;
-  // The heading the card now shows over its plan.
-  plan_title: string;
-}
-
-// Reply on a card to change what approving it does: the Executive rewrites
-// the card's "If you approve" plan, and Approve then does exactly that.
-export async function changeCardPlan(alertId: number, text: string): Promise<PlanResult> {
-  const res = await fetch(`${API_BASE}/alerts/${alertId}/plan`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
-  });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(body ? detailOf(body) : "Couldn't send that. Try again.");
-  }
-  return res.json();
-}
-
-// Undo change: the plan the last reply replaced.
 // A card's `call` button (CardButton.action "call"): POST to the path the
 // server gave, with no body. Throws the server's reason when it fails.
 export async function cardCall(path: string): Promise<void> {
@@ -6868,16 +6854,6 @@ export async function cardCall(path: string): Promise<void> {
     throw new Error(body ? detailOf(body) : "That didn't work.");
   }
 }
-
-export async function undoCardPlan(alertId: number): Promise<PlanResult> {
-  const res = await fetch(`${API_BASE}/alerts/${alertId}/plan/undo`, { method: "POST" });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(body ? detailOf(body) : "Couldn't undo that. Try again.");
-  }
-  return res.json();
-}
-
 
 // What a Needs you card asks of its reader (ProposalItem.needs).
 export type CardNeeds = "" | "answer" | "choice" | "ok" | "fyi";

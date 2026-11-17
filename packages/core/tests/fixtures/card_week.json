@@ -502,11 +502,11 @@
             "views": [
               {
                 "kind": "ask",
-                "panel": "ask",
+                "panel": "",
                 "need": "Needs your answer",
                 "buttons": [
                   "menu:snooze:Snooze",
-                  "side:dismiss:Dismiss"
+                  "side:dismiss:Skip"
                 ]
               }
             ]

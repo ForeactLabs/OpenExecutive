@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field
 
 from openexecutive.alerts import approvals, lifecycle, store
 from openexecutive.alerts.models import (
@@ -17,6 +17,7 @@ from openexecutive.alerts.models import (
     is_private_alert,
     visible_alert,
 )
+from openexecutive.api.routes.today import ProposalItem
 
 # The standalone alerts UI (panel, live toast stream, mute/severity settings,
 # feedback) was removed — those items now surface only through the briefing
@@ -179,10 +180,34 @@ class ApproveBody(BaseModel):
     edited_body: str | None = Field(
         default=None, min_length=1, max_length=approvals.EDITED_BODY_MAX
     )
-    # The "If you approve" plan the approver saw on the card. When given,
-    # Approve goes ahead only while the card still shows it, since a reply
-    # on the card (POST /alerts/{id}/plan) can change it.
+    # The plan of the option the approver picked on the card. When given,
+    # Approve goes ahead only while the card still offers it, since what
+    # someone says on the card (POST /alerts/{id}/say) can change it.
     plan: str | None = Field(default=None, max_length=approvals.EDITED_BODY_MAX)
+
+
+def _pick_option(alert: Alert, plan: str, person_id: int | None) -> None:
+    """Make ``plan`` the card's plan when it is another of the options the
+    card offers (its own plan is already there). Anything else is left for
+    the claim, which refuses a plan the card doesn't show."""
+    from openexecutive.alerts import card_talk, replan
+
+    picked = plan.strip()
+    current = (alert.suggested_action or "").strip()
+    if not picked or picked == current or alert.id is None:
+        return
+    talk = card_talk.read([alert]).get(alert.id)
+    option = next((o for o in (talk.options if talk else []) if o.plan == picked), None)
+    if option is None:
+        return
+    change = replan.apply_change(
+        alert.id, expected=alert.suggested_action or "", plan=option.plan,
+        person_id=person_id, label=option.label,
+    )
+    if change is None:
+        raise HTTPException(
+            status_code=409, detail="The plan on this card just changed. Read it and approve again.",
+        )
 
 
 # The turn an approved proposal runs on the server, as the person who
@@ -224,8 +249,9 @@ _PROPOSAL_CLOSE_RE = re.compile(r"<\s*/\s*proposal", re.IGNORECASE)
 # Said before the proposal when the approver changed the card's plan with a
 # reply on it (alerts/replan.py): the plan is theirs, and it is the whole job.
 APPROVED_CHANGED_PLAN_NOTE = (
-    "I changed the plan on this card myself before approving it. Do exactly the 'Action to "
-    "perform' below and nothing the card's text suggested beyond it."
+    "I chose this plan on the card before approving it (by saying what I wanted, or by picking "
+    "one of the ways you offered). Do exactly the 'Action to perform' below and nothing the "
+    "card's text suggested beyond it."
 )
 # The same when someone else changed it: the approver approves the plan as
 # it stands, and the turn knows whose words it started from.
@@ -373,6 +399,15 @@ def _requeue_scheduled_action(alert: Alert, approval: approvals.AlertApproval, a
 async def approve_alert(
     alert_id: int, body: ApproveBody, request: Request,
 ) -> approvals.AlertApproval:
+    """Approve a proposal card and carry it out on the server: ``plan`` is
+    the option the approver picked (its own plan, or another the card
+    offers), which then becomes the card's plan. See :func:`_approve`."""
+    return await _approve(alert_id, body, request)
+
+
+async def _approve(
+    alert_id: int, body: ApproveBody, request: Request,
+) -> approvals.AlertApproval:
     """Approve a proposal card and carry it out on the server.
 
     Records who approved it and when (``alert_approvals`` and the audit log),
@@ -412,6 +447,9 @@ async def approve_alert(
     if alert.source == "browser_handover" and (approver is None or approver != alert.routed_to_person_id):
         # A step in their own browser: only they say it's done.
         raise HTTPException(status_code=403, detail="Only the person it's waiting on can press Done.")
+
+    if body.plan is not None and body.edited_body is None:
+        _pick_option(alert, body.plan, approver)
 
     try:
         approval = approvals.claim(
@@ -494,31 +532,6 @@ async def approve_alert(
     return approvals.get(approval.id) or approval
 
 
-class PlanBody(BaseModel):
-    # Bounded in alerts.replan, not with max_length, so a 422 never echoes
-    # what the person wrote.
-    text: str = ""
-
-
-class PlanResponse(BaseModel):
-    """The card's plan after a reply changed it (or Undo change put the last
-    one back). ``changed`` says whether the plan on the card is still one the
-    person changed, so the card shows "Updated" and offers Undo change."""
-
-    plan: str
-    previous_plan: str
-    reply: str
-    changed: bool
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def plan_title(self) -> str:
-        """The heading the card now shows over its plan (briefing.card_view)."""
-        from openexecutive.briefing.card_view import plan_title
-
-        return plan_title(self.changed)
-
-
 def _may_approve(alert: Alert, request: Request) -> bool:
     """The approve route's own check: the principal, or the person the card
     was routed to."""
@@ -526,96 +539,6 @@ def _may_approve(alert: Alert, request: Request) -> bool:
         return True
     caller = _caller_person_id(request)
     return caller is not None and caller == alert.routed_to_person_id
-
-
-@router.post("/alerts/{alert_id}/plan", response_model=PlanResponse)
-async def change_plan_from_alert(
-    alert_id: int, body: PlanBody, request: Request
-) -> PlanResponse:
-    """Reply to a card to change what approving it does ("don't ask him,
-    share the whole folder"). A fast model call rewrites the card's plan
-    (``suggested_action``) from the line, the card stays open, and Approve
-    then carries out exactly the new plan. Undo change is ``/plan/undo``."""
-    from openexecutive.alerts import replan
-    from openexecutive.api import caller as api_caller
-
-    def _refuse(exc: replan.ReplanError) -> HTTPException:
-        code = {"empty": 422, "too_long": 422, "too_many": 429}.get(exc.code, 503)
-        return HTTPException(status_code=code, detail=exc.message)
-
-    try:
-        line = replan.check_text(body.text)
-    except replan.ReplanError as exc:
-        raise _refuse(exc) from exc
-    existing = _visible_alert(alert_id, request)
-    refusal = replan.plan_refusal(existing)
-    if refusal is not None:
-        raise HTTPException(status_code=409, detail=refusal)
-    if not _may_approve(existing, request):
-        raise HTTPException(status_code=403, detail="This one is for someone else to approve.")  # input-safety
-
-    try:
-        new = await replan.rewrite_plan(
-            existing, line, caller_key=api_caller.caller(request).email
-        )
-    except replan.ReplanError as exc:
-        raise _refuse(exc) from exc
-
-    previous = existing.suggested_action or ""
-    if new.plan.strip() == previous.strip():
-        # The line didn't change what Approve does: nothing to record, so
-        # the card doesn't read Updated and a held action stays as held.
-        return PlanResponse(
-            plan=previous, previous_plan=previous, reply=new.reply,
-            changed=replan.last_change(alert_id) is not None,
-        )
-    # The model call takes seconds: only an open card still showing the plan
-    # the model read takes the new one.
-    change = replan.apply_change(
-        alert_id, expected=previous, plan=new.plan, person_id=_caller_person_id(request),
-    )
-    if change is None:
-        raise HTTPException(status_code=409, detail="This card just changed. Try again.")
-
-    from openexecutive.audit import log_event as audit_log
-
-    audit_log(
-        "card_plan_changed",
-        f"Changed the plan on alert {alert_id} from a reply",
-        actor="user",
-        details={"alert_id": alert_id, "change_id": change.id, "by": api_caller.actor(request)},
-    )
-    return PlanResponse(plan=new.plan, previous_plan=previous, reply=new.reply, changed=True)
-
-
-@router.post("/alerts/{alert_id}/plan/undo", response_model=PlanResponse)
-async def undo_plan_change(alert_id: int, request: Request) -> PlanResponse:
-    """Undo change: put back the plan the last reply replaced, while the card
-    is open and still shows that change."""
-    from openexecutive.alerts import replan
-    from openexecutive.api import caller as api_caller
-
-    existing = _visible_alert(alert_id, request)
-    if not _may_approve(existing, request):
-        raise HTTPException(status_code=403, detail="This one is for someone else to approve.")  # input-safety
-    undone = replan.undo_last(alert_id)
-    if undone is None:
-        raise HTTPException(status_code=409, detail="Nothing to undo on this card now.")
-
-    from openexecutive.audit import log_event as audit_log
-
-    audit_log(
-        "card_plan_change_undone",
-        f"Put back the plan on alert {alert_id}",
-        actor="user",
-        details={"alert_id": alert_id, "change_id": undone.id, "by": api_caller.actor(request)},
-    )
-    return PlanResponse(
-        plan=undone.previous_plan,
-        previous_plan=undone.plan,
-        reply="",
-        changed=replan.last_change(alert_id) is not None,
-    )
 
 
 class AnswerBody(BaseModel):
@@ -657,6 +580,12 @@ def _answered_turn_message(alert: Alert, answer: str) -> str:
 async def answer_alert(
     alert_id: int, body: AnswerBody, request: Request,
 ) -> approvals.AlertApproval:
+    """Answer a card that asks something with one of its options. See
+    :func:`_answer`."""
+    return await _answer(alert_id, body.answer, request)
+
+
+async def _answer(alert_id: int, answer_text: str, request: Request) -> approvals.AlertApproval:
     """Answer a card that asks something (``needs`` answer or
     choice) and carry on with the work it was for. Closes the card once
     (``alert_approvals``, like an approval), then runs one Executive turn as
@@ -676,7 +605,7 @@ async def answer_alert(
         # drafted document, a held action) are never closed by a free-form
         # answer.
         raise HTTPException(status_code=409, detail="Use this card's own buttons.")
-    answer = body.answer.strip()
+    answer = answer_text.strip()
     if not answer:
         raise HTTPException(status_code=422, detail="Write an answer first.")
     answerer = _caller_person_id(request)
@@ -846,16 +775,8 @@ def reopen_alert(alert_id: int, request: Request) -> Alert:
     return updated
 
 
-class SteerBody(BaseModel):
-    # Bounded in monitoring.steer, not with max_length, so a 422 never
-    # echoes what the person wrote.
-    text: str = ""
-
-
 class SteerResponse(BaseModel):
-    """What changed when the person replied to a watch's card, and what the
-    card needs to undo it: PATCH the watch's notes back to
-    ``previous_notes`` and reopen each id in ``closed_alert_ids``."""
+    """What changed when the person corrected a watch on its card."""
 
     reply: str
     watch_slug: str
@@ -886,14 +807,11 @@ def _watch_cards_to_offer(
     return out
 
 
-@router.post("/alerts/{alert_id}/steer", response_model=SteerResponse)
-async def steer_watch_from_alert(
-    alert_id: int, body: SteerBody, request: Request
-) -> SteerResponse:
-    """Reply to a watch's card to correct it ("that's our own repo"). The
-    Executive folds the line into the watch's notes, which every later
-    check reads before it tells anyone, closes this card and any other open
-    card of the watch the line also answers, and says what it changed."""
+async def _steer(alert_id: int, text: str, request: Request) -> SteerResponse:
+    """What someone said on a watch's card, to correct it ("that's our own
+    repo"). The Executive folds the line into the watch's notes, which every
+    later check reads before it tells anyone, closes this card and any other
+    open card of the watch the line also answers, and says what it changed."""
     from openexecutive.api import caller as api_caller
     from openexecutive.briefing.ranking import watch_slug_of
     from openexecutive.monitoring import store as monitoring_store
@@ -905,7 +823,7 @@ async def steer_watch_from_alert(
         return HTTPException(status_code=code, detail=exc.message)
 
     try:
-        line = check_text(body.text)
+        line = check_text(text)
     except SteerError as exc:
         raise _refuse(exc) from exc
     existing = _visible_alert(alert_id, request)
@@ -968,6 +886,123 @@ async def steer_watch_from_alert(
         previous_notes=item.notes,
         closed_alert_ids=closed,
     )
+
+
+class SayBody(BaseModel):
+    # Bounded below, not with max_length, so a 422 never echoes what the
+    # person wrote.
+    text: str = ""
+
+
+class SayResponse(BaseModel):
+    """What the Executive said back, and the card as it reads now (its plan,
+    options and conversation). ``approval`` is set when what they said
+    started the work (an answer, or "yes, do it"): ``GET
+    /alerts/approvals/{id}`` says how it ends."""
+
+    reply: str
+    card: ProposalItem | None = None
+    approval: approvals.AlertApproval | None = None
+
+
+SAY_MAX_CHARS = 500
+
+
+@router.post("/alerts/{alert_id}/say", response_model=SayResponse)
+async def say_on_card(alert_id: int, body: SayBody, request: Request) -> SayResponse:
+    """The person said something on a card ("Or tell me…"): "ask Dan
+    instead", "yes, send it from you", an answer to its question, "that's
+    our own repo". The card takes it its own way, one place for every card:
+
+    - a card that asks something takes it as the answer and carries on;
+    - a watch's card takes it as a correction to the watch;
+    - any other card that takes words rewrites what it will do (its plan,
+      options and button) from it, and when they said to go ahead, does it
+      at once, through the same Approve as a tap.
+
+    Both what they said and what the Executive said back stay on the card.
+    """
+    from openexecutive.alerts import card_talk, replan
+    from openexecutive.api import caller as api_caller
+    from openexecutive.api.routes.today import one_card
+
+    line = " ".join((body.text or "").split())
+    if not line:
+        raise HTTPException(status_code=422, detail="Say something first.")
+    if len(line) > SAY_MAX_CHARS:
+        raise HTTPException(status_code=422, detail=f"Keep it under {SAY_MAX_CHARS} characters.")
+    existing = _visible_alert(alert_id, request)
+    kind = card_talk.kind_of(existing)
+    if kind == "none":
+        raise HTTPException(status_code=409, detail="Use this card's own buttons.")
+    person = _caller_person_id(request)
+    viewer = _caller_viewer(request)
+
+    def _card() -> ProposalItem | None:
+        # The card as it reads now; None once it is answered or closed.
+        fresh = store.get_alert(alert_id)
+        if fresh is None or fresh.status not in ("unread", "read"):
+            return None
+        return one_card(fresh, viewer)
+
+    if kind == "ask":
+        answered = await _answer(alert_id, line, request)
+        card_talk.add_turn(alert_id, "you", line, person_id=person)
+        reply = "Got it. I'm on it."
+        card_talk.add_turn(alert_id, "me", reply, person_id=person)
+        return SayResponse(reply=reply, card=_card(), approval=answered)
+
+    if kind == "watch":
+        steered = await _steer(alert_id, line, request)
+        card_talk.add_turn(alert_id, "you", line, person_id=person)
+        card_talk.add_turn(alert_id, "me", steered.reply, person_id=person)
+        return SayResponse(reply=steered.reply, card=_card())
+
+    def _refuse(exc: replan.ReplanError) -> HTTPException:
+        code = {"empty": 422, "too_long": 422, "too_many": 429}.get(exc.code, 503)
+        return HTTPException(status_code=code, detail=exc.message)
+
+    if not _may_approve(existing, request):
+        raise HTTPException(status_code=403, detail="This one is for someone else to approve.")  # input-safety
+    try:
+        new = await replan.rewrite_plan(existing, line, caller_key=api_caller.caller(request).email)
+    except replan.ReplanError as exc:
+        raise _refuse(exc) from exc
+
+    previous = (existing.suggested_action or "").strip()
+    if new.plan.strip() != previous:
+        # The model call takes seconds: only an open card still showing the
+        # plan the model read takes the new one.
+        change = replan.apply_change(
+            alert_id, expected=existing.suggested_action or "", plan=new.plan,
+            person_id=person, label=new.label,
+        )
+        if change is None:
+            raise HTTPException(status_code=409, detail="This card just changed. Try again.")
+        from openexecutive.audit import log_event as audit_log
+
+        audit_log(
+            "card_plan_changed",
+            f"Changed the plan on alert {alert_id} from what was said on it",
+            actor="user",
+            details={"alert_id": alert_id, "change_id": change.id, "by": api_caller.actor(request)},
+        )
+    plan = new.plan if new.plan.strip() != previous else existing.suggested_action or ""
+    had = card_talk.read([existing]).get(alert_id)
+    own = card_talk.CardOption(label=new.label or "Do it", plan=plan)
+    card_talk.keep_options(
+        alert_id, plan.strip(), had.happened if had else "",
+        [own, *(card_talk.CardOption(label=label, plan=text) for label, text in new.others)],
+    )
+    # A go runs the plan through the same Approve as a tap. Whether they
+    # said go is read from their words and the plan alone, never from the
+    # card, so text from outside on the card can't make its plan run.
+    go = new.go and await replan.said_go(plan, line)
+    reply = new.reply if go or not new.go else "Here's the plan now. Pick it to go ahead."
+    card_talk.add_turn(alert_id, "you", line, person_id=person)
+    card_talk.add_turn(alert_id, "me", reply, person_id=person)
+    approval = await _approve(alert_id, ApproveBody(plan=plan), request) if go else None
+    return SayResponse(reply=reply, card=_card(), approval=approval)
 
 
 class ReviewResponse(BaseModel):

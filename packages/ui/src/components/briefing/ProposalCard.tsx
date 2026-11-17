@@ -10,18 +10,14 @@ import Button, { buttonClass } from "@/components/ui/Button";
 import OverflowMenu, { type OverflowItem } from "@/components/ui/OverflowMenu";
 import {
   type CardButton,
+  type CardOption,
   type PersonBriefItem,
-  type PlanResult,
   type ProposalItem,
-  type SteerResult,
   cardCall,
-  undoCardPlan,
 } from "@/lib/api";
 import { type SnoozeChoice, snoozeChoices } from "@/lib/snooze";
 
-import CardAsk from "./CardAsk";
-import CardPlanReply from "./CardPlanReply";
-import CardSteer from "./CardSteer";
+import CardTalk from "./CardTalk";
 import CardTopRow from "./CardTopRow";
 import HeldActionCard from "./HeldActionCard";
 import LeadTrainingCard from "./LeadTrainingCard";
@@ -39,10 +35,10 @@ interface CardAction {
 // A card in "Needs you" (and in the Across-the-team panel). What it says and
 // which buttons it has come from the server (proposal.view,
 // briefing/card_view.py), the same view every screen draws: this only lays
-// it out. Closed, it shows the top row, the title, the text under it and its
-// status chip, with the main button, the ⋯ menu and Dismiss apart on the
-// right; a click opens it to show the review line, the chips, what approving
-// does, the tags and when it was last reviewed.
+// it out. Every card reads the same way: the top row, the title, what
+// happened, what I'll do, the options and "Or tell me…" (CardTalk), with the
+// ⋯ menu and Skip apart on the right; a click opens it to show the review
+// line, the chips, the tags and when it was last reviewed.
 export default function ProposalCard({
   proposal,
   people: _people,
@@ -53,8 +49,6 @@ export default function ProposalCard({
   onRerun,
   onApproveWithEdits,
   onAnswer,
-  onSteered,
-  onSteerUndone,
   busy = false,
   defaultBodyExpanded = false,
   emphasized = false,
@@ -70,13 +64,9 @@ export default function ProposalCard({
   // Queue a failed scheduled run again (a card's Run again button).
   onRerun?: (p: ProposalItem) => void;
   onApproveWithEdits?: (p: ProposalItem, editedBody: string) => void;
-  // Answer a card that asks something; rejects with the reason when it
-  // couldn't be sent.
+  // Answer a card that asks something with one of its options; rejects
+  // with the reason when it couldn't be sent.
   onAnswer?: (p: ProposalItem, answer: string) => Promise<void>;
-  // A watch's card (watch_slug): the person replied to steer the watch.
-  // The card stays to show what changed; the page drops the others it closed.
-  onSteered?: (p: ProposalItem, result: SteerResult) => void;
-  onSteerUndone?: (p: ProposalItem, result: SteerResult) => void;
   busy?: boolean;
   // Show the whole body while closed (no clamp) — the first card in the
   // queue, so its full text reads without a click.
@@ -91,21 +81,21 @@ export default function ProposalCard({
   const [editing, setEditing] = useState(false);
   const [editedBody, setEditedBody] = useState("");
   const [expanded, setExpanded] = useState(false);
-  // A reply on a watch's card closed it: its buttons go until Undo.
-  const [steered, setSteered] = useState(false);
-  // The plan after a reply on the card changed it (or Undo change put one
-  // back), over the card as it was loaded (`from`): once the page reloads
-  // the card with another plan, the card's own wins.
-  const [planNow, setPlanNow] = useState<{ plan: string; changed: boolean; title: string; from: string } | null>(null);
-  const [undoing, setUndoing] = useState(false);
-  const [undoError, setUndoError] = useState<string | null>(null);
-  // Bumped by Undo change, so the reply box drops what it last said.
-  const [undos, setUndos] = useState(0);
+  // The card as the server handed it back after something was said on it,
+  // over the card as it was loaded (`from`): once the page reloads the card
+  // with another plan, the page's wins.
+  const [said, setSaid] = useState<{ card: ProposalItem | null; from: string } | null>(null);
+  const [pickError, setPickError] = useState<string | null>(null);
   // An answer button (`call`) that's running, and what the card said after.
   const [calling, setCalling] = useState<string | null>(null);
   const [answered, setAnswered] = useState<string | null>(null);
   const [callError, setCallError] = useState<string | null>(null);
-  const view = proposal.view;
+  const loaded = proposal.view?.plan ?? "";
+  const now = said && said.from === loaded ? said : null;
+  const view = now?.card?.view ?? proposal.view;
+  // Something said on the card started the work or closed it: its own
+  // buttons go, and it follows that to the end.
+  const settled = now !== null && (now.card === null || !(now.card.view?.tell_me ?? false));
   // Cards answered on their own card. A roster request is never answered
   // through chat, so what a stranger wrote never seeds a turn.
   if (view?.panel === "new_sender" && proposal.roster_request) {
@@ -138,21 +128,13 @@ export default function ProposalCard({
     if (!text) return;
     onApproveWithEdits(proposal, text);
   }
-  const loadedPlan = view?.plan ?? "";
-  const local = planNow && planNow.from === loadedPlan ? planNow : null;
-  const plan = local?.plan ?? loadedPlan;
-  const planChanged = local?.changed ?? Boolean(proposal.plan_changed);
-  const planTitle = local?.title ?? view?.plan_title ?? "";
   const description = view?.description ?? "";
+  const happened = view?.happened ?? "";
   const clamp = Boolean(view?.long) && !expanded && !defaultBodyExpanded;
-  const suggestedActionBlock = plan && planTitle ? (
-    <div
-      className={`rounded-xl border px-3.5 py-2.5 ${
-        planChanged ? "border-accent/70 bg-accent/10" : "border-accent/30 bg-accent/5"
-      }`}
-    >
-      <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-accent">{planTitle}</div>
-      <p className="text-sm leading-snug text-fg whitespace-pre-wrap break-words">{plan}</p>
+  const suggestedActionBlock = view?.plan && view?.plan_title ? (
+    <div className="rounded-xl border border-accent/30 bg-accent/5 px-3.5 py-2.5">
+      <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-accent">{view.plan_title}</div>
+      <p className="text-sm leading-snug text-fg whitespace-pre-wrap break-words">{view.plan}</p>
     </div>
   ) : null;
 
@@ -192,18 +174,17 @@ export default function ProposalCard({
     );
   }
 
-  async function undoPlan() {
-    if (undoing) return;
-    setUndoing(true);
-    setUndoError(null);
+  async function pick(o: CardOption) {
+    setPickError(null);
+    if (o.action === "approve") {
+      // The option's plan, which the server checks the card offers.
+      onApprove?.({ ...proposal, suggested_action: o.plan });
+      return;
+    }
     try {
-      const r = await undoCardPlan(proposal.alert_id);
-      setPlanNow({ plan: r.plan, changed: r.changed, title: r.plan_title, from: loadedPlan });
-      setUndos((n) => n + 1);
+      await onAnswer?.(proposal, o.label);
     } catch (e) {
-      setUndoError(e instanceof Error ? e.message : "Couldn't undo that. Try again.");
-    } finally {
-      setUndoing(false);
+      setPickError(e instanceof Error ? e.message : "Couldn't send that. Try again.");
     }
   }
 
@@ -224,13 +205,6 @@ export default function ProposalCard({
   // doesn't have isn't shown. Snooze is one item per time to pick.
   function actionsFor(b: CardButton): CardAction[] {
     switch (b.action) {
-      case "approve":
-        // The plan as this card shows it, which the server checks.
-        // A reply (or Undo) changed the step here: the button's words were for the old
-        // one (the server drops them too), and the box shows the new step.
-        return onApprove
-          ? [{ label: local && b.label === proposal.action_label ? "Approve" : b.label, onSelect: () => onApprove({ ...proposal, suggested_action: plan }) }]
-          : [];
       case "edit_approve":
         return onApproveWithEdits ? [{ label: b.label, onSelect: startEditing }] : [];
       case "dismiss":
@@ -255,8 +229,7 @@ export default function ProposalCard({
   const sideDismiss = buttons.filter((b) => b.place === "side").flatMap(actionsFor)[0] ?? null;
   const answers = buttons.filter((b) => b.place === "answer");
   const showActions = Boolean(onApprove || onDismiss || onApproveWithEdits);
-  const asks = view?.panel === "ask" && Boolean(onAnswer);
-  const canReplan = Boolean(view?.plan_reply) && Boolean(onApprove);
+  const talks = Boolean(view && (view.options.length > 0 || view.tell_me || view.turns.length > 0));
 
   const review = view?.review ?? null;
   const chips = view?.chips ?? [];
@@ -265,7 +238,7 @@ export default function ProposalCard({
   const hasDetails = Boolean(
     review ||
       chips.length > 0 ||
-      (suggestedActionBlock && !canReplan) ||
+      (suggestedActionBlock && !talks) ||
       view?.surfaced ||
       tags.length > 0 ||
       view?.reviewed ||
@@ -290,15 +263,22 @@ export default function ProposalCard({
       >
         {proposal.headline}
       </div>
-      {description && (
-        <p
-          className={`mt-1.5 text-[15px] leading-relaxed text-fg-muted whitespace-pre-wrap break-words${
-            clamp ? " line-clamp-2" : ""
-          }`}
-          title={clamp ? description : undefined}
-        >
-          {description}
-        </p>
+      {happened ? (
+        <div className="mt-2">
+          <div className="mb-0.5 text-xs font-semibold uppercase tracking-wide text-fg-subtle">What happened</div>
+          <p className="text-[15px] leading-snug text-fg whitespace-pre-wrap break-words">{happened}</p>
+        </div>
+      ) : (
+        description && (
+          <p
+            className={`mt-1.5 text-[15px] leading-relaxed text-fg-muted whitespace-pre-wrap break-words${
+              clamp ? " line-clamp-2" : ""
+            }`}
+            title={clamp ? description : undefined}
+          >
+            {description}
+          </p>
+        )
       )}
       {(flag || hasDetails) && (
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-fg-muted">
@@ -342,20 +322,19 @@ export default function ProposalCard({
         </p>
       )}
 
-      {canReplan && (
-        <>
-          {suggestedActionBlock && <div className="mt-3">{suggestedActionBlock}</div>}
-          <CardPlanReply
-            key={undos}
-            alertId={proposal.alert_id}
-            changed={planChanged}
-            disabled={busy || undoing}
-            onChanged={(r: PlanResult) => {
-              setUndoError(null);
-              setPlanNow({ plan: r.plan, changed: r.changed, title: r.plan_title, from: loadedPlan });
-            }}
-          />
-        </>
+      {talks && view && (
+        <CardTalk
+          proposal={proposal}
+          view={view}
+          disabled={busy}
+          onPick={settled ? undefined : (o) => void pick(o)}
+          onSaid={(r) => setSaid({ card: r.card, from: loaded })}
+        />
+      )}
+      {pickError && (
+        <p role="alert" className="mt-2 text-sm text-red-500">
+          {pickError}
+        </p>
       )}
 
       {expanded && (
@@ -383,7 +362,7 @@ export default function ProposalCard({
               ))}
             </div>
           )}
-          {!canReplan && suggestedActionBlock}
+          {!talks && suggestedActionBlock}
           {view?.surfaced && <p className="text-sm text-fg-muted leading-snug">{view.surfaced}</p>}
           {tags.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
@@ -403,30 +382,6 @@ export default function ProposalCard({
           )}
           {view?.reviewed && <p className="text-xs text-fg-subtle">{view.reviewed}</p>}
         </div>
-      )}
-
-      {asks && onAnswer && (
-        <CardAsk
-          alertId={proposal.alert_id}
-          question={proposal.question ?? ""}
-          choices={proposal.needs === "choice" ? (proposal.choices ?? []) : []}
-          onAnswer={(answer) => onAnswer(proposal, answer)}
-        />
-      )}
-
-      {view?.steer && onDismiss && (
-        <CardSteer
-          alertId={proposal.alert_id}
-          watchSlug={proposal.watch_slug ?? ""}
-          onSteered={(r) => {
-            setSteered(true);
-            onSteered?.(proposal, r);
-          }}
-          onUndone={(r) => {
-            setSteered(false);
-            onSteerUndone?.(proposal, r);
-          }}
-        />
       )}
 
       {answers.length > 0 &&
@@ -461,7 +416,7 @@ export default function ProposalCard({
           </div>
         ))}
 
-      {showActions && !steered && (
+      {showActions && !settled && (
         <div className="mt-4 flex flex-wrap items-center gap-2">
           {primary &&
             (primary.href ? (
@@ -479,11 +434,6 @@ export default function ProposalCard({
                 {primary.label}
               </Button>
             ))}
-          {canReplan && planChanged && (
-            <Button variant="ghost" onClick={() => void undoPlan()} disabled={busy || undoing}>
-              {undoing ? "Undoing…" : "Undo change"}
-            </Button>
-          )}
           {menu.length > 0 && (
             <OverflowMenu
               label="More actions for this item"
@@ -507,11 +457,6 @@ export default function ProposalCard({
             </Button>
           )}
         </div>
-      )}
-      {undoError && (
-        <p role="alert" className="mt-1 text-sm text-red-500">
-          {undoError}
-        </p>
       )}
     </div>
   );

@@ -4,11 +4,11 @@ The one place that decides it. Every screen that shows a card draws it from
 :func:`card_view`, so they all show the same card. Each keeps its own
 layout; none works out a card's words or buttons from its raw fields.
 
-A button is one of a fixed list of actions (:data:`Action`), each done the
-same way everywhere:
+Approve is never a button: it is the card's first option
+(:class:`CardOption`, ``POST /alerts/{id}/approve`` with that option's plan,
+or ``/decisions/{id}/approve`` for a booking). A button is one of a fixed
+list of actions (:data:`Action`), each done the same way everywhere:
 
-- ``approve``: approve the card with the plan it shows (``POST
-  /alerts/{id}/approve``, or ``/decisions/{id}/approve`` for a booking).
 - ``edit_approve``: edit the text first, then approve exactly that.
 - ``dismiss``: Dismiss, or Got it on a card that's only to know.
 - ``snooze``: hide it until a time picked from the app's snooze choices.
@@ -24,8 +24,15 @@ answers in the card's body).
 
 ``panel`` names a card answered on its own panel, which the app draws whole:
 ``new_sender`` (who is this?), ``lead`` (Take the lead: Approve, Edit,
-Decline), ``held`` (a teammate's send a department held), ``ask`` (a
-question with an answer box).
+Decline), ``held`` (a teammate's send a department held).
+
+Every other card reads the same way (``alerts.card_talk``): ``happened``
+(what happened), ``plan`` under "What I'll do", the ``options`` to pick from
+before anything happens (the first is the Executive's own pick: an Approve
+of that option's plan, or on a card that asks something, that answer), and
+``tell_me``: a box where the person says anything ("ask Dan instead", "yes,
+send it from you"), sent to ``POST /alerts/{id}/say``. What they said and
+what the Executive said back show on the card (``turns``).
 """
 from __future__ import annotations
 
@@ -36,11 +43,11 @@ from urllib.parse import quote, urlsplit
 from pydantic import BaseModel, Field
 
 Action = Literal[
-    "approve", "edit_approve", "dismiss", "snooze", "rerun", "open", "open_url", "chat", "call",
+    "edit_approve", "dismiss", "snooze", "rerun", "open", "open_url", "chat", "call",
 ]
 Place = Literal["primary", "menu", "side", "answer"]
 Tone = Literal["neutral", "amber", "sky", "rose", "emerald"]
-Panel = Literal["", "new_sender", "lead", "held", "ask"]
+Panel = Literal["", "new_sender", "lead", "held"]
 Kind = Literal[
     "new_sender", "lead", "held", "ask", "rerun", "document", "signal", "decision", "proposal",
 ]
@@ -90,6 +97,24 @@ class CardButton(BaseModel):
     busy_label: str = ""
 
 
+class CardOption(BaseModel):
+    """One way to go, picked before anything happens. ``approve``: Approve
+    with ``plan`` (the server checks it is one the card offers). ``answer``:
+    send ``label`` as the answer (``POST /alerts/{id}/answer``)."""
+
+    action: Literal["approve", "answer"]
+    label: str
+    plan: str = ""
+
+
+class CardLine(BaseModel):
+    """One line of the reader's conversation on the card: theirs (``you``)
+    or the Executive's (``me``)."""
+
+    who: Literal["you", "me"]
+    text: str
+
+
 class CardReview(BaseModel):
     """The review's one line: "Since you last looked", "Updated", "Likely stale"."""
 
@@ -112,14 +137,20 @@ class CardView(BaseModel):
     # The text under the title, and whether it folds while the card is closed.
     description: str = ""
     long: bool = False
-    # What Approve does (``plan``, sent back with an Approve tap) and its
-    # heading; the box shows only when ``plan_title`` is set: not when the
-    # card's own text already says the step its button names.
+    # What happened, in one line (alerts.card_talk); "" until it is written,
+    # and the card shows ``description`` meanwhile.
+    happened: str = ""
+    # What the Executive will do (the plan its first option carries out),
+    # under ``plan_title`` ("What I'll do", or "What I'll do · Changed by
+    # Dana"); shown when ``plan_title`` is set.
     plan_title: str = ""
     plan: str = ""
-    plan_reply: bool = False
-    # A watch's card: a reply steers the watch.
-    steer: bool = False
+    # The ways to go, the Executive's own pick first.
+    options: list[CardOption] = Field(default_factory=list)
+    # Whether "Or tell me…" shows: the person can say anything on the card.
+    tell_me: bool = False
+    # What was said on the card, in order.
+    turns: list[CardLine] = Field(default_factory=list)
     waiting_because: str = ""
     # Opened card.
     radar: str = ""
@@ -221,18 +252,14 @@ def status_chip(item: Any, now: datetime | None = None) -> CardChip | None:
     return None
 
 
-def plan_title(changed: bool, changed_by: str | None = None) -> str:
-    """The heading over what Approve does."""
-    if not changed:
-        return "If you approve"
-    return f"If you approve · Updated by {changed_by}" if changed_by else "If you approve · Updated"
+PLAN_TITLE = "What I'll do"
 
 
-def _said_on_card(plan: str, item: Any) -> bool:
-    """Whether the card's title or text already says ``plan`` in full."""
-    words = " ".join(plan.split()).casefold()
-    shown = " ".join(f"{item.headline or ''} {item.body or ''}".split()).casefold()
-    return bool(words) and words in shown
+def plan_title(changed_by: str | None = None) -> str:
+    """The heading over what the card will do: it names who changed it when
+    that wasn't the reader, so nobody approves someone else's plan as the
+    Executive's own."""
+    return f"{PLAN_TITLE} · Changed by {changed_by}" if changed_by else PLAN_TITLE
 
 
 def _description(item: Any, artifact: bool, monitoring: bool) -> str:
@@ -284,12 +311,14 @@ def card_view(
     item: Any,
     *,
     assignee_name: str = "",
+    talk: Any = None,
     now: datetime | None = None,
 ) -> CardView:
     """What one card (a ``ProposalItem``) shows.
 
     ``assignee_name`` is the full name of the person it's routed to, when it
-    is.
+    is. ``talk`` is the card's line, options and the reader's
+    conversation on it (``alerts.card_talk.CardTalk``), when it has any.
     """
     tags = list(item.topic_tags or [])
     decision = item.decision_instance_id is not None
@@ -352,21 +381,28 @@ def card_view(
     open_run = (
         button("open", "Open the run", href=f"/jobs/runs/{quote(failed_run, safe='')}") if failed_run else None
     )
-    # The button names the step ("Reply to Dana") when the card has its
-    # words (``action_label``), else Approve.
+    # The card's own option names the step ("Reply to Dana") when the card
+    # has its words (``action_label``), else Approve; None when it has no
+    # step to approve.
     label = (getattr(item, "action_label", "") or "").strip()
     approve = (
-        button("approve", "Done" if handed_over else label or "Approve")
+        ("Done" if handed_over else label or "Approve")
         if not no_approve and not monitoring and not artifact and not failed_run
         else None
+    )
+    # Every card that takes words says what to change in "Or tell me…";
+    # one that doesn't keeps Edit & approve.
+    tell_me = not decision and not handed_over and (
+        asks or bool(item.watch_slug)
+        or (bool(item.plan_editable) and not failed_run and not artifact)
     )
     edit_approve = (
         button("edit_approve", "Edit & approve")
         if not handed_over and not no_approve and not monitoring and not artifact
-        and not decision and not failed_run
+        and not decision and not failed_run and not tell_me
         else None
     )
-    dismiss = button("dismiss", "Got it" if got_it else "Dismiss")
+    dismiss = button("dismiss", "Got it" if got_it else "Skip" if tell_me or approve is not None else "Dismiss")
     open_doc = (
         button("open", "Open document", href="/artifacts/" + quote(f"alert:{item.alert_id}", safe=""))
         if artifact
@@ -375,6 +411,20 @@ def card_view(
     link = safe_https(item.artifact_url) if artifact and item.artifact_format == "link" else ""
     open_in_app = button("open_url", f"Open in app ({_host(link)})", href=link) if link else None
     snooze = None if artifact else button("snooze", "Snooze")
+
+    plan = item.suggested_action or ""
+    # The ways to go: Approve of the card's plan first (or of another plan
+    # it offers), or on a card that asks, its answers.
+    own_options = list(getattr(talk, "options", None) or [])
+    options: list[CardOption] = []
+    if asks:
+        labels = [o.label for o in own_options] or [c for c in (item.choices or []) if c.strip()]
+        options = [CardOption(action="answer", label=x) for x in labels]
+    elif approve is not None:
+        if own_options and own_options[0].plan == plan:
+            options = [CardOption(action="approve", label=o.label, plan=o.plan) for o in own_options]
+        else:
+            options = [CardOption(action="approve", label=approve, plan=plan)]
 
     primary: CardButton | None
     if artifact:
@@ -388,12 +438,12 @@ def card_view(
     elif stale:
         primary = dismiss
     else:
-        primary = rerun or nudge or workflow or approve
+        primary = rerun or nudge or workflow
 
     buttons: list[CardButton] = []
     if primary is not None:
         buttons.append(primary.model_copy(update={"place": "primary"}))
-    for b in (rerun, open_run, nudge, workflow, approve, edit_approve, snooze, open_in_app):
+    for b in (rerun, open_run, nudge, workflow, edit_approve, snooze, open_in_app):
         if b is not None and b is not primary:
             buttons.append(b)
     if dismiss is not primary:
@@ -422,22 +472,20 @@ def card_view(
     )
 
     kind = _kind(item, artifact, failed_run, asks, decision)
-    plan = item.suggested_action or ""
-    # What Approve does shows only on a card with Approve, and always in
-    # full unless the card already says it word for word: the button's few
-    # words ("Reply to Dana") never stand in for the step it carries out
-    # (who it copies, what it attaches). A browser hand-over's step is the
-    # Executive's own note. ``plan`` stays whenever there is Approve: it is
-    # what an Approve tap carries out.
-    show_plan = (
-        bool(plan) and approve is not None and not handed_over
-        and (not label or bool(item.plan_changed_by) or not _said_on_card(plan, item))
-    )
+    # What the card will do shows on every card with a step to approve, in
+    # full: the option's few words ("Reply to Dana") never stand in for the
+    # step it carries out (who it copies, what it attaches). A browser
+    # hand-over's step is the Executive's own note.
+    show_plan = bool(plan) and approve is not None and not handed_over
     review, chips, reviewed = _lifecycle(item, now)
     description = _description(item, artifact, monitoring)
+    turns = [
+        CardLine(who=t.who, text=t.text)
+        for t in (getattr(talk, "turns", None) or [])
+    ]
     return CardView(
         kind=kind,
-        panel="ask" if asks else "",
+        panel="",
         routed_to=assignee_name if item.routed_to_person_id is not None else "",
         need=need,
         as_me=not source,
@@ -445,13 +493,12 @@ def card_view(
         status=None if monitoring else status_chip(item, now),
         description=description,
         long=len(description) > LONG_BODY_CHARS,
-        plan_title=(
-            ("What it does" if label and not item.plan_changed else plan_title(bool(item.plan_changed), item.plan_changed_by))
-            if show_plan else ""
-        ),
+        happened=(getattr(talk, "happened", "") or "") if not artifact else "",
+        plan_title=plan_title(item.plan_changed_by) if show_plan else "",
         plan=plan if approve is not None else "",
-        plan_reply=approve is not None and bool(item.plan_editable) and not decision and not handed_over,
-        steer=bool(item.watch_slug) and not asks,
+        options=options,
+        tell_me=tell_me,
+        turns=turns,
         waiting_because=item.waiting_because if approve is not None else "",
         radar=item.body if monitoring and item.body and item.body != item.headline else "",
         review=review,
@@ -487,13 +534,16 @@ def attach_views(
     items: list[Any],
     names: dict[int, str],
     *,
+    talk: dict[int, Any] | None = None,
     now: datetime | None = None,
 ) -> None:
-    """Set ``view`` on every card. ``names`` maps person id to full name."""
+    """Set ``view`` on every card. ``names`` maps person id to full name;
+    ``talk`` card id to its ``alerts.card_talk.CardTalk``."""
     for item in items:
         routed = item.routed_to_person_id
         item.view = card_view(
             item,
             assignee_name=names.get(routed, "") if routed is not None else "",
+            talk=(talk or {}).get(item.alert_id),
             now=now,
         )

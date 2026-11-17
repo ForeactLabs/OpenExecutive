@@ -1,6 +1,7 @@
-"""Steering a watch from its card: the reply becomes the watch's notes (What
-I know), closes the card and the others it answers, and every later check
-reads the notes before it tells anyone."""
+"""Steering a watch from its card: what the person says in "Or tell me…"
+(POST /alerts/{id}/say) becomes the watch's notes (What I know), closes the
+card and the others it answers, and every later check reads the notes before
+it tells anyone."""
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
@@ -51,6 +52,16 @@ def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     steer._CALLS.clear()
     steer._CALLER_CALLS.clear()
     return db_path
+
+
+@pytest.fixture(autouse=True)
+def no_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.alerts import card_talk
+
+    async def none(turn: str) -> dict[str, Any]:
+        return {}
+
+    monkeypatch.setattr(card_talk, "_call_model", none)
 
 
 @pytest.fixture()
@@ -110,14 +121,12 @@ def test_reply_updates_notes_closes_cards_and_can_be_undone(
         "close_card_ids": [same, 9999],
     })
 
-    res = client.post(f"/alerts/{aid}/steer", json={"text": "That's our own repo. We moved it."})
+    res = client.post(f"/alerts/{aid}/say", json={"text": "That's our own repo. We moved it."})
     assert res.status_code == 200, res.text
     body = res.json()
     assert body["reply"].startswith("Got it.")
-    assert body["previous_notes"] == "Acme launches."
-    assert body["watch_slug"] == SLUG
-    # Only cards it listed and the person can close; never an unknown id.
-    assert body["closed_alert_ids"] == [aid, same]
+    # The card is answered: nothing to draw, the reply says what changed.
+    assert body["card"] is None and body["approval"] is None
     assert "our own repo" in seen["turn"] and f"[{same}]" in seen["turn"]
 
     item = ms.get_watchlist_item_by_slug(SLUG, db_path=db)
@@ -128,23 +137,18 @@ def test_reply_updates_notes_closes_cards_and_can_be_undone(
     assert statuses == {aid: "dismissed", same: "dismissed", other: "unread"}
 
     # Undo with the existing endpoints: the cards come back.
-    for closed in body["closed_alert_ids"]:
+    for closed in (aid, same):
         assert client.post(f"/alerts/{closed}/reopen").status_code == 200
     assert alert_store.get_alert(aid, db_path=db).status == "unread"  # type: ignore[union-attr]
 
 
-def test_reply_is_refused_on_a_card_no_watch_raised(
+def test_a_card_whose_watch_is_gone_is_refused(
     client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _plan(monkeypatch, {"notes": "x", "reply": "y"})
-    triage = _card(db, "Board deck due", source="triage", tags=["finance"])
-    app = _card(db, "New app entries", source="app_entries", tags=["external:app-entries"])
-    for aid in (triage, app):
-        res = client.post(f"/alerts/{aid}/steer", json={"text": "wrong"})
-        assert res.status_code == 409
     # The watch was deleted since the card was raised.
     gone = _card(db, "Acme news")
-    assert client.post(f"/alerts/{gone}/steer", json={"text": "wrong"}).status_code == 409
+    assert client.post(f"/alerts/{gone}/say", json={"text": "wrong"}).status_code == 409
 
 
 def test_empty_or_long_reply_is_refused_without_a_model_call(
@@ -153,8 +157,8 @@ def test_empty_or_long_reply_is_refused_without_a_model_call(
     _watch(db)
     aid = _card(db, "Acme news")
     seen = _plan(monkeypatch, {"notes": "x", "reply": "y"})
-    assert client.post(f"/alerts/{aid}/steer", json={"text": "  "}).status_code == 422
-    res = client.post(f"/alerts/{aid}/steer", json={"text": "x" * 501})
+    assert client.post(f"/alerts/{aid}/say", json={"text": "  "}).status_code == 422
+    res = client.post(f"/alerts/{aid}/say", json={"text": "x" * 501})
     assert res.status_code == 422 and "x" * 50 not in res.text
     assert "turn" not in seen
     assert alert_store.get_alert(aid, db_path=db).status == "unread"  # type: ignore[union-attr]
@@ -166,7 +170,7 @@ def test_a_bad_model_answer_changes_nothing(
     _watch(db)
     aid = _card(db, "Acme news")
     _plan(monkeypatch, {"notes": "", "reply": "ok"})
-    assert client.post(f"/alerts/{aid}/steer", json={"text": "ours"}).status_code == 503
+    assert client.post(f"/alerts/{aid}/say", json={"text": "ours"}).status_code == 503
     item = ms.get_watchlist_item_by_slug(SLUG, db_path=db)
     assert item is not None and item.notes == "Acme launches."
     assert alert_store.get_alert(aid, db_path=db).status == "unread"  # type: ignore[union-attr]
@@ -207,7 +211,7 @@ def test_a_card_answered_during_the_reply_is_left_alone(
         return {"notes": "- Skip it", "reply": "Got it.", "close_card_ids": []}
 
     monkeypatch.setattr(steer, "_call_model", fake_call)
-    res = client.post(f"/alerts/{aid}/steer", json={"text": "ours"})
+    res = client.post(f"/alerts/{aid}/say", json={"text": "ours"})
     assert res.status_code == 409
     item = ms.get_watchlist_item_by_slug(SLUG, db_path=db)
     assert item is not None and item.notes == "Acme launches."
@@ -225,7 +229,7 @@ def test_notes_changed_during_the_reply_are_kept(
         return {"notes": "- From the reply", "reply": "Got it.", "close_card_ids": []}
 
     monkeypatch.setattr(steer, "_call_model", fake_call)
-    assert client.post(f"/alerts/{aid}/steer", json={"text": "ours"}).status_code == 409
+    assert client.post(f"/alerts/{aid}/say", json={"text": "ours"}).status_code == 409
     item = ms.get_watchlist_item_by_slug(SLUG, db_path=db)
     assert item is not None and item.notes == "- Edited on the watch page"
     assert alert_store.get_alert(aid, db_path=db).status == "unread"  # type: ignore[union-attr]
@@ -257,10 +261,10 @@ def test_a_teammate_steers_only_with_cards_routed_to_them(
     theirs = routed("Acme repo forked", 8)
     seen = _plan(monkeypatch, {"notes": "- n", "reply": "Got it.", "close_card_ids": [also_mine, theirs]})
 
-    assert client.post(f"/alerts/{theirs}/steer", json={"text": "ours"}).status_code == 403
-    res = client.post(f"/alerts/{mine}/steer", json={"text": "ours"})
+    assert client.post(f"/alerts/{theirs}/say", json={"text": "ours"}).status_code in (403, 404)
+    res = client.post(f"/alerts/{mine}/say", json={"text": "ours"})
     assert res.status_code == 200, res.text
-    assert res.json()["closed_alert_ids"] == [mine, also_mine]
+    assert [alert_store.get_alert(a, db_path=db).status for a in (mine, also_mine)] == ["dismissed", "dismissed"]  # type: ignore[union-attr]
     assert f"[{theirs}]" not in seen["turn"]
     assert alert_store.get_alert(theirs, db_path=db).status == "unread"  # type: ignore[union-attr]
 
@@ -272,10 +276,10 @@ def test_only_cards_shown_to_the_model_can_be_closed(
     aid = _card(db, "first")
     others = [_card(db, f"other {i}") for i in range(steer._OTHER_CARDS_MAX + 5)]
     _plan(monkeypatch, {"notes": "- n", "reply": "Got it.", "close_card_ids": others})
-    res = client.post(f"/alerts/{aid}/steer", json={"text": "close them all"})
+    res = client.post(f"/alerts/{aid}/say", json={"text": "close them all"})
     assert res.status_code == 200, res.text
-    assert len(res.json()["closed_alert_ids"]) == 1 + steer._OTHER_CARDS_MAX
-
+    closed = [o for o in others if alert_store.get_alert(o, db_path=db).status == "dismissed"]  # type: ignore[union-attr]
+    assert len(closed) == steer._OTHER_CARDS_MAX
 
 
 # --------------------------------------------------------------------- #
