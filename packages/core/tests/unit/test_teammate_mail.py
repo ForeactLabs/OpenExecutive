@@ -705,6 +705,19 @@ def test_a_send_without_an_id_is_left_out_of_a_listing_by_subject_and_time(
         assert "Crates on Monday" in _run(FakeMailbox({SEARCH: listing}), SEARCH, query=f"to:{DANA}")
 
 
+def test_a_message_that_shows_its_recipients_must_share_one_with_the_send(
+    roster: SimpleNamespace,
+) -> None:
+    # Subject and time alone decide only where no recipient is shown.
+    with _reader(roster.owner):
+        tm.note_sent(subject="Crates on Monday", recipients={DANA}, result="Email sent! Message ID: ")
+    other = _sent_by_exec("x1", "Crates on Monday", VENDOR, date=_now())
+    tm.allow_mail_ids(roster.session, "x1")
+    with _reader(roster.ben):
+        out = _run(FakeMailbox({READ: other}), READ, message_id="x1")
+    assert "Crates on Monday" in out and "withheld" not in out
+
+
 @pytest.mark.parametrize("case", ["other subject", "outside the send's time", "send has an id"])
 def test_a_listing_entry_matches_a_send_only_by_its_subject_its_time_and_no_id(
     roster: SimpleNamespace, case: str
