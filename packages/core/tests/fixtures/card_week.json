@@ -506,7 +506,6 @@
                 "need": "Needs your answer",
                 "buttons": [
                   "menu:snooze:Snooze",
-                  "menu:open:Open Sam's page",
                   "side:dismiss:Dismiss"
                 ]
               }
