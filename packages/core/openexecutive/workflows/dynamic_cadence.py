@@ -145,6 +145,7 @@ def seed_workflow_cadences(db_path: Path | None = None) -> int:
     scheduled. Never raises."""
     from openexecutive.memory.episodic import _get_conn, _resolve_db_path
     from openexecutive.workflows.dynamic_store import list_definitions
+    from openexecutive.workflows.failure_alerts import RERUN_SCOPE_PREFIX
 
     try:
         resolved = _resolve_db_path(db_path)
@@ -155,10 +156,14 @@ def seed_workflow_cadences(db_path: Path | None = None) -> int:
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='scheduled_actions'"
             ).fetchone() is None:
                 return 0
+            # A queued Run again is a one-off that never chains, so it is not
+            # the cadence's next run.
             scheduled = {
                 str(row[0]) for row in conn.execute(
                     "SELECT DISTINCT channel_ref FROM scheduled_actions "
-                    "WHERE kind = 'dynamic_workflow' AND status IN ('pending', 'running')"
+                    "WHERE kind = 'dynamic_workflow' AND status IN ('pending', 'running') "
+                    "AND (scope_key IS NULL OR scope_key NOT LIKE ?)",
+                    (f"{RERUN_SCOPE_PREFIX}%",),
                 ).fetchall()
             }
         defs = list_definitions(active_only=True, db_path=db_path)

@@ -309,14 +309,22 @@ def test_a_workflow_whose_run_never_finished_gets_its_next_run(monkeypatch: pyte
         )
         with episodic._get_conn(episodic.DB_PATH) as conn:
             conn.execute("UPDATE scheduled_actions SET status = ? WHERE id = ?", (status, action_id))
+    # A queued Run again never chains, so it isn't the cadence's next run.
+    defs.append(make("rerun_only"))
+    rerun_id = episodic.insert_scheduled_action(
+        run_at="2026-11-16T09:00:00+00:00", channel="__internal__", channel_ref="rerun_only",
+        intent_text="x", kind="dynamic_workflow",
+    )
+    with episodic._get_conn(episodic.DB_PATH) as conn:
+        conn.execute("UPDATE scheduled_actions SET scope_key = 'rerun:7' WHERE id = ?", (rerun_id,))
 
-    assert dynamic_cadence.seed_workflow_cadences() == 1
+    assert dynamic_cadence.seed_workflow_cadences() == 2
     with episodic._get_conn(episodic.DB_PATH) as conn:
         rows = conn.execute(
             "SELECT channel_ref FROM scheduled_actions WHERE kind = 'dynamic_workflow' "
             "AND status = 'pending' ORDER BY channel_ref"
         ).fetchall()
-    assert [r[0] for r in rows] == ["closed", "pending"]
+    assert [r[0] for r in rows] == ["closed", "pending", "rerun_only", "rerun_only"]
     assert dynamic_cadence.seed_workflow_cadences() == 0  # idempotent
 
 
