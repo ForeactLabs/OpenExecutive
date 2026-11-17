@@ -5411,7 +5411,12 @@ chat:
     names the real stop. Why: a reply card writing a long spreadsheet as one
     draft_artifact call was cut at 8192 twice and showed "couldn't finish"
     with the mark on the read before it. The last round (no tools) keeps
-    what it wrote.
+    what it wrote. A call whose block closed before the cut (cut in the
+    text after it) is whole and runs as usual. A self-hosted model gets at
+    most LOCAL_MAX_OUTPUT_TOKENS (default 8192, 0 = no cap): the local
+    FeatureSpec's max_output_tokens, which providers.feature_gate applies
+    by lowering max_tokens, since vLLM-style servers refuse prompt +
+    max_tokens over the model's context.
   chats_preview: |
     GET /sessions (no q) gives each chat a preview: the last message as
     one plain line (Markdown marks stripped, cut at a word near 120

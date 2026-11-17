@@ -125,3 +125,26 @@ def test_cut_off_reply_text_runs_on_without_a_paragraph_break() -> None:
         FinalMsg([TextBlock("3, driven by renewals.")], "end_turn"),
     ])
     assert text == "Revenue grew 12% in Q3, driven by renewals."
+
+
+def test_a_call_that_closed_before_the_cut_still_runs() -> None:
+    ran: list[dict[str, Any]] = []
+
+    async def _draft(tool_input: dict[str, Any], *_a: Any, **_k: Any) -> str:
+        ran.append(tool_input)
+        return "published"
+
+    provider = _ScriptedProvider(
+        [
+            # The call finished; the round was cut in the text after it.
+            _FinalMsg([_ToolUseBlock("ok", "draft_artifact", {"title": "Tax bills"}), _TextBlock("Now the")],
+                      "max_tokens"),
+            _FinalMsg([_TextBlock("Done.")], "end_turn"),
+        ]
+    )
+    asyncio.run(_run(provider, {"draft_artifact": _draft}))
+
+    assert len(ran) == 1
+    results = provider.calls[1]["messages"][-1]["content"]
+    answered = {b["tool_use_id"]: b["content"] for b in results if b.get("type") == "tool_result"}
+    assert answered["ok"] != CUT_OFF_RESULT

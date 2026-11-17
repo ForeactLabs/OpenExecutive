@@ -1239,7 +1239,8 @@ LAST_ROUND_NOTE = (
 )
 
 
-# The most one round of the Executive may write. A round that reaches it is
+# The most one round of the Executive may write (a self-hosted model gets
+# less when LOCAL_MAX_OUTPUT_TOKENS says so: providers.feature_gate). A round that reaches it is
 # cut off mid-answer (stop_reason "max_tokens"): a long file (a spreadsheet,
 # a document) written as one tool call stopped the whole turn before this was
 # raised from 8192. Every Executive round and the committee revision use it.
@@ -3021,7 +3022,15 @@ class Executive:
             group_results: dict[str, str] = {}
             # The call the round was still writing when it was cut off is the
             # last one; its input is unfinished, so nothing reads or runs it.
-            cut_id = tool_uses[-1]["id"] if cut_off and tool_uses else None
+            # A call whose block closed before the cut (trailing text, or a
+            # next call the provider dropped) is whole and runs as usual.
+            cut_id = (
+                tool_uses[-1]["id"]
+                if cut_off and tool_uses and response_content
+                and response_content[-1].get("type") == "tool_use"
+                and response_content[-1].get("id") == tool_uses[-1]["id"]
+                else None
+            )
             for i, tu in enumerate(tool_uses):
                 if tu["id"] == cut_id:
                     continue

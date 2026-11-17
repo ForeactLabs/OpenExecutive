@@ -404,6 +404,7 @@ def _local() -> OpenAICompatibleProvider:
         local_spec = replace(
             _LOCAL_FEATURE_SPEC,
             supports_pdf_input=bool(getattr(settings, "local_pdf_input", False)),
+            max_output_tokens=getattr(settings, "local_max_output_tokens", None) or None,
         )
         spec_lookup: dict[str, FeatureSpec] = {
             m: local_spec for m in _local_models(settings)
