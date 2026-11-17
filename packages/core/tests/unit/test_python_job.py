@@ -152,6 +152,18 @@ def test_links_are_url_encoded(company: Path, monkeypatch: pytest.MonkeyPatch) -
     assert f["link"].endswith("/My%20report%20%28v2%29.pdf")
 
 
+def test_an_image_comes_back_ready_to_show(company: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A chart shows in the chat only from its link, never its handle, so an
+    image result carries the markdown line to put in the answer."""
+    async def fake(*a: Any, **k: Any) -> dict[str, Any]:
+        return {"files": {"Monthly sales.png": base64.b64encode(b"x").decode(), "data.csv": base64.b64encode(b"a").decode()}}
+    monkeypatch.setattr(python_job, "run_job", fake)
+    files = {f["name"]: f for f in _run({"code": "1"})["files"]}
+    png = files["Monthly sales.png"]
+    assert png["show"] == f"![Monthly sales.png]({png['link']})"
+    assert "show" not in files["data.csv"]
+
+
 async def test_the_api_stops_reading_a_flood(monkeypatch: pytest.MonkeyPatch) -> None:
     reader = asyncio.StreamReader()
     reader.feed_data(b"x" * 300)
