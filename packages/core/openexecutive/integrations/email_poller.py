@@ -410,37 +410,48 @@ def _scan_new_text(body: list[str]) -> tuple[list[str], int | None, bool]:
     A reply attribution followed by ">" lines is skipped rather than ending
     the scan, so text the sender wrote below a quote (bottom-posting or an
     interleaved reply) is kept. A forward marker counts only before any
-    reply attribution: one inside quoted history is that history's.
+    reply attribution: one inside quoted history is that history's. A
+    ">"-quoted forward (Apple Mail) is skipped like any quote, its start
+    noted, so a note written below it is kept; an unquoted one ends the scan.
     """
     kept: list[str] = []
     i = 0
     replied = False
+    quoted_forward: int | None = None
+
+    def stop(at: int, forwarded: bool) -> tuple[list[str], int | None, bool]:
+        if quoted_forward is not None:
+            return kept, quoted_forward, True
+        return kept, at, forwarded
+
     while i < len(body):
         text = body[i].strip()
         if _FORWARDED_RE.match(text) or (
-            not replied and _BEGIN_FORWARDED_RE.match(text)
+            not replied and quoted_forward is None and _BEGIN_FORWARDED_RE.match(text)
             and not (text.startswith(">") and _after_attribution(body, i))
         ):
-            return kept, i, True
+            if not text.startswith(">"):
+                return stop(i, True)
+            quoted_forward = i
         if _ORIGINAL_MESSAGE_RE.match(text) or _OUTLOOK_RULE_RE.match(text):
-            return kept, i, False
+            return stop(i, False)
         if _OUTLOOK_HEADER_RE.match(text) and any(
             _OUTLOOK_SENT_RE.match(b.strip())
             for b in body[i + 1:i + 1 + _OUTLOOK_HEADER_SPAN]
         ):
-            return kept, i, False
+            return stop(i, False)
         attribution = _attribution_end(body, i)
         if attribution is not None:
             end, quoted = attribution
             if not quoted:
-                return kept, i, False
+                return stop(i, False)
             replied = True
             i = end + 1
             continue
         if not text.startswith(">") and text != _NO_BODY_PLACEHOLDER:
             kept.append(body[i].rstrip())
         i += 1
-    return kept, None, False
+    return stop(i, False) if quoted_forward is not None else (kept, None, False)
 
 
 def sender_new_text(body: str) -> str:
@@ -483,9 +494,13 @@ def _first_unattributed_quote(lines: list[str]) -> int | None:
 
 
 # What a reply attribution in any language looks like: a line ending in ":"
-# that names an address or a date ("Le lun. 3 nov. 2026, Dana <d@x> a écrit :",
-# "Am 03.11.2026 schrieb Dana:").
-_ATTRIBUTION_ANY_RE = re.compile(r"^(?=.*[@\d]).{8,300}:\s*$")
+# that names someone as ``name <address>``, or a numeric date or a time
+# ("Le lun. 3 nov. 2026 à 10:00, Dana <d@x> a écrit :", "Am 03.11.2026
+# schrieb Dana:"). A lead-in such as "Forwarding from dana@x.com:" or
+# "before the Nov 3 meeting:" names neither.
+_ATTRIBUTION_ANY_RE = re.compile(
+    r"^(?=.*(<[^<>@\s]+@[^<>\s]+>|\b\d{1,4}[./-]\d{1,2}[./-]\d{1,4}\b|\b\d{1,2}:\d{2}\b)).{8,300}:\s*$"
+)
 
 
 def _after_attribution(lines: list[str], i: int) -> bool:
@@ -514,12 +529,11 @@ def split_forward(
         # A forward whose marker is in another language ("Anfang der
         # weitergeleiteten Nachricht:"): its first ">" run, when no reply
         # attribution comes before it, is the forwarded email.
+        # The scan skipped it like any quote, so their words above and below
+        # it are already kept.
         cut_at = _first_unattributed_quote(lines)
-        if cut_at is not None:
-            # The scan read past the quote: their words are what comes above
-            # it (and what comes below it, added back with the forward).
-            kept = _scan_new_text(lines[:cut_at])[0]
-    own = "\n".join(kept).strip()
+    # A skipped quote leaves the blank lines around it: one is enough.
+    own = re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
     if max_chars is not None:
         own = own[:max_chars]
     if cut_at is None or not (forwarded or is_forward):
@@ -527,18 +541,13 @@ def split_forward(
     rest = lines[cut_at:]
     if rest and rest[0].lstrip().startswith(">"):
         # Quoted (Apple Mail): the forward is the run of ">" lines, one level
-        # of ">" off each; what the sender wrote below it is theirs.
+        # of ">" off each. What the sender wrote below it is in ``kept``.
         end = len(rest)
         for k, ln in enumerate(rest):
             if ln.strip() and not ln.lstrip().startswith(">"):
                 end = k
                 break
-        below = "\n".join(ln.rstrip() for ln in rest[end:]).strip()
         rest = [re.sub(r"^(\s*)>\s?", r"\1", ln) for ln in rest[:end]]
-        if below:
-            own = f"{own}\n\n{below}".strip()
-            if max_chars is not None:
-                own = own[:max_chars]
     if rest and (
         _BEGIN_FORWARDED_RE.match(rest[0].strip())
         or _FORWARDED_RE.match(rest[0].strip())

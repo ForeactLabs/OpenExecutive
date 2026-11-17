@@ -113,9 +113,12 @@ def test_a_forward_they_sent_stays_out_of_their_own_words() -> None:
 def test_a_note_below_an_apple_forward_stays_the_senders() -> None:
     from openexecutive.integrations.email_poller import split_forward
 
-    own, forwarded = split_forward("> Begin forwarded message:\n> From: A\n> body\n\nmy note below", "Fwd: x")
+    body = "> Begin forwarded message:\n> From: A\n> body\n\nmy note below"
+    own, forwarded = split_forward(body, "Fwd: x")
     assert own == "my note below"
     assert forwarded == "From: A\nbody"
+    # Own words alone (voice learning, emailed answers) keep it too.
+    assert sender_new_text(body) == "my note below"
 
 
 def test_the_principals_unquoted_iphone_forward_is_not_their_own_words() -> None:
@@ -164,3 +167,10 @@ def test_a_note_below_a_forward_in_another_language_shows_once() -> None:
     own, forwarded = split_forward(body, "WG: report")
     assert own == "FYI see below\n\nThanks, Bob"
     assert forwarded == "Anfang der weitergeleiteten Nachricht:\nVon: X\nhello there"
+
+
+def test_a_lead_in_with_a_date_or_address_keeps_the_forward() -> None:
+    quote = "> Begin forwarded message:\n>\n> From: Bank\n> Rate is 5%"
+    for lead in ("Can you handle this before the Nov 3 meeting:", "See below from dana@x.com:"):
+        text = readable_text(f"{lead}\n\n{quote}", "Fwd: Rates")
+        assert text == f"{lead}\n\nForwarded message:\nFrom: Bank\nRate is 5%"
