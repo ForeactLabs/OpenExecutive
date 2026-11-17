@@ -146,7 +146,7 @@ def _notes(person_id: int, since: str, session_id: str | None, db_path: Path | N
     finally:
         conn.close()
     return [{
-        "kind": "note", "id": int(r[0]), "title": r[2] or r[1], "source": "",
+        "kind": "note", "id": int(r[0]), "title": r[2] or history.shown_summary(r[1]), "source": "",
         "status": "active", "created_at": r[3], "can_undo": True,
     } for r in rows]
 

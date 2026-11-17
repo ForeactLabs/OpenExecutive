@@ -87,6 +87,7 @@ def test_each_kind_shows_up_newest_first_for_its_own_person(client: TestClient, 
     }
     assert all(c["can_undo"] for c in got)
     assert [c["created_at"] for c in got] == sorted((c["created_at"] for c in got), reverse=True)
+    assert next(c for c in got if c["kind"] == "note")["title"] == "You told Kyle the scans come Friday"
     figure_row = next(c for c in got if c["kind"] == "worked_out")
     assert figure_row["title"] == "Reserves held: $330,241" and figure_row["source"] == "DCA statement"
 

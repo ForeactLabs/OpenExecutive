@@ -235,3 +235,12 @@ def test_everyone_keeps_notes_until_they_turn_it_off(monkeypatch: pytest.MonkeyP
     assert h.people_keeping_notes() == []
     h.set_person_settings(2, by="t", reply_notes=True)
     assert h.people_keeping_notes() == [2]
+
+
+def test_shown_summary_puts_you_in_front_of_the_verb() -> None:
+    from openexecutive.memory.history import shown_summary
+
+    assert shown_summary("Said the Android review is complete.") == "You said the Android review is complete."
+    assert shown_summary("Promised Dana the deck by Friday") == "You promised Dana the deck by Friday"
+    assert shown_summary("Dana Lee asked for the deck") == "Dana Lee asked for the deck"
+    assert shown_summary("") == ""

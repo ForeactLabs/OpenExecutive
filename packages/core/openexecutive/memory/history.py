@@ -146,6 +146,33 @@ _COLUMNS = (
 )
 
 
+# Past-tense verbs a note can start with that don't end in "ed".
+_IRREGULAR_VERBS = frozenset({
+    "said", "told", "sent", "gave", "took", "made", "wrote", "set", "put", "got",
+    "kept", "left", "met", "paid", "bought", "sold", "chose", "thought", "felt",
+    "found", "brought", "began", "ran", "came", "went", "did", "had", "was",
+    "were", "let", "cut", "read", "built", "spent", "lent", "meant", "heard",
+    "held", "won", "quit", "forgot", "became", "knew", "saw", "showed", "shown",
+    "understood", "taught", "caught", "dealt", "drove", "flew", "fought", "hid",
+    "lost", "rang", "rose", "shut", "sought", "spoke", "stood", "swore", "threw",
+    "wore", "withdrew", "undertook", "overtook", "forgave", "forbade", "froze",
+})
+
+
+def shown_summary(summary: str) -> str:
+    """A note's summary as its owner reads it: "You said the price list goes
+    out Friday." A note is always about the person who owns it, and only
+    they see it, so the summary is stored starting with the verb ("Said …")
+    and the screens put "You" in front. Text that doesn't start with a
+    past-tense verb is shown as it is."""
+    text = (summary or "").strip()
+    first = text.split(" ", 1)[0]
+    word = first.rstrip(",.;:").lower()
+    if not word or not first[:1].isupper() or not (word.endswith("ed") or word in _IRREGULAR_VERBS):
+        return summary
+    return "You " + first[:1].lower() + text[1:]
+
+
 def _now(now: datetime | None) -> datetime:
     return now or datetime.now(UTC)
 

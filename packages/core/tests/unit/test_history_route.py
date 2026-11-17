@@ -85,6 +85,8 @@ def test_each_person_sees_only_their_own(client: TestClient, ids: dict[str, int]
     _add(ids["teammate"])
     mine = client.get("/memories/history", headers=OWNER).json()
     assert len(mine["notes"]) == 1 and mine["notes"][0]["quote"] == "I'll send the price list on Friday"
+    # The note is the reader's own, so it reads "You told …".
+    assert mine["notes"][0]["summary"] == "You told Dana Lee the price list comes Friday."
     # On for everyone on the team until they turn it off.
     assert mine["reply_notes"] is True and mine["effective_retention_days"] == 90
     assert mine["retention_choices"] == [30, 90, 365, None]
