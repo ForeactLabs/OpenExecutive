@@ -822,9 +822,9 @@ def approved_speaker() -> Any:
     """The person whose own card is being carried out right now
     (``orchestrator.levels.approved``): their tap on their own card is them
     asking, so a step that needs to know who asked (assign a task, record a
-    fact) acts for them as it would have in their turn. The owner when the
-    approved card names nobody else. None outside an approved step, or when
-    the lookup fails."""
+    fact) acts for them as it would have in their turn. None outside an
+    approved step, for a card nobody on the team asked for (mail from
+    someone not on People), or when the lookup fails."""
     try:
         from openexecutive.orchestrator import levels
 
@@ -832,9 +832,7 @@ def approved_speaker() -> Any:
             return None
         who = levels.approved_requester()
         if who is None:
-            from openexecutive.people.registry import get_principal
-
-            return get_principal()
+            return None
         from openexecutive.people.store import get_person
 
         person = get_person(int(who))
