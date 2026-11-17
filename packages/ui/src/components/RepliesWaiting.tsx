@@ -58,6 +58,8 @@ import NextTimeTick from "@/components/NextTimeTick";
 // While a send Gmail hasn't confirmed is being settled (the card is
 // "executing"), how often the cards are read again.
 const SETTLE_POLL_MS = 20_000;
+// What shows while "Reply to" is being changed.
+const RECIPIENTS_RUNNING = "Changing who it goes to…";
 
 // The cards and their refresh, for the Home "Needs you" list, which shows
 // each one as a card among the proposals. `cards` stays null for anyone but
@@ -210,7 +212,7 @@ export function ReplyCardItem({
 
   const pickRecipients = async (everyone: boolean) => {
     if (!choice || everyone === choice.toEveryone) return;
-    setStep({ kind: "busy", label: "Saving…" });
+    setStep({ kind: "busy", label: RECIPIENTS_RUNNING });
     setError(null);
     try {
       onChanged?.(await setReplyRecipients(card.decision_id, everyone));
@@ -625,6 +627,9 @@ export function ReplyCardItem({
           )}
         </div>
         <div className="mt-1 text-xs text-fg-subtle break-words" title={card.draft_to.join(", ")}>To {recipientNames(card.draft_to)}</div>
+        {running(RECIPIENTS_RUNNING) && (
+          <p className="mt-1 text-xs text-fg-subtle" aria-live="polite">{RECIPIENTS_RUNNING}</p>
+        )}
         {editing !== null ? (
           <div className="mt-1.5">
             <textarea
