@@ -182,24 +182,14 @@ def shown_summary(summary: str) -> str:
     out Friday." A note is always about the person who owns it, and only
     they see it, so the summary is stored starting with the verb ("Said …")
     and the screens put "You" in front. Text that doesn't start with a
-    past-tense verb from the known list, or that starts with a name and
-    then the verb, is shown as it is. A correction is the person's own
+    past-tense verb from the known list (which holds no names, so "Fred
+    asked …" is left alone) is shown as it is. A correction is the person's own
     words, so it is never passed through here."""
     text = (summary or "").strip()
-    words = text.split(" ", 2)
-    first = words[0]
+    first = text.split(" ", 1)[0]
     if not first[:1].isupper() or not _past_tense(first):
         return summary
-    # A known verb, then another one, is a word that is also a name; but
-    # "Had promised …" and "Were told …" are an auxiliary and the verb.
-    # A comma after it ("Sent, signed and …") is a list of verbs, not a name.
-    if (first.lower() not in _AUXILIARIES and not first.endswith(",") and len(words) > 1 and words[1][:1].islower()
-            and _past_tense(words[1])):
-        return summary
     return "You " + first[:1].lower() + text[1:]
-
-
-_AUXILIARIES = frozenset({"had", "were", "did"})
 
 
 def _past_tense(word: str) -> bool:
