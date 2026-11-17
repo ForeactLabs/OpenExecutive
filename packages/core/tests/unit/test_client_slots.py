@@ -774,10 +774,19 @@ async def test_blank_switch_then_unload_brings_every_table_back(
         run_at=(datetime.now(UTC) - timedelta(minutes=10)).isoformat(), channel="email",
         channel_ref="pat@example.com", intent_text="Call Pat back", kind="ad_hoc",
     )
+    # Still running in this process when the copy comes back: its handler
+    # finishes it and chains the next run, so the restore leaves it alone.
+    in_flight_id = episodic.insert_scheduled_action(
+        run_at="2020-01-01T00:00:00+00:00", channel="__internal__", channel_ref="weekly",
+        intent_text="Scheduled run of dynamic workflow: Weekly", kind="dynamic_workflow",
+    )
+    from openexecutive.scheduler import runner
+
+    monkeypatch.setattr(runner, "_inflight_ids", {in_flight_id})
     with sqlite3.connect(str(env.db_path)) as conn:
         conn.execute(
             "UPDATE scheduled_actions SET status = 'running' "
-            "WHERE kind IN ('reminder', 'client_rotation')"
+            "WHERE kind IN ('reminder', 'client_rotation', 'dynamic_workflow')"
         )
         conn.execute("CREATE TABLE IF NOT EXISTS audit_log (note TEXT)")
         conn.execute("INSERT INTO audit_log VALUES ('mine')")
@@ -833,6 +842,9 @@ async def test_blank_switch_then_unload_brings_every_table_back(
         assert conn.execute(
             "SELECT status FROM scheduled_actions WHERE id = ?", (just_due_id,)
         ).fetchall() == [("pending",)]
+        assert conn.execute(
+            "SELECT status FROM scheduled_actions WHERE id = ?", (in_flight_id,)
+        ).fetchall() == [("running",)]
 
 
 async def test_eval_scenarios_stay_across_every_switch(env: SimpleNamespace) -> None:

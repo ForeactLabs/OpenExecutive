@@ -9,6 +9,7 @@ one process against the same database.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, tzinfo
@@ -39,6 +40,19 @@ logger = logging.getLogger(__name__)
 
 # Strong refs so GC cannot cancel in-flight tasks mid-execution.
 _inflight: set[asyncio.Task[None]] = set()
+# The ids of the actions those tasks run: a restore of a saved company
+# database leaves these rows running (``clients.slots.restore_company_db``),
+# since their handlers are still going and will finish and chain them.
+_inflight_ids: set[int] = set()
+
+
+def in_flight_action_ids() -> frozenset[int]:
+    """The ids of the scheduled actions running in this process now."""
+    return frozenset(_inflight_ids)
+
+
+def _forget_inflight_id(action_id: int, _task: asyncio.Task[None]) -> None:
+    _inflight_ids.discard(action_id)
 
 # Liveness for the Setup status page (api/setup_checks.py): when this
 # loop started, and when its last tick finished and how. Every tick ends by
@@ -405,6 +419,9 @@ async def run_scheduler(
                     task = asyncio.create_task(_execute_action(row, gateway))
                 _inflight.add(task)
                 task.add_done_callback(_inflight.discard)
+                if row.id is not None:
+                    _inflight_ids.add(row.id)
+                    task.add_done_callback(functools.partial(_forget_inflight_id, row.id))
             _beat("ran")
         except asyncio.CancelledError:
             raise

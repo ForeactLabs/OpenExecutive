@@ -394,15 +394,15 @@ def restore_company_db(state_src: Path) -> None:
     _restore_db_from_file(state_src)
     _ensure_schemas()
     _restore_global_tables(preserved)
-    # The copy's queue is as it was when saved: a job running then finished
-    # here, and a job whose time passed since would fire late. Both are
-    # closed, never run; a recurring job among them is then seeded afresh at
-    # its next time (each seed skips a kind still pending).
+    # The copy's queue is as it was when saved: a job running then ran here,
+    # and a job long past its time would fire late. Both are closed, never
+    # run, except a job whose handler is still going, which finishes and
+    # chains as usual; a recurring job among the closed ones is then seeded
+    # afresh at its next time (each seed skips a kind still pending).
     from openexecutive.memory.episodic import settle_restored_queue
+    from openexecutive.scheduler.runner import in_flight_action_ids, seed_recurring_jobs
 
-    if settle_restored_queue(_episodic_db_path()):
-        from openexecutive.scheduler.runner import seed_recurring_jobs
-
+    if settle_restored_queue(_episodic_db_path(), in_flight=in_flight_action_ids()):
         seed_recurring_jobs()
 
 

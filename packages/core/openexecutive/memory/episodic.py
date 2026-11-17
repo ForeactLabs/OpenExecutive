@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import sqlite3
@@ -1662,12 +1663,16 @@ def requeue_orphaned_running(db_path: Path | None = None) -> int:
 RESTORED_LATE_GRACE = timedelta(hours=6)
 
 
-def settle_restored_queue(db_path: Path | None = None) -> int:
+def settle_restored_queue(
+    db_path: Path | None = None, *, in_flight: Collection[int] = ()
+) -> int:
     """Settle the job queue of a database copy that was just made live.
 
-    A row that was 'running' when the copy was saved finished in this
-    process against the database it replaced, so running it again would do
-    the work twice (a rotation, a send). A 'pending' row more than
+    A row that was 'running' when the copy was saved ran in this process
+    against the database it replaced, so running it again would do the work
+    twice (a rotation, a send). One whose handler is still going
+    (``in_flight``) stays 'running': the handler finishes it and chains its
+    next run, and a seed would otherwise chain a second. A 'pending' row more than
     ``RESTORED_LATE_GRACE`` past its time would fire long late, all of them
     on the next tick. Both are marked 'cancelled' with the reason; a row
     still to come, or only a little late, is left to run. The caller seeds
@@ -1681,7 +1686,8 @@ def settle_restored_queue(db_path: Path | None = None) -> int:
         running = conn.execute(
             "UPDATE scheduled_actions SET status = 'cancelled', "
             "last_error = 'was running when this copy was saved' "
-            "WHERE status = 'running'"
+            "WHERE status = 'running' AND id NOT IN (SELECT value FROM json_each(?))",
+            (json.dumps(sorted(in_flight)),),
         ).rowcount
         overdue = conn.execute(
             "UPDATE scheduled_actions SET status = 'cancelled', "
