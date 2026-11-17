@@ -738,6 +738,8 @@ async def test_blank_switch_then_unload_brings_every_table_back(
         assert conn.execute("SELECT COUNT(*) FROM brand_new_feature").fetchone()[0] == 0
         # Written while away: not the company's, so unload keeps it.
         conn.execute("INSERT INTO eval_scenarios VALUES ('written meanwhile')")
+        # A blank client starts with no workflows; yours are in the snapshot.
+        assert conn.execute("SELECT COUNT(*) FROM dynamic_workflows").fetchone()[0] == 0
         # The client's own: they stay in its slot, not in your company.
         conn.execute("INSERT INTO audit_log VALUES ('beta')")
         # A one-time marker describes the data saved with it, so the saved

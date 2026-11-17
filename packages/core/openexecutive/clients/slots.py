@@ -82,12 +82,6 @@ ENGAGEMENT_META_FIELDS: frozenset[str] = frozenset(
 
 ENGAGEMENT_STATUSES = ("active", "paused", "winding_down", "completed")
 
-# Kept by a blank-slot switch on top of RESET_KEEPS: the operator's own
-# workflow definitions, which the first-activation snapshot doesn't capture,
-# so wiping them would lose the operator's work.
-_BLANK_KEEPS: tuple[str, ...] = ("dynamic_workflows",)
-
-
 class ClientSlotError(ValueError):
     """Base error for slot operations (maps to HTTP 400)."""
 
@@ -426,12 +420,11 @@ def _wipe_per_client_tables() -> None:
     """Factory-wipe the company tables (blank-slot activation): the same sweep
     as a factory reset, so a table added later is wiped here too. The
     operator-level rows (``_GLOBAL_TABLES``) are carried across by the caller.
-    The operator's workflow definitions stay (``_BLANK_KEEPS``)."""
+    Workflows go too: the outgoing company's are in its slot or in the user's
+    snapshot, and a blank client starts with none."""
     from openexecutive.cli.fixture_loader import RESET_KEEPS, _delete_every_table
 
-    _delete_every_table(
-        _episodic_db_path(), keep=RESET_KEEPS | set(_GLOBAL_TABLES) | set(_BLANK_KEEPS)
-    )
+    _delete_every_table(_episodic_db_path(), keep=RESET_KEEPS | set(_GLOBAL_TABLES))
 
 
 def _dump_global_tables(
