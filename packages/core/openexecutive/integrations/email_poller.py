@@ -428,7 +428,6 @@ def _scan_new_text(body: list[str]) -> tuple[list[str], int | None, bool]:
         text = body[i].strip()
         if _FORWARDED_RE.match(text) or (
             not replied and quoted_forward is None and _BEGIN_FORWARDED_RE.match(text)
-            and not (text.startswith(">") and _after_attribution(body, i))
         ):
             if not text.startswith(">"):
                 return stop(i, True)

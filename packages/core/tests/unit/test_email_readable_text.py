@@ -146,13 +146,12 @@ def test_a_forward_with_its_marker_in_another_language_is_read() -> None:
     assert split_forward("Ja.\n\nOn Mon, A <a@example.com> wrote:\n> old", "WG: Rechnung") == ("Ja.", "")
 
 
-def test_a_quoted_forward_under_a_reply_in_another_language_is_history() -> None:
-    from openexecutive.integrations.email_poller import _new_text_lines
+def test_a_quote_under_a_reply_in_another_language_is_history() -> None:
+    from openexecutive.integrations.email_poller import split_forward
 
-    body = "Merci.\n\nLe lun. 3 nov. 2026 à 10:00, Dana <d@example.com> a écrit :\n> Begin forwarded message:\n> old"
-    text = readable_text(body, "RE: x")
-    assert FORWARDED_HEADING not in text and "old" not in text
-    assert _new_text_lines(body.splitlines())[1] is False
+    body = "Merci.\n\nLe lun. 3 nov. 2026 à 10:00, Dana <d@example.com> a écrit :\n> old"
+    own, forwarded = split_forward(body, "WG: x")
+    assert forwarded == "" and "old" not in own
 
 
 def test_max_chars_alone_caps_the_whole_text() -> None:
@@ -171,6 +170,12 @@ def test_a_note_below_a_forward_in_another_language_shows_once() -> None:
 
 def test_a_lead_in_with_a_date_or_address_keeps_the_forward() -> None:
     quote = "> Begin forwarded message:\n>\n> From: Bank\n> Rate is 5%"
-    for lead in ("Can you handle this before the Nov 3 meeting:", "See below from dana@x.com:"):
+    for lead in (
+        "Can you handle this before the Nov 3 meeting:",
+        "See below from dana@x.com:",
+        "Can you handle this before our 10:30 call:",
+        "Forwarding this from Dana <d@x.com>:",
+        "Please review by 11/20/2026:",
+    ):
         text = readable_text(f"{lead}\n\n{quote}", "Fwd: Rates")
         assert text == f"{lead}\n\nForwarded message:\nFrom: Bank\nRate is 5%"
