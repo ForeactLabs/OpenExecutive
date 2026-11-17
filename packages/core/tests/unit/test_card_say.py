@@ -637,6 +637,44 @@ def test_parse_keeps_the_cards_own_plan_first(db: Path) -> None:
     assert [o.label for o in card_talk.parse({"answers": ["C"]}, ask)[1]] == ["A", "B"]
 
 
+def test_a_watch_card_keeps_its_own_plan(client: TestClient, db: Path, turns: _Turns) -> None:
+    """A card whose plan can't change gets no other ways to go, and a pick of
+    another plan never swaps it in."""
+    watch = dict(source="query", topic_tags=["external:news-acme"], dedup_key="watch:news-acme", needs="ok")
+    aid = _card(db, **watch)  # type: ignore[arg-type]
+    card = alert_store.get_alert(aid)
+    assert card is not None
+    _, options = card_talk.parse({"others": [{"label": "Ask Sam", "plan": "Ask Sam."}]}, card)
+    assert [o.plan for o in options] == [OLD]
+    card_talk.keep_options(aid, OLD, "", [
+        card_talk.CardOption(label="Do it", plan=OLD), card_talk.CardOption(label="Ask Sam", plan="Ask Sam."),
+    ])
+    assert client.post(f"/alerts/{aid}/approve", json={"plan": "Ask Sam."}).status_code == 409
+    assert _plan_of(aid) == OLD and turns.calls == []
+
+
+async def test_a_card_whose_call_failed_waits_before_the_next_try(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    aid = _card(db)
+    card = alert_store.get_alert(aid)
+    assert card is not None
+    calls: list[int] = []
+
+    async def nothing(c: Any) -> None:
+        calls.append(1)
+
+    monkeypatch.setattr(card_talk, "fill", nothing)
+    monkeypatch.setattr(card_talk, "_MISSED", {})
+    card_talk.fill_soon([card], {})
+    await asyncio.gather(*card_talk._TASKS)
+    card_talk.fill_soon([card], {})
+    await asyncio.gather(*card_talk._TASKS)
+    assert calls == [1]
+
+
 def test_options_show_only_for_the_plan_they_were_written_for(db: Path) -> None:
     aid = _card(db)
     card_talk.keep_options(aid, OLD, "Alex asked.", [card_talk.CardOption(label="Ask Alex", plan=OLD)])

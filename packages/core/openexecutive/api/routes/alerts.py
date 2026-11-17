@@ -194,7 +194,7 @@ def _pick_option(alert: Alert, plan: str, person_id: int | None) -> None:
 
     picked = plan.strip()
     current = (alert.suggested_action or "").strip()
-    if not picked or picked == current or alert.id is None:
+    if not picked or picked == current or alert.id is None or replan.plan_refusal(alert) is not None:
         return
     talk = card_talk.read([alert]).get(alert.id)
     option = next((o for o in (talk.options if talk else []) if o.plan == picked), None)

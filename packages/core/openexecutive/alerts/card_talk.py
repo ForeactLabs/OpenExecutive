@@ -29,6 +29,7 @@ import asyncio
 import json
 import logging
 import sqlite3
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -321,7 +322,8 @@ def parse(data: dict[str, Any], card: Alert) -> tuple[str, list[CardOption]]:
         return happened, []
     own = (card.action_label or "").strip() or _one_line(data.get("label"), LABEL_MAX_CHARS) or "Do it"
     options = [CardOption(label=own, plan=plan)]
-    for other in data.get("others") or []:
+    # Other ways to go only on a card whose plan can change.
+    for other in (data.get("others") or []) if kind_of(card) == "plan" else []:
         if not isinstance(other, dict):
             continue
         label = _one_line(other.get("label"), LABEL_MAX_CHARS)
@@ -386,6 +388,10 @@ async def fill(card: Alert, *, db_path: Path | None = None) -> CardTalk | None:
 
 
 _FILLING: set[int] = set()
+# A card whose call came to nothing waits this long before the next try, so
+# an outage doesn't cost a call per card on every page load.
+RETRY_AFTER_S = 600.0
+_MISSED: dict[int, float] = {}
 _TASKS: set[asyncio.Task[None]] = set()
 
 
@@ -401,6 +407,8 @@ def fill_soon(cards: list[Alert], talk: dict[int, CardTalk]) -> None:
         cid = card.id
         if cid is None or cid in _FILLING or kind_of(card) == "none":
             continue
+        if time.monotonic() - _MISSED.get(cid, float("-inf")) < RETRY_AFTER_S:
+            continue
         have = talk.get(cid)
         if have is not None and have.written:
             continue
@@ -408,7 +416,10 @@ def fill_soon(cards: list[Alert], talk: dict[int, CardTalk]) -> None:
 
         async def run(c: Alert = card, i: int = cid) -> None:
             try:
-                if await fill(c) is not None:
+                if await fill(c) is None:
+                    _MISSED[i] = time.monotonic()
+                else:
+                    _MISSED.pop(i, None)
                     from openexecutive.alerts import sse_bus
 
                     sse_bus.publish({"type": "card_options", "alert_id": i})
