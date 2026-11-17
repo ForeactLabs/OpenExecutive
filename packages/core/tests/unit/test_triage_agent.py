@@ -176,6 +176,16 @@ def test_a_muted_topic_stays_muted_when_review_fails() -> None:
     assert decision.alert is False
 
 
+def test_a_short_mute_only_holds_back_whole_words() -> None:
+    """A mute of "ai" doesn't hold back a card that says "emailed"."""
+    event = AlertEvent(source="email", external_id="m-6", subject="Leo emailed about Friday",
+                       body="Open Friday afternoon?", from_executive=True)
+    decision = asyncio.run(TriageAgent().triage(
+        event, mute_patterns=["ai"], client=_client(side_effect=RuntimeError("boom")),
+    ))
+    assert decision.alert is True
+
+
 def test_triage_swallows_client_exceptions() -> None:
     """LLM error → quiet fallback for an ordinary event, never propagates."""
     client = SimpleNamespace(

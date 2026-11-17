@@ -319,10 +319,14 @@ def _kept_key(event: AlertEvent) -> str:
 
 
 def _names_muted_topic(event: AlertEvent, mute_patterns: list[str]) -> bool:
-    """Whether a mute pattern appears in the event's subject or body: with
-    no review there are no topic tags to match, so the words stand in."""
+    """Whether a mute pattern appears as whole words in the event's subject
+    or body: with no review there are no topic tags to match, so the words
+    stand in. Whole words, so a short mute like "ai" never hits "email"."""
     text = f"{event.subject}\n{event.title or ''}\n{event.body}".lower()
-    return any(p.strip() and p.strip().lower() in text for p in mute_patterns)
+    return any(
+        p.strip() and re.search(rf"\b{re.escape(p.strip().lower())}\b", text)
+        for p in mute_patterns
+    )
 
 
 def _parse_decision(raw: dict) -> TriageDecision:
