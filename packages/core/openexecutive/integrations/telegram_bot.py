@@ -466,7 +466,7 @@ async def _process_and_reply(
             session_id=session_id,
             title=f"Telegram {sender_name}",
             created_at=result.session.created_at.isoformat(),
-            owner_person_id=channel_turn.owner_or_principal(result.person_id),
+            owner_person_id=result.person_id,
             user_text=message_text,
             assistant_text=response,
             sender_person_id=result.person_id,

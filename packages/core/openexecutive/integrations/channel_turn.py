@@ -217,7 +217,8 @@ def save_turn(
     sender_person_id: int | None = None,
 ) -> bool:
     """Keep one exchange in the conversation's history; False when it
-    couldn't. Synchronous SQLite. Never raises: the person already has their
+    couldn't. The conversation shows in ``owner_person_id``'s chat list, or
+    the principal's when the sender isn't on People. Synchronous SQLite. Never raises: the person already has their
     answer, so a failure here must not turn into the error reply."""
     from openexecutive.memory.session_store import (
         create_session,
@@ -226,7 +227,10 @@ def save_turn(
     )
 
     try:
-        create_session(session_id, title, created_at, caller_person_id=owner_person_id)
+        create_session(
+            session_id, title, created_at,
+            caller_person_id=owner_or_principal(owner_person_id),
+        )
         save_message(session_id, "user", user_text, sender_person_id=sender_person_id)
         save_message(session_id, "assistant", assistant_text)
         update_session_timestamp(session_id)

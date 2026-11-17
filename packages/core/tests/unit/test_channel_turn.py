@@ -235,8 +235,23 @@ def test_save_turn_keeps_the_exchange_and_never_raises(monkeypatch: pytest.Monke
 def test_a_chat_from_someone_off_people_shows_in_the_principals_list(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    owners: list[Any] = []
     monkeypatch.setattr(
         "openexecutive.people.store.find_principal_person", lambda: SimpleNamespace(id=1)
     )
-    assert channel_turn.owner_or_principal(None) == 1
-    assert channel_turn.owner_or_principal(9) == 9
+    monkeypatch.setattr(
+        "openexecutive.memory.session_store.create_session",
+        lambda sid, title, created, caller_person_id=None: owners.append(caller_person_id),
+    )
+    monkeypatch.setattr(
+        "openexecutive.memory.session_store.save_message", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        "openexecutive.memory.session_store.update_session_timestamp", lambda sid: None
+    )
+    for owner in (None, 9):
+        assert channel_turn.save_turn(
+            session_id="s", title="t", created_at="c", owner_person_id=owner,
+            user_text="u", assistant_text="a",
+        ) is True
+    assert owners == [1, 9]

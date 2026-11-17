@@ -1126,12 +1126,11 @@ async def _handle_message(
 
         # Kept only after the reply is sent.
         created_at = result.session.created_at.isoformat()
-        session_owner_id = channel_turn.owner_or_principal(result.person_id)
         if channel_turn.save_turn(
             session_id=session_id,
             title=session_title,
             created_at=created_at,
-            owner_person_id=session_owner_id,
+            owner_person_id=result.person_id,
             user_text=formatted_user_text,
             assistant_text=response,
             sender_person_id=result.person_id,
@@ -1148,7 +1147,7 @@ async def _handle_message(
                 session_id=f"discord:thread:{route_result.promoted_thread_id}",
                 title=route_result.promoted_session_title or session_title,
                 created_at=created_at,
-                owner_person_id=session_owner_id,
+                owner_person_id=result.person_id,
                 user_text=formatted_user_text,
                 assistant_text=response,
                 sender_person_id=result.person_id,
