@@ -262,6 +262,7 @@ def test_shown_summary_puts_you_in_front_of_the_verb() -> None:
     assert shown_summary("Set of slides is due Friday") == "Set of slides is due Friday"
     assert shown_summary("Won Kim confirmed the scans") == "Won Kim confirmed the scans"
     assert shown_summary("Clarified the start date with Dana") == "You clarified the start date with Dana"
+    assert shown_summary("Thanked Dana for the intro") == "You thanked Dana for the intro"
     assert shown_summary("Sent signed contract to Dana") == "You sent signed contract to Dana"
     assert shown_summary("Shared finished deck with Kyle") == "You shared finished deck with Kyle"
 
