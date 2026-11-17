@@ -1051,7 +1051,7 @@ async def _handle_message(
             for other_uid in co_present_discord_user_ids or ():
                 if other_uid == discord_user_id:
                     continue  # sender already covered by the turn's person
-                other = find_person_by_discord_id(other_uid)
+                other = await asyncio.to_thread(find_person_by_discord_id, other_uid)
                 if other and other.id is not None:
                     co_present_person_ids.append(other.id)
 

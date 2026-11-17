@@ -415,7 +415,7 @@ async def _process_and_reply(
             # their name, and the chat shows in the principal's list.
             from openexecutive.people.store import find_person_by_telegram_chat_id
 
-            person = find_person_by_telegram_chat_id(str(chat_id))
+            person = await asyncio.to_thread(find_person_by_telegram_chat_id, str(chat_id))
             # Telegram private chats are 1:1 (a positive chat id); groups and
             # channels are negative. Only a private chat gets the person's
             # open cards and the backstory of a message sent to them earlier.
