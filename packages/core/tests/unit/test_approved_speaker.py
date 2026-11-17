@@ -3,6 +3,7 @@ what it grants: the asker's own powers, and nothing for a card nobody on the
 team asked for."""
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -86,3 +87,26 @@ def test_an_unreadable_roster_grants_nothing(
         assert people_tools.approved_speaker() is None
         assert people_tools.is_principal_on_verified_surface(_UNATTENDED) is False
         assert people_tools.teammate_on_verified_surface(_UNATTENDED) is None
+
+
+def test_the_speaker_ends_with_the_approved_step_and_stays_in_it(team: SimpleNamespace) -> None:
+    """The card's asker is bound only around the card's own run: not after
+    it, and not in a turn running beside it."""
+    with levels.approved(team.sara):
+        pass
+    assert people_tools.approved_speaker() is None
+
+    async def card() -> int | None:
+        with levels.approved(team.sara):
+            await asyncio.sleep(0.01)
+            speaker = people_tools.approved_speaker()
+            return speaker.id if speaker else None
+
+    async def other_turn() -> object:
+        await asyncio.sleep(0.005)
+        return people_tools.approved_speaker()
+
+    async def both() -> tuple[int | None, object]:
+        return await asyncio.gather(card(), other_turn())
+
+    assert asyncio.run(both()) == (team.sara, None)
