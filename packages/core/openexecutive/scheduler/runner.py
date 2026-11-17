@@ -1624,7 +1624,11 @@ async def _run_teammate_followup(
     else:
         # The run's own send went out or waits on an Approve card: the
         # runner delivered nothing, so it does not say it did.
-        _audit("ran", f"ran for {name}: its message to {action.channel_ref} via {action.channel} is the run's own step")
+        _audit(
+            "ran",
+            f"ran for {name}: its message to {_ref_for_prompt(action.channel_ref)} "
+            f"via {action.channel} is the run's own step",
+        )
     return True
 
 
