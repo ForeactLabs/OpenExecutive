@@ -395,20 +395,28 @@ def restore_company_db(state_src: Path) -> None:
     """Make a saved copy of the company database live, carrying the
     operator-level rows (``_GLOBAL_TABLES``) across. Used by a client switch
     and by unload, which puts the user's own saved database back."""
-    preserved = _dump_global_tables()
-    _restore_db_from_file(state_src)
-    _ensure_schemas()
-    _restore_global_tables(preserved)
     # The copy's queue is as it was when saved: a job running then ran here,
     # and a job long past its time would fire late. Both are closed, never
     # run, except a job whose handler is still going, which finishes and
     # chains as usual; a recurring job among the closed ones is then seeded
-    # afresh at its next time (each seed skips a kind still pending).
+    # afresh at its next time (each seed skips a kind still pending). The
+    # scheduler is held throughout, so no tick claims from the copy before
+    # it is settled.
     from openexecutive.memory.episodic import settle_restored_queue
-    from openexecutive.scheduler.runner import in_flight_actions, seed_recurring_jobs
+    from openexecutive.scheduler.runner import (
+        hold_claims,
+        in_flight_actions,
+        seed_recurring_jobs,
+    )
 
-    if settle_restored_queue(_episodic_db_path(), in_flight=in_flight_actions()):
-        seed_recurring_jobs()
+    with hold_claims():
+        in_flight = in_flight_actions()
+        preserved = _dump_global_tables()
+        _restore_db_from_file(state_src)
+        _ensure_schemas()
+        _restore_global_tables(preserved)
+        if settle_restored_queue(_episodic_db_path(), in_flight=in_flight):
+            seed_recurring_jobs()
 
 
 def _restore_db_from_file(state_src: Path) -> None:

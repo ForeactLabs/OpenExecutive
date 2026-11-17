@@ -926,3 +926,37 @@ async def test_a_failed_snapshot_keeps_the_last_one_and_stops_the_switch(
     assert saved.read_bytes() == before
     assert get_active_client(env.settings) is None
     assert _decision_summaries(env.db_path) == ["My Real Co decision"]
+
+
+async def test_the_scheduler_is_held_while_a_saved_company_is_put_back(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No tick may claim from the copy between the swap and the settle."""
+    import asyncio
+
+    from openexecutive.cli.fixture_loader import snapshot_user_state
+    from openexecutive.memory import episodic
+    from openexecutive.scheduler import runner
+
+    _seed_live_company(env, "My Real Co")
+    snapshot_user_state(env.settings)
+    held: list[bool] = []
+    real_restore = slots._restore_db_from_file
+    real_settle = episodic.settle_restored_queue
+
+    def _restore(src: Path) -> None:
+        held.append(runner._claims_held())
+        real_restore(src)
+
+    def _settle(*a: Any, **k: Any) -> int:
+        held.append(runner._claims_held())
+        return real_settle(*a, **k)
+
+    monkeypatch.setattr(slots, "_restore_db_from_file", _restore)
+    monkeypatch.setattr(episodic, "settle_restored_queue", _settle)
+    await asyncio.to_thread(
+        slots.restore_company_db,
+        env.company / "_user_backup" / "state.db",
+    )
+    assert held == [True, True]
+    assert not runner._claims_held()

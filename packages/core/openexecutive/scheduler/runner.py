@@ -11,6 +11,8 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, tzinfo
 from typing import TYPE_CHECKING, Any
@@ -32,6 +34,8 @@ from openexecutive.workflows import run_control
 from openexecutive.workflows.gate import ensure_workflow_event
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from openexecutive.briefing.brief_state import DeliveryReason
     from openexecutive.people.models import Person
 
@@ -391,6 +395,12 @@ async def run_scheduler(
                     "scheduler: company profile now active — resuming scheduled actions"
                 )
                 holding_for_profile = False
+            if _claims_held():
+                # A saved company database is being put back: claiming or
+                # sweeping now would read it before its queue is settled.
+                _beat("restoring")
+                await asyncio.sleep(poll_interval_seconds)
+                continue
             if _rotation_pause_active():
                 # An overnight client rotation is switching the live company
                 # context — claiming now would fire the just-activated
@@ -1750,6 +1760,32 @@ _DEFAULT_WEEKLY_REVIEW_SPEC = "weekly@fri@16:00"
 # (departments.goal_review): Monday morning in the user's zone, both modes.
 GOAL_REVIEW_KIND = "goal_review"
 _DEFAULT_GOAL_REVIEW_SPEC = "weekly@mon@09:00"
+
+
+_claim_holds = 0
+_claim_holds_lock = threading.Lock()
+
+
+@contextmanager
+def hold_claims() -> Iterator[None]:
+    """Keep the scheduler from claiming or sweeping for the duration.
+
+    Held while a saved company database is put back (a client switch, an
+    unload), so no tick reads the copy before its queue is settled. Works
+    from a worker thread; nests.
+    """
+    global _claim_holds
+    with _claim_holds_lock:
+        _claim_holds += 1
+    try:
+        yield
+    finally:
+        with _claim_holds_lock:
+            _claim_holds -= 1
+
+
+def _claims_held() -> bool:
+    return _claim_holds > 0
 
 
 def _rotation_pause_active() -> bool:
