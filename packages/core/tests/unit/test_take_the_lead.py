@@ -123,6 +123,10 @@ def test_rules_belong_to_their_scope() -> None:
     ("cancel_calendar_event", {"event_id": "e1"}, "delete_share"),
     ("send_company_broadcast", {"text": "Office closed Friday."}, "big_send"),
     ("create_calendar_event", {"title": "Sync", "attendee_emails": ["stranger@far.example"]}, "someone_new"),
+    # A follow-up the scheduler fires to an address nobody on People has:
+    # held here, at send time, whatever started it.
+    ("google_workspace__send_gmail_message",
+     {"to": "stranger@far.example", "subject": "Following up", "body": "hi"}, "someone_new"),
 ])
 def test_the_base_kinds_wait(owner: Any, tool: str, tool_input: dict[str, Any], kind: str) -> None:
     hit = ttl.check(tool, tool_input, lead=_lead(), rules=[])
