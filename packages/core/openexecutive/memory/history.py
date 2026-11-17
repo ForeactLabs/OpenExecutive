@@ -182,8 +182,8 @@ def shown_summary(summary: str) -> str:
     they see it, so the summary is stored starting with the verb ("Said …")
     and the screens put "You" in front. Text that doesn't start with a
     past-tense verb from the known list, or that starts with a name and
-    then the verb, is shown
-    as it is."""
+    then the verb, is shown as it is. A correction is the person's own
+    words, so it is never passed through here."""
     text = (summary or "").strip()
     words = text.split(" ", 2)
     first = words[0]
@@ -198,17 +198,6 @@ def shown_summary(summary: str) -> str:
 
 
 _AUXILIARIES = frozenset({"had", "were", "did"})
-
-
-def stored_text(text: str) -> str:
-    """The reverse of :func:`shown_summary`, for text the person saves: a
-    correction typed over "You told Dana …" is kept as "Told Dana …", since
-    the Executive reads corrections and its "you" is itself."""
-    words = (text or "").strip().split(" ", 2)
-    if len(words) > 1 and words[0].lower() == "you" and _past_tense(words[1]):
-        rest = " ".join(words[1:])
-        return rest[:1].upper() + rest[1:]
-    return text
 
 
 def _past_tense(word: str) -> bool:
@@ -913,7 +902,7 @@ def correct_note(
         return None
     from openexecutive.delegation.ghostwriter import one_line
 
-    cleaned = one_line(stored_text(text or ""), MAX_CORRECTION_CHARS)
+    cleaned = one_line(text or "", MAX_CORRECTION_CHARS)
     conn = _connect(db_path)
     try:
         conn.execute(
