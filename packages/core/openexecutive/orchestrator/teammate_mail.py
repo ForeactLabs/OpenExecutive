@@ -144,6 +144,7 @@ OUTLOOK_THEIRS_NOTE = (
 # every mailbox call; older sends fall out of reach of the subject match only.
 SENT_TABLE = "mail_sent_for"
 SENT_READ_MAX = 5000
+SUBJECT_MATCH_DAYS = 30
 _open = db.opener(db.company_path, schema=(
     f"CREATE TABLE IF NOT EXISTS {SENT_TABLE} ("
     "id INTEGER PRIMARY KEY AUTOINCREMENT, person_id INTEGER NOT NULL, "
@@ -311,8 +312,12 @@ def _sides(session: Any) -> _Sides | None:
     reader = [p for p in team if reader_id is not None and p.id == reader_id]
     others = [p for p in team if reader_id is None or p.id != reader_id]
     seen = getattr(session, "mail_ids_seen", None) if session is not None else None
+    # A scheduled workflow step has no session and reads teammates' mail as
+    # nobody, but the Executive's sends for the workflow's own person stay
+    # in reach.
+    mine = reader_id if session is not None else _workflow_person()
     try:
-        sent = [s for s in _sent_rows() if s.person_id != reader_id]
+        sent = [s for s in _sent_rows() if s.person_id != mine]
     except Exception:
         logger.warning("teammate_mail: sent mail read failed — refusing", exc_info=True)
         return None
@@ -340,9 +345,13 @@ def _sides(session: Any) -> _Sides | None:
 
 
 def _sent_rows() -> list[_Sent]:
+    """The newest kept sends. A send's ids count for good; its subject only
+    for ``SUBJECT_MATCH_DAYS``, so a later unrelated "Invoice" from the same
+    vendor is not taken for a reply to it."""
     with _open() as conn:
         rows = conn.execute(
-            f"SELECT person_id, message_id, thread_id, subject, recipients FROM {SENT_TABLE} "  # noqa: S608
+            f"SELECT person_id, message_id, thread_id, subject, recipients, "  # noqa: S608
+            f"at >= datetime('now', '-{SUBJECT_MATCH_DAYS} days') AS recent FROM {SENT_TABLE} "
             "ORDER BY id DESC LIMIT ?",
             (SENT_READ_MAX,),
         ).fetchall()
@@ -350,17 +359,33 @@ def _sent_rows() -> list[_Sent]:
         _Sent(
             person_id=int(r["person_id"]),
             ids={i for i in (r["message_id"], r["thread_id"]) if i},
-            subject=str(r["subject"] or ""),
+            subject=str(r["subject"] or "") if r["recent"] else "",
             recipients=set(str(r["recipients"] or "").split()),
         )
         for r in rows
     ]
 
 
+def _workflow_person() -> int | None:
+    """Whom a step of a running workflow outside any session works for: its
+    creator, else the principal. None outside a workflow."""
+    from openexecutive.people.store import find_principal_person
+    from openexecutive.workflows import chat_tools
+
+    chain, creator = chat_tools.running()
+    if not chain:
+        return None
+    if creator is not None:
+        return int(creator)
+    principal = find_principal_person()
+    return principal.id if principal is not None else None
+
+
 def sent_for() -> int | None:
     """Whom a send happening now is for: inside an approved step, the person
     who asked for it (the principal when they approved their own); else this
-    turn's reader (``_reader_id``). None when no one can be told."""
+    turn's reader (``_reader_id``); with no session, a running workflow's
+    creator. None when no one can be told."""
     from openexecutive.orchestrator import levels
     from openexecutive.orchestrator.schedule_tools import current_session
     from openexecutive.people.store import find_principal_person
@@ -373,7 +398,7 @@ def sent_for() -> int | None:
             principal = find_principal_person()
             return principal.id if principal is not None else None
         session = current_session.get()
-        return _reader_id(session) if session is not None else None
+        return _reader_id(session) if session is not None else _workflow_person()
     except Exception:
         logger.warning("teammate_mail: couldn't tell whom a send was for", exc_info=True)
         return None

@@ -545,3 +545,35 @@ def test_a_send_no_one_can_be_told_of_is_not_kept(roster: SimpleNamespace) -> No
     with _reader(None):
         tm.note_sent(subject="Hi", recipients={DANA}, result="Email sent! Message ID: x9")
     assert tm._sent_rows() == []
+
+
+def test_a_scheduled_step_finds_its_creators_sends(roster: SimpleNamespace) -> None:
+    from openexecutive.workflows import chat_tools
+
+    _send_for(roster.ben, mid="m2")
+    current_session.set(None)
+    with chat_tools.in_workflow("vendor replies", roster.owner):
+        tm.note_sent(subject="Crates on Monday", recipients={DANA}, result="Email sent! Message ID: m1")
+        out = _run(FakeMailbox({SEARCH: _listing(EXEC, EXEC)}), SEARCH, query=f"to:{DANA}")
+    assert "Subject 1" in out and "Subject 2" not in out
+
+
+def test_an_old_subject_no_longer_hides_new_mail(roster: SimpleNamespace) -> None:
+    _send_for(roster.ben, mid="s1", subject="Invoice")
+    with tm._open() as conn:
+        conn.execute(f"UPDATE {tm.SENT_TABLE} SET at = datetime('now', '-40 days')")
+    roster.session.mail_ids_seen.add(f"{roster.owner}:r3")
+    later = _sent_by_exec("r3", "Invoice", EXEC, sender=DANA)
+    with _reader(roster.owner):
+        out = _run(FakeMailbox({READ: later}), READ, message_id="r3")
+    assert "Invoice" in out and "withheld" not in out
+
+
+def test_the_gateway_keeps_whom_a_gmail_send_was_for(roster: SimpleNamespace) -> None:
+    from openexecutive.orchestrator import mcp_gateway
+
+    with _reader(roster.ben):
+        mcp_gateway._note_sent_for(SEND, SEND, {"to": DANA, "subject": "Re: Crates", "body": "Hi"},
+                                   "Email sent! Message ID: g7")
+    [row] = tm._sent_rows()
+    assert (row.person_id, row.ids, row.subject, row.recipients) == (roster.ben, {"g7"}, "crates", {DANA})
