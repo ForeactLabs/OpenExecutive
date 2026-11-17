@@ -439,8 +439,10 @@ def _scan_new_text(body: list[str]) -> tuple[list[str], int | None, bool]:
             for b in body[i + 1:i + 1 + _OUTLOOK_HEADER_SPAN]
         ):
             return stop(i, False)
-        if not text.startswith(">") and _ATTRIBUTION_ANY_RE.match(text) and any(
-            b.strip().startswith(">") for b in body[i + 1:i + 3] if b.strip()
+        quote_below = next((b.strip() for b in body[i + 1:i + 3] if b.strip()), "")
+        if (
+            not text.startswith(">") and _ATTRIBUTION_ANY_RE.match(text)
+            and quote_below.startswith(">") and not _BEGIN_FORWARDED_RE.match(quote_below)
         ):
             # A reply attribution in another language ("Dana a écrit :"):
             # the quote below it is history, not the sender's words.
@@ -501,12 +503,12 @@ def _first_unattributed_quote(lines: list[str]) -> int | None:
 
 
 # What a reply attribution in any language looks like: a line ending in ":"
-# that says someone wrote ("Le lun. 3 nov. 2026 à 10:00, Dana <d@x> a écrit :",
-# "Am 03.11.2026 schrieb Dana:"). A lead-in such as "Please review by
-# 11/20/2026:" or "Forwarding this from Dana <d@x.com>:" says nobody wrote.
+# that says someone wrote and names a date or address ("Le lun. 3 nov. 2026
+# à 10:00, Dana <d@x> a écrit :", "Am 03.11.2026 schrieb Dana:"). A lead-in such as "Please review by
+# 11/20/2026:" or "Look at what the county wrote:" is not one.
 _ATTRIBUTION_ANY_RE = re.compile(
-    r"^.{0,300}(\b(wrote|writes|schrieb|a écrit|escribió|escreveu|ha scritto|schreef|skrev|"
-    r"kirjoitti|napisał|napsal|írta|написал|написала|yazdı|έγραψε)\b|寫道|写道).{0,100}[:：]\s*$",
+    r"^(?=.*[\d@])(?=.{0,300}(\b(wrote|writes|schrieb|a écrit|escribió|escreveu|ha scritto|schreef|skrev|"
+    r"kirjoitti|napisał|napsal|írta|написал|написала|yazdı|έγραψε)\b|寫道|写道)).{0,400}[:：]\s*$",
     re.IGNORECASE,
 )
 

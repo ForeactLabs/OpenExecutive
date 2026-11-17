@@ -225,3 +225,17 @@ def test_a_chinese_reply_attribution_is_history() -> None:
     body = "好的\n\nDana <d@x.com> 于2026年11月3日周一 10:00写道：\n> 旧的"
     assert split_forward(body, "Fwd: x") == ("好的", "")
 
+
+def test_a_lead_in_that_says_wrote_keeps_the_forward() -> None:
+    body = (
+        "Look at what the county wrote:\n\n> Begin forwarded message:\n>\n"
+        "> From: County <c@x>\n> Subject: Permit\n>\n> Your permit is denied.\n"
+    )
+    text = readable_text(body, "Fwd: Permit")
+    assert text.startswith("Look at what the county wrote:\n\nForwarded message:\n")
+    assert "Your permit is denied." in text
+    assert sender_new_text(body) == "Look at what the county wrote:"
+    # Even when it names a date, a Begin forwarded marker right below wins.
+    dated = body.replace("county wrote:", "county wrote on 11/3:")
+    assert "Your permit is denied." in readable_text(dated, "Fwd: Permit")
+
