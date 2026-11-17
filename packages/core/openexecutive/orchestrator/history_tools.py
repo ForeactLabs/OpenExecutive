@@ -128,6 +128,7 @@ def _keep_private(session: Any, person: Any) -> bool:
 def render_notes(notes: list[Any]) -> str:
     """The notes as one ``<history_notes>`` block of plain lines."""
     from openexecutive.delegation.ghostwriter import one_line
+    from openexecutive.memory.history import note_form
     from openexecutive.utils.prompt_blocks import no_tags, plain
 
     def clean(text: str, limit: int) -> str:
@@ -140,7 +141,7 @@ def render_notes(notes: list[Any]) -> str:
         where = clean(note.channel, 40)
         line = f"[{note.occurred_at[:10]}] {where}, with {who}: " if who else f"[{note.occurred_at[:10]}] {where}: "
         if note.correction:
-            line += f"{clean(note.correction, 400)} (as you corrected it)"
+            line += f"{clean(note_form(note.correction), 400)} (as you corrected it)"
         else:
             # Their own words first; the summary is only how it was noted.
             line += f'your words: "{clean(note.quote, 400)}" (noted as: {clean(note.summary, 400)})'

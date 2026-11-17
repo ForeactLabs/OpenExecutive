@@ -218,6 +218,9 @@ def test_a_correction_replaces_the_summary(roster: SimpleNamespace) -> None:
     h.correct_note(roster.principal, note.id, "Told Dana it comes Monday.")
     result = _recall(_web(roster.principal))["result"]
     assert "comes Monday. (as you corrected it)" in result and "Friday" not in result
+    # Typed over the shown "You told …", it still reads as a note.
+    h.correct_note(roster.principal, note.id, "You said Dana it might slip to Monday.")
+    assert "Said Dana it might slip to Monday. (as you corrected it)" in _recall(_web(roster.principal))["result"]
 
 
 def test_the_block_cannot_be_closed_from_inside(roster: SimpleNamespace) -> None:

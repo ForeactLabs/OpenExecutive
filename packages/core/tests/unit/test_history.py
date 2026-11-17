@@ -267,13 +267,12 @@ def test_shown_summary_puts_you_in_front_of_the_verb() -> None:
     assert shown_summary("Shared finished deck with Kyle") == "You shared finished deck with Kyle"
 
 
-def test_a_correction_gets_you_only_when_it_rewords_the_note() -> None:
-    from openexecutive.memory.history import shown_correction, stored_correction
 
-    note = "Told Dana the deck comes Friday."
-    assert stored_correction("You told Dana the deck comes Monday.", note) == "Told Dana the deck comes Monday."
-    assert shown_correction("Told Dana the deck comes Monday.", note) == "You told Dana the deck comes Monday."
-    # The person's own words stay as typed, both ways.
-    assert stored_correction("You got the date wrong, it's Monday", note) == "You got the date wrong, it's Monday"
-    assert shown_correction("Shipped Friday, not Monday", note) == "Shipped Friday, not Monday"
-    assert shown_correction("Closed deals came to $2M", note) == "Closed deals came to $2M"
+def test_the_executive_reads_a_correction_in_note_form() -> None:
+    from openexecutive.memory.history import note_form
+
+    assert note_form("You told Dana the deck comes Monday.") == "Told Dana the deck comes Monday."
+    assert note_form("You said Dana it might slip") == "Said Dana it might slip"
+    assert note_form("Shipped Friday, not Monday") == "Shipped Friday, not Monday"
+    assert note_form("Your deck is late") == "Your deck is late"
+    assert note_form("") == ""

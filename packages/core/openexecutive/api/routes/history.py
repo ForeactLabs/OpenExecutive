@@ -146,7 +146,6 @@ def _note_out(note: history.Note) -> NoteOut:
     return NoteOut(**{
         **note.as_dict(),
         "summary": history.shown_summary(note.summary),
-        "correction": history.shown_correction(note.correction, note.summary) if note.correction else None,
     })
 
 
