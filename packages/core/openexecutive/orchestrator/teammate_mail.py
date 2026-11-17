@@ -410,6 +410,31 @@ def _sent_rows() -> list[_Sent]:
     ]
 
 
+def _exec_address() -> str:
+    from openexecutive.config import get_settings
+
+    return str(get_settings().exec_email_address or "").strip().lower()
+
+
+_FROM_RE = re.compile(r"^\s*from\s*:(.*)$", re.IGNORECASE | re.MULTILINE)
+
+
+def _sender(unit: str, block: str) -> str:
+    """Who a message is from: a Graph item's ``from``, else the From line of
+    its header block. Empty when it can't be told."""
+    try:
+        item = json.loads(unit)
+    except ValueError:
+        item = None
+    if isinstance(item, dict):
+        sender = item.get("from") or item.get("sender") or {}
+        address = (sender.get("emailAddress") or {}).get("address") if isinstance(sender, dict) else None
+        return str(address or "").strip().lower()
+    line = _FROM_RE.search(block)
+    found = _addresses(line.group(1).lower()) if line else []
+    return found[0] if found else ""
+
+
 def _when(value: object) -> datetime | None:
     """A message's date (an RFC 2822 Date header or an ISO time), in UTC;
     None when it can't be read."""
@@ -490,9 +515,7 @@ def note_sent(*, subject: object, recipients: list[str] | set[str], thread_id: o
             return
         found = _SENT_ID_RE.search(result or "")
         # The Executive's own address is on nearly every message it holds.
-        from openexecutive.config import get_settings
-
-        own = str(get_settings().exec_email_address or "").strip().lower()
+        own = _exec_address()
         message_id = found.group(1) if found else ""
         started = not str(thread_id or "").strip()
         with _open() as conn:
@@ -569,12 +592,18 @@ def _sent_for_other(unit: str, headers: str, sides: _Sides, *, ids: list[str] | 
     # thread, so a later "Re: Meeting" in someone else's thread isn't one.
     threaded = in_thread or "Thread ID:" in unit
     on_it = set(_addresses(headers.lower()))
+    # Only the Executive's own copy is a send itself; the message it
+    # answered, dated a moment before, is not.
+    from_exec = _sender(unit, block) == _exec_address()
 
     def answers(rows: list[_Sent]) -> bool:
         return any(
             when >= r.at - _SKEW
             and r.subject and r.subject == key and bool(r.recipients & on_it)
-            and (when <= r.at + _SKEW or (r.started and r.recent and reply and not (r.thread_id and threaded)))
+            and (
+                (from_exec and when <= r.at + _SKEW)
+                or (r.started and r.recent and reply and not (r.thread_id and threaded))
+            )
             for r in rows
         )
 

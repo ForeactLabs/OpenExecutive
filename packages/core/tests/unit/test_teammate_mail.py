@@ -41,6 +41,7 @@ def roster(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNa
     people_registry.invalidate()
     owner = people_store.upsert_person(full_name="Olivia Owner", is_principal=True, email=OWNER)
     ben = people_store.upsert_person(full_name="Ben Teammate", role="Ops", email=TEAMMATE)
+    monkeypatch.setattr(tm, "_exec_address", lambda: EXEC)
     session = SimpleNamespace(unattended=False, mail_ids_seen=set(), caller_person_id=owner)
     token = current_session.set(session)
     yield SimpleNamespace(owner=owner, ben=ben, session=session)
@@ -710,6 +711,20 @@ def test_a_gmail_send_finds_replies_by_its_thread_not_its_subject(roster: Simple
         assert "withheld" not in _run(FakeMailbox({READ: other}), READ, message_id="r9")
 
 
+def test_the_message_a_quick_reply_answered_stays_shared(roster: SimpleNamespace) -> None:
+    from datetime import UTC, datetime, timedelta
+    from email.utils import format_datetime
+
+    with _reader(roster.ben):
+        tm.note_sent(subject="Re: Taxes", recipients={DANA}, thread_id="t1", result="Email sent! Message ID: s9")
+    a_minute_ago = format_datetime(datetime.now(UTC) - timedelta(minutes=1))
+    text = _dated_thread((DANA, EXEC, a_minute_ago, "Original question."), (EXEC, DANA, _now(), "Ben's answer."))
+    roster.session.mail_ids_seen.add(f"{roster.owner}:t1")
+    with _reader(roster.owner):
+        out = _run(FakeMailbox({THREAD: text}), THREAD, thread_id="t1")
+    assert "Original question." in out and "Ben's answer." not in out
+
+
 def test_a_reply_sent_into_a_thread_takes_only_itself(roster: SimpleNamespace) -> None:
     with _reader(roster.ben):
         tm.note_sent(subject="Re: Taxes", recipients={DANA}, thread_id="t1", result="Email sent! Message ID: s9")
@@ -724,7 +739,6 @@ def test_a_reply_sent_into_a_thread_takes_only_itself(roster: SimpleNamespace) -
 def test_the_executives_own_address_is_not_kept_as_a_recipient(
     roster: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("openexecutive.config.get_settings", lambda: SimpleNamespace(exec_email_address=EXEC))
     with _reader(roster.ben):
         tm.note_sent(subject="Weekly update", recipients={DANA, EXEC}, result="Email sent! Message ID: w1")
     [row] = tm._sent_rows()
