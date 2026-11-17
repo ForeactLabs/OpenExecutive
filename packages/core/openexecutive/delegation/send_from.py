@@ -45,8 +45,8 @@ logger = logging.getLogger(__name__)
 FROM_EXECUTIVE = "from_executive"
 WORDS_AS_YOU = "words_as_you"
 # When it last switched to the Executive, and back to the person: a card
-# shown with the other sender sends only once it was shown again
-# (``card_drafts.version``, ``showed_executive``).
+# shown before either sends only once it was shown again
+# (``card_drafts.version``).
 SWITCHED_AT = "from_switched_at"
 SWITCHED_BACK_AT = "from_switched_back_at"
 # The Executive's words on the card were changed by hand: switching back
@@ -100,14 +100,6 @@ async def restyled(person: Any, changed: dict[str, Any], words: str) -> dict[str
         return changed
     mine = await _as_executive(person, {**changed, "draft_body": words})
     return {**changed, WORDS_AS_YOU: words, "draft_body": mine, CHANGED_AS_EXECUTIVE: False}
-
-
-def showed_executive(payload: dict[str, Any], at: str) -> bool:
-    """Whether a card shown at ``at`` (an ISO time) said it goes from the
-    Executive, as far as the last switch each way tells."""
-    to = str(payload.get(SWITCHED_AT) or "")
-    back = str(payload.get(SWITCHED_BACK_AT) or "")
-    return bool(to) and to <= at and not (back > to and back <= at)
 
 
 def say(instance: Any, text: str) -> dict[str, Any] | None:

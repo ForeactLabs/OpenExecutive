@@ -417,19 +417,15 @@ def _shows_now(payload: dict[str, Any], confirm: dict[str, Any], shown_at: str) 
     """Whether the card that was tapped shows what goes now. A web or phone
     card hands back the version it showed (``seen_caught_up_at``). A chat
     app's card is shown once, when it is posted (``shown_at``): it shows
-    what goes when nothing was changed from chat since, and it showed the
-    same sender as now (``send_from.showed_executive``)."""
-    from openexecutive.delegation import send_from
+    what goes when nothing was changed from chat, nor who it goes from
+    switched, since."""
+    from openexecutive.delegation.send_from import SWITCHED_AT, SWITCHED_BACK_AT
 
     changed = changed_since_shown(payload)
     if not changed or str(confirm.get("seen_caught_up_at") or "").partition("|")[2] == changed:
         return True
-    if not shown_at:
-        return False
-    chat = str(payload.get(CHANGED_IN_CHAT) or "")
-    return (not chat or chat <= shown_at) and send_from.showed_executive(payload, shown_at) == (
-        send_from.is_from_executive(payload)
-    )
+    stamps = [str(payload.get(k) or "") for k in (CHANGED_IN_CHAT, SWITCHED_AT, SWITCHED_BACK_AT)]
+    return bool(shown_at) and all(s <= shown_at for s in stamps if s)
 
 
 def asks_again(

@@ -235,10 +235,10 @@ def test_a_chat_app_card_shows_who_it_goes_from_when_posted() -> None:
     assert card_drafts.asks_again(switched, {}, moved_on=False, shown_at=t3) == []
     # Posted before: it showed them as the sender.
     assert card_drafts.asks_again(switched, {}, moved_on=False, shown_at=t1) == ["changed_in_chat"]
-    # Switched there and back since it was posted: it shows them, as now.
-    assert card_drafts.asks_again(back, {}, moved_on=False, shown_at=t1) == []
+    # Posted after it switched back: it shows them, as now.
     assert card_drafts.asks_again(back, {}, moved_on=False, shown_at=t4) == []
-    # Posted while it went from the Executive: not what goes now.
+    # Any switch since it was posted: look again, however it ended up.
+    assert card_drafts.asks_again(back, {}, moved_on=False, shown_at=t1) == ["changed_in_chat"]
     assert card_drafts.asks_again(back, {}, moved_on=False, shown_at=t2) == ["changed_in_chat"]
     # Not known when it was posted: look again.
     assert card_drafts.asks_again(back, {}, moved_on=False) == ["changed_in_chat"]
