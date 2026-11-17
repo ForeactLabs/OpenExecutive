@@ -303,3 +303,9 @@ def test_another_apps_range_and_offsets_keep_their_own_words() -> None:
     assert shown == [
         {"field": "Range", "value": "Q4"}, {"field": "Start index", "value": "0"}, {"field": "End index", "value": "50"},
     ]
+
+
+def test_rows_appended_to_whole_columns_have_no_header(monkeypatch) -> None:
+    _names(monkeypatch, {})
+    call = {**_SHEET_CALL, "range_name": "Sheet1!A:F"}
+    assert card_details.plain("google_workspace__modify_sheet_values", call)[2]["header"] is False

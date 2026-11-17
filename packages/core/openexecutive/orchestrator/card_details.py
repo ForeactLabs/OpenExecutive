@@ -421,7 +421,7 @@ def plain(tool: str, tool_input: Any) -> list[dict[str, Any]]:
             # The first row is a header only when the rows start at row 1.
             area = next((tool_input[k] for k in _RANGE_KEYS if isinstance(tool_input.get(k), str)), "")
             start = _CELLS.fullmatch(str(area).rpartition("!")[2].strip())
-            header = start is None or not start["r1"] or start["r1"] == "1"
+            header = start is not None and start["r1"] == "1"
             extra = {"table": rows, "header": header}
         else:
             # Words are shown whole: Approve does exactly what the card shows.
