@@ -163,6 +163,7 @@ _REGULAR_VERBS = frozenset({
     "removed", "replied", "reported", "requested", "reviewed",
     "shared", "shipped", "signed", "started", "submitted", "suggested",
     "tested", "used", "wanted", "warned", "worked",
+    "clarified", "stated", "corrected",
 })
 _IRREGULAR_VERBS = frozenset({
     "said", "told", "sent", "gave", "took", "made", "wrote", "put", "got",
