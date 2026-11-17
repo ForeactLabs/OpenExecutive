@@ -639,6 +639,16 @@ def test_the_readers_own_send_with_the_same_subject_wins(roster: SimpleNamespace
     assert "withheld" not in out
 
 
+def test_a_send_for_someone_no_longer_in_people_is_nobodys(roster: SimpleNamespace) -> None:
+    gone = roster.ben + 1000
+    _send_for(roster.ben, mid="m1")
+    with tm._open() as conn:
+        conn.execute(f"UPDATE {tm.SENT_TABLE} SET person_id = ?", (gone,))
+    with _reader(roster.owner):
+        out = _run(FakeMailbox({SEARCH: _listing(EXEC)}), SEARCH, query="q")
+    assert "Subject 1" in out
+
+
 def test_an_old_send_keeps_its_id(roster: SimpleNamespace) -> None:
     _send_for(roster.ben, mid="m1", subject="Invoice")
     with tm._open() as conn:

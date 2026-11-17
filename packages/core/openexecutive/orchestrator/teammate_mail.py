@@ -353,7 +353,10 @@ def _sides(session: Any) -> _Sides | None:
     except Exception:
         logger.warning("teammate_mail: sent mail read failed — refusing", exc_info=True)
         return None
-    sent = [s for s in rows if s.person_id != mine]
+    # A send for someone no longer in People is nobody's mail any more,
+    # as their own addresses stop counting once they are gone.
+    on_team = {p.id for p in team}
+    sent = [s for s in rows if s.person_id != mine and s.person_id in on_team]
     own = [s for s in rows if s.person_id == mine]
     return _Sides(
         reader=RosterAllow(reader),
