@@ -350,3 +350,17 @@ def test_gateway_keeps_no_name_of_a_hidden_saved_file(db: Path, bound_session: S
     monkeypatch.setattr(mcp_gateway, "_saved_files_hidden", lambda _name: view)
     _read_info_through_gateway()
     assert drive_reads.name_of("1mOCHqPWC2OZT9I0QBsk") == ""
+
+
+def test_an_old_or_renamed_file_name_is_not_shown(db: Path) -> None:
+    import sqlite3
+
+    tool = "google_workspace__get_spreadsheet_info"
+    drive_reads.remember_names(tool, _INFO, {"spreadsheet_id": "1mOCHqPWC2OZT9I0QBsk"}, db_path=db)
+    assert drive_reads.name_of("1mOCHqPWC2OZT9I0QBsk", db_path=db) == "Launch tracker"
+    drive_reads.forget_renamed({"file_id": "1mOCHqPWC2OZT9I0QBsk", "name": "Payroll 2026"}, db_path=db)
+    assert drive_reads.name_of("1mOCHqPWC2OZT9I0QBsk", db_path=db) == ""
+    drive_reads.remember_names(tool, _INFO, {"spreadsheet_id": "1mOCHqPWC2OZT9I0QBsk"}, db_path=db)
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE drive_file_names SET seen_at = '2020-01-01T00:00:00+00:00'")
+    assert drive_reads.name_of("1mOCHqPWC2OZT9I0QBsk", db_path=db) == ""

@@ -4190,6 +4190,7 @@ class MCPGateway:
         # from a turn private to the principal or one that read their own mail.
         from openexecutive.orchestrator.schedule_tools import current_session as _turn
 
+        drive_reads.forget_renamed(arguments)
         if drive_reads.may_remember_names(_turn.get()):
             drive_reads.remember_names(_normalize_tool_name(tool_name), result_text, arguments)
         if tool_name in drive_reads.DRIVE_READ_TOOLS:

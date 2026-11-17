@@ -30,7 +30,7 @@ from __future__ import annotations
 import logging
 import re
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -439,6 +439,29 @@ _NAME_LINES: dict[str, tuple[str, re.Pattern[str]]] = {
     ),
 }
 _MAX_NAMES_KEPT = 5000
+# A name older than this isn't shown: the file may have been renamed in Drive
+# since, and a card naming the wrong file is worse than "Open the sheet".
+_NAME_FRESH_FOR = timedelta(days=1)
+_FILE_ID_ARGS = ("file_id", "spreadsheet_id", "document_id", "presentation_id")
+_NEW_NAME_ARGS = ("name", "new_name", "title")
+
+
+def forget_renamed(arguments: dict[str, Any] | None, db_path: Path | None = None) -> None:
+    """A call that gives a file a new name (an update or rename through the
+    gateway) drops the name kept for it. Never raises."""
+    if not isinstance(arguments, dict) or not any(isinstance(arguments.get(k), str) for k in _NEW_NAME_ARGS):
+        return
+    ids = [arguments[k].strip() for k in _FILE_ID_ARGS if isinstance(arguments.get(k), str)]
+    path = _db_path(db_path)
+    if not ids or not path.exists():
+        return
+    try:
+        with episodic._get_conn(path) as conn:
+            conn.executemany("DELETE FROM drive_file_names WHERE file_id = ?", [(i,) for i in ids])
+    except sqlite3.OperationalError:
+        return
+    except Exception:
+        logger.warning("drive_reads: couldn't forget a renamed file", exc_info=True)
 
 
 def may_remember_names(session: Any) -> bool:
@@ -490,16 +513,25 @@ def remember_names(
 
 
 def name_of(file_id: str, db_path: Path | None = None) -> str:
-    """The name Drive's metadata last gave ``file_id``, or "". Never raises."""
+    """The name Drive's metadata gave ``file_id`` in the last day, or "".
+    Never raises."""
     path = _db_path(db_path)
     if not isinstance(file_id, str) or not file_id or not path.exists():
         return ""
     try:
         with episodic._get_conn(path) as conn:
-            row = conn.execute("SELECT name FROM drive_file_names WHERE file_id = ?", (file_id,)).fetchone()
+            row = conn.execute(
+                "SELECT name, seen_at FROM drive_file_names WHERE file_id = ?", (file_id,)
+            ).fetchone()
     except sqlite3.OperationalError:
         return ""
     except Exception:
         logger.warning("drive_reads: couldn't read a file's name", exc_info=True)
         return ""
-    return str(row[0]) if row is not None else ""
+    if row is None:
+        return ""
+    try:
+        seen = datetime.fromisoformat(str(row[1]))
+    except ValueError:
+        return ""
+    return str(row[0]) if datetime.now(UTC) - seen <= _NAME_FRESH_FOR else ""
