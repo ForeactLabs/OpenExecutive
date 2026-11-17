@@ -269,11 +269,16 @@ class TriageAgent(BaseAgent):
         log_model_usage(message, model=self.effective_model(), actor="triage")
 
         # An answer cut off at max_tokens is a partial decision: its missing
-        # fields would read as "no card". The card is kept as raised instead.
-        if getattr(message, "stop_reason", None) != "max_tokens":
-            for block in message.content:
-                if block.type == "tool_use" and block.name == "emit_alert_decision":
+        # fields would read as "no card". If it got as far as saying to raise
+        # a card, the card shows in the event's own words; otherwise it is
+        # handled as no decision.
+        cut_off = getattr(message, "stop_reason", None) == "max_tokens"
+        for block in message.content:
+            if block.type == "tool_use" and block.name == "emit_alert_decision":
+                if not cut_off:
                     return _parse_decision(block.input)
+                if isinstance(block.input, dict) and block.input.get("alert") is True:
+                    return _no_decision(event, mute_patterns or [], "cut_off", raise_it=True)
 
         logger.warning(
             "Triage gave no whole decision for event %s", event.external_id,
@@ -281,14 +286,18 @@ class TriageAgent(BaseAgent):
         return _no_decision(event, mute_patterns or [], "no_decision")
 
 
-def _no_decision(event: AlertEvent, mute_patterns: list[str], why: str) -> TriageDecision:
+def _no_decision(
+    event: AlertEvent, mute_patterns: list[str], why: str, *, raise_it: bool = False,
+) -> TriageDecision:
     """What stands when review made no decision. A card the Executive chose
     to raise (``AlertEvent.from_executive``) is kept as raised: a review that
     couldn't run never loses it, only a decision it made can. A muted topic
     it names stays muted. Anything else is recorded quietly, as before, so
-    an outage doesn't turn every chat line and newsletter into a card."""
+    an outage doesn't turn every chat line and newsletter into a card.
+    ``raise_it`` is a cut-off review that had already said to raise one:
+    any event is kept then."""
     headline = (event.subject or event.title or (event.body or "").strip().split("\n", 1)[0] or event.source)[:200]
-    if event.from_executive and not _names_muted_topic(event, mute_patterns):
+    if (raise_it or event.from_executive) and not _names_muted_topic(event, mute_patterns):
         return TriageDecision(
             alert=True,
             severity=AlertSeverity.MEDIUM,

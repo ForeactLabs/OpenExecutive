@@ -186,6 +186,21 @@ def test_a_short_mute_only_holds_back_whole_words() -> None:
     assert decision.alert is True
 
 
+def test_a_cut_off_review_that_said_raise_keeps_any_card() -> None:
+    """A watch event whose review was cut off after saying alert=True still
+    shows, in its own words; one cut off before deciding stays quiet."""
+    event = AlertEvent(source="monitoring", external_id="w-1", subject="Competitor price drop",
+                       body="Acme cut prices 20%.")
+    said = SimpleNamespace(type="tool_use", name="emit_alert_decision", input={"alert": True})
+    client = _client(return_value=SimpleNamespace(content=[said], stop_reason="max_tokens"))
+    decision = asyncio.run(TriageAgent().triage(event, client=client))
+    assert decision.alert is True
+    assert decision.headline == "Competitor price drop"
+    early = SimpleNamespace(type="tool_use", name="emit_alert_decision", input={})
+    client = _client(return_value=SimpleNamespace(content=[early], stop_reason="max_tokens"))
+    assert asyncio.run(TriageAgent().triage(event, client=client)).alert is False
+
+
 def test_triage_swallows_client_exceptions() -> None:
     """LLM error → quiet fallback for an ordinary event, never propagates."""
     client = SimpleNamespace(
