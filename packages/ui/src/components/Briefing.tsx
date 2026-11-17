@@ -39,7 +39,7 @@ import {
   splitOlder,
   waitedOnFirst,
 } from "@/lib/needsYou";
-import { BRIEFING_TICK_MS, shouldRefreshOnFocus, shouldRefreshOnTick } from "@/lib/narrativeFreshness";
+import { BRIEFING_TICK_MS, newestAnswer, shouldRefreshOnFocus, shouldRefreshOnTick } from "@/lib/narrativeFreshness";
 import type { SnoozeChoice } from "@/lib/snooze";
 import InfoTip from "./InfoTip";
 import { ACTION_CARDS_TIP, ActionCardItem, useActionCards } from "./ActionCards";
@@ -145,17 +145,13 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
   // shown is dropped (a timed refresh overtaken by Approve's would put old
   // counts back); an older answer still shows when the newer pull hasn't
   // landed, so a slow first load isn't lost to a focus refresh.
-  const pullSeqRef = useRef(0);
-  const shownSeqRef = useRef(0);
+  const [pulls] = useState(newestAnswer);
   const pullToday = useCallback(async () => {
     lastFetchRef.current = Date.now();
-    const seq = ++pullSeqRef.current;
+    const seq = pulls.begin();
     const t = await getToday();
-    if (seq > shownSeqRef.current) {
-      shownSeqRef.current = seq;
-      setToday(t);
-    }
-  }, []);
+    if (pulls.accept(seq)) setToday(t);
+  }, [pulls]);
   const refreshToday = useCallback(() => {
     pullToday().catch(() => { /* keep current view on failure */ });
   }, [pullToday]);

@@ -5,6 +5,7 @@ import {
   BRIEFING_TICK_MS,
   FOCUS_REFRESH_MIN_GAP_MS,
   narrativeRepollDelay,
+  newestAnswer,
   narrativeUpdatedLabel,
   shouldRefreshOnFocus,
   shouldRefreshOnTick,
@@ -33,6 +34,23 @@ test("timed refresh comes a minute after the last pull of any kind", () => {
   const tick = Math.ceil(due / BRIEFING_TICK_MS) * BRIEFING_TICK_MS;
   assert.equal(shouldRefreshOnTick(31_000, tick), true);
   assert.ok(tick - 31_000 < BRIEFING_REFRESH_INTERVAL_MS + BRIEFING_TICK_MS);
+});
+
+test("an older /today answer never overwrites a newer one already shown", () => {
+  const pulls = newestAnswer();
+  const timed = pulls.begin();
+  const approve = pulls.begin();
+  assert.equal(pulls.accept(approve), true); // Approve's pull lands first: card gone
+  assert.equal(pulls.accept(timed), false); // the older timed pull is dropped
+});
+
+test("an older answer still shows while the newer pull hasn't landed or failed", () => {
+  const pulls = newestAnswer();
+  const first = pulls.begin(); // slow first load
+  pulls.begin(); // a focus pull starts, then fails (never accepted)
+  assert.equal(pulls.accept(first), true);
+  const later = pulls.begin();
+  assert.equal(pulls.accept(later), true);
 });
 
 test("updated label reads as recency, then as a local clock time", () => {

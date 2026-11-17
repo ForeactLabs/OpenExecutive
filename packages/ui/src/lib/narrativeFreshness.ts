@@ -38,6 +38,23 @@ export function shouldRefreshOnTick(lastFetchMs: number, nowMs: number): boolean
   return nowMs - lastFetchMs >= BRIEFING_REFRESH_INTERVAL_MS;
 }
 
+/** Orders overlapping pulls of /today: `begin` numbers a pull as it starts,
+ * and `accept` says whether its answer may be shown when it lands. An answer
+ * older than one already shown is dropped (it would put old counts back); an
+ * older one still shows while the newer pull hasn't landed or has failed. */
+export function newestAnswer(): { begin(): number; accept(seq: number): boolean } {
+  let started = 0;
+  let shown = 0;
+  return {
+    begin: () => ++started,
+    accept: (seq) => {
+      if (seq <= shown) return false;
+      shown = seq;
+      return true;
+    },
+  };
+}
+
 /** Whether a tab that just became visible should re-pull /today. */
 export function shouldRefreshOnFocus(lastFetchMs: number, nowMs: number): boolean {
   return nowMs - lastFetchMs >= FOCUS_REFRESH_MIN_GAP_MS;
