@@ -146,8 +146,8 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
     getToday().then(setToday).catch(() => { /* keep current view on failure */ });
   }, []);
 
-  // Keep Home current when the tab comes back, and every few minutes while
-  // it is open.
+  // Keep Home current when the tab or window comes back (a card answered on
+  // another device meanwhile), and every minute while it is open.
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState === "visible" && shouldRefreshOnFocus(lastFetchRef.current, Date.now())) {
@@ -155,11 +155,13 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
       }
     };
     document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") refreshToday();
     }, BRIEFING_REFRESH_INTERVAL_MS);
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
       clearInterval(interval);
     };
   }, [refreshToday]);

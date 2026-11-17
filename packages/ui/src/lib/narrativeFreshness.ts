@@ -14,11 +14,12 @@
  * focus or periodic refresh rather than polling forever. */
 export const NARRATIVE_REPOLL_DELAYS_MS = [4_000, 10_000, 20_000] as const;
 
-/** How often an open, visible Briefing re-pulls /today on its own. */
-export const BRIEFING_REFRESH_INTERVAL_MS = 5 * 60_000;
+/** How often an open, visible Briefing re-pulls /today on its own, so a
+ * card answered on another device leaves Home within a minute. */
+export const BRIEFING_REFRESH_INTERVAL_MS = 60_000;
 
-/** A tab coming back to the foreground refreshes at most this often. */
-export const FOCUS_REFRESH_MIN_GAP_MS = 60_000;
+/** A tab or window coming back to the foreground refreshes at most this often. */
+export const FOCUS_REFRESH_MIN_GAP_MS = 10_000;
 
 /** The delay before re-poll number `attempt` (0-based), or null when the
  * page should stop polling. */
