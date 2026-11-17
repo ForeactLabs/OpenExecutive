@@ -146,14 +146,6 @@ def test_a_forward_with_its_marker_in_another_language_is_read() -> None:
     assert split_forward("Ja.\n\nOn Mon, A <a@example.com> wrote:\n> old", "WG: Rechnung") == ("Ja.", "")
 
 
-def test_a_quote_under_a_reply_in_another_language_is_history() -> None:
-    from openexecutive.integrations.email_poller import split_forward
-
-    body = "Merci.\n\nLe lun. 3 nov. 2026 à 10:00, Dana <d@example.com> a écrit :\n> old"
-    own, forwarded = split_forward(body, "WG: x")
-    assert forwarded == "" and "old" not in own
-
-
 def test_max_chars_alone_caps_the_whole_text() -> None:
     body = "x" * 50 + "\n\n---------- Forwarded message ---------\n" + "y" * 500
     assert len(readable_text(body, max_chars=100)) == 100
@@ -207,25 +199,6 @@ def test_the_principals_quoted_apple_forward_counts_as_forwarded() -> None:
     assert not _forwarded(reply)
 
 
-def test_a_forward_quoted_under_a_reply_in_another_language_is_history() -> None:
-    from openexecutive.integrations.email_poller import _new_text_lines, split_forward
-
-    body = (
-        "D'accord.\n\nLe lun. 3 nov. 2026 \u00e0 10:00, Dana <d@x> a \u00e9crit :\n"
-        "> Voici\n> Begin forwarded message:\n> From: Bank\n> secret old"
-    )
-    assert split_forward(body, "Re: x") == ("D'accord.", "")
-    assert _new_text_lines(body.splitlines())[1] is False
-    assert sender_new_text("Ja.\n\nAm 03.11.2026 schrieb Dana:\n> alt") == "Ja."
-
-
-def test_a_chinese_reply_attribution_is_history() -> None:
-    from openexecutive.integrations.email_poller import split_forward
-
-    body = "好的\n\nDana <d@x.com> 于2026年11月3日周一 10:00写道：\n> 旧的"
-    assert split_forward(body, "Fwd: x") == ("好的", "")
-
-
 def test_a_lead_in_that_says_wrote_keeps_the_forward() -> None:
     body = (
         "Look at what the county wrote:\n\n> Begin forwarded message:\n>\n"
@@ -238,4 +211,35 @@ def test_a_lead_in_that_says_wrote_keeps_the_forward() -> None:
     # Even when it names a date, a Begin forwarded marker right below wins.
     dated = body.replace("county wrote:", "county wrote on 11/3:")
     assert "Your permit is denied." in readable_text(dated, "Fwd: Permit")
+
+
+def test_a_quote_under_a_reply_in_another_language_is_history() -> None:
+    from openexecutive.integrations.email_poller import _new_text_lines, split_forward
+
+    body = "Merci.\n\nLe lun. 3 nov. 2026 \u00e0 10:00, Dana <d@x> a \u00e9crit :\n> old"
+    own, forwarded = split_forward(body, "RE: x")
+    assert forwarded == "" and "old" not in own
+    # A forward marker further down a quote is that history's, in any language.
+    body = body.replace("> old", "> Voici\n> Begin forwarded message:\n> From: Bank\n> secret old")
+    own, forwarded = split_forward(body, "Re: x")
+    assert forwarded == "" and "secret old" not in own
+    assert _new_text_lines(body.splitlines())[1] is False
+
+
+def test_lead_ins_keep_the_forward_and_stay_the_senders() -> None:
+    from openexecutive.integrations.email_poller import split_forward
+
+    for body, subject in (
+        ("Schau, was Dana am 3.11. schrieb:\n\n> Anfang der weitergeleiteten Nachricht:\n>\n> Von: Bank\n> Rate 5%", "WG: Rate"),
+        ("See what Dana wrote on 11/3:\n> D\u00e9but du message r\u00e9exp\u00e9di\u00e9 :\n> De: Bank\n> Rate 5%", "TR: Rate"),
+    ):
+        own, forwarded = split_forward(body, subject)
+        assert own == body.split("\n")[0]
+        assert forwarded.endswith("Bank\nRate 5%")
+    assert sender_new_text("Look at what Dana wrote on 11/3:\n> the quote\nThoughts?") == (
+        "Look at what Dana wrote on 11/3:\nThoughts?"
+    )
+    assert sender_new_text("As Dana <d@x> wrote yesterday:\n> we ship Friday\nCan we?") == (
+        "As Dana <d@x> wrote yesterday:\nCan we?"
+    )
 

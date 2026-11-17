@@ -428,6 +428,7 @@ def _scan_new_text(body: list[str]) -> tuple[list[str], int | None, bool]:
         text = body[i].strip()
         if _FORWARDED_RE.match(text) or (
             not replied and quoted_forward is None and _BEGIN_FORWARDED_RE.match(text)
+            and not (text.startswith(">") and _inside_quote(body, i))
         ):
             if not text.startswith(">"):
                 return stop(i, True)
@@ -439,16 +440,6 @@ def _scan_new_text(body: list[str]) -> tuple[list[str], int | None, bool]:
             for b in body[i + 1:i + 1 + _OUTLOOK_HEADER_SPAN]
         ):
             return stop(i, False)
-        quote_below = next((b.strip() for b in body[i + 1:i + 3] if b.strip()), "")
-        if (
-            not text.startswith(">") and _ATTRIBUTION_ANY_RE.match(text)
-            and quote_below.startswith(">") and not _BEGIN_FORWARDED_RE.match(quote_below)
-        ):
-            # A reply attribution in another language ("Dana a écrit :"):
-            # the quote below it is history, not the sender's words.
-            replied = True
-            i += 1
-            continue
         attribution = _attribution_end(body, i)
         if attribution is not None:
             end, quoted = attribution
@@ -498,28 +489,18 @@ def _first_unattributed_quote(lines: list[str]) -> int | None:
         if _attribution_end(lines, i) is not None:
             return None
         if line.lstrip().startswith(">"):
-            return None if _after_attribution(lines, i) else i
+            return i
     return None
 
 
-# What a reply attribution in any language looks like: a line ending in ":"
-# that says someone wrote and names a date or address ("Le lun. 3 nov. 2026
-# à 10:00, Dana <d@x> a écrit :", "Am 03.11.2026 schrieb Dana:"). A lead-in such as "Please review by
-# 11/20/2026:" or "Look at what the county wrote:" is not one.
-_ATTRIBUTION_ANY_RE = re.compile(
-    r"^(?=.*[\d@])(?=.{0,300}(\b(wrote|writes|schrieb|a écrit|escribió|escreveu|ha scritto|schreef|skrev|"
-    r"kirjoitti|napisał|napsal|írta|написал|написала|yazdı|έγραψε)\b|寫道|写道)).{0,400}[:：]\s*$",
-    re.IGNORECASE,
-)
-
-
-def _after_attribution(lines: list[str], i: int) -> bool:
-    """Whether the ">" line at ``i`` is the start of a quote under a reply
-    attribution: the last non-blank line before it looks like one."""
+def _inside_quote(lines: list[str], i: int) -> bool:
+    """Whether the ">" line at ``i`` is inside a quote rather than opening
+    one. Apple Mail opens a forward's quote with its marker; a marker further
+    down a quote belongs to the quoted history, whatever its language."""
     for j in range(i - 1, -1, -1):
         prev = lines[j].strip()
-        if prev:
-            return not prev.startswith(">") and _ATTRIBUTION_ANY_RE.match(prev) is not None
+        if prev and prev != ">":
+            return prev.startswith(">")
     return False
 
 
