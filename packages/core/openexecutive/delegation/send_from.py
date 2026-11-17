@@ -267,24 +267,23 @@ def _recipients(person: Any, payload: dict[str, Any], spec: Any) -> tuple[list[s
 
 async def _since_written(person: Any, payload: dict[str, Any], gmail: Any, now: datetime) -> tuple[bool, bool]:
     """Whether, since the card was written, the person answered in the
-    conversation themselves, and whether someone else wrote in it, as their
-    own Send checks. Unreadable is no to both."""
-    from openexecutive.delegation.gmail import gmail_for, gmail_status, normalize_email
+    conversation themselves, and whether someone else wrote in it: read from
+    their mailbox, with the same checks as their own Send
+    (``reply_send.mailbox_ready``). Unreadable refuses, as theirs does:
+    raises ``SendRefused``."""
+    from openexecutive.delegation.gmail import GmailError, normalize_email
     from openexecutive.delegation.inbox import later_messages
+    from openexecutive.delegation.reply_send import SendRefused, mailbox_ready
 
     email = normalize_email(str(person.email or ""))
-    thread_id = str(payload.get("thread_id") or "")
-    if not email or not thread_id:
-        return False, False
+    client = await mailbox_ready(person, email, gmail)
     try:
-        client = gmail if gmail is not None else gmail_for(email)
-        if await gmail_status(email, gmail=client) != "connected":
-            return False, False
         own = {email, *await client.send_as_addresses()}
-        thread = await client.get_thread(thread_id)
-    except Exception:
-        logger.warning("delegation.send_from: couldn't read the conversation", exc_info=True)
-        return False, False
+        thread = await client.get_thread(str(payload.get("thread_id") or ""))
+    except GmailError as exc:
+        raise SendRefused(
+            502, "gmail_error", "Couldn't read the conversation in your mailbox. Try again in a moment.",
+        ) from exc
     later = later_messages(thread, payload, now=now)
     return (
         any("SENT" in m.labels and m.from_addr in own for m in later),

@@ -351,3 +351,25 @@ def test_not_after_they_replied_themselves(
             now=NOW + timedelta(minutes=30),
         ))
     assert err.value.code == "you_replied" and sends == []
+
+
+def test_an_unreadable_mailbox_stops_it(
+    db: Path, owner: Any, models: dict[str, Any], rewrites: list[str], sends: list[dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.delegation.gmail import GmailError
+
+    mailbox, card = _card(owner)
+    _switch(card, mailbox, owner, True)
+
+    async def broken(thread_id: str) -> Any:
+        raise GmailError("expired")
+
+    monkeypatch.setattr(mailbox, "get_thread", broken)
+    with pytest.raises(SendRefused) as err:
+        asyncio.run(send_approved_reply(
+            _fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, confirm=_seen(card),
+            now=NOW + timedelta(minutes=30),
+        ))
+    assert err.value.code == "gmail_error" and sends == []
+    assert _fresh(card).status == "proposed"

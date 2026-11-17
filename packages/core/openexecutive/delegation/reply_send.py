@@ -130,6 +130,34 @@ def _check_caller(caller: Any, email: str) -> None:
     )
 
 
+async def mailbox_ready(person: Any, email: str, gmail: Any = None) -> Any:
+    """Their mailbox client, once a reply card may send from its tap: As
+    you and Draft replies to their inbox on, no client session active, and
+    their mailbox connected (it is read before anything goes, whoever's
+    mailbox sends). Raises ``SendRefused``."""
+    from openexecutive.delegation.gmail import (
+        BLOCKING_CODES,
+        STATUS_MESSAGES,
+        gmail_for,
+        gmail_status,
+    )
+    from openexecutive.delegation.inbox import _client_slot_active, get_watch
+    from openexecutive.delegation.settings import is_enabled
+
+    if not is_enabled(person.id) or not get_watch(person.id).enabled:
+        raise SendRefused(
+            409, "inbox_off",
+            "Turn on As you and Draft replies to your inbox to send from here, or send it from your mailbox.",
+        )
+    if _client_slot_active():
+        raise SendRefused(409, "client_slot", "Sending from here is paused while a client is active. Send it from your mailbox.")
+    client = gmail if gmail is not None else gmail_for(email)
+    status = await gmail_status(email, gmail=client)
+    if status != "connected":
+        raise SendRefused(409, BLOCKING_CODES.get(status, "gmail_error"), STATUS_MESSAGES[status])
+    return client
+
+
 async def send_approved_reply(
     instance: Any,
     *,
@@ -221,14 +249,11 @@ async def _send_checked(
     from openexecutive.config import get_settings
     from openexecutive.delegation import card_drafts, drafts, handle_it, training
     from openexecutive.delegation.gmail import (
-        BLOCKING_CODES,
         STATUS_MESSAGES,
         GmailAuthError,
         GmailError,
         GmailNotFound,
         GmailRateLimited,
-        gmail_for,
-        gmail_status,
         normalize_email,
     )
     from openexecutive.delegation.inbox import (
@@ -237,14 +262,12 @@ async def _send_checked(
         SENT,
         _add_flag,
         _audit,
-        _client_slot_active,
         _close_card,
         _set_outcome,
         card_payload,
-        get_watch,
         later_messages,
     )
-    from openexecutive.delegation.settings import can_delegate, is_enabled
+    from openexecutive.delegation.settings import can_delegate
     from openexecutive.delegation.threads import MAX_RECIPIENTS
     from openexecutive.memory.decision_ledger import (
         STATUS_APPROVED_UNCHANGED,
@@ -306,17 +329,7 @@ async def _send_checked(
                 raise SendRefused(
                     409, "learned_full", "It has learned as much as it can hold. Remove something first.",
                 )
-    if not is_enabled(person.id) or not get_watch(person.id).enabled:
-        raise SendRefused(
-            409, "inbox_off",
-            "Turn on As you and Draft replies to your inbox to send from here, or send it from your mailbox.",
-        )
-    if _client_slot_active():
-        raise SendRefused(409, "client_slot", "Sending from here is paused while a client is active. Send it from your mailbox.")
-    client = gmail if gmail is not None else gmail_for(email)
-    status = await gmail_status(email, gmail=client)
-    if status != "connected":
-        raise SendRefused(409, BLOCKING_CODES.get(status, "gmail_error"), STATUS_MESSAGES[status])
+    client = await mailbox_ready(person, email, gmail)
 
     if card_drafts.is_card_only(payload):
         # Kept on its card alone: make the draft from exactly what the card
