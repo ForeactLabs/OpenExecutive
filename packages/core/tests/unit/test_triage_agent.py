@@ -285,6 +285,9 @@ def test_a_cut_off_review_keeps_the_room_it_named() -> None:
     client = _client(return_value=SimpleNamespace(content=[said], stop_reason="max_tokens"))
     decision = asyncio.run(TriageAgent().triage(event, client=client))
     assert (decision.department_slug, decision.broadcast_integration) == ("sales", "slack")
+    said.input = {"alert": True, "channels": ["department_channel"]}
+    client = _client(return_value=SimpleNamespace(content=[said], stop_reason="max_tokens"))
+    assert AlertChannel.WEB in asyncio.run(TriageAgent().triage(event, client=client)).channels
 
 
 def test_a_short_mute_never_hits_a_kept_cards_department() -> None:

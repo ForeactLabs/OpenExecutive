@@ -355,7 +355,9 @@ def _with_partial_delivery(kept: TriageDecision, raw: dict) -> TriageDecision:
     if str(raw.get("severity") or "").lower() in AlertSeverity._value2member_map_:
         update["severity"] = said.severity
     if raw.get("channels") and said.channels != [AlertChannel.PERSISTED]:
-        update["channels"] = said.channels
+        # Web stays, so a room post missing its room (cut off before the
+        # slug) still leaves the card on Home.
+        update["channels"] = [*dict.fromkeys([AlertChannel.WEB, *said.channels])]
         update["department_slug"] = said.department_slug
         update["broadcast_integration"] = said.broadcast_integration
     return kept.model_copy(update=update) if update else kept
