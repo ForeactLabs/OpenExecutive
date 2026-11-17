@@ -945,11 +945,11 @@ async def test_the_scheduler_is_held_while_a_saved_company_is_put_back(
     real_settle = episodic.settle_restored_queue
 
     def _restore(src: Path) -> None:
-        held.append(runner._claims_held())
+        held.append(runner._claim_lock.locked())
         real_restore(src)
 
     def _settle(*a: Any, **k: Any) -> int:
-        held.append(runner._claims_held())
+        held.append(runner._claim_lock.locked())
         return real_settle(*a, **k)
 
     monkeypatch.setattr(slots, "_restore_db_from_file", _restore)
@@ -959,4 +959,4 @@ async def test_the_scheduler_is_held_while_a_saved_company_is_put_back(
         env.company / "_user_backup" / "state.db",
     )
     assert held == [True, True]
-    assert not runner._claims_held()
+    assert not runner._claim_lock.locked()

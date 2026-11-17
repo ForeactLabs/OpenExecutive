@@ -395,12 +395,6 @@ async def run_scheduler(
                     "scheduler: company profile now active — resuming scheduled actions"
                 )
                 holding_for_profile = False
-            if _claims_held():
-                # A saved company database is being put back: claiming or
-                # sweeping now would read it before its queue is settled.
-                _beat("restoring")
-                await asyncio.sleep(poll_interval_seconds)
-                continue
             if _rotation_pause_active():
                 # An overnight client rotation is switching the live company
                 # context — claiming now would fire the just-activated
@@ -409,31 +403,42 @@ async def run_scheduler(
                 _beat("rotating")
                 await asyncio.sleep(poll_interval_seconds)
                 continue
-            _maybe_refresh_narrative(now)
-            _maybe_scan_inbox(now)
-            _maybe_keep_contacts(now)
-            _maybe_remind_notes(now)
-            _maybe_send_reminders(now)
-            _maybe_check_mail_watches(now)
-            _maybe_watch_for_lead(now)
-            _maybe_release_held(now)
-            _maybe_push_cards(now)
-            _maybe_send_monthly_value(now)
-            due = claim_due_actions(now)
-            if due:
-                logger.info("scheduler: %d due action(s)", len(due))
-            for row in due:
-                # A scheduled action is unattended, never part of a turn: its
-                # task starts with no audit scope (create_task copies the
-                # context as it is here).
-                with unscoped_audit_rows():
-                    task = asyncio.create_task(_execute_action(row, gateway))
-                _inflight.add(task)
-                task.add_done_callback(_inflight.discard)
-                if row.id is not None:
-                    key = (row.id, row.kind, row.run_at)
-                    _inflight_actions.add(key)
-                    task.add_done_callback(functools.partial(_forget_inflight, key))
+            # The senders and the claim run under the restore lock, with no
+            # await inside, so a saved company database is never put back
+            # (restore_company_db, from any thread) while a tick reads it,
+            # and a tick never reads one before its queue is settled.
+            if not _claim_lock.acquire(blocking=False):
+                _beat("restoring")
+                await asyncio.sleep(poll_interval_seconds)
+                continue
+            try:
+                _maybe_refresh_narrative(now)
+                _maybe_scan_inbox(now)
+                _maybe_keep_contacts(now)
+                _maybe_remind_notes(now)
+                _maybe_send_reminders(now)
+                _maybe_check_mail_watches(now)
+                _maybe_watch_for_lead(now)
+                _maybe_release_held(now)
+                _maybe_push_cards(now)
+                _maybe_send_monthly_value(now)
+                due = claim_due_actions(now)
+                if due:
+                    logger.info("scheduler: %d due action(s)", len(due))
+                for row in due:
+                    # A scheduled action is unattended, never part of a turn: its
+                    # task starts with no audit scope (create_task copies the
+                    # context as it is here).
+                    with unscoped_audit_rows():
+                        task = asyncio.create_task(_execute_action(row, gateway))
+                    _inflight.add(task)
+                    task.add_done_callback(_inflight.discard)
+                    if row.id is not None:
+                        key = (row.id, row.kind, row.run_at)
+                        _inflight_actions.add(key)
+                        task.add_done_callback(functools.partial(_forget_inflight, key))
+            finally:
+                _claim_lock.release()
             _beat("ran")
         except asyncio.CancelledError:
             raise
@@ -1762,30 +1767,21 @@ GOAL_REVIEW_KIND = "goal_review"
 _DEFAULT_GOAL_REVIEW_SPEC = "weekly@mon@09:00"
 
 
-_claim_holds = 0
-_claim_holds_lock = threading.Lock()
+_claim_lock = threading.Lock()
 
 
 @contextmanager
 def hold_claims() -> Iterator[None]:
-    """Keep the scheduler from claiming or sweeping for the duration.
+    """Keep the scheduler's senders and claim off for the duration.
 
     Held while a saved company database is put back (a client switch, an
-    unload), so no tick reads the copy before its queue is settled. Works
-    from a worker thread; nests.
+    unload, a backup restore). The tick takes the same lock around its
+    senders and claim, which contain no await, so from a worker thread this
+    waits for a running tick to finish, and on the loop thread it is always
+    free.
     """
-    global _claim_holds
-    with _claim_holds_lock:
-        _claim_holds += 1
-    try:
+    with _claim_lock:
         yield
-    finally:
-        with _claim_holds_lock:
-            _claim_holds -= 1
-
-
-def _claims_held() -> bool:
-    return _claim_holds > 0
 
 
 def _rotation_pause_active() -> bool:
