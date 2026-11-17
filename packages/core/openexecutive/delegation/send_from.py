@@ -49,10 +49,16 @@ WORDS_AS_YOU = "words_as_you"
 # (``card_drafts.version``, ``showed_executive``).
 SWITCHED_AT = "from_switched_at"
 SWITCHED_BACK_AT = "from_switched_back_at"
+# The Executive's words on the card were changed by hand: switching back
+# puts their own words back without that change, and says so.
+CHANGED_AS_EXECUTIVE = "changed_as_executive"
 
 # What the Executive says on the card when it switched.
 NOTE_TO_EXECUTIVE = "It now goes from me, with you on cc."
 NOTE_TO_YOU = "It goes from you again."
+NOTE_TO_YOU_WITHOUT_CHANGE = (
+    "It goes from you again, with your own words. The change made to mine isn't in them: make it again here."
+)
 
 AS_EXECUTIVE_PROMPT = """<draft> is an email written AS the person named in \
 <writer>, to <recipients>. It will now be sent by their assistant instead, \
@@ -91,7 +97,7 @@ async def restyled(person: Any, changed: dict[str, Any], words: str) -> dict[str
     if not is_from_executive(changed):
         return changed
     mine = await _as_executive(person, {**changed, "draft_body": words})
-    return {**changed, WORDS_AS_YOU: words, "draft_body": mine}
+    return {**changed, WORDS_AS_YOU: words, "draft_body": mine, CHANGED_AS_EXECUTIVE: False}
 
 
 def showed_executive(payload: dict[str, Any], at: str) -> bool:
@@ -187,11 +193,14 @@ async def _switch(
         else:
             words = str(payload.get(WORDS_AS_YOU) or "") or str(payload.get("draft_body") or "")
             extra = {FROM_EXECUTIVE: False, WORDS_AS_YOU: ""}
+        dropped = not executive and payload.get(CHANGED_AS_EXECUTIVE) is True
+        extra[CHANGED_AS_EXECUTIVE] = False
         turns = [*conversation(payload)]
         if asked:
             turns.append({"kind": "asked", "text": asked})
         turns.append({
-            "kind": "note", "text": NOTE_TO_EXECUTIVE if executive else NOTE_TO_YOU,
+            "kind": "note",
+            "text": NOTE_TO_EXECUTIVE if executive else NOTE_TO_YOU_WITHOUT_CHANGE if dropped else NOTE_TO_YOU,
             "at": datetime.now(UTC).isoformat(),
         })
         extra[CONVERSATION_KEY] = turns[-CONVERSATION_MAX:]

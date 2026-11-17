@@ -197,6 +197,10 @@ def test_a_rewrite_on_a_switched_card_keeps_it_from_the_executive(
     ))
     assert kept[send_from.FROM_EXECUTIVE] is True and kept["draft_body"] == "Hi Dana,\n\nShort and sweet."
     assert kept[send_from.WORDS_AS_YOU] == "Hi Dana,\n\nFriday works.\n\nOlivia"
+    # Switching back puts their own words back and says the change isn't in them.
+    again = _switch(card, mailbox, owner, False)
+    assert again["draft_body"] == "Hi Dana,\n\nFriday works.\n\nOlivia"
+    assert again["conversation"][-1]["text"] == send_from.NOTE_TO_YOU_WITHOUT_CHANGE
 
 
 def test_a_rewrite_keeps_their_words_in_their_mailbox(

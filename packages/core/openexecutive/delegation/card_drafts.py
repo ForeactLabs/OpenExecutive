@@ -528,6 +528,8 @@ async def _edit(
             changed[DRAFT_SPEC] = {**spec, "to": to, "cc": cc}
     if theirs:
         changed = await send_from.restyled(person, changed, words)
+    elif send_from.is_from_executive(changed) and words != str(payload.get("draft_body") or ""):
+        changed[send_from.CHANGED_AS_EXECUTIVE] = True
     # What their mailbox's draft says: their own words, never the Executive's.
     words = str(send_from.theirs(changed).get("draft_body") or "")
     draft_id = str(payload.get("draft_id") or "")
