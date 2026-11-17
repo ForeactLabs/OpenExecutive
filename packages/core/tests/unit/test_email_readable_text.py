@@ -189,3 +189,19 @@ def test_a_lead_in_above_a_forward_in_another_language_keeps_it() -> None:
         own, forwarded = split_forward(f"{lead}\n\n{quote}", "WG: Rates")
         assert own == lead
         assert forwarded.endswith("Von: Bank\nRate is 5%")
+
+
+def test_the_principals_quoted_apple_forward_counts_as_forwarded() -> None:
+    from openexecutive.integrations.email_poller import _forwarded, _principal_email_text
+
+    raw = (
+        "Message ID: 1\nSubject: Fwd: Tree trimming easement\nFrom: owner@example.com\n\n--- BODY ---\n"
+        "Can you handle this?\n" + APPLE_FORWARD
+    )
+    assert _forwarded(raw)
+    own, _, rest = _principal_email_text(raw, "owner@example.com").partition("<untrusted_content")
+    assert "Can you handle this?" in own and "640 feet" not in own
+    assert "640 feet" in rest
+    # A plain reply with quoted history is not a forward.
+    reply = "Message ID: 2\nSubject: Re: x\nFrom: owner@example.com\n\n--- BODY ---\nOK\n\nOn Mon, A <a@example.com> wrote:\n> hi"
+    assert not _forwarded(reply)
