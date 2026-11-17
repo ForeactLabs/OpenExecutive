@@ -421,27 +421,43 @@ def delete_session_drive_memory(session_id: str, db_path: Path | None = None) ->
 # --------------------------------------------------------------------------- #
 # File names, for Approve cards
 # --------------------------------------------------------------------------- #
-# Any Google Workspace answer that names a file with its id: a search's
-# "- Name: "Q4 plan" (ID: …", an info read's "Spreadsheet: "Q4 plan" (ID: …",
-# a create's "created spreadsheet 'Q4 plan' (ID: …". An Approve card for a
-# step on that file then shows its name instead of a bare link
-# (``orchestrator.card_details``). Only the name and id are kept, company-wide:
-# a card goes to whoever asked, about a file they named by its id.
-_NAMED_ID_RE = re.compile(
-    r"""["'](?P<name>[^"'\n]{1,200})["']\s*\(ID:\s*(?P<id>[A-Za-z0-9_-]{10,128})\b"""
-)
+# Drive's own metadata answers, read only from the lines Drive writes: a
+# search or folder listing's "- Name: "Q4 plan" (ID: …, Type: …", a sheet
+# info read's first line "Spreadsheet: "Q4 plan" (ID: …)", an opened file's
+# first line "File: "Q4 plan" (ID: …". Never mail, a Doc's or a Sheet's
+# content, or a calendar: anyone can write "(ID: …)" there. The name is
+# matched greedily up to the line's last quote, so a file named to look
+# like another line still gives its own id; an id named twice in one answer
+# is dropped. An Approve card for a step on that file then shows its name
+# (``orchestrator.card_details``). Only names and ids are kept, company-wide.
+_NAME_LINES: dict[str, re.Pattern[str]] = {
+    SEARCH_TOOL: re.compile(r'^- Name: "(?P<name>.*)" \(ID: (?P<id>[A-Za-z0-9_-]{10,128}), Type: ', re.MULTILINE),
+    "google_workspace__list_drive_items": re.compile(
+        r'^- Name: "(?P<name>.*)" \(ID: (?P<id>[A-Za-z0-9_-]{10,128}), Type: ', re.MULTILINE,
+    ),
+    "google_workspace__get_spreadsheet_info": re.compile(
+        r'\ASpreadsheet: "(?P<name>.*)" \(ID: (?P<id>[A-Za-z0-9_-]{10,128})\)', re.MULTILINE,
+    ),
+    CONTENT_TOOL: re.compile(r'\AFile: "(?P<name>.*)" \(ID: (?P<id>[A-Za-z0-9_-]{10,128}), Type: ', re.MULTILINE),
+}
 _MAX_NAMES_KEPT = 5000
 
 
 def remember_names(tool_name: str, result_text: str, db_path: Path | None = None) -> int:
-    """Keep each file a Google Workspace answer names with its id; how many.
+    """Keep each file a Drive metadata answer names with its id; how many.
     Never raises."""
-    if not isinstance(tool_name, str) or not tool_name.startswith("google_workspace__"):
+    pattern = _NAME_LINES.get(tool_name) if isinstance(tool_name, str) else None
+    if pattern is None or not isinstance(result_text, str):
         return 0
-    if not isinstance(result_text, str) or result_text.lstrip().lower().startswith("error"):
-        return 0
-    found = {m["id"]: _clip(m["name"], _NAME_CHARS) for m in _NAMED_ID_RE.finditer(result_text[:200_000])}
-    found = {k: v for k, v in found.items() if v}
+    found: dict[str, str] = {}
+    twice: set[str] = set()
+    for m in pattern.finditer(result_text[:200_000]):
+        name = _clip(m["name"], _NAME_CHARS)
+        if m["id"] in found and found[m["id"]] != name:
+            twice.add(m["id"])
+        if name:
+            found[m["id"]] = name
+    found = {k: v for k, v in found.items() if k not in twice}
     if not found:
         return 0
     try:
@@ -465,18 +481,13 @@ def remember_names(tool_name: str, result_text: str, db_path: Path | None = None
 
 
 def name_of(file_id: str, db_path: Path | None = None) -> str:
-    """The name a Google answer last gave ``file_id``, or "". Never raises."""
+    """The name Drive's metadata last gave ``file_id``, or "". Never raises."""
     path = _db_path(db_path)
     if not isinstance(file_id, str) or not file_id or not path.exists():
         return ""
     try:
         with episodic._get_conn(path) as conn:
             row = conn.execute("SELECT name FROM drive_file_names WHERE file_id = ?", (file_id,)).fetchone()
-            if row is None:
-                row = conn.execute(
-                    "SELECT name FROM session_drive_files WHERE file_id = ? ORDER BY last_seen_at DESC LIMIT 1",
-                    (file_id,),
-                ).fetchone()
     except sqlite3.OperationalError:
         return ""
     except Exception:

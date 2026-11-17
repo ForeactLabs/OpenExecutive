@@ -205,32 +205,39 @@ def _rows_text(rows: list[list[str]]) -> str:
 
 
 def cells(text: str) -> str:
-    """A sheet range in words: "Sheet1!A1:F13" is "Sheet1, rows 1 to 13,
-    columns A to F". Anything it can't read is shown as written."""
+    """A sheet range in words, with the range as written after it:
+    "Sheet1!A1:F13" is "Sheet1, rows 1 to 13, columns A to F (A1:F13)";
+    "A2:C" is "rows 2 to the end, columns A to C (A2:C)". A range it can't
+    read whole (a named range, "A:F10") is shown as written."""
     raw = text.strip()
     tab, _, area = raw.rpartition("!")
     tab = tab.strip()
     if len(tab) >= 2 and tab[0] == tab[-1] == "'":
         tab = tab[1:-1].replace("''", "'")
-    found = _CELLS.match(area.strip().upper()) if area.strip() else None
-    if found is None or not any(found.groupdict().values()):
+    area = area.strip()
+    found = _CELLS.fullmatch(area) if area else None
+    if found is None:
         return raw
     c1, r1, c2, r2 = found["c1"], found["r1"], found["c2"], found["r2"]
     ranged = ":" in area
-    parts: list[str] = []
-    if not ranged and c1 and r1:
-        parts.append(f"cell {c1}{r1}")
-    else:
-        if r1:
-            last = r2 if ranged else r1
-            parts.append(f"rows {r1} to {last}" if last and last != r1 else f"row {r1}")
-        if c1:
-            last_c = c2 if ranged else c1
-            parts.append(f"columns {c1} to {last_c}" if last_c and last_c != c1 else f"column {c1}")
-    if tab:
-        parts.insert(0, tab)
-    shown = ", ".join(parts)
-    return shown[:1].upper() + shown[1:] if shown else raw
+    words = ""
+    if not ranged:
+        words = f"cell {c1}{r1}" if c1 and r1 else ""
+    elif c1 and r1 and c2 and r2:
+        rows = f"row {r1}" if r1 == r2 else f"rows {r1} to {r2}"
+        cols = f"column {c1}" if c1 == c2 else f"columns {c1} to {c2}"
+        words = f"{rows}, {cols}"
+    elif c1 and r1 and c2 and not r2:
+        cols = f"column {c1}" if c1 == c2 else f"columns {c1} to {c2}"
+        words = f"rows {r1} to the end, {cols}"
+    elif c1 and c2 and not r1 and not r2:
+        words = f"all rows, {'column ' + c1 if c1 == c2 else f'columns {c1} to {c2}'}"
+    elif r1 and r2 and not c1 and not c2:
+        words = f"{'row ' + r1 if r1 == r2 else f'rows {r1} to {r2}'}, all columns"
+    if not words:
+        return raw
+    shown = f"{tab}, {words} ({area})" if tab else f"{words} ({area})"
+    return shown[:1].upper() + shown[1:]
 
 
 def _drive_link(key: str, value: Any) -> str | None:

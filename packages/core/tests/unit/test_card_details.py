@@ -169,7 +169,7 @@ def test_a_sheet_update_shows_the_sheet_by_name_its_cells_and_a_table(monkeypatc
     _names(monkeypatch, {_SHEET_ID: "Launch tracker"})
     shown = card_details.plain("google_workspace__modify_sheet_values", _SHEET_CALL)
     assert shown[0] == {"field": "Sheet", "value": "Launch tracker", "href": f"https://drive.google.com/open?id={_SHEET_ID}"}
-    assert shown[1] == {"field": "Cells", "value": "Rows 1 to 3, columns A to C"}
+    assert shown[1] == {"field": "Cells", "value": "Rows 1 to 3, columns A to C (A1:C3)"}
     assert shown[2]["field"] == "Values"
     assert shown[2]["table"] == _SHEET_CALL["values"]
     # Where a table can't be drawn (a chat app), every cell as a line.
@@ -195,11 +195,17 @@ def test_rows_sent_as_a_json_string_are_a_table_too(monkeypatch) -> None:
     assert card_details.plain("google_workspace__modify_sheet_values", call)[2]["table"] == _SHEET_CALL["values"]
 
 
-def test_ranges_read_as_words() -> None:
-    assert card_details.cells("Sheet1!A1:F13") == "Sheet1, rows 1 to 13, columns A to F"
-    assert card_details.cells("'Q4 Plan'!A:G") == "Q4 Plan, columns A to G"
-    assert card_details.cells("B2") == "Cell B2"
-    assert card_details.cells("2:5") == "Rows 2 to 5"
+def test_ranges_read_as_words_and_never_understate() -> None:
+    assert card_details.cells("Sheet1!A1:F13") == "Sheet1, rows 1 to 13, columns A to F (A1:F13)"
+    assert card_details.cells("'Q4 Plan'!A:G") == "Q4 Plan, all rows, columns A to G (A:G)"
+    assert card_details.cells("B2") == "Cell B2 (B2)"
+    assert card_details.cells("2:5") == "Rows 2 to 5, all columns (2:5)"
+    # An open end runs to the end of the sheet.
+    assert card_details.cells("A1:F") == "Rows 1 to the end, columns A to F (A1:F)"
+    assert card_details.cells("B2:B") == "Rows 2 to the end, column B (B2:B)"
+    # What it can't read whole is shown as written: a named range, a mixed one.
+    assert card_details.cells("Tax") == "Tax"
+    assert card_details.cells("A:F10") == "A:F10"
     assert card_details.cells("Pipeline") == "Pipeline"
 
 
@@ -274,6 +280,6 @@ def test_a_chat_app_card_names_the_sheet_and_lists_its_rows(monkeypatch) -> None
     assert text is not None
     assert "Update Launch tracker (Google Sheets)" in text
     assert f"Sheet: Launch tracker (https://drive.google.com/open?id={_SHEET_ID})" in text
-    assert "Cells: Rows 1 to 3, columns A to C" in text
+    assert "Cells: Rows 1 to 3, columns A to C (A1:C3)" in text
     assert "Launch date | Nov 16 passed | Sam" in text
     assert "[[" not in text
