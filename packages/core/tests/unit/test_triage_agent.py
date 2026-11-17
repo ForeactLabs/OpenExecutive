@@ -146,6 +146,17 @@ def test_triage_keeps_a_raised_card_when_review_fails() -> None:
     assert decision.alert is True
 
 
+def test_kept_cards_without_an_id_never_fold_into_each_other() -> None:
+    """create_alert needs no external id: two different cards kept while
+    review is down get different keys, and the same card again the same."""
+    def kept(subject: str, body: str) -> str:
+        event = AlertEvent(source="unknown", external_id="", subject=subject, body=body, from_executive=True)
+        return asyncio.run(TriageAgent().triage(event, client=_client(side_effect=RuntimeError("down")))).dedup_key
+    leo = kept("Leo asks about Friday", "Open Friday afternoon?")
+    assert leo != kept("Invoice 4411 overdue", "Due last week.")
+    assert leo == kept("Leo asks about Friday", "Open Friday afternoon?")
+
+
 def test_a_failed_review_never_turns_chat_lines_into_cards() -> None:
     """An outage fails review for every event: a chat line or a polled mail
     is recorded quietly, not raised (only create_alert's cards are kept)."""

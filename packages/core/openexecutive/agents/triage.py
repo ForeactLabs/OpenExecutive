@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import unicodedata
@@ -294,7 +295,7 @@ def _no_decision(event: AlertEvent, mute_patterns: list[str], why: str) -> Triag
             channels=[AlertChannel.WEB, AlertChannel.PERSISTED],
             headline=headline,
             body=(event.body or "")[:2000],
-            dedup_key=f"kept-{event.source}-{event.external_id}",
+            dedup_key=_kept_key(event),
         )
     return TriageDecision(
         alert=False,
@@ -305,6 +306,16 @@ def _no_decision(event: AlertEvent, mute_patterns: list[str], why: str) -> Triag
         dedup_key=f"{why}-{event.source}-{event.external_id}",
         reason_if_suppressed=why,
     )
+
+
+def _kept_key(event: AlertEvent) -> str:
+    """The key a kept card folds on. ``create_alert`` needs no external id,
+    so without one the card's own words make the key: two different cards
+    never fold into one, and the same card raised again still does."""
+    if event.external_id:
+        return f"kept-{event.source}-{event.external_id}"
+    text = f"{event.source}\n{event.subject}\n{event.body}"
+    return f"kept:{hashlib.sha256(text.encode('utf-8')).hexdigest()[:16]}"
 
 
 def _names_muted_topic(event: AlertEvent, mute_patterns: list[str]) -> bool:
