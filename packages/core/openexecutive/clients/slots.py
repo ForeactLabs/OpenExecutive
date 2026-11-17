@@ -35,7 +35,6 @@ import json
 import logging
 import shutil
 import sqlite3
-from collections.abc import Collection
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -59,8 +58,9 @@ CLIENT_WORKSPACE_PREFIX = "openexec-client-"
 # Tables preserved verbatim across slot restores — operator-level state that
 # does not belong to any one client company. `executive_control` is the
 # global pause switch (scheduler/pause.py): activating a client must never
-# silently un-pause (or re-pause) the Executive.
-_GLOBAL_TABLES = ("generated_fixtures", "executive_control")
+# silently un-pause (or re-pause) the Executive. `eval_scenarios` are the
+# scenarios people wrote: the instance's, kept by a reset (RESET_KEEPS) too.
+_GLOBAL_TABLES = ("generated_fixtures", "executive_control", "eval_scenarios")
 
 # Engagement metadata lives in meta.json — deliberately OUTSIDE the swapped
 # client state, so the practice layer (cockpit, renewal awareness) can see
@@ -386,12 +386,11 @@ def _seed_from_slot_files(settings: Any, slot: Path) -> dict[str, Any]:
     return out
 
 
-def restore_company_db(state_src: Path, *, carry: Collection[str] = ()) -> None:
+def restore_company_db(state_src: Path) -> None:
     """Make a saved copy of the company database live, carrying the
-    operator-level rows (``_GLOBAL_TABLES``, plus ``carry``) across. Used by
-    a client switch and by unload, which puts the user's own saved database
-    back."""
-    preserved = _dump_global_tables((*_GLOBAL_TABLES, *sorted(set(carry) - set(_GLOBAL_TABLES))))
+    operator-level rows (``_GLOBAL_TABLES``) across. Used by a client switch
+    and by unload, which puts the user's own saved database back."""
+    preserved = _dump_global_tables()
     _restore_db_from_file(state_src)
     _ensure_schemas()
     _restore_global_tables(preserved)
@@ -437,9 +436,7 @@ def _wipe_per_client_tables() -> None:
     _delete_every_table(_episodic_db_path(), keep=RESET_KEEPS | set(_GLOBAL_TABLES))
 
 
-def _dump_global_tables(
-    tables: Collection[str] = _GLOBAL_TABLES,
-) -> dict[str, tuple[list[str], list[tuple[Any, ...]]]]:
+def _dump_global_tables() -> dict[str, tuple[list[str], list[tuple[Any, ...]]]]:
     """Read operator-level table rows from the live DB before a restore."""
     db_path = _episodic_db_path()
     out: dict[str, tuple[list[str], list[tuple[Any, ...]]]] = {}
@@ -447,7 +444,7 @@ def _dump_global_tables(
         return out
     conn = sqlite3.connect(str(db_path))
     try:
-        for table in tables:
+        for table in _GLOBAL_TABLES:
             exists = conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
                 (table,),

@@ -825,6 +825,22 @@ async def test_blank_switch_then_unload_brings_every_table_back(
         ).fetchall() == [("pending",)]
 
 
+async def test_eval_scenarios_stay_across_every_switch(env: SimpleNamespace) -> None:
+    """The scenarios people wrote belong to the instance: switching into a
+    saved client keeps the live ones, as a blank switch and unload do."""
+    _seed_live_company(env)
+    with sqlite3.connect(str(env.db_path)) as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS eval_scenarios (note TEXT)")
+    await create_client_slot(env.settings, display_name="Acme", source="current")
+    await create_client_slot(env.settings, display_name="Beta", source="blank")
+    await activate_client_slot(env.settings, "beta")
+    with sqlite3.connect(str(env.db_path)) as conn:
+        conn.execute("INSERT INTO eval_scenarios VALUES ('written in Beta')")
+    await activate_client_slot(env.settings, "acme")  # a saved slot
+    with sqlite3.connect(str(env.db_path)) as conn:
+        assert conn.execute("SELECT note FROM eval_scenarios").fetchall() == [("written in Beta",)]
+
+
 async def test_every_first_activation_saves_your_company_again(
     env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
