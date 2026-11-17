@@ -1132,3 +1132,21 @@ def test_a_card_already_on_their_list_is_not_a_nudge(db: Path, audit_events, mon
     _apply(db, aid, _verdict(aid, recommended_move="nudge", message="Gentle ping"), summary=summary)
     assert summary.nudged == 0
     assert not any(e[0] == review.EVENT_NUDGED for e in audit_events)
+
+
+def test_an_escalation_with_no_chat_app_says_no_message_went(db: Path, audit_events, monkeypatch) -> None:
+    """The principal has no chat app: the card on their list is raised, and
+    the log doesn't claim a message reached them."""
+    async def no_app_dm(
+        person_id: int, text: str, *, headline: str = "", alert_id: int | None = None, theirs: bool = False,
+    ):
+        return True, review.ON_THEIR_LIST
+
+    monkeypatch.setattr(review, "_dm", no_app_dm)
+    _person(full_name="Pat", role="CEO", is_principal=True)
+    aid = _insert(db, "deadline", severity="low")
+    _apply(db, aid, _verdict(aid, recommended_move="escalate", message="look"))
+    row = alert_store.get_alert(aid, db_path=db)
+    assert row is not None and row.severity == "high" and row.due_at is not None
+    [esc] = [e for e in audit_events if e[0] == review.EVENT_ESCALATED]
+    assert esc[2]["dm_ok"] is False and "no message sent" in esc[1]

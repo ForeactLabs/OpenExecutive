@@ -952,8 +952,11 @@ async def _apply_escalate(ctx: _MoveContext) -> None:
     ctx.due_at = ctx.due_at or (ctx.now + timedelta(hours=_DEFAULT_ESCALATION_HOURS)).isoformat()
     ctx.summary.escalated += 1
     ctx.move_taken = "escalate"
-    _audit(EVENT_ESCALATED, f"Escalated '{alert.headline[:80]}' to {new_sev} ({detail})",
-           {**ctx.base_details, "new_severity": new_sev, "due_at": ctx.due_at, "dm_ok": ok})
+    # With no chat app the card on their list is raised; no message went.
+    sent = detail != ON_THEIR_LIST
+    _audit(EVENT_ESCALATED,
+           f"Escalated '{alert.headline[:80]}' to {new_sev} ({detail if sent else 'raised on their list, no message sent'})",
+           {**ctx.base_details, "new_severity": new_sev, "due_at": ctx.due_at, "dm_ok": sent})
 
 
 async def _apply_draft(ctx: _MoveContext) -> None:
