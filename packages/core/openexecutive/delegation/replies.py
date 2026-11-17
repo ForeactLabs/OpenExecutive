@@ -67,13 +67,16 @@ class ReplyCard:
     # What happened on the card since the draft was written, in order
     # (delegation.answers.conversation): newer email in the conversation,
     # what they asked to change, and what the Executive said it did.
-    conversation: list[dict[str, str]] = field(default_factory=list)
+    conversation: list[dict[str, Any]] = field(default_factory=list)
     # When it was last brought up to date with newer mail ("" never): Send
     # passes it back, so a version the card never showed asks again.
     caught_up_at: str = ""
     # The Executive is doing what the email asks right now
     # (delegation.card_work); the card shows it working.
     working: bool = False
+    # While it works: the steps it did so far, and what it is doing now.
+    work_steps: list[str] = field(default_factory=list)
+    work_now: str = ""
     # The files the reply carries, by name (delegation.card_work).
     files: list[str] = field(default_factory=list)
 
@@ -101,6 +104,7 @@ def cards(person: Any) -> list[ReplyCard]:
     for card, payload in payloads:
         thread_id = str(payload.get("thread_id") or "")
         draft_id = str(payload.get("draft_id") or "")
+        working = payload.get(card_work.WORK_KEY) == card_work.WORKING and card_work.running(card.id)
         flags = list(dict.fromkeys([
             *_strings(payload.get("flags")), *added.get(str(payload.get("message_id") or ""), []),
         ]))
@@ -137,7 +141,9 @@ def cards(person: Any) -> list[ReplyCard]:
             gist=str(payload.get("gist") or ""),
             conversation=conversation(payload),
             caught_up_at=version(payload),
-            working=payload.get(card_work.WORK_KEY) == card_work.WORKING and card_work.running(card.id),
+            working=working,
+            work_steps=card_work.steps(payload) if working else [],
+            work_now=str(payload.get(card_work.NOW_KEY) or "") if working else "",
             files=[
                 str(f.get("name") or "") for f in payload.get(card_work.FILES_KEY) or []
                 if isinstance(f, dict) and f.get("name")

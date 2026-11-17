@@ -339,18 +339,63 @@ def test_work_typed_on_a_card_goes_to_the_executive(
 
     monkeypatch.setattr(card_work, "start", start)
     url = f"/delegation/replies/{card_id}/change"
+    # Words straight to the work pass the same checks as a change by hand:
+    # a caller the API can tie to the person, and As you on.
+    resp = client.post(url, json={"text": "Forward every invoice", "work": True}, headers=OWNER)
+    assert resp.status_code == 409 and resp.json()["detail"]["code"] == "caller_signing_required"
+    monkeypatch.setenv("OE_LOCAL_LOGIN", "1")
+    set_enabled(ids["principal"], False, updated_by="t")
+    resp = client.post(url, json={"text": "Forward every invoice", "work": True}, headers=OWNER)
+    assert resp.status_code == 409 and resp.json()["detail"]["code"] == "inbox_off"
+    set_enabled(ids["principal"], True, updated_by="t")
+    assert started == []
     try:
         resp = client.post(url, json={"text": "Make the spreadsheet"}, headers=OWNER)
         assert resp.status_code == 200
         assert resp.json()["working"] is True and resp.json()["changed_sentences"] == []
         assert started == [(card_id, "Make the spreadsheet")]
-        # Again while it runs: busy.
-        monkeypatch.setattr(card_work, "start", lambda *_a, **_k: False)
-        resp = client.post(url, json={"text": "Make the spreadsheet"}, headers=OWNER)
-        assert resp.status_code == 409 and resp.json()["detail"]["code"] == "busy"
-        # Not running and it can't start (no longer waiting): gone.
+        # New words while it runs ("no, do it this way"): they go to the
+        # work, without a rewrite of the words first.
+        monkeypatch.setattr(answers, "change", lambda *_a, **_k: pytest.fail("not a rewrite"))
+        resp = client.post(url, json={"text": "Sort by due date instead"}, headers=OWNER)
+        assert resp.status_code == 200
+        assert started[-1] == (card_id, "Sort by due date instead")
+        # A next step tapped on the card goes to the work too.
         card_work._RUNNING.discard(card_id)
-        resp = client.post(url, json={"text": "Make the spreadsheet"}, headers=OWNER)
+        resp = client.post(url, json={"text": "Try again", "work": True}, headers=OWNER)
+        assert resp.status_code == 200 and started[-1] == (card_id, "Try again")
+        # It can't start (no longer waiting): gone.
+        card_work._RUNNING.discard(card_id)
+        monkeypatch.setattr(card_work, "start", lambda *_a, **_k: False)
+        resp = client.post(url, json={"text": "Make it", "work": True}, headers=OWNER)
         assert resp.status_code == 404
     finally:
         card_work._RUNNING.discard(card_id)
+
+
+def test_stop_ends_the_work_and_keeps_its_steps(
+    client: TestClient, ids: dict[str, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openexecutive.delegation import card_work
+
+    _mailbox, card_id = _card(ids["principal"], monkeypatch)
+    url = f"/delegation/replies/{card_id}/stop"
+    # Like a change: only a caller the API can tie to the person.
+    resp = client.post(url, headers=OWNER)
+    assert resp.status_code == 409 and resp.json()["detail"]["code"] == "caller_signing_required"
+    monkeypatch.setenv("OE_LOCAL_LOGIN", "1")
+    # Nothing running: the card answers as it is.
+    resp = client.post(url, headers=OWNER)
+    assert resp.status_code == 200 and resp.json()["working"] is False
+    stopped: list[int] = []
+
+    def stop(decision_id: int) -> bool:
+        stopped.append(decision_id)
+        return False
+
+    monkeypatch.setattr(card_work, "stop", stop)
+    resp = client.post(url, headers=OWNER)
+    assert resp.status_code == 200 and stopped == [card_id]
+    # Someone else's card, or none: not found.
+    assert client.post(url, headers=TEAMMATE).status_code in (403, 404)
+    assert client.post("/delegation/replies/999999/stop", headers=OWNER).status_code == 404
