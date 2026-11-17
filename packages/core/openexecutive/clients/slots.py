@@ -87,6 +87,10 @@ class ClientSlotError(ValueError):
     """Base error for slot operations (maps to HTTP 400)."""
 
 
+class ClientSnapshotError(ClientSlotError):
+    """The live company couldn't be saved before a switch (maps to HTTP 500)."""
+
+
 class ClientSlotNotFoundError(ClientSlotError):
     """The named slot does not exist (maps to HTTP 404)."""
 
@@ -824,7 +828,7 @@ async def create_client_slot(
                 await asyncio.to_thread(snapshot_user_state, settings)
             except Exception as exc:
                 logger.exception("client-slots: pre-create user snapshot failed")
-                raise ClientSlotError(
+                raise ClientSnapshotError(
                     "Couldn't save your company before switching. Nothing was changed."
                 ) from exc
 
@@ -928,7 +932,7 @@ async def activate_client_slot(
                 await asyncio.to_thread(snapshot_user_state, settings)
             except Exception as exc:
                 logger.exception("client-slots: pre-activation user snapshot failed")
-                raise ClientSlotError(
+                raise ClientSnapshotError(
                     "Couldn't save your company before switching. Nothing was changed."
                 ) from exc
 

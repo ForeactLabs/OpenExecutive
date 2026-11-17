@@ -257,7 +257,7 @@ async def test_create_from_current_stops_when_the_snapshot_fails(
         raise OSError("disk full")
 
     monkeypatch.setattr(slots, "snapshot_user_state", _fail)
-    with pytest.raises(slots.ClientSlotError):
+    with pytest.raises(slots.ClientSnapshotError, match="Nothing was changed"):
         await create_client_slot(env.settings, display_name="Acme", source="current")
     assert not (env.company / "_client_slots" / "acme").exists()
     assert get_active_client(env.settings) is None
