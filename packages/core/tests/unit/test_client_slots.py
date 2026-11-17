@@ -10,6 +10,7 @@ round-trip contract under test.
 from __future__ import annotations
 
 import sqlite3
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -767,6 +768,12 @@ async def test_blank_switch_then_unload_brings_every_table_back(
         run_at="2099-01-01T00:00:00+00:00", channel="email", channel_ref="pat@example.com",
         intent_text="Renewal reminder", kind="ad_hoc",
     )
+    # Only a little late (a short time away, like the overnight rotation):
+    # it still runs.
+    just_due_id = episodic.insert_scheduled_action(
+        run_at=(datetime.now(UTC) - timedelta(minutes=10)).isoformat(), channel="email",
+        channel_ref="pat@example.com", intent_text="Call Pat back", kind="ad_hoc",
+    )
     with sqlite3.connect(str(env.db_path)) as conn:
         conn.execute(
             "UPDATE scheduled_actions SET status = 'running' "
@@ -816,12 +823,15 @@ async def test_blank_switch_then_unload_brings_every_table_back(
         assert conn.execute(
             "SELECT status FROM scheduled_actions WHERE id = ?", (rotation_id,)
         ).fetchall() == [("cancelled",)]
-        # Overdue rows are closed; one still to come stays the user's.
+        # Long-overdue rows are closed; one still to come stays the user's.
         assert conn.execute(
             "SELECT status FROM scheduled_actions WHERE id = ?", (overdue_id,)
         ).fetchall() == [("cancelled",)]
         assert conn.execute(
             "SELECT status FROM scheduled_actions WHERE id = ?", (future_id,)
+        ).fetchall() == [("pending",)]
+        assert conn.execute(
+            "SELECT status FROM scheduled_actions WHERE id = ?", (just_due_id,)
         ).fetchall() == [("pending",)]
 
 

@@ -1654,21 +1654,29 @@ def requeue_orphaned_running(db_path: Path | None = None) -> int:
         return int(cursor.rowcount)
 
 
+# How late a restored job may still run. A copy back after a short time
+# away (the overnight client rotation puts the active client back within the
+# hour, its queue paused meanwhile) keeps its jobs and they run a little
+# late; one that sat for longer would fire them long past their point (a
+# days-old follow-up, a morning brief in the afternoon).
+RESTORED_LATE_GRACE = timedelta(hours=6)
+
+
 def settle_restored_queue(db_path: Path | None = None) -> int:
     """Settle the job queue of a database copy that was just made live.
 
     A row that was 'running' when the copy was saved finished in this
     process against the database it replaced, so running it again would do
-    the work twice (a rotation, a send). A 'pending' row whose time passed
-    while the copy sat saved would fire late, all of them on the next tick
-    (a days-old follow-up, a morning brief at 3 PM). Both are marked
-    'cancelled' with the reason; a pending row still to come is left to
-    run. The caller seeds the recurring jobs again. Returns the count closed.
+    the work twice (a rotation, a send). A 'pending' row more than
+    ``RESTORED_LATE_GRACE`` past its time would fire long late, all of them
+    on the next tick. Both are marked 'cancelled' with the reason; a row
+    still to come, or only a little late, is left to run. The caller seeds
+    the recurring jobs again. Returns the count closed.
     """
     resolved = _resolve_db_path(db_path)
     if not resolved.exists():
         return 0
-    now = datetime.now(UTC).isoformat()
+    cutoff = (datetime.now(UTC) - RESTORED_LATE_GRACE).isoformat()
     with _get_conn(resolved) as conn:
         running = conn.execute(
             "UPDATE scheduled_actions SET status = 'cancelled', "
@@ -1677,9 +1685,9 @@ def settle_restored_queue(db_path: Path | None = None) -> int:
         ).rowcount
         overdue = conn.execute(
             "UPDATE scheduled_actions SET status = 'cancelled', "
-            "last_error = 'its time passed while this copy was saved' "
+            "last_error = 'its time passed long before this copy came back' "
             "WHERE status = 'pending' AND run_at <= ?",
-            (now,),
+            (cutoff,),
         ).rowcount
         return int(running) + int(overdue)
 
