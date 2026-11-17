@@ -517,8 +517,8 @@ def test_other_outside_mail_with_another_subject_reads(roster: SimpleNamespace) 
     assert "Invoice 44" in out
 
 
-def _dated_thread(*messages: tuple[str, str, str, str]) -> str:
-    text = "Thread ID: t1\nSubject: Taxes\nMessages: 2\n\n"
+def _dated_thread(*messages: tuple[str, str, str, str], thread: str = "t1") -> str:
+    text = f"Thread ID: {thread}\nSubject: Taxes\nMessages: 2\n\n"
     for i, (sender, to, date, body) in enumerate(messages, 1):
         text += f"=== Message {i} ===\nFrom: {sender}\nTo: {to}\nDate: {date}\n\n{body}\n\n"
     return text
@@ -526,17 +526,19 @@ def _dated_thread(*messages: tuple[str, str, str, str]) -> str:
 
 def test_a_thread_of_mail_sent_for_a_teammate_is_withheld(roster: SimpleNamespace) -> None:
     _send_for(roster.ben, mid="s1", subject="Taxes")
-    text = _dated_thread((EXEC, DANA, LATER, "Hello."), (DANA, EXEC, LATER, "Thanks."))
-    roster.session.mail_ids_seen.add(f"{roster.owner}:t1")
+    text = _dated_thread((EXEC, DANA, LATER, "Hello."), (DANA, EXEC, LATER, "Thanks."), thread="s1")
+    roster.session.mail_ids_seen.add(f"{roster.owner}:s1")
     with _reader(roster.owner):
-        out = json.loads(_run(FakeMailbox({THREAD: text}), THREAD, thread_id="t1"))
+        out = json.loads(_run(FakeMailbox({THREAD: text}), THREAD, thread_id="s1"))
     assert out["withheld"] is True
 
 
 def test_an_outlook_item_sent_for_a_teammate_is_dropped(roster: SimpleNamespace) -> None:
     _send_for(roster.ben, subject="Crates on Monday")
+    from datetime import UTC, datetime
+
     sent = {**_item(EXEC, "Crates on Monday", "o2"), "toRecipients": [{"emailAddress": {"address": DANA}}],
-            "receivedDateTime": "2050-01-01T09:00:00Z"}
+            "receivedDateTime": datetime.now(UTC).isoformat()}
     text = json.dumps({"value": [_item(VENDOR, "Invoice", "o1"), sent]})
     with _reader(roster.owner):
         out = json.loads(_run(FakeMailbox({OUTLOOK_LIST: text}), OUTLOOK_LIST))
@@ -612,11 +614,43 @@ def test_a_teammates_reply_into_a_shared_thread_hides_only_what_came_after(roste
     # Dana wrote first; Ben then had the Executive reply in that thread.
     with _reader(roster.ben):
         tm.note_sent(subject="Re: Taxes", recipients={DANA}, thread_id="t1", result="Email sent! Message ID: s9")
-    text = _dated_thread((DANA, EXEC, EARLIER, "Original question."), (EXEC, DANA, LATER, "Ben's answer."))
+    text = _dated_thread(
+        (DANA, EXEC, EARLIER, "Original question."), (EXEC, DANA, _now(), "Ben's answer."),
+        (DANA, EXEC, LATER, "Dana writes again."),
+    )
     roster.session.mail_ids_seen.add(f"{roster.owner}:t1")
     with _reader(roster.owner):
         out = _run(FakeMailbox({THREAD: text}), THREAD, thread_id="t1")
-    assert "Original question." in out and "Ben's answer." not in out
+    assert "Original question." in out and "Dana writes again." in out
+    assert "Ben's answer." not in out
+
+
+def _now() -> str:
+    from datetime import UTC, datetime
+    from email.utils import format_datetime
+
+    return format_datetime(datetime.now(UTC))
+
+
+def test_a_new_message_with_the_same_subject_is_no_reply(roster: SimpleNamespace) -> None:
+    _send_for(roster.ben, mid="s1", subject="Invoice")
+    roster.session.mail_ids_seen.update({f"{roster.owner}:r6", f"{roster.owner}:r7"})
+    fresh = _sent_by_exec("r6", "Invoice", EXEC, sender=DANA)
+    reply = _sent_by_exec("r7", "Re: Invoice", EXEC, sender=DANA)
+    with _reader(roster.owner):
+        assert "withheld" not in _run(FakeMailbox({READ: fresh}), READ, message_id="r6")
+        assert "withheld" in _run(FakeMailbox({READ: reply}), READ, message_id="r7")
+
+
+def test_a_reply_sent_into_a_thread_takes_only_itself(roster: SimpleNamespace) -> None:
+    with _reader(roster.ben):
+        tm.note_sent(subject="Re: Taxes", recipients={DANA}, thread_id="t1", result="Email sent! Message ID: s9")
+    [row] = tm._sent_rows()
+    assert (row.message_id, row.thread_id, row.started) == ("s9", "", False)
+    roster.session.mail_ids_seen.add(f"{roster.owner}:r8")
+    reply = _sent_by_exec("r8", "Re: Taxes", EXEC, sender=DANA)
+    with _reader(roster.owner):
+        assert "withheld" not in _run(FakeMailbox({READ: reply}), READ, message_id="r8")
 
 
 def test_the_executives_own_address_is_not_kept_as_a_recipient(

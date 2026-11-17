@@ -145,17 +145,19 @@ OUTLOOK_THEIRS_NOTE = (
 
 
 # Mail the Executive sent for someone (rule 4). The sent message itself is
-# theirs for good. A message dated after the send is theirs too when it is
-# in the send's thread, or (while the send is recent) has its subject and
-# one of its recipients: a reply. Mail from before the send never is, so a
-# teammate's reply into a shared thread hides nothing that was there.
+# theirs for good. A send that started its own conversation also takes what
+# answers it: a message dated after the send in its thread, or (while the
+# send is recent) a reply ("Re:") with its subject and one of its
+# recipients. A reply sent into a thread that was already there takes only
+# itself, so it never hides the rest of a shared thread from anyone.
 SENT_TABLE = "mail_sent_for"
 SUBJECT_MATCH_DAYS = 30
 _open = db.opener(db.company_path, schema=(
     f"CREATE TABLE IF NOT EXISTS {SENT_TABLE} ("
     "id INTEGER PRIMARY KEY AUTOINCREMENT, person_id INTEGER NOT NULL, "
     "message_id TEXT NOT NULL DEFAULT '', thread_id TEXT NOT NULL DEFAULT '', "
-    "subject TEXT NOT NULL DEFAULT '', recipients TEXT NOT NULL DEFAULT '', at TEXT NOT NULL);"
+    "subject TEXT NOT NULL DEFAULT '', recipients TEXT NOT NULL DEFAULT '', "
+    "started INTEGER NOT NULL DEFAULT 1, at TEXT NOT NULL);"
 ))
 _SUBJECT_RE = re.compile(r"^\s*(?:\d+\.\s*)?subject\s*:(.*)$", re.IGNORECASE | re.MULTILINE)
 _REPLY_PREFIX_RE = re.compile(r"^(?:\s*(?:re|fwd?|aw|sv)\s*:\s*)+", re.IGNORECASE)
@@ -181,6 +183,8 @@ class _Sent:
     at: datetime
     # Whether its subject still finds replies (``SUBJECT_MATCH_DAYS``).
     recent: bool = True
+    # Whether the send started its conversation (it was no reply into one).
+    started: bool = True
 
 
 @dataclass
@@ -369,7 +373,7 @@ def _sent_rows() -> list[_Sent]:
     with the send) for good, which an Outlook send, with no id, needs."""
     with _open() as conn:
         rows = conn.execute(
-            f"SELECT person_id, message_id, thread_id, subject, recipients, at, "  # noqa: S608
+            f"SELECT person_id, message_id, thread_id, subject, recipients, started, at, "  # noqa: S608
             f"at >= datetime('now', '-{SUBJECT_MATCH_DAYS} days') AS recent FROM {SENT_TABLE}"
         ).fetchall()
     return [
@@ -379,6 +383,7 @@ def _sent_rows() -> list[_Sent]:
             thread_id=str(r["thread_id"] or ""),
             subject=str(r["subject"] or ""),
             recent=bool(r["recent"]),
+            started=bool(r["started"]),
             recipients=set(str(r["recipients"] or "").split()),
             at=datetime.fromisoformat(str(r["at"])).replace(tzinfo=UTC),
         )
@@ -442,8 +447,10 @@ def sent_for() -> int | None:
 
 def note_sent(*, subject: object, recipients: list[str] | set[str], thread_id: object = "", result: str = "") -> None:
     """Keep a send the mailbox accepted with whom it was for (rule 4): its
-    message id (from the send's result, "Message ID: ..."), its thread, its
-    subject and who it went to. Never raises: the send already happened."""
+    message id (from the send's result, "Message ID: ..."), its subject and
+    who it went to. ``thread_id`` is the thread a reply was sent into; with
+    none the send started its own, whose id is the message's (Gmail).
+    Never raises: the send already happened."""
     try:
         person = sent_for()
         if person is None:
@@ -453,13 +460,16 @@ def note_sent(*, subject: object, recipients: list[str] | set[str], thread_id: o
         from openexecutive.config import get_settings
 
         own = str(get_settings().exec_email_address or "").strip().lower()
+        message_id = found.group(1) if found else ""
+        started = not str(thread_id or "").strip()
         with _open() as conn:
             conn.execute(
-                f"INSERT INTO {SENT_TABLE} (person_id, message_id, thread_id, subject, recipients, at) "  # noqa: S608
-                "VALUES (?, ?, ?, ?, ?, datetime('now'))",
+                f"INSERT INTO {SENT_TABLE} (person_id, message_id, thread_id, subject, recipients, started, at) "  # noqa: S608
+                "VALUES (?, ?, ?, ?, ?, ?, datetime('now'))",
                 (
-                    int(person), found.group(1) if found else "", str(thread_id or "").strip(),
+                    int(person), message_id, message_id if started else "",
                     _subject_key(subject), " ".join(sorted({a.strip().lower() for a in recipients if a.strip()} - {own})),
+                    int(started),
                 ),
             )
     except Exception:
@@ -493,9 +503,11 @@ def _theirs(unit: str, headers: str, sides: _Sides, *, ids: list[str] | None = N
 def _sent_for_other(unit: str, headers: str, sides: _Sides, *, ids: list[str] | None = None,
                     subject: str | None = None, when: datetime | None = None) -> bool:
     """Whether the Executive sent ``unit`` for someone other than the
-    reader, or it answers one (rule 4): it is a kept send's message, or it
-    is dated after a kept send and is in its thread or has its subject and
-    one of the people it went to. The reader's own sends win."""
+    reader, or it answers one (rule 4): it is a kept send's message (by id,
+    or by its subject and a recipient at the send's own time), or it is
+    dated after a send that started its conversation and is in that thread
+    or is a reply with its subject and one of the people it went to. The
+    reader's own sends win."""
     if not sides.sent:
         return False
     found = set(ids if ids is not None else _LISTED_ID_RE.findall(unit))
@@ -513,15 +525,16 @@ def _sent_for_other(unit: str, headers: str, sides: _Sides, *, ids: list[str] | 
         match = _SUBJECT_RE.search(block)
         subject = match.group(1) if match else ""
     key = _subject_key(subject)
+    reply = bool(_REPLY_PREFIX_RE.match(str(subject or "")))
     on_it = set(_addresses(headers.lower()))
 
     def answers(rows: list[_Sent]) -> bool:
         return any(
             when >= r.at - _SKEW and (
-                (r.thread_id and r.thread_id in found)
+                (r.started and r.thread_id and r.thread_id in found)
                 or (
                     r.subject and r.subject == key and bool(r.recipients & on_it)
-                    and (r.recent or when <= r.at + _SKEW)
+                    and (when <= r.at + _SKEW or (r.started and r.recent and reply))
                 )
             )
             for r in rows
