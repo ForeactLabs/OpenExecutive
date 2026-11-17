@@ -883,7 +883,13 @@ def delete_alert(alert_id: int, db_path: Path | None = None) -> bool:
         return False
     with _get_conn(db_path) as conn:
         cursor = conn.execute("DELETE FROM alerts WHERE id = ?", (alert_id,))
-        return cursor.rowcount > 0
+        deleted = cursor.rowcount > 0
+    if deleted:
+        # What was said on it goes with it.
+        from openexecutive.alerts import card_talk
+
+        card_talk.forget(alert_id, db_path=db_path)
+    return deleted
 
 
 # --- Mute topics ---

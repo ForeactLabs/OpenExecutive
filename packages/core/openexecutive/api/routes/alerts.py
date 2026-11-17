@@ -906,6 +906,8 @@ class SayResponse(BaseModel):
 
 
 SAY_MAX_CHARS = 500
+# What the card says when their go couldn't start the work.
+COULD_NOT_START = "I couldn't start that. Pick an option to try again."
 
 
 @router.post("/alerts/{alert_id}/say", response_model=SayResponse)
@@ -1000,8 +1002,15 @@ async def say_on_card(alert_id: int, body: SayBody, request: Request) -> SayResp
     go = new.go and await replan.said_go(plan, line)
     reply = new.reply if go or not new.go else "Here's the plan now. Pick it to go ahead."
     card_talk.add_turn(alert_id, "you", line, person_id=person)
+    approval = None
+    if go:
+        # The card says it started only once it has.
+        try:
+            approval = await _approve(alert_id, ApproveBody(plan=plan), request)
+        except HTTPException:
+            card_talk.add_turn(alert_id, "me", COULD_NOT_START, person_id=person)
+            raise
     card_talk.add_turn(alert_id, "me", reply, person_id=person)
-    approval = await _approve(alert_id, ApproveBody(plan=plan), request) if go else None
     return SayResponse(reply=reply, card=_card(), approval=approval)
 
 

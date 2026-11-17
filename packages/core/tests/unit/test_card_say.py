@@ -244,6 +244,53 @@ def test_for_you_to_know_takes_words_and_then_waits_for_an_ok(
     assert res.json()["card"]["view"]["options"][0]["label"] == "Email Alex"
 
 
+def test_a_go_that_cant_start_says_so_on_the_card(
+    client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fastapi import HTTPException
+
+    aid = _card(db)
+    _model(monkeypatch, {"plan": NEW, "go": True, "reply": "On it."})
+    _go(monkeypatch, True)
+
+    async def fails(*a: object, **k: object) -> None:
+        raise HTTPException(status_code=409, detail="Someone else just did it.")
+
+    monkeypatch.setattr(alerts_route, "_approve", fails)
+    assert _say(client, aid, "yes, do it").status_code == 409
+    talk = card_talk.read([alert_store.get_alert(aid)])[aid]  # type: ignore[list-item]
+    assert [(t.who, t.text) for t in talk.turns] == [
+        ("you", "yes, do it"), ("me", alerts_route.COULD_NOT_START),
+    ]
+
+
+def test_what_one_person_says_on_a_card_shows_only_to_them(
+    client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch, caller: dict[str, Any],
+) -> None:
+    from openexecutive.api.routes import today
+    from openexecutive.orchestrator.artifact_records import Viewer
+
+    # A teammate's card, so the owner can read it too.
+    aid = _card(db, routed_to_person_id=3)
+    _model(monkeypatch, {"plan": NEW, "reply": "Changed it."})
+    caller.update(person_id=3, principal=False)
+    assert _say(client, aid, "share it from me").status_code == 200
+    alert = alert_store.get_alert(aid)
+    assert alert is not None
+
+    def lines(viewer: Viewer) -> list[str]:
+        card = today.one_card(alert, viewer)
+        assert card is not None and card.view is not None
+        return [t.text for t in card.view.turns or []]
+
+    assert lines(Viewer(person_id=3)) == ["share it from me", "Changed it."]
+    assert lines(Viewer(person_id=1, is_principal=True)) == []
+    assert lines(Viewer(person_id=4)) == []
+    # Nobody signed in as a person sees anyone's lines either.
+    assert lines(Viewer(person_id=None)) == []
+    assert today.card_talks([alert], Viewer(person_id=1))[aid].turns == []
+
+
 def test_an_asking_card_takes_words_as_the_answer(
     client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch, turns: _Turns,
 ) -> None:
@@ -635,3 +682,15 @@ async def test_fill_writes_options_once_and_never_for_a_stale_plan(
     card_talk.forget(aid)
     assert await card_talk.fill(fresh) is None
     assert card_talk.read([alert_store.get_alert(aid)])[aid].options == []  # type: ignore[list-item]
+
+
+def test_deleting_a_card_drops_what_was_said_on_it(db: Path) -> None:
+    aid = _card(db)
+    card_talk.keep_options(aid, OLD, "Alex can't open the Drive.", [card_talk.CardOption(label="Ask Alex", plan=OLD)])
+    card_talk.add_turn(aid, "you", "ask him", person_id=1)
+    assert alert_store.delete_alert(aid, db_path=db)
+    import sqlite3
+
+    with sqlite3.connect(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM alert_card_turns").fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM alert_card_options").fetchone()[0] == 0
