@@ -904,6 +904,12 @@ async def _apply_nudge(ctx: _MoveContext) -> None:
         _audit(EVENT_REVIEWED, f"Nudge about '{alert.headline[:80]}' held for the recipient",
                {**ctx.base_details, "target_person_id": target, "held": True})
         return
+    if ok and detail == ON_THEIR_LIST:
+        # Nothing was sent: the card on their list is all they have. Not a
+        # nudge, so it never counts as one.
+        _audit(EVENT_REVIEWED, f"'{alert.headline[:80]}' is already on their list",
+               {**ctx.base_details, "target_person_id": target, "on_their_list": True})
+        return
     if ok:
         ctx.summary.nudged += 1
         ctx.move_taken = "nudge"

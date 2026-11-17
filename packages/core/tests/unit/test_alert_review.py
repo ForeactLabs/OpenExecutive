@@ -1111,3 +1111,24 @@ def test_a_held_nudge_does_not_count_toward_the_cap(db: Path, audit_events, monk
     # While it waits, the next pass doesn't hold another.
     _apply(db, aid, _verdict(aid, recommended_move="nudge", message="again"), summary=summary)
     assert sent == [dana]
+
+
+def test_a_card_already_on_their_list_is_not_a_nudge(db: Path, audit_events, monkeypatch) -> None:
+    """A teammate with no chat app: nothing was sent, so no nudge is counted
+    or logged as one."""
+    _person(full_name="Pat", role="CEO", is_principal=True)
+    dana = _person(full_name="Dana", role="CFO", department_slugs=["finance"])
+    aid = _insert(db, "Waiting on Dana", topic_tags=["department:finance"], routed_to_person_id=dana)
+
+    async def no_app_dm(
+        person_id: int, text: str, *, headline: str = "", alert_id: int | None = None, theirs: bool = False,
+    ):
+        assert theirs
+        return True, review.ON_THEIR_LIST
+
+    monkeypatch.setattr(review, "_dm", no_app_dm)
+    monkeypatch.setattr(review, "_nudges_so_far", lambda alert_id: 0)
+    summary = review.ReviewSummary()
+    _apply(db, aid, _verdict(aid, recommended_move="nudge", message="Gentle ping"), summary=summary)
+    assert summary.nudged == 0
+    assert not any(e[0] == review.EVENT_NUDGED for e in audit_events)
