@@ -141,16 +141,20 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
   // the stale-but-still-usable view rather than erroring the briefing.
   const [mountedAt] = useState(() => Date.now());
   const lastFetchRef = useRef(mountedAt);
-  // Only the newest refresh's answer is shown: an older one that lands
-  // later (a timed refresh overtaken by Approve's) would put old counts back.
-  const refreshSeqRef = useRef(0);
-  const refreshToday = useCallback(() => {
+  // Every pull of /today goes through here, and only the newest one's answer
+  // is shown: an older one that lands later (a timed refresh overtaken by
+  // Approve's, a slow first load overtaken by a focus refresh) would put old
+  // counts back.
+  const pullSeqRef = useRef(0);
+  const pullToday = useCallback(async () => {
     lastFetchRef.current = Date.now();
-    const seq = ++refreshSeqRef.current;
-    getToday()
-      .then((t) => { if (seq === refreshSeqRef.current) setToday(t); })
-      .catch(() => { /* keep current view on failure */ });
+    const seq = ++pullSeqRef.current;
+    const t = await getToday();
+    if (seq === pullSeqRef.current) setToday(t);
   }, []);
+  const refreshToday = useCallback(() => {
+    pullToday().catch(() => { /* keep current view on failure */ });
+  }, [pullToday]);
 
   // Keep Home current when the tab or window comes back (a card answered on
   // another device meanwhile), and every minute while it is open.
@@ -357,12 +361,11 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
 
   useEffect(() => {
     let cancelled = false;
-    getToday()
-      .then((t) => { if (!cancelled) setToday(t); })
+    pullToday()
       .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load"); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, []);
+  }, [pullToday]);
 
   // Replies the Executive drafted in the owner's own mailbox (Act as me):
   // cards in Needs you. Empty for everyone else.
@@ -415,10 +418,10 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
     setToday((t) => t && { ...t, right_now: (t.right_now ?? []).filter((r) => r.key !== row.key) });
     dismissRightNowRow(row.key)
       .then((kept) => {
-        if (!kept) return getToday().then(setToday);
+        if (!kept) return pullToday();
       })
       .catch((e) => console.error("Dismissing a Right now row failed", e));
-  }, []);
+  }, [pullToday]);
   const onRowGone = useCallback((row: RightNowRow) => {
     setToday((t) => t && { ...t, right_now: (t.right_now ?? []).filter((r) => r.key !== row.key) });
   }, []);
