@@ -707,15 +707,18 @@ def test_every_email_from_one_sender_gets_its_card(db: Path, owner: Any, models:
     assert len(drafted) == 2
 
 
-def test_the_daily_limits_leave_mail_for_later(
+def test_no_daily_count_holds_inbox_mail(
     db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # However many drafts were written today (chat's own limit full too),
+    # an email that needs a reply still gets its card.
     monkeypatch.setattr(caps, "drafts_today", lambda _pid: 10_000)
+    monkeypatch.setattr(caps, "reserve", lambda *a, **kw: "reached")
     mailbox = FakeInbox()
     mailbox.add(_msg("m1", "t1"))
-    assert _scan(owner, mailbox).status == "daily_limit"
-    assert _ledger(db) == {} and models["classified"] == []
-    assert inbox.get_watch(owner.id).status == "daily_limit"
+    result = _scan(owner, mailbox)
+    assert result.status == "ok" and result.drafted == 1
+    assert _ledger(db)["m1"][0] == "drafted"
 
 
 def test_a_full_backlog_drafts_nothing_new(owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1176,19 +1179,6 @@ def test_a_card_that_couldnt_be_made_takes_its_draft_back(
     assert len(inbox.open_cards(owner.id)) == 1
 
 
-def test_a_limit_reached_while_reading_leaves_the_message_for_later(
-    db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    reserve = caps.reserve
-    monkeypatch.setattr(caps, "reserve", lambda *a, **kw: "daily_limit")
-    mailbox = FakeInbox()
-    mailbox.add(_msg("m1", "t1"))
-    assert _scan(owner, mailbox).status == "daily_limit"
-    assert _ledger(db)["m1"] == ("retry", "daily_limit")
-    monkeypatch.setattr(caps, "reserve", reserve)
-    assert _scan(owner, mailbox, now=NOW + timedelta(minutes=5)).drafted == 1
-
-
 def test_older_threads_are_reached_after_a_burst(db: Path, owner: Any, models: dict[str, Any]) -> None:
     """The cap on threads a scan looks at applies after settled ones are
     passed over, so the older ones are reached on the next scans."""
@@ -1354,7 +1344,7 @@ def test_reply_from_home_refuses_what_it_cannot_answer(db: Path, owner: Any, mod
     assert _ask(owner, mailbox, "t1", "m1") == "theirs_last"
     assert _ask(owner, mailbox, "nope", "m1") == "not_found"
     assert _ask(owner, mailbox, "t1", "gone") == "not_found"
-    assert set(inbox.ASK_REFUSALS) >= {"theirs_last", "not_found", "busy", "daily_limit", "not_now"}
+    assert set(inbox.ASK_REFUSALS) >= {"theirs_last", "not_found", "busy", "not_now"}
     assert mailbox.specs == [] and inbox.open_cards(owner.id) == []
 
 
