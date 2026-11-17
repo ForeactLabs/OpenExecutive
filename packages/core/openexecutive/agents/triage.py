@@ -304,18 +304,22 @@ def _no_decision(
     ``raise_it`` is a cut-off review that had already said to raise one:
     any event is kept then."""
     headline = (event.subject or event.title or (event.body or "").strip().split("\n", 1)[0] or event.source)[:200]
-    # The tags a kept card carries: any a cut-off review gave, and the
-    # department or room it came from, so a "mute this topic" holds it here
-    # and in the pipeline's own mute check, as it does a reviewed card.
+    # A kept card carries the tags a cut-off review gave, matched the way
+    # the pipeline matches a reviewed card's. The department or room it came
+    # from holds it back only when that very topic was muted ("mute this
+    # topic" stores department:<slug>), so a short mute never hits it.
     topic_tags = [*(tags or [])]
+    own = set()
     if event.department:
-        topic_tags.append(f"department:{event.department.lower()}")
+        own.add(f"department:{event.department.lower()}")
     if event.channel:
-        topic_tags.append(event.channel.lower())
+        own.add(event.channel.lower())
     # A cut-off review that said to raise it had seen the mutes: only its
     # tags count then. With no review at all, the words stand in.
-    muted = matches_mute(topic_tags, mute_patterns) or (
-        not raise_it and _names_muted_topic(event, mute_patterns)
+    muted = (
+        matches_mute(topic_tags, mute_patterns)
+        or any(p.strip().lower() in own for p in mute_patterns)
+        or (not raise_it and _names_muted_topic(event, mute_patterns))
     )
     if muted:
         why = "muted"

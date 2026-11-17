@@ -287,6 +287,15 @@ def test_a_cut_off_review_keeps_the_room_it_named() -> None:
     assert (decision.department_slug, decision.broadcast_integration) == ("sales", "slack")
 
 
+def test_a_short_mute_never_hits_a_kept_cards_department() -> None:
+    event = AlertEvent(source="unknown", external_id="", subject="Store count", body="Twelve stores.",
+                       department="retail", from_executive=True)
+    decision = asyncio.run(TriageAgent().triage(
+        event, mute_patterns=["ai"], client=_client(side_effect=RuntimeError("boom")),
+    ))
+    assert decision.alert is True
+
+
 def test_triage_swallows_client_exceptions() -> None:
     """LLM error → quiet fallback for an ordinary event, never propagates."""
     client = SimpleNamespace(
