@@ -278,7 +278,8 @@ def test_a_cut_off_review_that_said_raise_isnt_muted_by_words() -> None:
 
 
 def test_a_cut_off_review_keeps_the_room_it_named() -> None:
-    event = AlertEvent(source="monitoring", external_id="w-5", subject="Deal slipped", body="Acme moved to Q1.")
+    event = AlertEvent(source="monitoring", external_id="w-5", subject="Deal slipped", body="Acme moved to Q1.",
+                       from_executive=True)
     said = SimpleNamespace(type="tool_use", name="emit_alert_decision", input={
         "alert": True, "channels": ["department_channel"], "department_slug": "sales", "broadcast_integration": "slack",
     })
@@ -288,6 +289,19 @@ def test_a_cut_off_review_keeps_the_room_it_named() -> None:
     said.input = {"alert": True, "channels": ["department_channel"]}
     client = _client(return_value=SimpleNamespace(content=[said], stop_reason="max_tokens"))
     assert AlertChannel.WEB in asyncio.run(TriageAgent().triage(event, client=client)).channels
+
+
+def test_outside_mail_a_cut_off_review_named_a_room_for_stays_off_the_room() -> None:
+    event = AlertEvent(source="email", external_id="m-9", subject="Big order", body="Ship 40 crates.")
+    said = SimpleNamespace(type="tool_use", name="emit_alert_decision", input={
+        "alert": True, "severity": "high", "channels": ["department_channel", "company_broadcast"],
+        "department_slug": "sales", "broadcast_integration": "slack",
+    })
+    client = _client(return_value=SimpleNamespace(content=[said], stop_reason="max_tokens"))
+    decision = asyncio.run(TriageAgent().triage(event, client=client))
+    assert decision.alert is True and decision.severity == AlertSeverity.HIGH
+    assert decision.channels == [AlertChannel.WEB, AlertChannel.PERSISTED]
+    assert (decision.department_slug, decision.broadcast_integration) == ("", "")
 
 
 def test_a_short_mute_never_hits_a_kept_cards_department() -> None:

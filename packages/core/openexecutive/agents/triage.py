@@ -281,7 +281,7 @@ class TriageAgent(BaseAgent):
                 if isinstance(block.input, dict) and block.input.get("alert") is True:
                     said_tags = [str(t).lower() for t in block.input.get("topic_tags") or []]
                     kept = _no_decision(event, mute_patterns or [], "cut_off", raise_it=True, tags=said_tags)
-                    return _with_partial_delivery(kept, block.input)
+                    return _with_partial_delivery(kept, block.input, event)
                 if isinstance(block.input, dict) and block.input.get("alert") is False:
                     # It had decided not to raise it: that decision stands.
                     return _parse_decision(block.input)
@@ -345,21 +345,27 @@ def _no_decision(
     )
 
 
-def _with_partial_delivery(kept: TriageDecision, raw: dict) -> TriageDecision:
+def _with_partial_delivery(kept: TriageDecision, raw: dict, event: AlertEvent) -> TriageDecision:
     """A kept card keeps the severity and channels a cut-off review had
-    already given, so an urgent one is still delivered as urgent."""
+    already given, so an urgent one is still delivered as urgent. A room or
+    company post only stays for a card the Executive raised: the kept card
+    shows the event's own words, and outside mail nobody finished reviewing
+    is not posted to a room."""
     if not kept.alert:
         return kept
     said = _parse_decision(raw)
     update: dict[str, Any] = {}
     if str(raw.get("severity") or "").lower() in AlertSeverity._value2member_map_:
         update["severity"] = said.severity
-    if raw.get("channels") and said.channels != [AlertChannel.PERSISTED]:
+    rooms = {AlertChannel.DEPARTMENT_CHANNEL, AlertChannel.COMPANY_BROADCAST}
+    channels = [c for c in said.channels if event.from_executive or c not in rooms]
+    if raw.get("channels") and channels != [AlertChannel.PERSISTED]:
         # Web stays, so a room post missing its room (cut off before the
         # slug) still leaves the card on Home.
-        update["channels"] = [*dict.fromkeys([AlertChannel.WEB, *said.channels])]
-        update["department_slug"] = said.department_slug
-        update["broadcast_integration"] = said.broadcast_integration
+        update["channels"] = [*dict.fromkeys([AlertChannel.WEB, *channels])]
+        if any(c in rooms for c in channels):
+            update["department_slug"] = said.department_slug
+            update["broadcast_integration"] = said.broadcast_integration
     return kept.model_copy(update=update) if update else kept
 
 
