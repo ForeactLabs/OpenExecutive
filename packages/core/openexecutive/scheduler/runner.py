@@ -12,7 +12,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, tzinfo
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from openexecutive.audit.context import unscoped_audit_rows
 from openexecutive.memory.chat_review import CHAT_REVIEW_KIND as _CHAT_REVIEW_KIND
@@ -314,44 +314,22 @@ async def run_scheduler(
     except Exception:
         logger.exception("scheduler: requeue_orphaned_running failed")
 
-    # Idempotent seed of the recurring principal briefs. After the first
-    # boot, subsequent restarts are no-ops because each brief row chains
-    # the next occurrence on fire (see _run_principal_brief).
-    try:
-        seeded = seed_principal_briefs()
-        if seeded:
-            logger.info("scheduler: seeded %d principal brief row(s)", seeded)
-    except Exception:
-        logger.exception("scheduler: seed_principal_briefs failed")
-
     # Overnight client rotation: reconcile a stale marker from a crash
-    # mid-rotation (it would pause claiming forever), then seed the next
-    # occurrence (no-op unless CLIENT_ROTATION_ENABLED).
+    # mid-rotation (it would pause claiming forever) before seeding.
     try:
-        from openexecutive.clients.rotation import (
-            clear_stale_rotation_marker,
-            seed_client_rotation,
-        )
+        from openexecutive.clients.rotation import clear_stale_rotation_marker
         from openexecutive.config import get_settings as _gs
 
         clear_stale_rotation_marker(_gs())
-        seed_client_rotation()
     except Exception:
-        logger.exception("scheduler: rotation reconcile/seed failed")
+        logger.exception("scheduler: rotation reconcile failed")
+
+    # Every recurring job, seeded idempotently (a reset calls the same).
+    seed_recurring_jobs()
 
     # Expire past-TTL alerts once at boot (a redeploy cleans an old backlog
     # immediately) and then every _ALERT_SWEEP_INTERVAL from the tick loop.
     _maybe_sweep_alerts(datetime.now(UTC))
-
-    # Executive alert review heartbeat — idempotent bootstrap, like nudge_scan.
-    try:
-        from openexecutive.alerts.review import bootstrap_alert_review_scan
-        from openexecutive.config import get_settings as _review_settings
-
-        if _review_settings().alert_review_enabled:
-            bootstrap_alert_review_scan()
-    except Exception:
-        logger.exception("scheduler: alert_review bootstrap failed")
 
     logger.info(
         "scheduler started (poll_interval=%ds)", poll_interval_seconds
@@ -1986,6 +1964,55 @@ def seed_principal_briefs() -> int:
         1 for kind in _RECURRING_KIND_ENV
         if _kind_runs_in(kind, mode) and _seed_kind(kind, now)
     )
+
+
+def seed_recurring_jobs() -> None:
+    """Enqueue every recurring job the system runs on its own, each only if
+    none of its kind is pending: the principal's briefs and reflection,
+    department check-ins, nudges, monitoring and research, the alert review,
+    document syncs and client rotation (each when it is on). The one place that knows them: the scheduler calls it at start and
+    a reset calls it after emptying the queue. Never raises; a failing seed
+    is logged and the rest still run."""
+    from openexecutive.config import get_settings
+
+    settings = get_settings()
+
+    def _seeds() -> list[tuple[str, Any]]:
+        from openexecutive.alerts.review import bootstrap_alert_review_scan
+        from openexecutive.clients.rotation import seed_client_rotation
+        from openexecutive.departments.cadence import bootstrap_cadences
+        from openexecutive.knowledge.confluence_sync import bootstrap_confluence_sync_scan
+        from openexecutive.knowledge.drive_sync import bootstrap_drive_sync_scan
+        from openexecutive.knowledge.notion_sync import bootstrap_notion_sync_scan
+        from openexecutive.knowledge.onedrive_sync import bootstrap_onedrive_sync_scan
+        from openexecutive.monitoring.pipeline import bootstrap_external_monitor_scan
+        from openexecutive.monitoring.research.scheduler import bootstrap_watchlist_research_scan
+        from openexecutive.scheduler.nudge_engine import bootstrap_nudge_scan
+
+        seeds: list[tuple[str, Any]] = [
+            ("principal briefs", seed_principal_briefs),
+            ("department check-ins", bootstrap_cadences),
+            ("client rotation", seed_client_rotation),
+        ]
+        for on, name, seed in (
+            (settings.nudge_scan_enabled, "nudge scan", bootstrap_nudge_scan),
+            (settings.external_monitor_enabled, "external monitor", bootstrap_external_monitor_scan),
+            (settings.watchlist_research_enabled, "watchlist research", bootstrap_watchlist_research_scan),
+            (settings.alert_review_enabled, "alert review", bootstrap_alert_review_scan),
+            (settings.notion_sync_enabled, "Notion sync", bootstrap_notion_sync_scan),
+            (settings.drive_sync_enabled, "Drive sync", bootstrap_drive_sync_scan),
+            (settings.onedrive_sync_enabled, "OneDrive sync", bootstrap_onedrive_sync_scan),
+            (settings.confluence_sync_enabled, "Confluence sync", bootstrap_confluence_sync_scan),
+        ):
+            if on:
+                seeds.append((name, seed))
+        return seeds
+
+    for name, seed in _seeds():
+        try:
+            seed()
+        except Exception:
+            logger.exception("scheduler: seeding %s failed", name)
 
 
 def seed_weekly_review() -> int:

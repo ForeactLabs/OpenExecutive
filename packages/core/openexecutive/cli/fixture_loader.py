@@ -752,12 +752,11 @@ async def reset_all_state(
       2. Delete + recreate company/docs/, clear ChromaDB company collection
       3. Empty every table in the company DB except ``RESET_KEEPS`` and
          ``keep``: chats, memory, run and audit history, people, departments
-         and Goals (none are re-created), and any table added later. Of the
-         queue, only the system's own recurring jobs stay
+         and Goals (none are re-created), the whole job queue, and any
+         table added later
       5a. Reset the workspace settings to the defaults (team, no zone),
-          then re-bootstrap principal briefs, department cadences, and (if
-          enabled) the nudge-scan heartbeat — without this Today stays
-          blank until the next API restart
+          then seed every recurring job again (``seed_recurring_jobs``) —
+          without this Today stays blank until the next API restart
       6. Remove the _user_backup/ directory entirely (sentinel goes with it)
       7. Swap app.state.store inside the lock so concurrent reads cannot
          hit the deleted-then-recreated collection mid-flight
@@ -846,13 +845,8 @@ async def reset_all_state(
         for db_path in dict.fromkeys(
             p.resolve() for p in (EPISODIC_DB_PATH, people_store.DB_PATH, dept_store.DB_PATH)
         ):
-            for table, count in _delete_every_table(
-                db_path, keep=RESET_KEEPS | {"scheduled_actions"} | set(keep)
-            ).items():
+            for table, count in _delete_every_table(db_path, keep=RESET_KEEPS | set(keep)).items():
                 cleared[table] = cleared.get(table, 0) + count
-            cleared["scheduled_actions"] = cleared.get("scheduled_actions", 0) + (
-                _clear_company_scheduled_actions(db_path)
-            )
 
         # 3c. Knowledge review state (same DB as the episodic rows above). A
         # "factory reset" that keeps the previous operator's approvals,
@@ -923,61 +917,23 @@ async def reset_all_state(
         # Executive's create_goal tool) creates only the ones the company has.
         departments_seeded = 0
 
-        # 5a. Re-bootstrap the built-in scheduled actions that
-        # ``api/main.py`` enqueues at process startup. The episodic wipe
-        # above just deleted them, but the bootstrap functions only run on
-        # API boot — without re-calling them here, the box stays "blank
-        # slate" until the next deploy/restart. That's what makes Today
-        # look stuck for the principal: no morning brief, no EoD digest,
-        # no reflection, and no department check-ins.
-        #
-        # All three calls are idempotent (each checks for a pending/running
-        # row before inserting), so calling them again on a freshly-empty
-        # table simply enqueues one row apiece.
-        from openexecutive.config import get_settings
-        from openexecutive.departments.cadence import bootstrap_cadences
+        # 5a. Seed the recurring jobs again. The sweep above emptied the
+        # queue (the company's reminders, follow-ups and open loops go with
+        # it), and the seeds otherwise only run at startup: without this the
+        # box has no brief, check-in, scan or sync until the next restart.
+        # The scheduler's start calls the same function, so the two can't
+        # drift; every seed is idempotent.
         from openexecutive.memory.workspace_settings import reset_workspace_settings
-        from openexecutive.scheduler.runner import seed_principal_briefs
+        from openexecutive.scheduler.runner import seed_recurring_jobs
 
         # Factory state is team mode with no zone of its own — reset it
-        # before the bootstraps below, which read both.
+        # before the seeding below, which reads both.
         if "workspace_settings" not in keep:
             try:
                 reset_workspace_settings()
             except Exception:
                 logger.exception("reset: reset_workspace_settings failed")
-        try:
-            seed_principal_briefs()
-        except Exception:
-            logger.exception("reset: seed_principal_briefs failed")
-        try:
-            bootstrap_cadences()
-        except Exception:
-            logger.exception("reset: bootstrap_cadences failed")
-        if get_settings().nudge_scan_enabled:
-            try:
-                from openexecutive.scheduler.nudge_engine import bootstrap_nudge_scan
-                bootstrap_nudge_scan()
-            except Exception:
-                logger.exception("reset: bootstrap_nudge_scan failed")
-        if get_settings().external_monitor_enabled:
-            try:
-                from openexecutive.monitoring.pipeline import (
-                    bootstrap_external_monitor_scan,
-                )
-                bootstrap_external_monitor_scan()
-            except Exception:
-                logger.exception("reset: bootstrap_external_monitor_scan failed")
-        if get_settings().watchlist_research_enabled:
-            try:
-                from openexecutive.monitoring.research.scheduler import (
-                    bootstrap_watchlist_research_scan,
-                )
-                bootstrap_watchlist_research_scan()
-            except Exception:
-                logger.exception(
-                    "reset: bootstrap_watchlist_research_scan failed"
-                )
+        seed_recurring_jobs()
 
         # 5b. External per-person memory (Honcho) — best-effort. The
         # wrapper swallows its own errors and audits them; the second
@@ -1075,34 +1031,6 @@ def _delete_every_table(db_path: Path, *, keep: Collection[str]) -> dict[str, in
     finally:
         conn.close()
     return counts
-
-
-def _clear_company_scheduled_actions(db_path: Path) -> int:
-    """Delete the company's queued work, keep the instance's own heartbeats.
-
-    Every reminder, follow-up, task and workflow run a person or the
-    Executive queued goes. The system's own recurring jobs (channel
-    ``__internal__``: briefs, scans, document syncs, backups) stay, so a
-    reset doesn't leave them stopped until the next restart; a department's
-    jobs go with the departments. Returns the rows deleted.
-    """
-    if not db_path.exists():
-        return 0
-    conn = sqlite3.connect(str(db_path))
-    try:
-        if not conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='scheduled_actions'"
-        ).fetchone():
-            return 0
-        columns = {row[1] for row in conn.execute("PRAGMA table_info(scheduled_actions)")}
-        where = "channel != '__internal__'"
-        if "department" in columns:
-            where += " OR COALESCE(department, '') != ''"
-        cursor = conn.execute(f"DELETE FROM scheduled_actions WHERE {where}")  # noqa: S608 - fixed text
-        conn.commit()
-        return int(cursor.rowcount)
-    finally:
-        conn.close()
 
 
 def _delete_all_rows(

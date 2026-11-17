@@ -102,22 +102,19 @@ def test_keeps_cover_the_one_time_markers() -> None:
         assert table in fixture_loader.RESET_KEEPS
 
 
-def test_reset_keeps_the_system_jobs_and_drops_the_company_queue(db: Path, tmp_path: Path) -> None:
-    episodic.insert_scheduled_action(
-        run_at="2099-01-01T00:00:00+00:00", channel="__internal__", channel_ref="",
-        intent_text="Back up", kind="backup_run",
-    )
+def test_reset_empties_the_queue_and_seeds_the_recurring_jobs_again(db: Path, tmp_path: Path) -> None:
     episodic.insert_scheduled_action(
         run_at="2099-01-01T00:00:00+00:00", channel="email", channel_ref="pat@example.com",
         intent_text="Call the bank", kind="reminder",
     )
+    # An open loop sits on the internal channel but is the old company's.
     episodic.insert_scheduled_action(
-        run_at="2099-01-01T00:00:00+00:00", channel="__internal__", channel_ref="finance",
-        intent_text="Department check-in: finance", kind="dept_cadence", department="finance",
+        run_at="2099-01-01T00:00:00+00:00", channel="__internal__", channel_ref="",
+        intent_text="Send Northwind the proposal", kind="open_loop",
     )
     _reset(tmp_path)
     with sqlite3.connect(str(db)) as conn:
         kinds = {row[0] for row in conn.execute("SELECT kind FROM scheduled_actions")}
-    assert "backup_run" in kinds
     assert "reminder" not in kinds
-    assert "dept_cadence" not in kinds
+    assert "open_loop" not in kinds
+    assert "principal_brief_morning" in kinds
