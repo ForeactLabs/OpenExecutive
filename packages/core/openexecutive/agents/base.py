@@ -10,6 +10,15 @@ from openexecutive.providers import get_provider, model_supports_deep_reasoning
 from openexecutive.providers.feature_gate import MAX_OUTPUT_TOKENS
 
 _SPECIALIST_TIMEOUT = 180.0
+# The slowest a specialist's answer is taken to be written, in tokens a
+# second: a request's timeout leaves room to write all it may (max_tokens),
+# so a long analysis is never lost to the clock halfway through.
+_WRITE_TOKENS_PER_SECOND = 40
+
+
+def specialist_timeout(max_tokens: int) -> float:
+    """Seconds a specialist request may take to write ``max_tokens``."""
+    return max(_SPECIALIST_TIMEOUT, max_tokens / _WRITE_TOKENS_PER_SECOND)
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +178,7 @@ class BaseAgent(ABC):
             # Per-request timeout — keeps cancellation semantics aligned with
             # the previous per-client timeout, but the provider singleton no
             # longer needs to recreate the SDK client to set it.
-            "timeout": _SPECIALIST_TIMEOUT,
+            "timeout": specialist_timeout(MAX_OUTPUT_TOKENS),
             "system": [
                 {
                     "type": "text",
@@ -219,7 +228,7 @@ class BaseAgent(ABC):
         tools: list[dict[str, Any]],
         system_addendum: str = "",
         max_tokens: int = MAX_OUTPUT_TOKENS,
-        timeout_seconds: float = _SPECIALIST_TIMEOUT,
+        timeout_seconds: float | None = None,
         model_override: str | None = None,
         deep_reasoning_override: bool | None = None,
         actor: str = "specialist_tools",
@@ -271,7 +280,9 @@ class BaseAgent(ABC):
         create_kwargs: dict[str, Any] = {
             "model": model,
             "max_tokens": max_tokens,
-            "timeout": timeout_seconds,
+            # Room to write all of max_tokens unless the caller set its own
+            # (set again below if thinking raises max_tokens).
+            "timeout": timeout_seconds if timeout_seconds is not None else specialist_timeout(max_tokens),
             "system": [
                 {
                     "type": "text",
@@ -287,6 +298,8 @@ class BaseAgent(ABC):
             create_kwargs["thinking"] = {"type": "adaptive"}
             create_kwargs["output_config"] = {"effort": settings.specialist_effort}
             create_kwargs["max_tokens"] = max(max_tokens, 16000)
+        if timeout_seconds is None:
+            create_kwargs["timeout"] = specialist_timeout(create_kwargs["max_tokens"])
 
         provider = get_provider(model)
         message = await provider.messages_create(**create_kwargs)
