@@ -1130,7 +1130,7 @@ def test_a_card_already_on_their_list_is_not_a_nudge(db: Path, audit_events, mon
     monkeypatch.setattr(review, "_nudges_so_far", lambda alert_id: 0)
     summary = review.ReviewSummary()
     _apply(db, aid, _verdict(aid, recommended_move="nudge", message="Gentle ping"), summary=summary)
-    assert summary.nudged == 0
+    assert summary.nudged == 0 and summary.moves_used == 0
     assert not any(e[0] == review.EVENT_NUDGED for e in audit_events)
 
 

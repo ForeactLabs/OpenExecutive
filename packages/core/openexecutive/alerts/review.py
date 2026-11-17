@@ -898,7 +898,8 @@ async def _apply_nudge(ctx: _MoveContext) -> None:
             target, v.message or f"Checking in on: {alert.headline}", headline=alert.headline,
             alert_id=ctx.alert_id, theirs=alert.routed_to_person_id == target,
         )
-    ctx.summary.moves_used += 1
+    if detail != ON_THEIR_LIST:  # nothing went, so no move was spent
+        ctx.summary.moves_used += 1
     if ok and detail == _HELD_DETAIL:
         # Not delivered yet: no nudge counted toward the cap.
         _audit(EVENT_REVIEWED, f"Nudge about '{alert.headline[:80]}' held for the recipient",
