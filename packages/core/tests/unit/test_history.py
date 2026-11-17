@@ -278,3 +278,9 @@ def test_the_executive_reads_a_correction_in_note_form() -> None:
     assert note_form("you told Dana the deck comes Monday") == "Told Dana the deck comes Monday"
     assert shown_summary("Advised Dana to wait") == "You advised Dana to wait"
     assert note_form("") == ""
+
+
+def test_a_noun_that_reads_like_a_verb_is_left_alone() -> None:
+    from openexecutive.memory.history import shown_summary
+
+    assert shown_summary("Used car quote came in.") == "Used car quote came in."

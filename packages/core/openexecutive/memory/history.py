@@ -155,7 +155,8 @@ _COLUMNS = (
 
 # Past-tense verbs a note can start with. A known list, not any word ending
 # in "ed", so a name (Fred, Ahmed) or a noun (Seed) is never read as a verb.
-# Words often used as adjectives ("Expected revenue …") are left out.
+# Words often used as adjectives ("Expected revenue …", "Used car …") are
+# left out.
 _REGULAR_VERBS = frozenset({
     "accepted", "added", "agreed", "announced", "answered", "approved", "asked",
     "assigned", "booked", "called", "cancelled", "canceled", "changed", "checked",
@@ -169,7 +170,7 @@ _REGULAR_VERBS = frozenset({
     "received", "recommended", "rejected", "reminded",
     "removed", "replied", "reported", "requested", "reviewed",
     "shared", "shipped", "signed", "started", "submitted", "suggested",
-    "tested", "used", "wanted", "warned", "worked",
+    "tested", "wanted", "warned", "worked",
     "clarified", "stated", "corrected",
     "rescheduled", "responded", "advised", "arranged",
     "provided", "acknowledged", "thanked", "informed", "notified", "pushed",
