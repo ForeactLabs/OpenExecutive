@@ -146,7 +146,23 @@ _COLUMNS = (
 )
 
 
-# Past-tense verbs a note can start with that don't end in "ed".
+# Past-tense verbs a note can start with. A known list, not any word ending
+# in "ed", so a name (Fred, Ahmed) or a noun (Seed) is never read as a verb.
+_REGULAR_VERBS = frozenset({
+    "accepted", "added", "agreed", "announced", "answered", "approved", "asked",
+    "assigned", "booked", "called", "cancelled", "canceled", "changed", "checked",
+    "closed", "committed", "completed", "complained", "confirmed", "created",
+    "decided", "declined", "delayed", "delegated", "delivered", "emailed",
+    "estimated", "expected", "explained", "finished", "fixed", "followed",
+    "forwarded", "hired", "introduced", "invited", "launched", "liked",
+    "listed", "mentioned", "moved", "needed", "noted", "offered", "opened",
+    "ordered", "owed", "planned", "postponed", "preferred", "priced",
+    "promised", "proposed", "published", "purchased", "quoted", "raised",
+    "received", "recommended", "reduced", "rejected", "released", "reminded",
+    "removed", "replied", "reported", "requested", "reviewed", "scheduled",
+    "shared", "shipped", "signed", "started", "submitted", "suggested",
+    "tested", "updated", "used", "wanted", "warned", "worked",
+})
 _IRREGULAR_VERBS = frozenset({
     "said", "told", "sent", "gave", "took", "made", "wrote", "set", "put", "got",
     "kept", "left", "met", "paid", "bought", "sold", "chose", "thought", "felt",
@@ -164,7 +180,8 @@ def shown_summary(summary: str) -> str:
     out Friday." A note is always about the person who owns it, and only
     they see it, so the summary is stored starting with the verb ("Said …")
     and the screens put "You" in front. Text that doesn't start with a
-    past-tense verb, or that starts with a name and then the verb, is shown
+    past-tense verb from the known list, or that starts with a name and
+    then the verb, is shown
     as it is."""
     text = (summary or "").strip()
     words = text.split(" ", 2)
@@ -179,7 +196,7 @@ def shown_summary(summary: str) -> str:
 
 def _past_tense(word: str) -> bool:
     w = word.rstrip(",.;:").lower()
-    return bool(w) and (w.endswith("ed") or w in _IRREGULAR_VERBS)
+    return w in _REGULAR_VERBS or w in _IRREGULAR_VERBS
 
 
 def _now(now: datetime | None) -> datetime:
