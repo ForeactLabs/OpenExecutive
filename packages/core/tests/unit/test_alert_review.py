@@ -932,11 +932,16 @@ def test_a_card_already_on_their_list_is_not_repeated_as_a_second_card(monkeypat
         return reply["raw"]
 
     monkeypatch.setattr(st, "message_person", fake_message_person)
+    monkeypatch.setattr(review, "_on_team", lambda pid: pid == 5)
     assert asyncio.run(review._dm(5, "hi", headline="h", alert_id=1, theirs=True)) == (True, "sent")
     assert calls == [{"alert_fallback": False}]
 
     reply["raw"] = '{"error": "could not deliver to \'Dana\' on any configured chat channel (no reachable channel)"}'
     assert asyncio.run(review._dm(5, "hi", headline="h", alert_id=1, theirs=True)) == (True, review.ON_THEIR_LIST)
+
+    # A contact has no list to see it on.
+    ok, _detail = asyncio.run(review._dm(6, "hi", headline="h", alert_id=1, theirs=True))
+    assert not ok
 
     # A send that failed is still a failure.
     reply["raw"] = '{"error": "could not deliver to \'Dana\' on any configured chat channel (slack: 503)"}'

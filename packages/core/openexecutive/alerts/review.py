@@ -579,9 +579,10 @@ async def _dm(
         parsed = json.loads(raw)
     except Exception as exc:
         return False, f"dm failed: {exc}"
-    if theirs and isinstance(parsed, dict) and _NO_CHANNEL in str(parsed.get("error") or ""):
+    if theirs and isinstance(parsed, dict) and _NO_CHANNEL in str(parsed.get("error") or "") and _on_team(person_id):
         # They have no chat app: the card on their list is the message. A
-        # send that failed stays a failure.
+        # send that failed stays a failure, and a contact, who never signs
+        # in, has no list.
         return True, ON_THEIR_LIST
     # Only a real delivery counts. "alerted" means the handler fell back to
     # creating a NEW alert because the person has no channel — for the
@@ -593,6 +594,18 @@ async def _dm(
     if isinstance(parsed, dict) and parsed.get("status") == "held":
         return True, _HELD_DETAIL
     return False, str(parsed.get("error") if isinstance(parsed, dict) else raw)[:200]
+
+
+def _on_team(person_id: int) -> bool:
+    """Whether ``person_id`` is someone on the team, who signs in and has
+    a list of cards. False on a read error."""
+    try:
+        from openexecutive.people.store import get_person
+
+        person = get_person(person_id)
+    except Exception:
+        return False
+    return person is not None and getattr(person, "kind", "team") == "team"
 
 
 def _urgent_if(urgent: bool) -> contextlib.AbstractContextManager[None]:
