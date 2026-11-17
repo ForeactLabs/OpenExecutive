@@ -421,24 +421,22 @@ def delete_session_drive_memory(session_id: str, db_path: Path | None = None) ->
 # --------------------------------------------------------------------------- #
 # File names, for Approve cards
 # --------------------------------------------------------------------------- #
-# Drive's own metadata answers, read only from the lines Drive writes: a
-# search or folder listing's "- Name: "Q4 plan" (ID: …, Type: …", a sheet
-# info read's first line "Spreadsheet: "Q4 plan" (ID: …)", an opened file's
-# first line "File: "Q4 plan" (ID: …". Never mail, a Doc's or a Sheet's
-# content, or a calendar: anyone can write "(ID: …)" there. The name is
-# matched greedily up to the line's last quote, so a file named to look
-# like another line still gives its own id; an id named twice in one answer
-# is dropped. An Approve card for a step on that file then shows its name
-# (``orchestrator.card_details``). Only names and ids are kept, company-wide.
-_NAME_LINES: dict[str, re.Pattern[str]] = {
-    SEARCH_TOOL: re.compile(r'^- Name: "(?P<name>.*)" \(ID: (?P<id>[A-Za-z0-9_-]{10,128}), Type: ', re.MULTILINE),
-    "google_workspace__list_drive_items": re.compile(
-        r'^- Name: "(?P<name>.*)" \(ID: (?P<id>[A-Za-z0-9_-]{10,128}), Type: ', re.MULTILINE,
+# A file's name, read only from Drive's own answer about that one file,
+# asked for by its id: a sheet info read's first line "Spreadsheet: "Q4 plan"
+# (ID: …)" or an opened file's first line "File: "Q4 plan" (ID: …". The id
+# on that line must be the one the call asked for. Never a search or folder
+# listing (workspace-mcp writes names unescaped, so a file named with a line
+# break can forge another file's line), mail, a Doc's or a Sheet's content,
+# or a calendar: anyone can write "(ID: …)" there. An Approve card for a step
+# on that file then shows its name (``orchestrator.card_details``). Only
+# names and ids are kept, company-wide.
+_NAME_LINES: dict[str, tuple[str, re.Pattern[str]]] = {
+    "google_workspace__get_spreadsheet_info": (
+        "spreadsheet_id", re.compile(r'\ASpreadsheet: "(?P<name>[^\n]*)" \(ID: (?P<id>[A-Za-z0-9_-]{10,128})\)'),
     ),
-    "google_workspace__get_spreadsheet_info": re.compile(
-        r'\ASpreadsheet: "(?P<name>.*)" \(ID: (?P<id>[A-Za-z0-9_-]{10,128})\)', re.MULTILINE,
+    CONTENT_TOOL: (
+        "file_id", re.compile(r'\AFile: "(?P<name>[^\n]*)" \(ID: (?P<id>[A-Za-z0-9_-]{10,128}), Type: '),
     ),
-    CONTENT_TOOL: re.compile(r'\AFile: "(?P<name>.*)" \(ID: (?P<id>[A-Za-z0-9_-]{10,128}), Type: ', re.MULTILINE),
 }
 _MAX_NAMES_KEPT = 5000
 
@@ -454,23 +452,23 @@ def may_remember_names(session: Any) -> bool:
     return getattr(session, "private_to_principal", False) is not True and not turn_touched_delegate_mail(session)
 
 
-def remember_names(tool_name: str, result_text: str, db_path: Path | None = None) -> int:
-    """Keep each file a Drive metadata answer names with its id; how many.
-    Never raises."""
-    pattern = _NAME_LINES.get(tool_name) if isinstance(tool_name, str) else None
-    if pattern is None or not isinstance(result_text, str):
+def remember_names(
+    tool_name: str, result_text: str, arguments: dict[str, Any] | None = None, db_path: Path | None = None,
+) -> int:
+    """Keep the name of the one file a Drive answer is about, when its id is
+    the one the call asked for; how many (0 or 1). Never raises."""
+    spec = _NAME_LINES.get(tool_name) if isinstance(tool_name, str) else None
+    if spec is None or not isinstance(result_text, str) or not isinstance(arguments, dict):
         return 0
-    found: dict[str, str] = {}
-    twice: set[str] = set()
-    for m in pattern.finditer(result_text[:200_000]):
-        name = _clip(m["name"], _NAME_CHARS)
-        if m["id"] in found and found[m["id"]] != name:
-            twice.add(m["id"])
-        if name:
-            found[m["id"]] = name
-    found = {k: v for k, v in found.items() if k not in twice}
-    if not found:
+    key, pattern = spec
+    m = pattern.match(result_text)
+    asked = arguments.get(key)
+    if m is None or not isinstance(asked, str) or m["id"] != asked.strip():
         return 0
+    name = _clip(m["name"], _NAME_CHARS)
+    if not name:
+        return 0
+    found = {m["id"]: name}
     try:
         now = _now()
         with episodic._get_conn(_db_path(db_path)) as conn:
@@ -488,7 +486,7 @@ def remember_names(tool_name: str, result_text: str, db_path: Path | None = None
     except Exception:
         logger.warning("drive_reads: couldn't keep file names", exc_info=True)
         return 0
-    return len(found)
+    return 1
 
 
 def name_of(file_id: str, db_path: Path | None = None) -> str:

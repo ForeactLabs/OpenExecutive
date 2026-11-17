@@ -4191,7 +4191,7 @@ class MCPGateway:
         from openexecutive.orchestrator.schedule_tools import current_session as _turn
 
         if drive_reads.may_remember_names(_turn.get()):
-            drive_reads.remember_names(_normalize_tool_name(tool_name), result_text)
+            drive_reads.remember_names(_normalize_tool_name(tool_name), result_text, arguments)
         if tool_name in drive_reads.DRIVE_READ_TOOLS:
             result_text = _remember_drive_read(tool_name, arguments, result_text)
         if normalized == _M365_DOWNLOAD_TOOL and isinstance(arguments.get("target"), str):
