@@ -1041,10 +1041,8 @@ def _delete_every_table(db_path: Path, *, keep: Collection[str]) -> dict[str, in
         # shadow tables (``<name>_data``, ``_config``, …) hold its structure
         # and break it if emptied directly.
         virtual = [name for name, sql in rows if (sql or "").upper().startswith("CREATE VIRTUAL TABLE")]
-        tables = [
-            name for name, _ in rows
-            if not any(name.startswith(f"{v}_") for v in virtual)
-        ]
+        shadows = {f"{v}_{s}" for v in virtual for s in ("data", "idx", "content", "docsize", "config")}
+        tables = [name for name, _ in rows if name not in shadows]
         for table in sorted(tables):
             if table in keep:
                 continue
