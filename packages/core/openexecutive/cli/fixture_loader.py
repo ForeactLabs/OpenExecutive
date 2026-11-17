@@ -1016,11 +1016,16 @@ def _delete_every_table(db_path: Path, *, keep: Collection[str]) -> dict[str, in
     conn = sqlite3.connect(str(db_path))
     try:
         conn.execute("PRAGMA foreign_keys = OFF")
+        rows = conn.execute(
+            "SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+        # A virtual table (full-text search) is emptied through itself; its
+        # shadow tables (``<name>_data``, ``_config``, …) hold its structure
+        # and break it if emptied directly.
+        virtual = [name for name, sql in rows if (sql or "").upper().startswith("CREATE VIRTUAL TABLE")]
         tables = [
-            row[0]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
-            )
+            name for name, _ in rows
+            if not any(name.startswith(f"{v}_") for v in virtual)
         ]
         for table in sorted(tables):
             if table in keep:

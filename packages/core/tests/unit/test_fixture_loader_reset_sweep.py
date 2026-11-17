@@ -134,3 +134,17 @@ def test_one_broken_seed_does_not_stop_the_rest(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr("openexecutive.config.get_settings", lambda: type("S", (), {"never_on": False})())
     runner.seed_recurring_jobs()
     assert ran == ["briefs"]
+    assert ran == ["briefs"]
+
+
+def test_sweep_empties_a_search_table_without_breaking_it(tmp_path: Path) -> None:
+    path = tmp_path / "fts.db"
+    with sqlite3.connect(str(path)) as conn:
+        conn.execute("CREATE VIRTUAL TABLE notes_fts USING fts5(body)")
+        conn.execute("INSERT INTO notes_fts (body) VALUES ('old company plan')")
+    fixture_loader._delete_every_table(path, keep=())
+    with sqlite3.connect(str(path)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM notes_fts").fetchone()[0] == 0
+        conn.execute("INSERT INTO notes_fts (body) VALUES ('new company plan')")
+        hits = conn.execute("SELECT body FROM notes_fts WHERE notes_fts MATCH 'new'").fetchall()
+    assert hits == [("new company plan",)]
