@@ -897,7 +897,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Open Executive API",
         description="AI-powered virtual executive team",
-        version="0.7.5",  # x-release-please-version
+        version="0.7.6",  # x-release-please-version
         lifespan=lifespan,
     )
 

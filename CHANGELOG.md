@@ -9,6 +9,31 @@ From 0.3.0 on, entries are written by release-please from the titles of the
 merged pull requests (`feat` → Added, `fix` → Fixed). The open release PR holds
 the next entry; edit it there before merging if a line needs rewording.
 
+## [0.7.6](https://github.com/ForeactLabs/OpenExecutive/compare/v0.7.5...v0.7.6) (2026-11-17)
+
+
+### Added
+
+* **alerts:** drop the card menu's link to a person's page ([#900](https://github.com/ForeactLabs/OpenExecutive/issues/900)) ([15929ae](https://github.com/ForeactLabs/OpenExecutive/commit/15929aed36f156c4b9afbbfd85ff51ef67c11680))
+* **alerts:** make every card say what its button does ([#895](https://github.com/ForeactLabs/OpenExecutive/issues/895)) ([789f63f](https://github.com/ForeactLabs/OpenExecutive/commit/789f63f3338ea8cbc168f272b464adcee0bf31e2))
+* **alerts:** stop watch cards repeating themselves or handing out look-ups ([#898](https://github.com/ForeactLabs/OpenExecutive/issues/898)) ([d05dbd9](https://github.com/ForeactLabs/OpenExecutive/commit/d05dbd92538e8ead1b00b9acb47f5ffbb8d516c6))
+* **chat:** show a chat-started workflow's steps as they happen ([#887](https://github.com/ForeactLabs/OpenExecutive/issues/887)) ([132fc47](https://github.com/ForeactLabs/OpenExecutive/commit/132fc476641c1d816927bd26c8ffba97603c6a21))
+* **integrations:** post announcements and department messages to Google Chat spaces ([#889](https://github.com/ForeactLabs/OpenExecutive/issues/889)) ([9eed644](https://github.com/ForeactLabs/OpenExecutive/commit/9eed64415f1fe302e3324c4d6aff36fd013344f9))
+* **orchestrator:** tell the Executive how people reach it in Google Chat ([#884](https://github.com/ForeactLabs/OpenExecutive/issues/884)) ([c2bc574](https://github.com/ForeactLabs/OpenExecutive/commit/c2bc574a3ca028970caa6b760d4e7ba24fe78357))
+
+
+### Fixed
+
+* **alerts:** keep a personal card's words with the person it is for ([#888](https://github.com/ForeactLabs/OpenExecutive/issues/888)) ([c3a600c](https://github.com/ForeactLabs/OpenExecutive/commit/c3a600c5a1e44b5548e2b026f1a2f7be81957589))
+* **approvals:** run a held card on its asker's tap, whichever gate held it ([#896](https://github.com/ForeactLabs/OpenExecutive/issues/896)) ([5d9728f](https://github.com/ForeactLabs/OpenExecutive/commit/5d9728f089f1ac5b82d2913d76919634f9cb2923))
+* **approvals:** the owner's own ask meets Your rules and In training ([#894](https://github.com/ForeactLabs/OpenExecutive/issues/894)) ([1804e50](https://github.com/ForeactLabs/OpenExecutive/commit/1804e5058919e50fed8c4aa0d30b39c7a49a0610))
+* **browser:** ask browser hand-overs in the chat and close their cards with them ([#881](https://github.com/ForeactLabs/OpenExecutive/issues/881)) ([61d2eaf](https://github.com/ForeactLabs/OpenExecutive/commit/61d2eafecb619a08d2e21e4bd7c6971fcc755dce))
+* **chat:** greet back on a hello and show the logo on replies at phone width ([#883](https://github.com/ForeactLabs/OpenExecutive/issues/883)) ([48eccdd](https://github.com/ForeactLabs/OpenExecutive/commit/48eccdd0044d9b3000d2b3739398e2b0d9e4c6ff))
+* **chat:** write suggestions for the reader and recheck access in shared chats ([#886](https://github.com/ForeactLabs/OpenExecutive/issues/886)) ([730ce28](https://github.com/ForeactLabs/OpenExecutive/commit/730ce285a6bd1f99bde92b977a69cc30bafcaf42))
+* **memory:** put teammates' facts in force at once ([#880](https://github.com/ForeactLabs/OpenExecutive/issues/880)) ([1045c58](https://github.com/ForeactLabs/OpenExecutive/commit/1045c585df7a311801a77b84bbae9b92add14e07))
+* **scheduler:** let a teammate's follow-up reach other people ([#899](https://github.com/ForeactLabs/OpenExecutive/issues/899)) ([bd67fcb](https://github.com/ForeactLabs/OpenExecutive/commit/bd67fcb8c3e6bf8dab19224d5556220e8336553d))
+* **scheduler:** say where a follow-up's own message goes ([#897](https://github.com/ForeactLabs/OpenExecutive/issues/897)) ([47f6c22](https://github.com/ForeactLabs/OpenExecutive/commit/47f6c228df7cc9a340a8c1551e65099a797bc45f))
+
 ## [0.7.5](https://github.com/ForeactLabs/OpenExecutive/compare/v0.7.4...v0.7.5) (2026-11-16)
 
 
