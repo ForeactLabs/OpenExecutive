@@ -59,12 +59,14 @@ logger = logging.getLogger(__name__)
 _OPEN = ("unread", "read")
 
 
-def _open(alias: str = "a") -> str:
-    """SQL for a card still open where its reader sees it: unread or read,
-    and not put away (``archived_at``). One put away is no card to join."""
+def _open(alias: str = "a", *, shown: bool = False) -> str:
+    """SQL for an open card: unread or read. ``shown``: and not put away
+    (``archived_at``), so its reader still sees it. Only a card they see is
+    one to join; one put away is still replaced, so its step never waits on."""
     col = f"{alias}." if alias else ""
     statuses = ",".join(f"'{s}'" for s in _OPEN)
-    return f"{col}status IN ({statuses}) AND {col}archived_at IS NULL"
+    hidden = f" AND {col}archived_at IS NULL" if shown else ""
+    return f"{col}status IN ({statuses}){hidden}"
 # Where a held step's Approve card comes from (``decision_ledger``).
 _APPROVE_SOURCE = "decision_scheduling"
 _THEN = "\n\nThen: "
@@ -555,6 +557,11 @@ def _place(alert_id: int, db_path: Path | None) -> int:
             )
             if other.id not in own_action
         ]
+        put_away = {
+            int(r["id"]) for r in conn.execute(
+                f"SELECT id FROM alerts WHERE archived_at IS NOT NULL AND {_open('')}",
+            ).fetchall()
+        }
         if card.approve and card.thread:
             # A newer send to the same people on the same thread, asked on a
             # turn with the same person, replaces the one waiting.
@@ -562,7 +569,7 @@ def _place(alert_id: int, db_path: Path | None) -> int:
                 o for o in others
                 if o.approve and (o.thread, o.step, o.person) == (card.thread, card.step, card.person)
             ]
-        same = [o for o in others if o not in replaced and _same_topic(card, o, joins)]
+        same = [o for o in others if o not in replaced and o.id not in put_away and _same_topic(card, o, joins)]
         into = card
         if card.approve:
             for other in same:
@@ -624,7 +631,7 @@ def open_cards_from(
                 f"WHERE t.person = ? AND t.reader = ? AND t.turn != ? AND a.needs != ? "
                 # A teammate's own message joins nothing the Executive wrote.
                 f"AND t.thread NOT LIKE '{_OWN_MESSAGE}%' "
-                f"AND {_open()} ORDER BY t.created_at, a.id LIMIT 10",
+                f"AND {_open(shown=True)} ORDER BY t.created_at, a.id LIMIT 10",
                 (person, reader, turn, _OWN_ACTION),
             ).fetchall()
         return [(int(r["id"]), str(r["headline"] or ""), str(r["question"] or "")) for r in rows]
