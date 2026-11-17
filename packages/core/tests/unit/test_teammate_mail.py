@@ -691,6 +691,20 @@ def test_an_undated_reply_in_a_thread_the_send_started_is_left_out(roster: Simpl
         assert "Subject 2" in _run(FakeMailbox({SEARCH: _listing(VENDOR, DANA)}), SEARCH, query="q")
 
 
+def test_a_send_without_an_id_is_left_out_of_a_listing_by_subject_and_time(
+    roster: SimpleNamespace,
+) -> None:
+    # Some mailboxes answer a send with no id; a listing shows only From.
+    with _reader(roster.owner):
+        tm.note_sent(subject="Crates on Monday", recipients={DANA}, result="Email sent! Message ID: ")
+    listing = _listing(EXEC).replace("Subject 1", "Crates on Monday").replace("Mon, 5 Oct 2026", _now())
+    with _reader(roster.ben):
+        out = _run(FakeMailbox({SEARCH: listing}), SEARCH, query=f"to:{DANA}")
+    assert "Crates on Monday" not in out and "Left out 1 message" in out
+    with _reader(roster.owner):
+        assert "Crates on Monday" in _run(FakeMailbox({SEARCH: listing}), SEARCH, query=f"to:{DANA}")
+
+
 def test_a_new_message_with_the_same_subject_is_no_reply(roster: SimpleNamespace) -> None:
     _send_for(roster.ben, mid="s1", subject="Invoice")
     roster.session.mail_ids_seen.update({f"{roster.owner}:r6", f"{roster.owner}:r7"})

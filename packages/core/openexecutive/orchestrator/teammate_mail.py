@@ -597,9 +597,15 @@ def _sent_for_other(unit: str, headers: str, sides: _Sides, *, ids: list[str] | 
     def matches(r: _Sent) -> bool:
         return bool(r.subject and r.subject == key and r.recipients & on_it)
 
+    # A search listing shows only From: its entry for the Executive's copy
+    # has no recipient to match, so the subject and the time decide.
+    shows_recipients = bool(on_it - {_exec_address()})
+
     def copy_of(rows: list[_Sent]) -> bool:
         return when is not None and from_exec and any(
-            matches(r) and r.at - _SKEW <= when <= r.at + _SKEW for r in rows
+            r.subject and r.subject == key and (r.recipients & on_it or not shows_recipients)
+            and r.at - _SKEW <= when <= r.at + _SKEW
+            for r in rows
         )
 
     if copy_of(sides.own):
