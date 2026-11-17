@@ -1219,3 +1219,30 @@ def test_stop_takes_a_reply_back_before_a_newer_email_restarts_the_work(
         card_work._RUNNING.discard(card.id)
     assert held and held[0] == "work_unfinished"
     assert inbox.card_payload(_fresh(card))["conversation"][-1]["text"] == "Stopped."
+
+
+def test_a_join_that_fails_after_it_lands_warns_on_the_card(
+    db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.delegation.gmail import GmailError
+
+    mailbox = FakeInbox()
+    mailbox.add(_msg("m1", "t1", minutes_ago=50, text="Can you confirm Thursday?"))
+    _scan(owner, mailbox)
+    card = inbox.open_cards(owner.id)[0]
+    payload = inbox.card_payload(_fresh(card))
+    assert ledger.update_open_payload(card.id, {**payload, "open_questions": []})
+    models["verdicts"]["<their_open_email>"] = {
+        "needs_reply": False, "kind": "fyi", "asked_of_them": True, "confidence": 0.9, "continues_open": True,
+    }
+    mailbox.add(_msg("m2", "t2", minutes_ago=30, text="Or Friday works too."))
+    flags: list[tuple[str, str]] = []
+    monkeypatch.setattr(inbox, "_add_flag", lambda _pid, mid, flag: flags.append((mid, flag)))
+
+    async def failing(*_a: Any, **_k: Any) -> bool:
+        raise GmailError("mailbox hiccup")
+
+    monkeypatch.setattr(answers, "catch_up", failing)
+    _scan(owner, mailbox)
+    assert card_work.threads(inbox.card_payload(_fresh(card))) == ["t1", "t2"]
+    assert ("m1", "thread_moved_on") in flags

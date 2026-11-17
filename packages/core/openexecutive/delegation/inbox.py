@@ -1452,7 +1452,10 @@ async def join_card(
                 _add_flag(person.id, str(joined.get("message_id") or ""), "thread_moved_on")
         return True
     except Exception:
+        # The email is on the card but the reply isn't up to date with it:
+        # the card says so, so Send asks first.
         logger.warning("delegation.inbox: couldn't put a newer email on its card", exc_info=True)
+        _add_flag(person.id, str(joined.get("message_id") or ""), "thread_moved_on")
         return False
 
 
