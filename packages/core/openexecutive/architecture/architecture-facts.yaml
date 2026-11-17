@@ -11720,6 +11720,29 @@ delegation:
     words as the ask. Why: an email that asked for a spreadsheet made from its
     attached bills got a card that only asked "Do you want to do it?", and
     the box answered "I can't open the attachment", though chat could.
+    On the card as it happens: each tool round is a step on the card
+    (payload work_steps / work_now, from the turn's on_progress activity
+    labels; the card reads again every 3 s), with Stop
+    (POST /delegation/replies/{id}/stop). Words typed while it works go to
+    card_work.redirect: the run ends as a stopped turn with its steps, the
+    words follow, a new run starts with them and the stopped run's steps.
+    Every run ends as one note turn with state done / stopped / stuck,
+    steps and up to 3 choices to tap (update_reply_card choices; a run
+    that ends with nothing offers Try again). The prompt never sends the
+    person to the chat. Joined emails: when a proven sender's open card is
+    on another thread, the classifier sees it (<their_open_email>) and says
+    continues_open; inbox.join_card then adds the thread to the card
+    (joined_threads: scan passes it over, settling watches it, the work
+    reads it and may attach its files) instead of a new card. A join counts
+    toward the sender's daily limit; a joined thread's mail is newer only
+    after the joining email (joined_at); each run reads every word the
+    person gave the card. Typed work and Stop pass card_drafts.check /
+    owner (the caller, card and As you checks a change by hand passes);
+    choices never carry a link or address (answers.no_link). Why: a
+    sender asked for a sorted list and said they'd send last year's, then
+    sent it as a new email with no text; that made two cards, the second
+    didn't know what was asked, and the first card's work only said "ask
+    me again in chat".
   inbox_watcher: |
     delegation.inbox — the second switch, "Draft replies to my inbox"
     (delegation_inbox_watch: person_id, enabled, watch_since, last_poll_at,

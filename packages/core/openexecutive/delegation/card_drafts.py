@@ -267,6 +267,50 @@ def recipients_for(payload: dict[str, Any], everyone: bool) -> tuple[list[str], 
     return [sender], (others if everyone else [])
 
 
+def owner(instance: Any, *, caller: Any, resolver: int | None) -> Any:
+    """The person whose reply card ``instance`` is, when ``resolver`` is
+    them and the signed caller is them (``reply_send._check_caller``, the
+    rule Send uses). Raises ``SendRefused``. Every change to a card, by
+    hand, by rewrite or by its work, and Stop on its work, passes this."""
+    from openexecutive.audit import rows_for_person
+    from openexecutive.delegation.gmail import normalize_email
+    from openexecutive.delegation.inbox import card_payload
+    from openexecutive.delegation.reply_send import _NOT_YOURS, SendRefused, _check_caller
+    from openexecutive.delegation.settings import can_delegate
+    from openexecutive.people.store import get_person
+
+    payload = card_payload(instance)
+    person = get_person(int(payload.get("person_id") or 0))
+    if (
+        person is None or person.id is None or not person.email or not can_delegate(person)
+        or instance.approver_person_id != person.id or resolver != person.id
+    ):
+        raise SendRefused(403, "not_yours", _NOT_YOURS)
+    with rows_for_person(person.id):
+        _check_caller(caller, normalize_email(person.email))
+    return person
+
+
+def check(instance: Any, *, caller: Any, resolver: int | None) -> Any:
+    """``owner``, and the card is still open to change: not sent, not being
+    sent on its own, As you on. Returns the person; raises ``SendRefused``.
+    A change by hand, a rewrite and new words for the card's work all pass
+    this one place."""
+    from openexecutive.delegation.inbox import SENDING
+    from openexecutive.delegation.reply_send import SendRefused
+    from openexecutive.delegation.settings import is_enabled
+    from openexecutive.memory.decision_ledger import STATUS_PROPOSED
+
+    person = owner(instance, caller=caller, resolver=resolver)
+    if instance.status != STATUS_PROPOSED or instance.id in SENDING:
+        raise SendRefused(409, "already_handled", "This reply was already sent or dismissed.")
+    if getattr(instance, "gate_mode", "") == "auto_execute":
+        raise SendRefused(409, "already_handled", "This reply is being sent on its own right now.")
+    if not is_enabled(person.id):
+        raise SendRefused(409, "inbox_off", "Turn on As you to change this reply here.")
+    return person
+
+
 async def edit(
     instance: Any, *, caller: Any, resolver: int | None, text: str = "", gmail: Any = None,
     rewrite: Rewrite | None = None, everyone: bool | None = None,
@@ -281,28 +325,12 @@ async def edit(
     questions (``QUESTIONS_SETTLED``): the person wrote what goes. With
     ``everyone`` the words stay and who it goes to changes (``set_recipients``)."""
     from openexecutive.audit import rows_for_person
-    from openexecutive.delegation.gmail import normalize_email
-    from openexecutive.delegation.inbox import SENDING, card_payload
-    from openexecutive.delegation.reply_send import _NOT_YOURS, SendRefused, _check_caller
-    from openexecutive.delegation.settings import can_delegate, is_enabled
-    from openexecutive.memory.decision_ledger import STATUS_PROPOSED
-    from openexecutive.people.store import get_person
+    from openexecutive.delegation.inbox import card_payload
+    from openexecutive.delegation.reply_send import SendRefused
 
     payload = card_payload(instance)
-    person = get_person(int(payload.get("person_id") or 0))
-    if (
-        person is None or person.id is None or not person.email or not can_delegate(person)
-        or instance.approver_person_id != person.id or resolver != person.id
-    ):
-        raise SendRefused(403, "not_yours", _NOT_YOURS)
+    person = check(instance, caller=caller, resolver=resolver)
     with rows_for_person(person.id):
-        _check_caller(caller, normalize_email(person.email))
-        if instance.status != STATUS_PROPOSED or instance.id in SENDING:
-            raise SendRefused(409, "already_handled", "This reply was already sent or dismissed.")
-        if getattr(instance, "gate_mode", "") == "auto_execute":
-            raise SendRefused(409, "already_handled", "This reply is being sent on its own right now.")
-        if not is_enabled(person.id):
-            raise SendRefused(409, "inbox_off", "Turn on As you to change this reply here.")
         recipients = recipients_for(payload, everyone) if everyone is not None else None
         if recipients is not None:
             words = str(payload.get("draft_body") or "")

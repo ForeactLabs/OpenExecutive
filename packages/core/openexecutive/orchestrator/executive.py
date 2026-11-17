@@ -8,7 +8,7 @@ import logging
 import re
 import time
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
@@ -4141,9 +4141,15 @@ class Executive:
         memory_text: str | None = None,
         standing_facts: str | None = None,
         cards: list[int] | None = None,
+        on_progress: Callable[[dict[str, Any]], None] | None = None,
     ) -> str:
         """Non-streaming chat — collects and returns the full response.
         A turn the model refused ends on ``REFUSED_REPLY``.
+
+        ``on_progress``, when given, sees each ``activity`` and ``progress``
+        event as the turn runs (what the web chat's progress card shows),
+        for a caller with its own way of showing it, such as the steps on a
+        reply card while its work runs (``delegation.card_work``).
 
         ``cards``, when given, collects the ids of the approval cards the
         reply left (the ``decision_id`` on its ``action_taken`` events, as the
@@ -4222,6 +4228,9 @@ class Executive:
                     elif isinstance(chunk, dict) and chunk.get("type") == "rewrite":
                         # The next round writes the reply again.
                         result, rewritten = "", True
+                    elif isinstance(chunk, dict) and chunk.get("type") in ("activity", "progress"):
+                        if on_progress is not None:
+                            on_progress(chunk)
                     elif cards is not None and isinstance(chunk, dict) and chunk.get("type") == "action_taken":
                         decision_id = chunk.get("decision_id")
                         if isinstance(decision_id, int) and not isinstance(decision_id, bool) and decision_id not in cards:

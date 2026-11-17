@@ -2212,6 +2212,15 @@ export interface ReplyTurn {
   from_name?: string;
   from_email?: string;
   at?: string;
+  // News: its subject and its files' names.
+  subject?: string;
+  files?: string[];
+  // A note that ends a run of the Executive's work: "done", "stopped" or
+  // "stuck", the steps it took, and next steps to tap (changeReply with
+  // work: true).
+  state?: "done" | "stopped" | "stuck" | string;
+  steps?: string[];
+  choices?: string[];
 }
 
 export interface ReplyCard {
@@ -2273,6 +2282,9 @@ export interface ReplyCard {
   // The Executive is doing what the email asks right now; the card polls
   // until it is done.
   working?: boolean;
+  // While it works: the steps done so far, and what it is doing now.
+  work_steps?: string[];
+  work_now?: string;
   // The files your reply carries, by name: attached when it is sent.
   files?: string[];
 }
@@ -2625,13 +2637,23 @@ export async function answerReplyQuestions(
 
 // Change the reply the way you say, in your own words: the Executive
 // rewrites it and says what it changed (POST .../change). Sends nothing.
-export async function changeReply(id: number, text: string): Promise<ReplyCard> {
+// While it works, your words stop the run going now and it starts again
+// your way. `work`: a next step you tapped, straight to the work.
+export async function changeReply(id: number, text: string, opts: { work?: boolean } = {}): Promise<ReplyCard> {
   const res = await fetch(`${API_BASE}/delegation/replies/${id}/change`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, work: Boolean(opts.work) }),
   });
   if (!res.ok) throw await delegationError(res, "Couldn't change your reply.");
+  return (await res.json()) as ReplyCard;
+}
+
+// Stop what the Executive is doing on a reply card: the card keeps what it
+// did as a stopped run (POST .../stop). Sends nothing.
+export async function stopReplyWork(id: number): Promise<ReplyCard> {
+  const res = await fetch(`${API_BASE}/delegation/replies/${id}/stop`, { method: "POST" });
+  if (!res.ok) throw await delegationError(res, "Couldn't stop it.");
   return (await res.json()) as ReplyCard;
 }
 
