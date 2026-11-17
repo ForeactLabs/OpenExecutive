@@ -555,6 +555,15 @@ def test_one_gate_fails_on_a_new_refusal_outside_levels() -> None:
     assert _gate({PKG + "delegation/x.py": ["MAX_SENDS_PER_DAY = 5"]}) == "FAIL"
 
 
+def test_one_gate_fails_on_a_can_only_reason() -> None:
+    """A feature that writes its own "may only" reason for stopping a step."""
+    line = """        reason = "a teammate's follow-up may only reach that teammate\""""
+    assert _gate({PKG + "scheduler/runner.py": [line]}) == "FAIL"
+    assert _gate({PKG + "api/routes/x.py": ['    detail="You can only change your own."']}) == "FAIL"
+    # Prose in a docstring is not a message the code sends.
+    assert _gate({PKG + "scheduler/runner.py": ["    The teammate's own turn may only read and advise."]}) == "PASS"
+
+
 def test_one_gate_allows_levels_input_checks_comments_and_tests() -> None:
     assert _gate({PKG + "orchestrator/levels.py": ["    status_code=403"]}) == "PASS"
     marked = {PKG + "api/routes/x.py": ["    raise HTTPException(status_code=403)  # input-safety"]}

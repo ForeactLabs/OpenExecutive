@@ -214,7 +214,10 @@ GATE_RE = re.compile(
     r"|only the (?:account )?(?:owner|principal)\b"
     r"|\b(?:daily|per-day|per day) (?:cap|limit)\b"
     r"|\b(?:cap|limit) reached\b"
-    r"|\bnot (?:allowed|permitted)\b|\bisn't allowed\b",
+    r"|\bnot (?:allowed|permitted)\b|\bisn't allowed\b"
+    # A "can only" reason in a message a feature writes for itself. Inside a
+    # string literal only: an apostrophe in prose opens nothing.
+    r"""|(?<![A-Za-z])"[^"]*\b(?:may|can) only\b|(?<![A-Za-z])'[^']*\b(?:may|can) only\b""",
     re.IGNORECASE,
 )
 

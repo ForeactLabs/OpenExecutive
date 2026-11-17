@@ -474,9 +474,9 @@ def _record_outbound_context(
 SCHEDULE_FOLLOWUP_TOOL: dict[str, Any] = {
     "name": "schedule_followup",
     "description": (
-        "Queue a follow-up for a future time. Its own message goes to the person who "
-        "asked (channel_ref); anything it should send to someone else then, put in "
-        "intent, and the run does it as a step under Approvals. Use "
+        "Queue a follow-up for a future time, to the person who asked or to someone "
+        "else (channel_ref). One to someone else is sent when it runs, under the "
+        "asker's Approvals like any send. Use "
         "ONLY when the user explicitly asks for a follow-up, reminder, check-in or "
         "scheduled action, never to defer a normal reply. Convert relative times "
         "(\"tomorrow 9am\") to ISO8601 UTC yourself, using the timezone in your system prompt."
@@ -496,7 +496,7 @@ SCHEDULE_FOLLOWUP_TOOL: dict[str, Any] = {
             "channel_ref": {
                 "type": "string",
                 "description": (
-                    "Where the follow-up's own message goes: the person who asked. "
+                    "Who the follow-up reaches: the person who asked, or someone else. "
                     "For telegram: the numeric chat_id as a string. "
                     "For email: the email address (optionally with thread_id appended as "
                     "'address|thread_id'). For slack_dm: the Slack user id."
