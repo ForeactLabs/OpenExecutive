@@ -1228,7 +1228,8 @@ class Settings(BaseSettings):
     # The model that learns "How I write" and writes drafts; unset = DEFAULT_MODEL.
     delegation_composer_model: str | None = Field(None, alias="DELEGATION_COMPOSER_MODEL")
     # Ceiling on drafts written as one person per UTC day (a cost guard),
-    # from chat (delegation.caps); the inbox watcher has no daily count.
+    # from chat, follow-ups and workflow sends (delegation.caps); the inbox
+    # watcher's replies neither count toward it nor are held by it.
     delegation_max_drafts_per_day: int = Field(
         50, alias="DELEGATION_MAX_DRAFTS_PER_DAY", ge=1, le=1000
     )

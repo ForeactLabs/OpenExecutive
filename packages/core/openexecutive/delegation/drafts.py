@@ -107,16 +107,20 @@ def record(
 
 
 def count_since(
-    person_id: int, since: datetime, *, source: str | None = None, db_path: Path | None = None
+    person_id: int, since: datetime, *, source: str | None = None, but_not: str | None = None,
+    db_path: Path | None = None,
 ) -> int:
-    """Drafts saved as ``person_id`` at or after ``since``, from chat and the
-    inbox alike, or from one ``source``. Raises on a read error: a cap must
-    not fail open."""
+    """Drafts saved as ``person_id`` at or after ``since``, from every source,
+    from one ``source``, or from all but ``but_not``. Raises on a read error:
+    a cap must not fail open."""
     sql = f"SELECT COUNT(*) FROM {DRAFTS_TABLE} WHERE person_id = ? AND created_at >= ?"  # noqa: S608
     params: tuple[object, ...] = (person_id, since.isoformat())
     if source is not None:
         sql += " AND source = ?"
         params = (*params, source)
+    if but_not is not None:
+        sql += " AND source != ?"
+        params = (*params, but_not)
     conn = _connect(db_path)
     try:
         row = conn.execute(sql, params).fetchone()
