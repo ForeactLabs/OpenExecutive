@@ -725,6 +725,27 @@ def test_the_message_a_quick_reply_answered_stays_shared(roster: SimpleNamespace
     assert "Original question." in out and "Ben's answer." not in out
 
 
+def test_a_teammates_reply_into_the_readers_own_thread_stays_theirs(roster: SimpleNamespace) -> None:
+    from datetime import UTC, datetime, timedelta
+    from email.utils import format_datetime
+
+    _send_for(roster.owner, mid="t1", subject="Taxes")
+    with tm._open() as conn:
+        conn.execute(f"UPDATE {tm.SENT_TABLE} SET at = datetime('now', '-1 hour')")
+    an_hour_ago = format_datetime(datetime.now(UTC) - timedelta(hours=1))
+    with _reader(roster.ben):
+        tm.note_sent(subject="Re: Taxes", recipients={DANA}, thread_id="t1", result="Email sent! Message ID: s9")
+    roster.session.mail_ids_seen.add(f"{roster.owner}:s9")
+    bens = _sent_by_exec("s9", "Re: Taxes", DANA) + "Thread ID: t1\n"
+    with _reader(roster.owner):
+        assert "withheld" in _run(FakeMailbox({READ: bens}), READ, message_id="s9")
+    text = _dated_thread((EXEC, DANA, an_hour_ago, "Olivia's note."), (EXEC, DANA, _now(), "Ben's answer."))
+    roster.session.mail_ids_seen.add(f"{roster.owner}:t1")
+    with _reader(roster.owner):
+        out = _run(FakeMailbox({THREAD: text}), THREAD, thread_id="t1")
+    assert "Olivia's note." in out and "Ben's answer." not in out
+
+
 def test_a_reply_sent_into_a_thread_takes_only_itself(roster: SimpleNamespace) -> None:
     with _reader(roster.ben):
         tm.note_sent(subject="Re: Taxes", recipients={DANA}, thread_id="t1", result="Email sent! Message ID: s9")
