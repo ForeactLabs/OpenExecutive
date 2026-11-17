@@ -118,3 +118,19 @@ def test_reset_empties_the_queue_and_seeds_the_recurring_jobs_again(db: Path, tm
     assert "reminder" not in kinds
     assert "open_loop" not in kinds
     assert "principal_brief_morning" in kinds
+    assert "principal_brief_morning" in kinds
+
+
+def test_one_broken_seed_does_not_stop_the_rest(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.scheduler import runner
+
+    ran: list[str] = []
+    monkeypatch.setattr(runner, "seed_principal_briefs", lambda: ran.append("briefs"))
+    monkeypatch.setattr(runner, "_RECURRING_SEEDS", (
+        ("missing", None, "openexecutive.no_such_module", "seed"),
+        ("principal briefs", None, "openexecutive.scheduler.runner", "seed_principal_briefs"),
+        ("off", "never_on", "openexecutive.no_such_module", "seed"),
+    ))
+    monkeypatch.setattr("openexecutive.config.get_settings", lambda: type("S", (), {"never_on": False})())
+    runner.seed_recurring_jobs()
+    assert ran == ["briefs"]

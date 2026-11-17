@@ -1966,51 +1966,50 @@ def seed_principal_briefs() -> int:
     )
 
 
+# Every recurring job the system seeds on its own: (name, the settings flag
+# that turns it on or None for always, module, function). Imported only when
+# seeded, so one module that fails to import stops only its own seed.
+_RECURRING_SEEDS: tuple[tuple[str, str | None, str, str], ...] = (
+    ("principal briefs", None, "openexecutive.scheduler.runner", "seed_principal_briefs"),
+    ("department check-ins", None, "openexecutive.departments.cadence", "bootstrap_cadences"),
+    ("client rotation", None, "openexecutive.clients.rotation", "seed_client_rotation"),
+    ("nudge scan", "nudge_scan_enabled", "openexecutive.scheduler.nudge_engine", "bootstrap_nudge_scan"),
+    ("external monitor", "external_monitor_enabled", "openexecutive.monitoring.pipeline",
+     "bootstrap_external_monitor_scan"),
+    ("watchlist research", "watchlist_research_enabled", "openexecutive.monitoring.research.scheduler",
+     "bootstrap_watchlist_research_scan"),
+    ("alert review", "alert_review_enabled", "openexecutive.alerts.review", "bootstrap_alert_review_scan"),
+    ("Notion sync", "notion_sync_enabled", "openexecutive.knowledge.notion_sync", "bootstrap_notion_sync_scan"),
+    ("Drive sync", "drive_sync_enabled", "openexecutive.knowledge.drive_sync", "bootstrap_drive_sync_scan"),
+    ("OneDrive sync", "onedrive_sync_enabled", "openexecutive.knowledge.onedrive_sync",
+     "bootstrap_onedrive_sync_scan"),
+    ("Confluence sync", "confluence_sync_enabled", "openexecutive.knowledge.confluence_sync",
+     "bootstrap_confluence_sync_scan"),
+)
+
+
 def seed_recurring_jobs() -> None:
     """Enqueue every recurring job the system runs on its own, each only if
     none of its kind is pending: the principal's briefs and reflection,
     department check-ins, nudges, monitoring and research, the alert review,
-    document syncs and client rotation (each when it is on). The one place that knows them: the scheduler calls it at start and
-    a reset calls it after emptying the queue. Never raises; a failing seed
-    is logged and the rest still run."""
+    document syncs and client rotation (each when it is on). The one place that
+    knows them (``_RECURRING_SEEDS``): the scheduler calls it at start and a
+    reset calls it after emptying the queue. Never raises; a seed that fails,
+    in its import too, is logged and the rest still run."""
+    import importlib
+
     from openexecutive.config import get_settings
 
-    settings = get_settings()
-
-    def _seeds() -> list[tuple[str, Any]]:
-        from openexecutive.alerts.review import bootstrap_alert_review_scan
-        from openexecutive.clients.rotation import seed_client_rotation
-        from openexecutive.departments.cadence import bootstrap_cadences
-        from openexecutive.knowledge.confluence_sync import bootstrap_confluence_sync_scan
-        from openexecutive.knowledge.drive_sync import bootstrap_drive_sync_scan
-        from openexecutive.knowledge.notion_sync import bootstrap_notion_sync_scan
-        from openexecutive.knowledge.onedrive_sync import bootstrap_onedrive_sync_scan
-        from openexecutive.monitoring.pipeline import bootstrap_external_monitor_scan
-        from openexecutive.monitoring.research.scheduler import bootstrap_watchlist_research_scan
-        from openexecutive.scheduler.nudge_engine import bootstrap_nudge_scan
-
-        seeds: list[tuple[str, Any]] = [
-            ("principal briefs", seed_principal_briefs),
-            ("department check-ins", bootstrap_cadences),
-            ("client rotation", seed_client_rotation),
-        ]
-        for on, name, seed in (
-            (settings.nudge_scan_enabled, "nudge scan", bootstrap_nudge_scan),
-            (settings.external_monitor_enabled, "external monitor", bootstrap_external_monitor_scan),
-            (settings.watchlist_research_enabled, "watchlist research", bootstrap_watchlist_research_scan),
-            (settings.alert_review_enabled, "alert review", bootstrap_alert_review_scan),
-            (settings.notion_sync_enabled, "Notion sync", bootstrap_notion_sync_scan),
-            (settings.drive_sync_enabled, "Drive sync", bootstrap_drive_sync_scan),
-            (settings.onedrive_sync_enabled, "OneDrive sync", bootstrap_onedrive_sync_scan),
-            (settings.confluence_sync_enabled, "Confluence sync", bootstrap_confluence_sync_scan),
-        ):
-            if on:
-                seeds.append((name, seed))
-        return seeds
-
-    for name, seed in _seeds():
+    try:
+        settings: Any = get_settings()
+    except Exception:
+        logger.exception("scheduler: seeding recurring jobs: settings unreadable")
+        return
+    for name, flag, module, func in _RECURRING_SEEDS:
         try:
-            seed()
+            if flag is not None and not getattr(settings, flag):
+                continue
+            getattr(importlib.import_module(module), func)()
         except Exception:
             logger.exception("scheduler: seeding %s failed", name)
 
