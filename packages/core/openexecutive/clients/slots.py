@@ -35,6 +35,7 @@ import json
 import logging
 import shutil
 import sqlite3
+from collections.abc import Collection
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -386,11 +387,12 @@ def _seed_from_slot_files(settings: Any, slot: Path) -> dict[str, Any]:
     return out
 
 
-def restore_company_db(state_src: Path) -> None:
+def restore_company_db(state_src: Path, *, carry: Collection[str] = ()) -> None:
     """Make a saved copy of the company database live, carrying the
-    operator-level rows (``_GLOBAL_TABLES``) across. Used by a client switch
-    and by unload, which puts the user's own saved database back."""
-    preserved = _dump_global_tables()
+    operator-level rows (``_GLOBAL_TABLES``, plus ``carry``) across. Used by
+    a client switch and by unload, which puts the user's own saved database
+    back."""
+    preserved = _dump_global_tables((*_GLOBAL_TABLES, *sorted(set(carry) - set(_GLOBAL_TABLES))))
     _restore_db_from_file(state_src)
     _ensure_schemas()
     _restore_global_tables(preserved)
@@ -427,7 +429,9 @@ def _wipe_per_client_tables() -> None:
     )
 
 
-def _dump_global_tables() -> dict[str, tuple[list[str], list[tuple[Any, ...]]]]:
+def _dump_global_tables(
+    tables: Collection[str] = _GLOBAL_TABLES,
+) -> dict[str, tuple[list[str], list[tuple[Any, ...]]]]:
     """Read operator-level table rows from the live DB before a restore."""
     db_path = _episodic_db_path()
     out: dict[str, tuple[list[str], list[tuple[Any, ...]]]] = {}
@@ -435,14 +439,14 @@ def _dump_global_tables() -> dict[str, tuple[list[str], list[tuple[Any, ...]]]]:
         return out
     conn = sqlite3.connect(str(db_path))
     try:
-        for table in _GLOBAL_TABLES:
+        for table in tables:
             exists = conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
                 (table,),
             ).fetchone()
             if not exists:
                 continue
-            cursor = conn.execute(f"SELECT * FROM {table}")  # noqa: S608 — fixed allowlist
+            cursor = conn.execute(f'SELECT * FROM "{table}"')  # noqa: S608 — names from code constants
             cols = [d[0] for d in cursor.description]
             out[table] = (cols, cursor.fetchall())
     finally:

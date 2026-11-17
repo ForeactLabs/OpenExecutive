@@ -706,10 +706,13 @@ async def test_blank_switch_then_unload_brings_every_table_back(
     with sqlite3.connect(str(env.db_path)) as conn:
         conn.execute("CREATE TABLE brand_new_feature (note TEXT)")
         conn.execute("INSERT INTO brand_new_feature VALUES ('mine')")
+        conn.execute("CREATE TABLE IF NOT EXISTS eval_scenarios (note TEXT)")
     await create_client_slot(env.settings, display_name="Beta", source="blank")
     await activate_client_slot(env.settings, "beta")
     with sqlite3.connect(str(env.db_path)) as conn:
         assert conn.execute("SELECT COUNT(*) FROM brand_new_feature").fetchone()[0] == 0
+        # Written while away: not the company's, so unload keeps it.
+        conn.execute("INSERT INTO eval_scenarios VALUES ('written meanwhile')")
 
     summary = await fixture_loader.unload_fixture(env.settings)
 
@@ -718,6 +721,8 @@ async def test_blank_switch_then_unload_brings_every_table_back(
         assert conn.execute("SELECT note FROM brand_new_feature").fetchall() == [("mine",)]
     assert _decision_summaries(env.db_path) == ["My Real Co decision"]
     assert get_active_client(env.settings) is None
+    with sqlite3.connect(str(env.db_path)) as conn:
+        assert conn.execute("SELECT note FROM eval_scenarios").fetchall() == [("written meanwhile",)]
 
 
 async def test_every_first_activation_saves_your_company_again(

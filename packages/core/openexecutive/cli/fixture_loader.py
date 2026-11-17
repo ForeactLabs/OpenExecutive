@@ -643,9 +643,14 @@ async def unload_fixture(settings: Any) -> dict[str, Any]:
             # The whole saved database goes back over what the files above
             # seeded, so every table is the user's again, not only the ones
             # a fixture has. Same restore as a client switch.
-            from openexecutive.clients.slots import restore_company_db
+            # What isn't the company's stays as it is now: the instance-level
+            # rows a reset keeps, the operator's workflows, and the audit
+            # trail of what happened while the fixture was loaded.
+            from openexecutive.clients.slots import _BLANK_KEEPS, restore_company_db
 
-            restore_company_db(backup / "state.db")
+            restore_company_db(
+                backup / "state.db", carry=RESET_KEEPS | set(_BLANK_KEEPS) | {"audit_log"}
+            )
             forget_company_caches()
             summary["database_restored"] = True
         if summary_client is not None:
