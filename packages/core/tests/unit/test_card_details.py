@@ -317,3 +317,7 @@ def test_an_empty_item_in_a_list_still_shows() -> None:
 
 def test_a_cell_with_a_bar_or_line_break_stays_one_cell() -> None:
     assert card_details._rows_text([["c|d", "e\nf"]]) == "1 row\nc\\|d | e ⏎ f"
+
+
+def test_a_true_cell_shows_as_the_sheet_will_hold_it() -> None:
+    assert card_details._grid([[True, False, "x"]]) == [["TRUE", "FALSE", "x"]]

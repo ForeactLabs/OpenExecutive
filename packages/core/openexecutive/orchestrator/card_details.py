@@ -205,7 +205,8 @@ def _grid(value: Any) -> list[list[str]] | None:
         return None
     if not all(isinstance(row, list) and all(_scalar(c) for c in row) for row in value):
         return None
-    return [[_word(c) for c in row] for row in value]
+    # A cell shows what the sheet will hold: True is TRUE there, not "Yes".
+    return [["TRUE" if c is True else "FALSE" if c is False else _word(c) for c in row] for row in value]
 
 
 def _rows_text(rows: list[list[str]]) -> str:
