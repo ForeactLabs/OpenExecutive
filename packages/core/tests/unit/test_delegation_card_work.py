@@ -256,16 +256,20 @@ def test_the_reply_carries_only_the_threads_own_mail_and_what_the_turn_made(
         return next(m for t in mailbox.threads.values() for m in t.messages if m.id == message_id)
 
     mailbox.get_message = get_message  # type: ignore[attr-defined]
-    thread = card_work.threads_of(card.id)
-    assert thread == ["t1"]
+    thread = card_work.thread_starts(card.id)
+    assert thread == {"t1": ""}
     check = reply_card_tools._outside_the_thread
     assert asyncio.run(check(["mail:m1#1"], mailbox, thread)) == ""
     assert "own thread" in asyncio.run(check(["mail:other#1"], mailbox, thread))
-    assert "own thread" in asyncio.run(check(["mail:m1#1"], mailbox, []))
+    assert "own thread" in asyncio.run(check(["mail:m1#1"], mailbox, {}))
     assert "own thread" in asyncio.run(check(["drive:abcdefghijklmnop"], mailbox, thread))
     assert "own thread" in asyncio.run(check(["file:board.pdf"], mailbox, thread))
-    # A thread that joined the card (the same person's next email) is its own too.
-    assert asyncio.run(check(["mail:other#1"], mailbox, ["t1", "t9"])) == ""
+    # A thread that joined the card (the same person's next email) is its own
+    # too, from the joining email on: what came before it there isn't.
+    other = next(m for t in mailbox.threads.values() for m in t.messages if m.id == "other")
+    assert asyncio.run(check(["mail:other#1"], mailbox, {"t1": "", "t9": other.received_at})) == ""
+    later = (NOW + timedelta(minutes=5)).isoformat()
+    assert "own thread" in asyncio.run(check(["mail:other#1"], mailbox, {"t1": "", "t9": later}))
     began = datetime(2026, 11, 9, 12, 0, tzinfo=UTC)
     assert reply_card_tools._made_since("2026-11-09T12:01:00+00:00", began)
     assert reply_card_tools._made_since("2026-11-09 12:01:00", began)

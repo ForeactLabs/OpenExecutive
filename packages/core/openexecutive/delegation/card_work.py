@@ -235,13 +235,23 @@ def threads(payload: dict[str, Any]) -> list[str]:
     return [t for i, t in enumerate(out) if t and t not in out[:i]]
 
 
-def threads_of(card_id: int) -> list[str]:
-    """:func:`threads` of card ``card_id`` ([] when it isn't known)."""
+def thread_starts(card_id: int) -> dict[str, str]:
+    """Each thread of card ``card_id`` with the time its mail counts from:
+    "" for the card's own (all of it), ``JOINED_AT_KEY`` for one that
+    joined (the joining email and after; mail before it isn't this card's)."""
     from openexecutive.delegation.inbox import card_payload
     from openexecutive.memory.decision_ledger import get_decision_instance
 
     card = get_decision_instance(card_id)
-    return threads(card_payload(card)) if card is not None else []
+    if card is None:
+        return {}
+    payload = card_payload(card)
+    since = payload.get(JOINED_AT_KEY)
+    since = since if isinstance(since, dict) else {}
+    ids = threads(payload)
+    # A joined thread with no time recorded counts from now on.
+    far = "9999-12-31T00:00:00+00:00"
+    return {t: ("" if n == 0 else str(since.get(t) or far)) for n, t in enumerate(ids)}
 
 
 def _update(card_id: int, change: Any, *, only_working: bool = True) -> dict[str, Any] | None:
