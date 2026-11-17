@@ -312,7 +312,13 @@ def _no_decision(
         topic_tags.append(f"department:{event.department.lower()}")
     if event.channel:
         topic_tags.append(event.channel.lower())
-    muted = matches_mute(topic_tags, mute_patterns) or _names_muted_topic(event, mute_patterns)
+    # A cut-off review that said to raise it had seen the mutes: only its
+    # tags count then. With no review at all, the words stand in.
+    muted = matches_mute(topic_tags, mute_patterns) or (
+        not raise_it and _names_muted_topic(event, mute_patterns)
+    )
+    if muted:
+        why = "muted"
     if (raise_it or event.from_executive) and not muted:
         return TriageDecision(
             alert=True,

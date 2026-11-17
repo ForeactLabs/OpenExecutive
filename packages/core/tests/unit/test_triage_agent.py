@@ -266,6 +266,17 @@ def test_a_mute_starting_with_a_symbol_holds_back_its_word() -> None:
     assert decision.alert is False
 
 
+def test_a_cut_off_review_that_said_raise_isnt_muted_by_words() -> None:
+    """The review saw the mutes and said raise: a mute word in the body
+    doesn't drop it; only the tags it gave count."""
+    event = AlertEvent(source="monitoring", external_id="w-4", subject="Site down",
+                       body="Checkout fails on the pricing page.")
+    said = SimpleNamespace(type="tool_use", name="emit_alert_decision", input={"alert": True, "severity": "urgent"})
+    client = _client(return_value=SimpleNamespace(content=[said], stop_reason="max_tokens"))
+    decision = asyncio.run(TriageAgent().triage(event, mute_patterns=["pricing"], client=client))
+    assert decision.alert is True
+
+
 def test_triage_swallows_client_exceptions() -> None:
     """LLM error → quiet fallback for an ordinary event, never propagates."""
     client = SimpleNamespace(
