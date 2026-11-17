@@ -644,3 +644,23 @@ async def test_executive_pause_survives_switch_to_a_pre_pause_slot(
     state = pause_store.get_pause_state()
     assert state.paused is True
     assert state.reason == "holiday"
+
+
+async def test_switch_forgets_the_old_clients_agent_overrides(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Overrides are cached with no expiry; a switch must drop them."""
+    from openexecutive.agents import overrides
+
+    monkeypatch.setattr(overrides, "DB_PATH", env.db_path)
+    overrides.initialize_overrides_db(env.db_path)
+    _seed_live_company(env)
+    await create_client_slot(env.settings, display_name="Beta", source="blank")
+    overrides.set_override("finance", instructions="Acme's voice.", instructions_set=True)
+    await create_client_slot(env.settings, display_name="Acme", source="current")
+    assert overrides.get_override("finance") is not None  # now in memory
+    await activate_client_slot(env.settings, "beta")
+    try:
+        assert overrides.get_override("finance") is None
+    finally:
+        overrides.invalidate_cache()

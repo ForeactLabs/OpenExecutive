@@ -12,6 +12,7 @@ import pytest
 from openexecutive.cli import fixture_loader
 from openexecutive.departments import registry as dept_registry
 from openexecutive.departments import store as dept_store
+from openexecutive.knowledge.store import ChromaDBStore
 from openexecutive.memory import episodic, honcho_client
 from openexecutive.memory import workspace_settings as ws
 from openexecutive.people import store as people_store
@@ -20,8 +21,12 @@ USER = ws.WorkspaceSettings(mode="solo", timezone="America/Chicago")
 
 
 class _FakeStore:
-    RESEARCH_COLLECTION = "recent_research"
-    COMPANY_COLLECTION = "company_docs"
+    # The real collection names: a sync module first imported while this
+    # stands in for the store reads them at import (its ``SOURCE``), so a
+    # missing one failed these tests whenever they ran before that import.
+    locals().update(
+        {k: v for k, v in vars(ChromaDBStore).items() if k.endswith("_COLLECTION")}
+    )
 
     def __init__(self, **_kw: object) -> None: ...
 
@@ -151,3 +156,31 @@ def test_bad_zone_in_fixture_file_does_not_abort_the_load(settings: Any, tmp_pat
     _load(settings)
     assert ws.get_workspace() == ws.WorkspaceSettings(mode="solo", timezone=None)
     assert "Demo Co" in settings.company_profile_path.read_text()  # the load completed
+
+
+def test_load_and_unload_forget_cached_agent_overrides(
+    settings: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Overrides are cached with no expiry, so a load or unload, which changes
+    the tables under them, must drop the cache."""
+    import sqlite3
+
+    from openexecutive.agents import overrides
+
+    db = tmp_path / "episodic.db"
+    monkeypatch.setattr(overrides, "DB_PATH", db)
+    overrides.initialize_overrides_db(db)
+
+    def _cached_then_gone(step: Any) -> None:
+        overrides.set_override("finance", instructions="Old voice.", instructions_set=True)
+        assert overrides.get_override("finance") is not None  # now in memory
+        with sqlite3.connect(str(db)) as conn:
+            conn.execute("DELETE FROM agent_overrides")
+        step(settings)
+        assert overrides.get_override("finance") is None
+
+    try:
+        _cached_then_gone(_load)
+        _cached_then_gone(_unload)
+    finally:
+        overrides.invalidate_cache()
