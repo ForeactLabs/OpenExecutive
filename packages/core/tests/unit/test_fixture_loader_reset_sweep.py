@@ -62,7 +62,7 @@ def _settings(tmp_path: Path) -> Any:
     })()
 
 
-def _reset(tmp_path: Path, keep: tuple[str, ...] = ()) -> dict[str, Any]:
+def _reset(tmp_path: Path, keep: frozenset[str] = frozenset()) -> dict[str, Any]:
     with patch.object(ChromaDBStore, "delete_company_docs", lambda self: None), \
          patch.object(ChromaDBStore, "delete_documents", lambda self, **kw: None):
         return asyncio.run(fixture_loader.reset_all_state(_settings(tmp_path), keep=keep))
@@ -88,7 +88,7 @@ def test_reset_empties_every_table_but_the_bookkeeping(db: Path, tmp_path: Path)
 
 def test_reset_keeps_the_tables_the_caller_names(db: Path, tmp_path: Path) -> None:
     ws.restore_workspace_settings(ws.WorkspaceSettings(mode="solo", timezone="Asia/Seoul"))
-    _reset(tmp_path, keep=("people", "workspace_settings"))
+    _reset(tmp_path, keep=frozenset({"people", "workspace_settings"}))
     assert _rows(db, "people") == 1
     assert _rows(db, "brand_new_feature") == 0
     assert _rows(db, "departments") == 0

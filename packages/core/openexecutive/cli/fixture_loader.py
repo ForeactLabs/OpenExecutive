@@ -737,7 +737,7 @@ def _reregister_surviving_user_knowledge(db_path: Path) -> int:
 
 
 async def reset_all_state(
-    settings: Any, *, app_state: Any | None = None, keep: Collection[str] = ()
+    settings: Any, *, app_state: Any | None = None, keep: frozenset[str] = frozenset()
 ) -> dict[str, Any]:
     """Wipe live state AND the snapshot — return to factory-default.
 
@@ -750,9 +750,11 @@ async def reset_all_state(
     so concurrent requests cannot read the old store object after its
     backing collection has been deleted.
 
-    ``keep`` (optional) names tables to keep on top of ``RESET_KEEPS``: a
-    caller that starts a company over but keeps its team passes the people
-    tables. Keeping ``workspace_settings`` also keeps its row as it is.
+    ``keep`` (optional) names tables to keep on top of ``RESET_KEEPS``, as
+    a frozenset so a bare string can't be passed by mistake: a caller that
+    starts a company over but keeps its team passes every people table
+    (``people`` with ``person_emails`` and the rest). Keeping
+    ``workspace_settings`` also keeps its row as it is.
 
     Steps (under the shared destructive-op lock):
       1. Empty live profile.yaml
