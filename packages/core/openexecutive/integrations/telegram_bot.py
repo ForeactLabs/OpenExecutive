@@ -462,7 +462,8 @@ async def _process_and_reply(
             return
 
         # Kept only after the reply is sent.
-        if channel_turn.save_turn(
+        if await asyncio.to_thread(
+            channel_turn.save_turn,
             session_id=session_id,
             title=f"Telegram {sender_name}",
             created_at=result.session.created_at.isoformat(),

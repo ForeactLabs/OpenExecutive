@@ -1126,7 +1126,8 @@ async def _handle_message(
 
         # Kept only after the reply is sent.
         created_at = result.session.created_at.isoformat()
-        if channel_turn.save_turn(
+        if await asyncio.to_thread(
+            channel_turn.save_turn,
             session_id=session_id,
             title=session_title,
             created_at=created_at,
@@ -1143,7 +1144,8 @@ async def _handle_message(
         # is also kept under that thread's conversation, so a message that
         # continues the thread sees the original question and answer.
         if route_result is not None and route_result.promoted_thread_id:
-            channel_turn.save_turn(
+            await asyncio.to_thread(
+                channel_turn.save_turn,
                 session_id=f"discord:thread:{route_result.promoted_thread_id}",
                 title=route_result.promoted_session_title or session_title,
                 created_at=created_at,
