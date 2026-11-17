@@ -140,6 +140,8 @@ def test_sweep_empties_a_search_table_without_breaking_it(tmp_path: Path) -> Non
     with sqlite3.connect(str(path)) as conn:
         conn.execute("CREATE VIRTUAL TABLE notes_fts USING fts5(body)")
         conn.execute("INSERT INTO notes_fts (body) VALUES ('old company plan')")
+        conn.execute("CREATE VIRTUAL TABLE older_fts USING fts4(body)")
+        conn.execute("INSERT INTO older_fts (body) VALUES ('old company plan')")
         # An ordinary table that only shares the prefix is still swept.
         conn.execute("CREATE TABLE notes_fts_log (note TEXT)")
         conn.execute("INSERT INTO notes_fts_log VALUES ('old company')")
@@ -149,7 +151,10 @@ def test_sweep_empties_a_search_table_without_breaking_it(tmp_path: Path) -> Non
         assert conn.execute("SELECT COUNT(*) FROM notes_fts_log").fetchone()[0] == 0
         conn.execute("INSERT INTO notes_fts (body) VALUES ('new company plan')")
         hits = conn.execute("SELECT body FROM notes_fts WHERE notes_fts MATCH 'new'").fetchall()
+        conn.execute("INSERT INTO older_fts (body) VALUES ('new company plan')")
+        older = conn.execute("SELECT body FROM older_fts WHERE older_fts MATCH 'company'").fetchall()
     assert hits == [("new company plan",)]
+    assert older == [("new company plan",)]
 
 
 def test_reset_forgets_the_old_agent_overrides(
