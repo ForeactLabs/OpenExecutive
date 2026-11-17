@@ -305,6 +305,9 @@ export function ReplyCardItem({
   };
 
   const busy = step.kind === "busy";
+  // Each button shows only its own running words, so Don't send or Save never
+  // reads as "Sending…" on the Send button.
+  const running = (label: string) => step.kind === "busy" && step.label === label;
   const confirming = step.kind === "ask" || step.kind === "confirm";
   const label = "text-xs font-semibold uppercase tracking-wide text-fg-muted";
   // Closed, the card is its summary, what's left to decide and one main
@@ -349,7 +352,7 @@ export function ReplyCardItem({
     // Don't send is its own button, set apart on the right, so it's never
     // hunted for in a menu next to Send.
     <Button variant="ghost" className="ml-auto" onClick={() => void dismiss()} disabled={busy}>
-      Don&apos;t send
+      {running("Removing…") ? "Removing…" : "Don't send"}
     </Button>
   );
 
@@ -640,7 +643,7 @@ export function ReplyCardItem({
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <Button variant="primary" onClick={() => void saveEdit()} disabled={busy || !editing.trim()}>
-                {busy ? step.label : "Save"}
+                {running("Saving…") ? "Saving…" : "Save"}
               </Button>
               <Button variant="ghost" onClick={() => setEditing(null)} disabled={busy}>
                 Cancel
@@ -787,7 +790,7 @@ export function ReplyCardItem({
             onClick={askToSend}
             disabled={busy || left > 0}
           >
-            {busy ? step.label : "Send"}
+            {running("Sending…") ? "Sending…" : "Send"}
           </Button>
           {gmailLink && (
             <a

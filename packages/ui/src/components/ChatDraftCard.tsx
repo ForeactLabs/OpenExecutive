@@ -37,6 +37,8 @@ const DONE: Record<string, string> = {
 
 // Codes after which the card reads the draft again: it moved on meanwhile.
 const STALE = new Set(["draft_gone", "draft_changed", "already_sent", "already_handled"]);
+const SENDING = "Sending…";
+const DELETING = "Deleting…";
 
 // One tap each: what the pill asks the Executive to change.
 const TONES: { label: string; ask: string }[] = [
@@ -83,8 +85,11 @@ export default function ChatDraftCard({
   onFinished?: () => void;
 }) {
   const [now, setNow] = useState<ChatDraftState | null>(null);
-  const [busy, setBusy] = useState(false);
+  // What the card is doing right now, as the running button's own words
+  // ("Sending…", "Deleting…", a rewrite's label). Each button shows only its
+  // own, so Delete never reads as Send.
   const [working, setWorking] = useState<string | null>(null);
+  const busy = working !== null;
   const [done, setDone] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<string | null>(null);
@@ -126,7 +131,7 @@ export default function ChatDraftCard({
   };
 
   const remove = async () => {
-    setBusy(true);
+    setWorking(DELETING);
     setError(null);
     setConfirm(null);
     try {
@@ -136,12 +141,12 @@ export default function ChatDraftCard({
     } catch (err) {
       failed(err, "Couldn't delete it.");
     } finally {
-      setBusy(false);
+      setWorking(null);
     }
   };
 
   const send = async (threadMovedOn = false) => {
-    setBusy(true);
+    setWorking(SENDING);
     setError(null);
     try {
       const result = await sendChatDraft(draft.row, threadMovedOn);
@@ -160,12 +165,11 @@ export default function ChatDraftCard({
         failed(err, "Couldn't send it.");
       }
     } finally {
-      setBusy(false);
+      setWorking(null);
     }
   };
 
   const rewrite = async (label: string, run: () => Promise<ChatDraftState>) => {
-    setBusy(true);
     setWorking(label);
     setError(null);
     setConfirm(null);
@@ -179,7 +183,6 @@ export default function ChatDraftCard({
     } catch (err) {
       failed(err, "Couldn't change the email.");
     } finally {
-      setBusy(false);
       setWorking(null);
     }
   };
@@ -256,7 +259,7 @@ export default function ChatDraftCard({
               disabled={busy || !editing.trim()}
               onClick={() => void rewrite("Saving…", () => setChatDraftText(draft.row, editing))}
             >
-              {working ?? "Save"}
+              {busy ? working : "Save"}
             </Button>
             <Button variant="ghost" onClick={() => setEditing(null)} disabled={busy}>
               Cancel
@@ -305,7 +308,7 @@ export default function ChatDraftCard({
             )}
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <Button variant="primary" onClick={() => void send(confirm !== null)} disabled={busy}>
-                {busy && !working ? "Sending…" : confirm ? "Send anyway" : "Send"}
+                {working === SENDING ? SENDING : confirm ? "Send anyway" : "Send"}
               </Button>
               {canChange ? (
                 <button
@@ -331,7 +334,7 @@ export default function ChatDraftCard({
                   onClick={() => void remove()}
                   className="min-h-10 cursor-pointer px-2 text-sm font-medium text-rose-500 disabled:opacity-50"
                 >
-                  Delete
+                  {working === DELETING ? DELETING : "Delete"}
                 </button>
               )}
             </div>
