@@ -157,6 +157,14 @@ def test_kept_cards_without_an_id_never_fold_into_each_other() -> None:
     assert leo == kept("Leo asks about Friday", "Open Friday afternoon?")
 
 
+def test_triage_keeps_a_raised_card_when_no_tool_call() -> None:
+    text = SimpleNamespace(type="text", text="Just chatting")
+    decision = asyncio.run(TriageAgent().triage(
+        _raised(), client=_client(return_value=SimpleNamespace(content=[text], stop_reason="end_turn")),
+    ))
+    assert decision.alert is True
+
+
 def test_a_failed_review_never_turns_chat_lines_into_cards() -> None:
     """An outage fails review for every event: a chat line or a polled mail
     is recorded quietly, not raised (only create_alert's cards are kept)."""
