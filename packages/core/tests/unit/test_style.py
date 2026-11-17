@@ -373,11 +373,9 @@ def test_archiving_drops_the_profile(team: SimpleNamespace) -> None:
 
 def test_reset_paths_wipe_profiles() -> None:
     from openexecutive.cli import fixture_loader
-    from openexecutive.clients.slots import _BLANK_WIPE_TABLES
 
+    # A factory reset and a blank slot empty every table they don't keep.
     profiles = {"attunement_profiles", "attunement_profile_history"}
-    assert profiles <= set(_BLANK_WIPE_TABLES)
-    # The factory reset empties every table it doesn't keep.
     assert not profiles & set(fixture_loader.RESET_KEEPS)
 
 

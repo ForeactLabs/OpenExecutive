@@ -456,56 +456,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         for _w in _org_warnings:
             logging.getLogger("openexecutive").warning("org-completeness: %s", _w)
 
-    from openexecutive.departments.cadence import (
-        bootstrap_cadences,
-        cancel_orphaned_cadences,
-    )
-    # Sweep first: cancel cadence actions left behind by deleted departments
-    # so they stop firing check-in alerts, then enqueue for live departments.
-    cancel_orphaned_cadences()
-    bootstrap_cadences()
-
-    if settings.nudge_scan_enabled:
-        from openexecutive.scheduler.nudge_engine import bootstrap_nudge_scan
-        bootstrap_nudge_scan()
-
-    # External-condition monitor — init the watchlist / external_signals
-    # tables, then seed the heartbeat row so the scheduler picks it up
-    # on its next tick. Same shape as nudge_scan above.
+    from openexecutive.departments.cadence import cancel_orphaned_cadences
     from openexecutive.monitoring.store import (
         initialize_db as initialize_monitoring_db,
     )
+    from openexecutive.scheduler.runner import seed_recurring_jobs
+
+    # Sweep first: cancel cadence actions left behind by deleted departments
+    # so they stop firing check-in alerts. The monitoring tables must exist
+    # before its heartbeat is seeded.
+    cancel_orphaned_cadences()
     initialize_monitoring_db()
-    if settings.external_monitor_enabled:
-        from openexecutive.monitoring.pipeline import (
-            bootstrap_external_monitor_scan,
-        )
-        bootstrap_external_monitor_scan()
-
-    # Watchlist research cron — periodic re-run gated by a state-hash
-    # check so quiet days cost nothing. Mirrors the external_monitor
-    # heartbeat above.
-    if settings.watchlist_research_enabled:
-        from openexecutive.monitoring.research.scheduler import (
-            bootstrap_watchlist_research_scan,
-        )
-        bootstrap_watchlist_research_scan()
-
-    if settings.notion_sync_enabled:
-        from openexecutive.knowledge.notion_sync import bootstrap_notion_sync_scan
-        bootstrap_notion_sync_scan()
-    if settings.drive_sync_enabled:
-        from openexecutive.knowledge.drive_sync import bootstrap_drive_sync_scan
-
-        bootstrap_drive_sync_scan()
-    if settings.onedrive_sync_enabled:
-        from openexecutive.knowledge.onedrive_sync import bootstrap_onedrive_sync_scan
-
-        bootstrap_onedrive_sync_scan()
-    if settings.confluence_sync_enabled:
-        from openexecutive.knowledge.confluence_sync import bootstrap_confluence_sync_scan
-
-        bootstrap_confluence_sync_scan()
+    # Every recurring job, from the one list a reset and the scheduler's
+    # start also use, so a job added there comes back after each of them.
+    seed_recurring_jobs()
 
     audit_logger = AuditLogger()
     app.state.audit = audit_logger

@@ -281,18 +281,9 @@ def test_fixture_path_cache_wipe_is_unconditional() -> None:
     )
 
 
-def test_slot_switch_consumes_the_shared_cache_constant() -> None:
-    """The client-slot wipe list must carry the one cache constant.
+def test_slot_switch_and_reset_keep_none_of_the_caches() -> None:
+    """A switch into a blank/seed slot and a factory reset empty every table
+    but RESET_KEEPS, so the caches can't be left behind."""
+    from openexecutive.cli.fixture_loader import PER_CLIENT_CACHE_TABLES, RESET_KEEPS
 
-    The original bug was three hand-maintained table lists over one DB: the
-    fix landed in one and the leak stayed live in the other two. A factory
-    reset no longer keeps a list (it empties every table but RESET_KEEPS).
-    """
-    from openexecutive.cli.fixture_loader import PER_CLIENT_CACHE_TABLES
-    from openexecutive.clients.slots import _BLANK_WIPE_TABLES
-
-    for table in PER_CLIENT_CACHE_TABLES:
-        assert table in _BLANK_WIPE_TABLES, (
-            f"{table!r} dropped out of the client-slot wipe list — switching "
-            "into a blank/seed slot will leak the previous client's cache."
-        )
+    assert not set(PER_CLIENT_CACHE_TABLES) & RESET_KEEPS

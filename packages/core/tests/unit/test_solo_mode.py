@@ -320,7 +320,8 @@ def test_fixture_load_path_always_applies_the_workspace_file() -> None:
 
 
 def test_blank_client_slot_wipes_the_workspace_settings() -> None:
-    from openexecutive.clients.slots import _BLANK_WIPE_TABLES, _GLOBAL_TABLES
+    from openexecutive.cli.fixture_loader import RESET_KEEPS
+    from openexecutive.clients.slots import _GLOBAL_TABLES
 
-    assert "workspace_settings" in _BLANK_WIPE_TABLES
+    assert "workspace_settings" not in RESET_KEEPS
     assert "workspace_settings" not in _GLOBAL_TABLES

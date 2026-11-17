@@ -78,9 +78,8 @@ _SAFE_NAME_RE = re.compile(r"^[a-z0-9_-]+$")
 #
 # Three separate paths swap live company state, and each maintained its own
 # hand-written table list — so this was fixed in one and still live in the other
-# two. They now all consume this constant: `clients.slots._BLANK_WIPE_TABLES`
-# (client switch into a blank/seed slot), `reset_all_state` (factory reset, which
-# empties every table but RESET_KEEPS anyway), and
+# two. A factory reset and a switch into a blank/seed slot now empty every
+# table but RESET_KEEPS (`_delete_every_table`); this constant is for
 # `_apply_state_from_source` (fixture load AND unload). Any new per-company
 # cache table goes here, once.
 #

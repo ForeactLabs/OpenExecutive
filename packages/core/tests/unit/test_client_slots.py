@@ -664,3 +664,17 @@ async def test_switch_forgets_the_old_clients_agent_overrides(
         assert overrides.get_override("finance") is None
     finally:
         overrides.invalidate_cache()
+
+
+async def test_blank_switch_empties_a_table_nobody_listed(env: SimpleNamespace) -> None:
+    """A blank slot gets the factory reset's sweep, so a table added later
+    doesn't carry the previous client's rows into it."""
+    _seed_live_company(env)
+    with sqlite3.connect(str(env.db_path)) as conn:
+        conn.execute("CREATE TABLE brand_new_feature (note TEXT)")
+        conn.execute("INSERT INTO brand_new_feature VALUES ('acme only')")
+    await create_client_slot(env.settings, display_name="Acme", source="current")
+    await create_client_slot(env.settings, display_name="Beta", source="blank")
+    await activate_client_slot(env.settings, "beta")
+    with sqlite3.connect(str(env.db_path)) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM brand_new_feature").fetchone()[0] == 0
