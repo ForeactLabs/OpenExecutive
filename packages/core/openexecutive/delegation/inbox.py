@@ -834,7 +834,7 @@ def _card_payload(
     handled_as: str, handle_it_reason: str | None = None, source: str | None = None,
 ) -> dict[str, Any]:
     from openexecutive.delegation.ghostwriter import one_line
-    from openexecutive.integrations.email_poller import sender_new_text
+    from openexecutive.integrations.email_poller import readable_text
 
     follow_up = source == FOLLOW_UP_SOURCE
     return {
@@ -856,7 +856,7 @@ def _card_payload(
         "sender_verified": bool(message.sender_authenticated),
         "subject": one_line(message.subject, 200),
         "received_at": message.received_at,
-        "they_wrote": sender_new_text(message.text or "")[:_THEY_WROTE_CHARS],
+        "they_wrote": readable_text(message.text or "", message.subject, max_chars=_THEY_WROTE_CHARS),
         # Everyone it goes to: Send checks the draft against this list.
         "draft_to": [*reply.to, *reply.cc],
         # Who Reply to: Everyone adds (``card_drafts.set_recipients``).

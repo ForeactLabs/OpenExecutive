@@ -25,6 +25,8 @@ from typing import Any
 MAX_RECIPIENTS = 10
 THREAD_MESSAGES = 6
 THREAD_MESSAGE_CHARS = 1500
+# A message forwarded inside one (``email_poller.readable_text``).
+THREAD_FORWARDED_CHARS = 6000
 
 _HEADER_LINE_RE = re.compile(r"^(\s*)(\[\s*\d+\s*\]\s*From\s*:)", re.IGNORECASE | re.MULTILINE)
 
@@ -53,14 +55,16 @@ def thread_text(thread: Any, own: str) -> str:
     all labelled alike: nothing here says which are the writer's
     (``writer_said`` does)."""
     from openexecutive.delegation.ghostwriter import one_line
-    from openexecutive.integrations.email_poller import sender_new_text
+    from openexecutive.integrations.email_poller import readable_text
     from openexecutive.utils.prompt_blocks import plain
 
     parts = []
     for i, m in enumerate(_shown_messages(thread), 1):
         who = one_line(m.from_name or m.from_addr, 120)
         # Plain first, so no hidden or look-alike character dodges the quoting.
-        text = _quote_headers(plain(sender_new_text(m.text or "")[:THREAD_MESSAGE_CHARS]))
+        text = _quote_headers(plain(readable_text(
+            m.text or "", m.subject, max_chars=THREAD_MESSAGE_CHARS, forwarded_chars=THREAD_FORWARDED_CHARS,
+        )))
         parts.append(f"[{i}] From: {who} — {one_line(m.date, 60)}\n{text}")
     return "\n\n".join(parts)
 

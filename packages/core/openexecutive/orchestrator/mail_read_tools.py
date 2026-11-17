@@ -75,6 +75,8 @@ AWAITING_DAYS = 14
 MAX_DAYS = 30
 READ_MESSAGES = 10
 READ_MESSAGE_CHARS = 4000
+# A message they forwarded inside one (``email_poller.readable_text``).
+READ_FORWARDED_CHARS = 12_000
 # Sent mail looked at for my_email_awaiting_reply, and threads opened for it.
 _SENT_LOOKED_AT = 40
 _AWAITING_CANDIDATES = 15
@@ -142,7 +144,8 @@ READ_MY_EMAIL_TOOL: dict[str, Any] = {
         "Read one email thread in the mailbox of the person you are speaking "
         "with, by the thread_id search_my_email or my_email_awaiting_reply "
         f"returned: its last {READ_MESSAGES} messages, each sender's own words "
-        "(quoted history left out), drafts saved there marked not sent, and "
+        "(quoted history left out) and any email they forwarded, under "
+        "'Forwarded message:', drafts saved there marked not sent, and "
         "the files attached to them "
         "(`attachments`: message_id and index; open one with "
         "read_my_email_attachment). Their own messages are marked yours. Use it "
@@ -480,13 +483,15 @@ def _render_thread(messages: list[Any], first: int, own: str) -> str:
     anyone else's inside an untrusted block."""
     from openexecutive.delegation.ghostwriter import one_line
     from openexecutive.delegation.threads import mine
-    from openexecutive.integrations.email_poller import sender_new_text
+    from openexecutive.integrations.email_poller import readable_text
     from openexecutive.orchestrator.content_trust import wrap_untrusted
     from openexecutive.utils.prompt_blocks import no_tags, plain
 
     parts = []
     for i, m in enumerate(messages, first):
-        text = plain(sender_new_text(m.text or ""))[:READ_MESSAGE_CHARS]
+        text = plain(readable_text(
+            m.text or "", m.subject, max_chars=READ_MESSAGE_CHARS, forwarded_chars=READ_FORWARDED_CHARS,
+        ))
         date = one_line(m.date or m.received_at, 60)
         if "DRAFT" in m.labels:
             # Saved, never sent: whoever wrote it (them, Act as me, another

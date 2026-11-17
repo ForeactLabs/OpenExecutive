@@ -1050,7 +1050,7 @@ async def get_delegation_mail(request: Request, thread_id: str, message_id: str)
     from openexecutive.delegation.gmail import GmailNotFound, mailbox_link
     from openexecutive.delegation.inbox import card_on_thread, open_cards
     from openexecutive.delegation.inbox_classifier import their_last_words
-    from openexecutive.integrations.email_poller import sender_new_text
+    from openexecutive.integrations.email_poller import readable_text
 
     person = _caller(request)
     person_id = _person_id(person)
@@ -1080,7 +1080,7 @@ async def get_delegation_mail(request: Request, thread_id: str, message_id: str)
         to=list(message.to),
         cc=list(message.cc),
         received_at=message.received_at,
-        text=sender_new_text(message.text or "")[:_MAIL_VIEW_MAX_CHARS].strip(),
+        text=readable_text(message.text or "", message.subject, max_chars=_MAIL_VIEW_MAX_CHARS),
         attachments=[
             MailAttachmentOut(name=a.name, mime_type=a.mime_type, size=a.size) for a in message.attachments
         ],

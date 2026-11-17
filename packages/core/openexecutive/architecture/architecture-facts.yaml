@@ -10091,7 +10091,13 @@ integrations:
     (In-Reply-To, References, threadId) and stamped X-OE-Ghostwritten; no
     send method. email_poller.sender_new_text (the poller's quoted-reply
     stripper, made public) keeps only each sender's own words for the voice
-    learner and the ghostwriter's thread.
+    learner. Reading an email for what it says (read_my_email, the
+    ghostwriter's thread, the inbox classifier and card, the mail view) goes
+    through email_poller.readable_text instead - why: Apple Mail and iPhone
+    quote a whole forward with ">" under "Begin forwarded message:", so the
+    own-words cut dropped every forward's content. It keeps the forwarded
+    email unquoted under "Forwarded message:"; reply history stays out, and
+    an Outlook header block counts only under a Fw:/Fwd: subject.
 
   mcp_server: |
     openexecutive.mcp_server — Open Executive exposed AS an MCP server, the

@@ -499,7 +499,7 @@ async def _forward(writer: _Writer, intent: str, tool_input: dict[str, Any]) -> 
     from openexecutive.delegation.gmail import DraftSpec, ForwardOf
     from openexecutive.delegation.gmail import valid_id as gmail_id
     from openexecutive.delegation.voice import composer_model, get_voice, render_voice_block
-    from openexecutive.integrations.email_poller import sender_new_text
+    from openexecutive.integrations.email_poller import readable_text
 
     thread_id = str(tool_input.get("forward") or "").strip()
     if not getattr(writer.mailbox, "valid_id", gmail_id)(thread_id):
@@ -549,7 +549,7 @@ async def _forward(writer: _Writer, intent: str, tool_input: dict[str, Any]) -> 
         forward=ForwardOf(
             message_id=original.id,
             header=_forward_header(original),
-            text=sender_new_text(original.text or "") or (original.text or ""),
+            text=readable_text(original.text or "", original.subject) or (original.text or ""),
         ),
     ))
     plan: dict[str, Any] = {

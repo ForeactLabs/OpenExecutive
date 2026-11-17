@@ -243,15 +243,18 @@ def render_email(
     message: Any, *, relation: str, addressed: Addressing | None = None, earlier: str = "",
     max_body_chars: int = MAX_BODY_CHARS, open_email: str = "",
 ) -> str:
-    """The user turn: a few header lines and the sender's own new words, as
+    """The user turn: a few header lines and the sender's own new words (and
+    any email they forwarded, ``readable_text``), as
     data in one ``<email>`` block, after the person's own ``earlier`` words
     in a ``<their_last_email>`` block when they wrote any, and the sender's
     email still waiting on them (``open_email``) in ``<their_open_email>``."""
     from openexecutive.delegation.ghostwriter import one_line
-    from openexecutive.integrations.email_poller import sender_new_text
+    from openexecutive.integrations.email_poller import readable_text
     from openexecutive.utils.prompt_blocks import no_tags, scrub_block_line
 
-    body = sender_new_text(getattr(message, "text", "") or "")[:max_body_chars]
+    body = readable_text(
+        getattr(message, "text", "") or "", getattr(message, "subject", "") or "", max_chars=max_body_chars,
+    )
     others = len({*getattr(message, "to", []), *getattr(message, "cc", [])})
     header = [
         f"From: {one_line(getattr(message, 'from_name', '') or '', 80)} "
