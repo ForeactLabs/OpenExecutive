@@ -41,6 +41,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from openexecutive.utils import db
+
 logger = logging.getLogger(__name__)
 
 ASKS_TABLE = "repeat_asks"
@@ -75,12 +77,7 @@ hey hi hello ok okay
 _STOP = frozenset(_STOP_WORDS.split())
 
 
-def _db(db_path: Path | None) -> Path:
-    if db_path is not None:
-        return db_path
-    from openexecutive.memory import episodic
-
-    return Path(episodic.DB_PATH)
+_db = db.company_path
 
 
 def _connect(db_path: Path | None) -> sqlite3.Connection:

@@ -58,6 +58,8 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from openexecutive.utils import db
+
 if TYPE_CHECKING:
     from openexecutive.people.models import AuthorityScope, Person
 
@@ -241,12 +243,7 @@ def person_scope(person_id: int) -> str:
 # --------------------------------------------------------------------------- #
 
 
-def _db(db_path: Path | None) -> Path:
-    if db_path is not None:
-        return db_path
-    from openexecutive.memory import episodic
-
-    return Path(episodic.DB_PATH)
+_db = db.company_path
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:

@@ -13,8 +13,7 @@ import json
 import logging
 import os
 import sqlite3
-from collections.abc import Generator, Iterable
-from contextlib import contextmanager
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -31,6 +30,7 @@ from openexecutive.departments.models import (
     GoalStatus,
     PeriodType,
 )
+from openexecutive.utils import db
 from openexecutive.utils.slug import DEPARTMENT_SLUG_FALLBACK, slugify
 
 logger = logging.getLogger(__name__)
@@ -54,18 +54,7 @@ def _resolve_db_path(db_path: Path | None) -> Path:
     return db_path if db_path is not None else DB_PATH
 
 
-@contextmanager
-def _get_conn(db_path: Path | None = None) -> Generator[sqlite3.Connection, None, None]:
-    conn = sqlite3.connect(str(_resolve_db_path(db_path)))
-    conn.row_factory = sqlite3.Row
-    # Foreign keys are off by default in SQLite; we don't rely on FK enforcement
-    # but turning it on keeps invariants visible if a caller violates them.
-    conn.execute("PRAGMA foreign_keys = ON")
-    try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
+_get_conn = db.opener(_resolve_db_path, foreign_keys=True)
 
 
 def _now() -> str:

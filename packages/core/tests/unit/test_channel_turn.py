@@ -255,3 +255,18 @@ def test_a_chat_from_someone_off_people_shows_in_the_principals_list(
             user_text="u", assistant_text="a",
         ) is True
     assert owners == [1, 9]
+
+
+def test_reads_skip_knowledge_when_the_ask_is_not_the_persons_own(turn_env: dict) -> None:
+    session = SimpleNamespace(session_id="one-on-one:1")
+    person = SimpleNamespace(id=5)
+
+    assert asyncio.run(
+        channel_turn.reads(session, query=None, person=person, is_dm=True)
+    ) == ("", "PROJECTS", "BOARD")
+    assert turn_env["retrieve"] == []
+
+    assert asyncio.run(
+        channel_turn.reads(session, query="what changed?", person=person, is_dm=True)
+    ) == ("KNOWLEDGE", "PROJECTS", "BOARD")
+    assert turn_env["briefing"] == [(True, person), (True, person)]

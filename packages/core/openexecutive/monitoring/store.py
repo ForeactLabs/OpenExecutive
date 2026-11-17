@@ -23,8 +23,6 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from collections.abc import Generator
-from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -49,25 +47,12 @@ from openexecutive.monitoring.models import (
     is_valid_origin,
     is_valid_outcome,
 )
+from openexecutive.utils import db
 
 logger = logging.getLogger(__name__)
 
 
-@contextmanager
-def _get_conn(db_path: Path | None = None) -> Generator[sqlite3.Connection, None, None]:
-    conn = sqlite3.connect(str(_resolve_db_path(db_path)))
-    conn.row_factory = sqlite3.Row
-    # SQLite ships with foreign-key enforcement OFF by default. Without
-    # this PRAGMA the FK on external_signals.watchlist_id is just
-    # documentation; with it, inserting a signal for a deleted/unknown
-    # watchlist fails loudly. Per-connection setting — must run on every
-    # acquisition.
-    conn.execute("PRAGMA foreign_keys = ON")
-    try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
+_get_conn = db.opener(_resolve_db_path, foreign_keys=True)
 
 
 def initialize_db(db_path: Path | None = None) -> None:

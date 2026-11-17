@@ -9,15 +9,13 @@ stale, so the /today route regenerates it in the background.
 from __future__ import annotations
 
 import logging
-import sqlite3
-from collections.abc import Generator
-from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import BaseModel
 
 from openexecutive.memory import episodic as _episodic
+from openexecutive.utils import db
 
 logger = logging.getLogger(__name__)
 
@@ -51,16 +49,7 @@ def _resolve_db_path(db_path: Path | None) -> Path:
     return _episodic.DB_PATH
 
 
-@contextmanager
-def _get_conn(db_path: Path | None = None) -> Generator[sqlite3.Connection, None, None]:
-    resolved = _resolve_db_path(db_path)
-    conn = sqlite3.connect(str(resolved))
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
+_get_conn = db.opener(_resolve_db_path)
 
 
 def initialize_db(db_path: Path | None = None) -> None:

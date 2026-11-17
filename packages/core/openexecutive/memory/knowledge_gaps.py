@@ -51,6 +51,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from openexecutive.utils import db
+
 logger = logging.getLogger(__name__)
 
 TABLE = "knowledge_gaps"
@@ -86,12 +88,7 @@ _WORD_RE = re.compile(r"[a-z0-9$%][a-z0-9$%.,'-]*")
 _UNNAMED_RE = re.compile(r"\b(he|she|him|his|her|hers)\b", re.IGNORECASE)
 
 
-def _db(db_path: Path | None) -> Path:
-    if db_path is not None:
-        return db_path
-    from openexecutive.memory import episodic
-
-    return Path(episodic.DB_PATH)
+_db = db.company_path
 
 
 def _connect(db_path: Path | None) -> sqlite3.Connection:

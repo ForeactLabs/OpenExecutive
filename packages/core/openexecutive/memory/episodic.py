@@ -5,8 +5,7 @@ import logging
 import os
 import sqlite3
 import threading
-from collections.abc import Collection, Generator
-from contextlib import contextmanager
+from collections.abc import Collection
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -14,6 +13,7 @@ from typing import Any, NamedTuple
 from pydantic import BaseModel
 
 from openexecutive.memory.conversation_ids import family_clause, family_params
+from openexecutive.utils import db
 
 logger = logging.getLogger(__name__)
 
@@ -155,15 +155,7 @@ def _resolve_db_path(db_path: Path | None) -> Path:
     return db_path if db_path is not None else DB_PATH
 
 
-@contextmanager
-def _get_conn(db_path: Path | None = None) -> Generator[sqlite3.Connection, None, None]:
-    conn = sqlite3.connect(str(_resolve_db_path(db_path)))
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
+_get_conn = db.opener(_resolve_db_path)
 
 
 def initialize_db(db_path: Path | None = None) -> None:

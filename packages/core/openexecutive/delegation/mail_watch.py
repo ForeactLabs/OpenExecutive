@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from openexecutive.delegation.schema import MAIL_WATCH_TABLE, ensure_schema
+from openexecutive.utils import db
 
 logger = logging.getLogger(__name__)
 
@@ -59,12 +60,7 @@ class MailWatch:
     expires_at: str
 
 
-def _db(db_path: Path | None) -> Path:
-    if db_path is not None:
-        return db_path
-    from openexecutive.memory import episodic
-
-    return Path(episodic.DB_PATH)
+_db = db.company_path
 
 
 def _connect(db_path: Path | None) -> sqlite3.Connection:

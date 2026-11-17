@@ -5,8 +5,6 @@ import logging
 import os
 import sqlite3
 import uuid
-from collections.abc import Generator
-from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -15,6 +13,7 @@ from openexecutive.alerts.models import (
     Alert,
     MuteTopic,
 )
+from openexecutive.utils import db
 from openexecutive.utils.text_search import words_clause
 
 logger = logging.getLogger(__name__)
@@ -31,16 +30,7 @@ def _resolve_db_path(db_path: Path | None) -> Path:
     return db_path if db_path is not None else DB_PATH
 
 
-@contextmanager
-def _get_conn(db_path: Path | None = None) -> Generator[sqlite3.Connection, None, None]:
-    conn = sqlite3.connect(str(_resolve_db_path(db_path)))
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
+_get_conn = db.opener(_resolve_db_path, foreign_keys=True)
 
 
 def initialize_db(db_path: Path | None = None) -> None:

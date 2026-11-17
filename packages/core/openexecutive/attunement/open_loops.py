@@ -52,6 +52,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from openexecutive.utils import db
+
 logger = logging.getLogger(__name__)
 
 OPEN_LOOP_KIND = "open_loop"
@@ -321,10 +323,7 @@ def _loop_from_row(r: Any, names: dict[int, str]) -> OpenLoop:
 # --------------------------------------------------------------------------- #
 
 
-def _db(db_path: Path | None) -> Path:
-    from openexecutive.memory.episodic import _resolve_db_path
-
-    return _resolve_db_path(db_path)
+_db = db.company_path
 
 
 def _clean(text: str, limit: int) -> str:

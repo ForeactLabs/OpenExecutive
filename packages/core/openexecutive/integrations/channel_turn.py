@@ -94,17 +94,53 @@ class TurnResult:
     person_id: int | None
 
 
+async def reads(
+    session: Any,
+    *,
+    query: str | None,
+    person: Any | None,
+    is_dm: bool,
+    store: Any | None = None,
+) -> tuple[str, str, str]:
+    """What a conversation's turn reads before the Executive runs: knowledge
+    matched to ``query`` (none for a ``None`` query), the active projects, and
+    the person's open cards (in their own direct conversation only, which
+    also records on ``session`` which cards the turn may answer).
+
+    Every step blocks (a vector search, SQLite reads), so none runs on the
+    event loop every other conversation shares. Knowledge is capped the same
+    everywhere: uncapped, a turn carried ~25k characters of excerpts, paid on
+    every model call of the turn."""
+    from openexecutive.config import get_settings
+    from openexecutive.integrations.channel_context import attach_briefing_context
+    from openexecutive.knowledge.retriever import chat_builtin_results, retrieve
+    from openexecutive.memory.episodic import format_for_prompt
+
+    async def knowledge() -> str:
+        if query is None:
+            return ""
+        kwargs: dict[str, Any] = {
+            "query": query,
+            "max_chars": get_settings().knowledge_chat_max_chars,
+            "n_builtin": chat_builtin_results(),
+        }
+        if store is not None:
+            kwargs["store"] = store
+        return await asyncio.to_thread(retrieve, **kwargs)
+
+    retrieved, projects = await asyncio.gather(
+        knowledge(),
+        asyncio.to_thread(format_for_prompt, session_id=session.session_id),
+    )
+    board = await asyncio.to_thread(attach_briefing_context, session, is_dm=is_dm, person=person)
+    return retrieved, projects, board
+
+
 async def run(turn: ChannelTurn) -> TurnResult:
     """Take the Executive's turn on ``turn``. Raises what the turn raises:
     the adapter owns the apology, because only it can post one."""
-    from openexecutive.config import get_settings
     from openexecutive.integrations.channel_cards import shows_cards
-    from openexecutive.integrations.channel_context import (
-        attach_briefing_context,
-        build_channel_context_block,
-    )
-    from openexecutive.knowledge.retriever import chat_builtin_results, retrieve
-    from openexecutive.memory.episodic import format_for_prompt
+    from openexecutive.integrations.channel_context import build_channel_context_block
     from openexecutive.memory.session_store import load_messages
     from openexecutive.onboarding.profile_builder import load_or_create_profile
     from openexecutive.orchestrator.executive import Executive
@@ -134,23 +170,8 @@ async def run(turn: ChannelTurn) -> TurnResult:
     if turn.seen_ref is not None:
         session.seen_channel_refs.add(turn.seen_ref)
 
-    # Both block (a vector search, a SQLite read), so neither runs on the
-    # event loop every other conversation shares.
-    retrieve_kwargs: dict[str, Any] = {
-        "query": turn.own_text,
-        "max_chars": get_settings().knowledge_chat_max_chars,
-        "n_builtin": chat_builtin_results(),
-    }
-    if turn.store is not None:
-        retrieve_kwargs["store"] = turn.store
-    retrieved_context, episodic_context = await asyncio.gather(
-        asyncio.to_thread(retrieve, **retrieve_kwargs),
-        asyncio.to_thread(format_for_prompt, session_id=turn.session_id),
-    )
-
-    # The open cards, in the person's own direct message only.
-    briefing_context = await asyncio.to_thread(
-        attach_briefing_context, session, is_dm=turn.is_dm, person=turn.person
+    retrieved_context, episodic_context, briefing_context = await reads(
+        session, query=turn.own_text, person=turn.person, is_dm=turn.is_dm, store=turn.store
     )
 
     # Given to the model only: the block is consumed once, so it must not
@@ -240,4 +261,4 @@ def save_turn(
     return True
 
 
-__all__ = ["ChannelTurn", "TurnResult", "owner_or_principal", "run", "save_turn"]
+__all__ = ["ChannelTurn", "TurnResult", "owner_or_principal", "reads", "run", "save_turn"]
