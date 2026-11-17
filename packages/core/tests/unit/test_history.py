@@ -258,3 +258,4 @@ def test_shown_summary_puts_you_in_front_of_the_verb() -> None:
     assert shown_summary("Had promised Dana the deck by Friday") == "You had promised Dana the deck by Friday"
     assert shown_summary("Were told the launch slips a week") == "You were told the launch slips a week"
     assert shown_summary("Rose will send the deck") == "Rose will send the deck"
+    assert shown_summary("Sent, signed and returned the NDA") == "You sent, signed and returned the NDA"

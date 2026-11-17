@@ -97,6 +97,8 @@ def test_each_person_sees_only_their_own(client: TestClient, ids: dict[str, int]
     assert shown["correction"] == "Shipped Friday, not Monday."
     # Searching the words on screen finds it.
     assert len(client.get("/memories/history?q=you told dana", headers=OWNER).json()["notes"]) == 1
+    # Only a leading "you" is dropped; on its own it is still a search word.
+    assert client.get("/memories/history?q=you", headers=OWNER).json()["notes"] == []
     # On for everyone on the team until they turn it off.
     assert mine["reply_notes"] is True and mine["effective_retention_days"] == 90
     assert mine["retention_choices"] == [30, 90, 365, None]
