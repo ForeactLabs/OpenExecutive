@@ -160,3 +160,16 @@ def test_reset_forgets_the_old_agent_overrides(
     _reset(tmp_path)
     assert overrides.get_override("finance") is None
     overrides.invalidate_cache()
+
+
+def test_every_recurring_seed_points_at_real_code() -> None:
+    """The seeds are named as strings, so a rename would only show as a log
+    line after a reset. Each must import, be callable, and use a real flag."""
+    import importlib
+
+    from openexecutive.config import Settings
+    from openexecutive.scheduler import runner
+
+    for name, flag, module, func in runner._RECURRING_SEEDS:
+        assert callable(getattr(importlib.import_module(module), func)), name
+        assert flag is None or flag in Settings.model_fields, name
