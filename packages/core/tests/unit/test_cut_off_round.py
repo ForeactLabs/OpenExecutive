@@ -259,3 +259,31 @@ def test_only_the_round_right_after_a_cut_runs_on() -> None:
         FinalMsg([TextBlock("Final answer.")], "end_turn"),
     ])
     assert text == "Here is the first half.\n\nFinal answer."
+
+
+def test_the_cut_call_is_not_counted_as_a_call_made() -> None:
+    calls: list[tuple[str, str]] = []
+    provider = _ScriptedProvider(
+        [
+            _FinalMsg([_ToolUseBlock("cut", "draft_artifact", {})], "max_tokens"),
+            _FinalMsg([_TextBlock("Done.")], "end_turn"),
+        ]
+    )
+
+    async def _go() -> None:
+        with patch("openexecutive.orchestrator.executive.get_provider", return_value=provider), patch.dict(
+            "openexecutive.orchestrator.executive._ALL_SKILL_HANDLERS", {"draft_artifact": lambda *_a, **_k: "x"},
+        ):
+            async for _ in Executive()._stream_agent_loop(
+                system_blocks=[], messages=[{"role": "user", "content": "make the sheet"}], model="claude-test",
+                calls_out=calls,
+            ):
+                pass
+
+    asyncio.run(_go())
+
+    assert calls == []
+    results = provider.calls[1]["messages"][-1]["content"]
+    assert [(b["tool_use_id"], b["content"]) for b in results if b.get("type") == "tool_result"] == [
+        ("cut", CUT_OFF_RESULT)
+    ]

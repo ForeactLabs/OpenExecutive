@@ -3061,9 +3061,13 @@ class Executive:
             # the history, which every later round sends again.
             if cut_id is not None and last_written is not None:
                 last_written["input"] = {}
+            # Nothing below sees the cut call (no hand-over ask, no count of
+            # calls made): it only gets CUT_OFF_RESULT, after the others.
+            cut_results: list[dict[str, Any]] = []
+            if cut_id is not None:
+                tool_uses = [tu for tu in tool_uses if tu["id"] != cut_id]
+                cut_results.append({"type": "tool_result", "tool_use_id": cut_id, "content": CUT_OFF_RESULT})
             for i, tu in enumerate(tool_uses):
-                if tu["id"] == cut_id:
-                    continue
                 if tu["name"] == turn_progress.SHOW_PROGRESS:
                     result, progress_event, shown_progress = turn_progress.apply(
                         tu["input"],
@@ -3090,8 +3094,6 @@ class Executive:
                     own = _own_tool_call(tu, turn_handlers)
                     if own is not None:
                         tool_uses[i] = own
-            if cut_id is not None:
-                group_results[cut_id] = CUT_OFF_RESULT
             # The turn's one full re-read of a result the reading budget cut
             # is answered from that result, never by running the tool again
             # (it may have been a write).
@@ -3314,7 +3316,7 @@ class Executive:
                 # The progress call is not what the round is doing.
                 round_work = [
                     tu for tu in tool_uses
-                    if tu["name"] != turn_progress.SHOW_PROGRESS and tu["id"] != cut_id
+                    if tu["name"] != turn_progress.SHOW_PROGRESS
                 ]
                 activity = summarize_activity(round_work, iteration=iteration)
                 # What the round read, by kind, for the card when the turn
@@ -4170,6 +4172,7 @@ class Executive:
                 )
                 content = tool_images.content(content, images_by_id.get(tu["id"]), sees=sees)
                 tool_results.append({"type": "tool_result", "tool_use_id": tu["id"], "content": content})
+            tool_results.extend(cut_results)
             # Messages the person sent since the last round ride in this
             # round's user message, after the tool results (which must come
             # first). Only this loop's own, newest message changes, so the
