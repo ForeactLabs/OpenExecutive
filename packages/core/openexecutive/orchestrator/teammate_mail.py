@@ -338,14 +338,7 @@ def _sides(session: Any) -> _Sides | None:
     # nobody, but the Executive's sends for the workflow's own person stay
     # in reach.
     try:
-        mine = reader_id if session is not None else _workflow_person()
-        if mine is None and str(getattr(session, "origin_channel", "") or "") == "email":
-            # Mail from someone outside the team is answered for the
-            # principal: the sends they asked for are that turn's own thread.
-            from openexecutive.people.store import find_principal_person
-
-            principal = find_principal_person()
-            mine = principal.id if principal is not None else None
+        mine = _turn_person(session, reader_id)
         rows = _sent_rows()
     except Exception:
         logger.warning("teammate_mail: sent mail read failed — refusing", exc_info=True)
@@ -427,11 +420,25 @@ def _workflow_person() -> int | None:
     return principal.id if principal is not None else None
 
 
+def _turn_person(session: Any, reader_id: int | None) -> int | None:
+    """Whose sends this turn's own are: its reader; a turn answering mail
+    from outside the team works for the principal; with no session, a
+    running workflow's creator. ``sent_for`` keeps a send for the same
+    person ``_sides`` reads as this turn's own."""
+    from openexecutive.people.store import find_principal_person
+
+    if session is None:
+        return _workflow_person()
+    if reader_id is None and str(getattr(session, "origin_channel", "") or "") == "email":
+        principal = find_principal_person()
+        return principal.id if principal is not None else None
+    return reader_id
+
+
 def sent_for() -> int | None:
     """Whom a send happening now is for: inside an approved step, the person
     who asked for it (the principal when they approved their own); else this
-    turn's reader (``_reader_id``); with no session, a running workflow's
-    creator. None when no one can be told."""
+    turn's own person (``_turn_person``). None when no one can be told."""
     from openexecutive.orchestrator import levels
     from openexecutive.orchestrator.schedule_tools import current_session
     from openexecutive.people.store import find_principal_person
@@ -444,7 +451,7 @@ def sent_for() -> int | None:
             principal = find_principal_person()
             return principal.id if principal is not None else None
         session = current_session.get()
-        return _reader_id(session) if session is not None else _workflow_person()
+        return _turn_person(session, _reader_id(session) if session is not None else None)
     except Exception:
         logger.warning("teammate_mail: couldn't tell whom a send was for", exc_info=True)
         return None

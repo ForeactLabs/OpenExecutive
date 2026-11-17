@@ -739,6 +739,14 @@ def test_an_outside_senders_email_turn_reads_the_principals_thread(roster: Simpl
     assert "withheld" not in out
 
 
+def test_a_send_on_an_outside_senders_email_turn_is_the_principals(roster: SimpleNamespace) -> None:
+    roster.session.origin_channel = "email"
+    with _reader(None):
+        tm.note_sent(subject="Re: Crates", recipients={DANA}, result="Email sent! Message ID: e1")
+    [row] = tm._sent_rows()
+    assert row.person_id == roster.owner
+
+
 def test_an_outside_senders_email_turn_still_leaves_a_teammates_send_out(roster: SimpleNamespace) -> None:
     _send_for(roster.ben, mid="s1", subject="Crates on Monday")
     roster.session.origin_channel = "email"
