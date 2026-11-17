@@ -277,6 +277,44 @@ def test_choosing_who_a_reply_goes_to(
     assert client.put("/delegation/replies/9999/recipients", json={"everyone": True}, headers=OWNER).status_code == 404
 
 
+def test_choosing_who_a_reply_goes_from(
+    client: TestClient, ids: dict[str, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openexecutive.delegation import answers
+
+    async def as_executive(model: str, system: str, turn: str) -> dict[str, Any]:
+        return {"body": "Hi Dana,\n\nOlivia asked me to say she'll get back to you."}
+
+    mailbox, card_id = _card(ids["principal"], monkeypatch)
+    monkeypatch.setattr("openexecutive.delegation.gmail.gmail_for", lambda email: mailbox)
+    monkeypatch.setattr(answers, "_call_model", as_executive)
+    monkeypatch.setenv("OE_LOCAL_LOGIN", "1")
+    url = f"/delegation/replies/{card_id}/from"
+    before = client.get("/delegation/replies", headers=OWNER).json()["cards"][0]
+    assert before["from_executive"] is False
+    # Someone else's card isn't theirs to switch, and stays as it was.
+    assert client.put(url, json={"executive": True}, headers=TEAMMATE).status_code == 404
+    assert client.put(url, json={"executive": True}, headers=NOT_ON_TEAM).status_code in (403, 404)
+    resp = client.put(url, json={"executive": True}, headers=OWNER)
+    assert resp.status_code == 200
+    card = resp.json()
+    assert card["from_executive"] is True and card["executive_name"]
+    assert card["draft_body"].startswith("Hi Dana,\n\nOlivia asked me")
+    # Back to them: their words as they were.
+    back = client.put(url, json={"executive": False}, headers=OWNER).json()
+    assert back["from_executive"] is False and back["draft_body"] == before["draft_body"]
+
+    # A rewrite that fails says so, and the card stays from them.
+    async def broken(model: str, system: str, turn: str) -> dict[str, Any]:
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(answers, "_call_model", broken)
+    resp = client.put(url, json={"executive": True}, headers=OWNER)
+    assert resp.status_code == 502 and resp.json()["detail"]["code"] == "rewrite_failed"
+    assert client.get("/delegation/replies", headers=OWNER).json()["cards"][0]["from_executive"] is False
+    assert client.put("/delegation/replies/9999/from", json={"executive": True}, headers=OWNER).status_code == 404
+
+
 def test_view_an_email_from_home(client: TestClient, ids: dict[str, int], monkeypatch: pytest.MonkeyPatch) -> None:
     from openexecutive.delegation.gmail import MailAttachment
 

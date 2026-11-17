@@ -98,7 +98,8 @@ TOOL_DEFINITION: dict[str, Any] = {
         "Run Python with real libraries, on attached files or on data you have or "
         "make up, when a job needs more than your tools: split or merge PDFs and read their pages (pypdf), read or build "
         "spreadsheets (openpyxl, pandas), analyse data (pandas, numpy), draw charts "
-        "(matplotlib), work with images (Pillow), and make documents, from scratch "
+        "(matplotlib; whenever the person asks for a chart, graph or plot, draw it "
+        "here as a PNG, never as text bars or characters), work with images (Pillow), and make documents, from scratch "
         "or from files: Word (python-docx, imported as docx), PowerPoint "
         "(python-pptx, as pptx), laid-out PDFs (fpdf2, as fpdf), Excel with charts "
         "(openpyxl, xlsxwriter). These make files to download; for a Google Doc, "
@@ -769,6 +770,10 @@ def _meter(details: dict[str, Any]) -> None:
         logger.warning("python job: couldn't record its usage", exc_info=True)
 
 
+# An image the chat shows inline from its link (``show``).
+_IMAGE_NAME = re.compile(r"\.(png|jpe?g|gif|webp)$", re.I)
+
+
 async def _keep(files: dict[str, bytes]) -> dict[str, Any]:
     """Store a job's result files and return their links for the reply. They
     are kept for the conversation too, so its later file tools find them by
@@ -795,11 +800,15 @@ async def _keep(files: dict[str, bytes]) -> dict[str, Any]:
         "files": [
             {"name": n, "bytes": len(d),
              "link": f"/api/backend/python-jobs/{job_id}/{urllib.parse.quote(n)}",
-             **({"handle": f"file:{safe_name(n)}"} if safe_name(n) in kept else {})}
+             **({"handle": f"file:{safe_name(n)}"} if safe_name(n) in kept else {}),
+             **({"show": f"![{n}](/api/backend/python-jobs/{job_id}/{urllib.parse.quote(n)})"}
+                if _IMAGE_NAME.search(n) else {})}
             for n, d in sorted(files.items())
         ],
         "note": (
-            "Give the person each file's link as a markdown link. A file's handle "
+            "Put each image file's `show` line in the answer as it is, so the image "
+            "appears in the chat (a handle never shows as an image); give every "
+            "other file's link as a markdown link. A file's handle "
             "attaches it to a draft (ghostwrite_email files) or saves it to a "
             "Drive folder (save_file): do that yourself when they asked for it."
         ),

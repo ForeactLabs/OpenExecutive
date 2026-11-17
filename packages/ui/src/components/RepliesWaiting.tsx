@@ -8,6 +8,7 @@ import {
   changeReply,
   dismissReplyCard,
   editReplyText,
+  setReplyFrom,
   setReplyRecipients,
   getReplyCards,
   ReplySendError,
@@ -28,6 +29,7 @@ import {
   mailboxName,
   safeGmailLink,
   sendLeftNothing,
+  sendButtonLabel,
   sendQuestion,
   senderLine,
   recipientNames,
@@ -66,6 +68,8 @@ const SETTLE_POLL_MS = 20_000;
 const WORK_POLL_MS = 3_000;
 // What shows while "Reply to" is being changed.
 const RECIPIENTS_RUNNING = "Changing who it goes to…";
+// What shows while From is being changed (the Executive rewrites it).
+const FROM_RUNNING = "Switching who it's from…";
 const STOPPING = "Stopping…";
 
 // The cards and their refresh, for the Home "Needs you" list, which shows
@@ -299,6 +303,19 @@ export function ReplyCardItem({
     }
   };
 
+  const pickFrom = async (executive: boolean) => {
+    if (executive === Boolean(card.from_executive)) return;
+    setStep({ kind: "busy", label: FROM_RUNNING });
+    setError(null);
+    try {
+      onChanged?.(await setReplyFrom(card.decision_id, executive));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't change who it's from.");
+    } finally {
+      setStep({ kind: "idle" });
+    }
+  };
+
   const answer = async (index: number, text: string) => {
     const words = text.trim();
     if (!words) return;
@@ -361,7 +378,9 @@ export function ReplyCardItem({
       if (result.status === "sent") {
         onGone(
           card.decision_id,
-          followUp
+          card.from_executive
+            ? `${card.executive_name || "Executive"} sent it to ${who}, with you on cc.`
+            : followUp
             ? allow
               ? `Sent your follow-up to ${who}. Follow-ups to them go on their own from now on.`
               : `Sent your follow-up to ${who}.`
@@ -432,6 +451,8 @@ export function ReplyCardItem({
       help="Everything sent as you to them goes on its own from then on, where Approvals lets it. Undo it on Delegate."
     />
   ) : null;
+  const sendLabel = sendButtonLabel(card, "Send");
+  const executiveName = card.executive_name || "Executive";
   const askToSend = () => {
     setOpen(true);
     setStep({ kind: "ask", recipients: card.draft_to, allow: Boolean(card.can_allow) && nextTime });
@@ -612,7 +633,7 @@ export function ReplyCardItem({
                   onClick={left > 0 ? () => setOpen(true) : askToSend}
                   disabled={busy || card.working}
                 >
-                  Send
+                  {sendLabel}
                 </Button>
                 <Button variant="secondary" onClick={() => setOpen(true)} disabled={busy}>
                   Open
@@ -749,7 +770,40 @@ export function ReplyCardItem({
             </div>
           )}
         </div>
+        {!followUp && !unconfirmed && (
+          <div className="mt-2 flex items-center gap-2">
+            <span className="w-9 text-xs text-fg-subtle">From</span>
+            <div
+              role="radiogroup"
+              aria-label="From"
+              className="inline-flex overflow-hidden rounded-full border border-line-strong"
+            >
+              {([false, true] as const).map((executive) => {
+                const on = executive === Boolean(card.from_executive);
+                return (
+                  <button
+                    key={String(executive)}
+                    type="button"
+                    role="radio"
+                    aria-checked={on}
+                    disabled={busy || confirming || editing !== null || Boolean(card.working)}
+                    onClick={() => void pickFrom(executive)}
+                    className={`min-h-9 px-3 text-[13px] disabled:opacity-60 ${
+                      on ? "bg-accent/20 font-semibold text-fg" : "text-fg-muted hover:bg-surface-overlay/60"
+                    }`}
+                  >
+                    {executive ? executiveName : "You"}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        {running(FROM_RUNNING) && (
+          <p className="mt-1 text-xs text-fg-subtle" aria-live="polite">{FROM_RUNNING}</p>
+        )}
         <div className="mt-1 text-xs text-fg-subtle break-words" title={card.draft_to.join(", ")}>To {recipientNames(card.draft_to)}</div>
+        {card.from_executive && <div className="mt-0.5 text-xs text-fg-subtle">Cc you</div>}
         {running(RECIPIENTS_RUNNING) && (
           <p className="mt-1 text-xs text-fg-subtle" aria-live="polite">{RECIPIENTS_RUNNING}</p>
         )}
@@ -864,7 +918,7 @@ export function ReplyCardItem({
           {step.kind === "confirm" && (
             <p className="text-sm text-amber-700 dark:text-amber-300">{step.message}</p>
           )}
-          <p className="text-sm text-fg">{sendQuestion(step.recipients, mailbox, inMailbox)}</p>
+          <p className="text-sm text-fg">{sendQuestion(step.recipients, mailbox, inMailbox, card.from_executive ? executiveName : "")}</p>
           {step.kind === "ask" && nextTimeTick("mt-2")}
           {allowNow && (
             <p className="mt-2 text-sm text-fg">
@@ -918,7 +972,7 @@ export function ReplyCardItem({
             onClick={askToSend}
             disabled={busy || left > 0 || card.working}
           >
-            {running("Sending…") ? "Sending…" : "Send"}
+            {running("Sending…") ? "Sending…" : sendLabel}
           </Button>
           {gmailLink && (
             <a

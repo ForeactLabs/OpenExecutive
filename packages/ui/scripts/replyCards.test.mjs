@@ -11,6 +11,7 @@ import {
   replyFlagLines,
   replyToChoice,
   safeGmailLink,
+  sendButtonLabel,
   sendLeftNothing,
   sendQuestion,
   senderLine,
@@ -162,4 +163,14 @@ test("namesFromLine reads a draft row's line, even one cut short", () => {
     "Brennan Monaco and Annamarie Braden",
   );
   assert.equal(namesFromLine("dana@example.com"), "dana@example.com");
+});
+
+test("a reply sent from the Executive says so on Send", () => {
+  assert.equal(sendButtonLabel({}), "Send");
+  assert.equal(sendButtonLabel({ from_executive: true, executive_name: "Ava" }), "Send from Ava");
+  assert.equal(sendButtonLabel({ from_executive: true }, "Send both"), "Send both from Executive");
+  assert.equal(
+    sendQuestion(["dana@x.example"], "Gmail", false, "Ava"),
+    "Send this to dana@x.example from Ava, with you on cc, as shown above?",
+  );
 });

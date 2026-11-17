@@ -25,23 +25,49 @@ from typing import Any
 
 from openexecutive.memory.drive_reads import parse_content_result
 
+# Whose mailbox a mail read is in, said one way everywhere: "my email" is the
+# Executive's own mailbox (the connected Gmail or Outlook tools below), "your
+# email" is the person's own (Act as me's reads, `activity_labels`). Every
+# search, read and attachment label for either takes its words from here, so
+# the two can never trade places.
+MY_MAIL = "my"
+YOUR_MAIL = "your"
+_MAIL_ACTIONS: dict[str, tuple[str, str]] = {
+    "search": ("Searched {} email", "Searching {} email"),
+    "read": ("Read {} email", "Reading {} email"),
+    "attachment": ("Opened an attachment in {} email", "Opening an attachment in {} email"),
+    "attachments": ("Checked attachments in {} email", "Checking attachments in {} email"),
+}
+
+
+def mail_labels(whose: str, action: str) -> tuple[str, str]:
+    """(done, doing) for a mail search, read or attachment in `whose` mailbox
+    (`MY_MAIL` or `YOUR_MAIL`)."""
+    done, doing = _MAIL_ACTIONS[action]
+    return done.format(whose), doing.format(whose)
+
+
+_MY_SEARCH = mail_labels(MY_MAIL, "search")
+_MY_READ = mail_labels(MY_MAIL, "read")
+_MY_ATTACHMENT = mail_labels(MY_MAIL, "attachment")
+
 # Underlying tool name (without its `server__` prefix, hyphens folded to
 # underscores) -> (done, doing). `doing` carries no ellipsis; the progress line
 # adds it. Google Workspace and Microsoft 365 names share the table: the two
 # servers do not reuse a name for different things.
 _LABELS: dict[str, tuple[str, str]] = {
-    # Mail
-    "search_gmail_messages": ("Searched my email", "Searching my email"),
-    "list_mail_messages": ("Searched my email", "Searching my email"),
-    "list_mail_folder_messages": ("Searched my email", "Searching my email"),
-    "get_gmail_message_content": ("Read an email", "Reading an email"),
-    "get_gmail_messages_content_batch": ("Read an email", "Reading an email"),
-    "get_gmail_thread_content": ("Read an email", "Reading an email"),
-    "get_gmail_threads_content_batch": ("Read an email", "Reading an email"),
-    "get_mail_message": ("Read an email", "Reading an email"),
-    "get_gmail_attachment_content": ("Opened an attachment", "Opening an attachment"),
-    "get_mail_attachment": ("Opened an attachment", "Opening an attachment"),
-    "list_mail_attachments": ("Checked attachments", "Checking attachments"),
+    # Mail. These connected tools are the Executive's own mailbox: "my email".
+    "search_gmail_messages": _MY_SEARCH,
+    "list_mail_messages": _MY_SEARCH,
+    "list_mail_folder_messages": _MY_SEARCH,
+    "get_gmail_message_content": _MY_READ,
+    "get_gmail_messages_content_batch": _MY_READ,
+    "get_gmail_thread_content": _MY_READ,
+    "get_gmail_threads_content_batch": _MY_READ,
+    "get_mail_message": _MY_READ,
+    "get_gmail_attachment_content": _MY_ATTACHMENT,
+    "get_mail_attachment": _MY_ATTACHMENT,
+    "list_mail_attachments": mail_labels(MY_MAIL, "attachments"),
     "draft_gmail_message": ("Drafted an email", "Drafting an email"),
     "create_draft_email": ("Drafted an email", "Drafting an email"),
     "create_reply_draft": ("Drafted a reply", "Drafting a reply"),

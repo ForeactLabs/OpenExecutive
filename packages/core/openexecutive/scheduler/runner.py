@@ -9,10 +9,13 @@ one process against the same database.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, tzinfo
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from openexecutive.audit.context import unscoped_audit_rows
 from openexecutive.memory.chat_review import CHAT_REVIEW_KIND as _CHAT_REVIEW_KIND
@@ -31,6 +34,8 @@ from openexecutive.workflows import run_control
 from openexecutive.workflows.gate import ensure_workflow_event
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from openexecutive.briefing.brief_state import DeliveryReason
     from openexecutive.people.models import Person
 
@@ -39,6 +44,20 @@ logger = logging.getLogger(__name__)
 
 # Strong refs so GC cannot cancel in-flight tasks mid-execution.
 _inflight: set[asyncio.Task[None]] = set()
+# The actions those tasks run, as (id, kind, run_at): a restore of a saved
+# company database leaves these rows running (``clients.slots.
+# restore_company_db``), since their handlers are still going and will finish
+# and chain them. Ids alone can repeat across two companies' databases.
+_inflight_actions: set[tuple[int, str, str]] = set()
+
+
+def in_flight_actions() -> frozenset[tuple[int, str, str]]:
+    """The scheduled actions running in this process now: (id, kind, run_at)."""
+    return frozenset(_inflight_actions)
+
+
+def _forget_inflight(key: tuple[int, str, str], _task: asyncio.Task[None]) -> None:
+    _inflight_actions.discard(key)
 
 # Liveness for the Setup status page (api/setup_checks.py): when this
 # loop started, and when its last tick finished and how. Every tick ends by
@@ -314,44 +333,22 @@ async def run_scheduler(
     except Exception:
         logger.exception("scheduler: requeue_orphaned_running failed")
 
-    # Idempotent seed of the recurring principal briefs. After the first
-    # boot, subsequent restarts are no-ops because each brief row chains
-    # the next occurrence on fire (see _run_principal_brief).
-    try:
-        seeded = seed_principal_briefs()
-        if seeded:
-            logger.info("scheduler: seeded %d principal brief row(s)", seeded)
-    except Exception:
-        logger.exception("scheduler: seed_principal_briefs failed")
-
     # Overnight client rotation: reconcile a stale marker from a crash
-    # mid-rotation (it would pause claiming forever), then seed the next
-    # occurrence (no-op unless CLIENT_ROTATION_ENABLED).
+    # mid-rotation (it would pause claiming forever) before seeding.
     try:
-        from openexecutive.clients.rotation import (
-            clear_stale_rotation_marker,
-            seed_client_rotation,
-        )
+        from openexecutive.clients.rotation import clear_stale_rotation_marker
         from openexecutive.config import get_settings as _gs
 
         clear_stale_rotation_marker(_gs())
-        seed_client_rotation()
     except Exception:
-        logger.exception("scheduler: rotation reconcile/seed failed")
+        logger.exception("scheduler: rotation reconcile failed")
+
+    # Every recurring job, seeded idempotently (a reset calls the same).
+    seed_recurring_jobs()
 
     # Expire past-TTL alerts once at boot (a redeploy cleans an old backlog
     # immediately) and then every _ALERT_SWEEP_INTERVAL from the tick loop.
     _maybe_sweep_alerts(datetime.now(UTC))
-
-    # Executive alert review heartbeat — idempotent bootstrap, like nudge_scan.
-    try:
-        from openexecutive.alerts.review import bootstrap_alert_review_scan
-        from openexecutive.config import get_settings as _review_settings
-
-        if _review_settings().alert_review_enabled:
-            bootstrap_alert_review_scan()
-    except Exception:
-        logger.exception("scheduler: alert_review bootstrap failed")
 
     logger.info(
         "scheduler started (poll_interval=%ds)", poll_interval_seconds
@@ -406,27 +403,42 @@ async def run_scheduler(
                 _beat("rotating")
                 await asyncio.sleep(poll_interval_seconds)
                 continue
-            _maybe_refresh_narrative(now)
-            _maybe_scan_inbox(now)
-            _maybe_keep_contacts(now)
-            _maybe_remind_notes(now)
-            _maybe_send_reminders(now)
-            _maybe_check_mail_watches(now)
-            _maybe_watch_for_lead(now)
-            _maybe_release_held(now)
-            _maybe_push_cards(now)
-            _maybe_send_monthly_value(now)
-            due = claim_due_actions(now)
-            if due:
-                logger.info("scheduler: %d due action(s)", len(due))
-            for row in due:
-                # A scheduled action is unattended, never part of a turn: its
-                # task starts with no audit scope (create_task copies the
-                # context as it is here).
-                with unscoped_audit_rows():
-                    task = asyncio.create_task(_execute_action(row, gateway))
-                _inflight.add(task)
-                task.add_done_callback(_inflight.discard)
+            # The senders and the claim run under the restore lock, with no
+            # await inside, so a saved company database is never put back
+            # (restore_company_db, from any thread) while a tick reads it,
+            # and a tick never reads one before its queue is settled.
+            if not _claim_lock.acquire(blocking=False):
+                _beat("restoring")
+                await asyncio.sleep(poll_interval_seconds)
+                continue
+            try:
+                _maybe_refresh_narrative(now)
+                _maybe_scan_inbox(now)
+                _maybe_keep_contacts(now)
+                _maybe_remind_notes(now)
+                _maybe_send_reminders(now)
+                _maybe_check_mail_watches(now)
+                _maybe_watch_for_lead(now)
+                _maybe_release_held(now)
+                _maybe_push_cards(now)
+                _maybe_send_monthly_value(now)
+                due = claim_due_actions(now)
+                if due:
+                    logger.info("scheduler: %d due action(s)", len(due))
+                for row in due:
+                    # A scheduled action is unattended, never part of a turn: its
+                    # task starts with no audit scope (create_task copies the
+                    # context as it is here).
+                    with unscoped_audit_rows():
+                        task = asyncio.create_task(_execute_action(row, gateway))
+                    _inflight.add(task)
+                    task.add_done_callback(_inflight.discard)
+                    if row.id is not None:
+                        key = (row.id, row.kind, row.run_at)
+                        _inflight_actions.add(key)
+                        task.add_done_callback(functools.partial(_forget_inflight, key))
+            finally:
+                _claim_lock.release()
             _beat("ran")
         except asyncio.CancelledError:
             raise
@@ -1755,6 +1767,23 @@ GOAL_REVIEW_KIND = "goal_review"
 _DEFAULT_GOAL_REVIEW_SPEC = "weekly@mon@09:00"
 
 
+_claim_lock = threading.Lock()
+
+
+@contextmanager
+def hold_claims() -> Iterator[None]:
+    """Keep the scheduler's senders and claim off for the duration.
+
+    Held while a saved company database is put back (a client switch, an
+    unload, a backup restore). The tick takes the same lock around its
+    senders and claim, which contain no await, so from a worker thread this
+    waits for a running tick to finish, and on the loop thread it is always
+    free.
+    """
+    with _claim_lock:
+        yield
+
+
 def _rotation_pause_active() -> bool:
     """True while an overnight client rotation holds the claim pause.
 
@@ -1986,6 +2015,56 @@ def seed_principal_briefs() -> int:
         1 for kind in _RECURRING_KIND_ENV
         if _kind_runs_in(kind, mode) and _seed_kind(kind, now)
     )
+
+
+# Every recurring job the system seeds on its own: (name, the settings flag
+# that turns it on or None for always, module, function). Imported only when
+# seeded, so one module that fails to import stops only its own seed.
+_RECURRING_SEEDS: tuple[tuple[str, str | None, str, str], ...] = (
+    ("principal briefs", None, "openexecutive.scheduler.runner", "seed_principal_briefs"),
+    ("department check-ins", None, "openexecutive.departments.cadence", "bootstrap_cadences"),
+    ("workflow cadences", None, "openexecutive.workflows.dynamic_cadence", "seed_workflow_cadences"),
+    ("client rotation", None, "openexecutive.clients.rotation", "seed_client_rotation"),
+    ("nudge scan", "nudge_scan_enabled", "openexecutive.scheduler.nudge_engine", "bootstrap_nudge_scan"),
+    ("external monitor", "external_monitor_enabled", "openexecutive.monitoring.pipeline",
+     "bootstrap_external_monitor_scan"),
+    ("watchlist research", "watchlist_research_enabled", "openexecutive.monitoring.research.scheduler",
+     "bootstrap_watchlist_research_scan"),
+    ("alert review", "alert_review_enabled", "openexecutive.alerts.review", "bootstrap_alert_review_scan"),
+    ("Notion sync", "notion_sync_enabled", "openexecutive.knowledge.notion_sync", "bootstrap_notion_sync_scan"),
+    ("Drive sync", "drive_sync_enabled", "openexecutive.knowledge.drive_sync", "bootstrap_drive_sync_scan"),
+    ("OneDrive sync", "onedrive_sync_enabled", "openexecutive.knowledge.onedrive_sync",
+     "bootstrap_onedrive_sync_scan"),
+    ("Confluence sync", "confluence_sync_enabled", "openexecutive.knowledge.confluence_sync",
+     "bootstrap_confluence_sync_scan"),
+)
+
+
+def seed_recurring_jobs() -> None:
+    """Enqueue every recurring job the system runs on its own, each only if
+    none of its kind is pending: the principal's briefs and reflection,
+    department check-ins, workflow cadences, nudges, monitoring and research,
+    the alert review, document syncs and client rotation (each when it is
+    on). The one place that knows them (``_RECURRING_SEEDS``): the
+    scheduler calls it at start and a reset calls it after emptying the
+    queue. Never raises; a seed that fails,
+    in its import too, is logged and the rest still run."""
+    import importlib
+
+    from openexecutive.config import get_settings
+
+    try:
+        settings: Any = get_settings()
+    except Exception:
+        logger.exception("scheduler: seeding recurring jobs: settings unreadable")
+        return
+    for name, flag, module, func in _RECURRING_SEEDS:
+        try:
+            if flag is not None and not getattr(settings, flag):
+                continue
+            getattr(importlib.import_module(module), func)()
+        except Exception:
+            logger.exception("scheduler: seeding %s failed", name)
 
 
 def seed_weekly_review() -> int:

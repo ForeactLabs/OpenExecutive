@@ -115,6 +115,35 @@ def test_new_text_on_an_opened_card_makes_it_new_again() -> None:
     assert kept.status == "unread" and "Dana needs the answer today" in kept.body
 
 
+def test_a_card_put_away_is_no_card_to_join(mail_turn: Session) -> None:
+    with set_turn(session_id="s", turn_id="turn-1"):
+        first = _note("Leo asked about Friday")
+    assert alerts_store.set_alert_archived(first, True)
+    owners = one_card.reader_for(OWNER, private=False)
+    assert one_card.open_cards_from("mail:dana@northpeak.example", turn="turn-2", reader=owners) == []
+    # The model naming it is its own card too.
+    with set_turn(session_id="s", turn_id="turn-2"):
+        named = _note("Leo asked again", joins=first)
+    assert _get(named).status == "unread" and _get(named).superseded_by_alert_id is None
+    # And so is the same person on the same thread.
+    alerts_store.set_alert_archived(named, True)
+    with set_turn(session_id="s", turn_id="turn-3"):
+        again = _note("Leo asked about Friday again")
+    assert _get(again).status == "unread" and _get(again).superseded_by_alert_id is None
+
+
+def test_a_put_away_approve_card_is_still_replaced_by_a_newer_step(mail_turn: Session) -> None:
+    reply = {"to": "dana@northpeak.example", "subject": "Re: Labels", "thread_id": "thread-1"}
+    with set_turn(session_id="s", turn_id="turn-1"):
+        old_card, old = _approve(tool_input={**reply, "body": "x"})
+    assert alerts_store.set_alert_archived(old_card, True)
+    with set_turn(session_id="s", turn_id="turn-2"):
+        new_card, _ = _approve(tool_input={**reply, "body": "y"})
+    # Its step never waits on behind the newer one.
+    assert ledger.get_decision_instance(old).status == ledger.STATUS_CLOSED_EXTERNALLY  # type: ignore[union-attr]
+    assert _get(old_card).superseded_by_alert_id == new_card and _get(new_card).status == "unread"
+
+
 def test_cards_for_different_readers_or_privacy_stay_apart() -> None:
     with set_turn(session_id="s", turn_id="turn-1"):
         mine = _note("For the owner")

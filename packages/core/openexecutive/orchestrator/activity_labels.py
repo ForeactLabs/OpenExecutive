@@ -132,9 +132,10 @@ _LABELS: dict[str, str] = {
     # Act as me: a draft in the speaker's own Gmail (never sent)
     "ghostwrite_email": "Drafting an email in your voice…",
     # Act as me: reads of the speaker's own mailbox
-    "search_my_email": "Searching your email…",
-    "read_my_email": "Reading your email…",
-    "read_my_email_attachment": "Reading an attachment…",
+    # (their wording is shared with the Executive's own mailbox's, `mail_labels`)
+    "search_my_email": f"{tool_labels.mail_labels(tool_labels.YOUR_MAIL, 'search')[1]}…",
+    "read_my_email": f"{tool_labels.mail_labels(tool_labels.YOUR_MAIL, 'read')[1]}…",
+    "read_my_email_attachment": f"{tool_labels.mail_labels(tool_labels.YOUR_MAIL, 'attachment')[1]}…",
     "save_my_email_attachment": "Saving a file from your email…",
     "remind_me": "Setting a reminder…",
     "watch_for_email": "Watching for that email…",

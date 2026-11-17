@@ -136,6 +136,49 @@ def cancel_cadence_rows(name: str, db_path: Path | None = None) -> int:
     return cancelled
 
 
+def seed_workflow_cadences(db_path: Path | None = None) -> int:
+    """Schedule the next run of every active workflow with a cadence that has
+    none pending or running. A cadence chains its next run when one finishes,
+    so a run that never finished here (a restart mid-run, a restored copy
+    saved mid-run) would otherwise stop it for good. One of the recurring
+    seeds (``scheduler.runner.seed_recurring_jobs``). Returns the count
+    scheduled. Never raises."""
+    from openexecutive.memory.episodic import _get_conn, _resolve_db_path
+    from openexecutive.workflows.dynamic_store import list_definitions
+    from openexecutive.workflows.failure_alerts import RERUN_SCOPE_PREFIX
+
+    try:
+        resolved = _resolve_db_path(db_path)
+        if not resolved.exists():
+            return 0
+        with _get_conn(resolved) as conn:
+            if conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='scheduled_actions'"
+            ).fetchone() is None:
+                return 0
+            # A queued Run again is a one-off that never chains, so it is not
+            # the cadence's next run.
+            scheduled = {
+                str(row[0]) for row in conn.execute(
+                    "SELECT DISTINCT channel_ref FROM scheduled_actions "
+                    "WHERE kind = 'dynamic_workflow' AND status IN ('pending', 'running') "
+                    "AND (scope_key IS NULL OR scope_key NOT LIKE ?)",
+                    (f"{RERUN_SCOPE_PREFIX}%",),
+                ).fetchall()
+            }
+        defs = list_definitions(active_only=True, db_path=db_path)
+    except Exception:
+        logger.warning("dynamic_cadence: couldn't read the workflows to seed", exc_info=True)
+        return 0
+    seeded = 0
+    for defn in defs:
+        if not defn.cadence or defn.name in scheduled:
+            continue
+        if schedule_dynamic_workflow_cadence(defn, db_path=db_path) is not None:
+            seeded += 1
+    return seeded
+
+
 def retime_pending(db_path: Path | None = None) -> int:
     """After the company's time zone changes: each workflow with a run
     already scheduled gets it again at its time in the new zone. One that

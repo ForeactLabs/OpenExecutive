@@ -835,3 +835,71 @@ def test_a_search_of_the_company_drive_is_not_outside() -> None:
     assert oc.source_of("call_tool", {"name": "microsoft_365__search-onedrive-files", "arguments": {}}) is None
 
 
+
+
+def test_who_a_goes_rule_lets_go_is_not_someone_new_on_balanced(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.orchestrator import levels, outside_mode
+    from openexecutive.orchestrator import mcp_gateway as gw
+    from openexecutive.orchestrator import take_the_lead as ttl
+
+    level = {"now": outside_mode.OUTSIDERS}
+    monkeypatch.setattr(levels, "turn_level", lambda session=None: level["now"])
+    ttl.add_rule(ttl.SCOPE_COMPANY, ttl.RULE_PERSON, "pat.lane@vendor.example", created_by="t", effect=ttl.EFFECT_GO)
+    ttl.add_rule(ttl.SCOPE_COMPANY, ttl.RULE_DOMAIN, "partner.example", created_by="t", effect=ttl.EFFECT_GO)
+    ttl.add_rule(ttl.SCOPE_COMPANY, ttl.RULE_DOMAIN, "gmail.com", created_by="t", effect=ttl.EFFECT_GO)
+    ttl.add_rule(ttl.SCOPE_COMPANY, ttl.RULE_PERSON, "dana@vendor.example", created_by="t")
+
+    def send(to: str) -> str | None:
+        return gw._check_gmail_recipients(
+            "google_workspace__send_gmail_message", {"to": to, "subject": "Hello", "body": "Hi"},
+        )
+
+    def turn(**kw: Any) -> Any:
+        session = Session(**kw)
+        current_session.set(session)
+        return oc.begin_turn(session)
+
+    async def go() -> None:
+        state = turn()
+        assert send("Pat.Lane@vendor.example") is None
+        assert send("ann@partner.example") is None
+        # An invite and an Outlook send read the same list.
+        invite = {"action": "create", "attendees": ["ann@partner.example"]}
+        assert gw._check_calendar_attendees("google_workspace__manage_event", invite) is None
+        invite["attendees"] = ["ann@partner.example", "evil@x.example"]
+        assert gw._check_calendar_attendees("google_workspace__manage_event", invite) is not None
+        outlook = {"body": {"Message": {"toRecipients": [{"emailAddress": {"address": "ann@partner.example"}}]}}}
+        assert gw._check_m365_recipients("ms365__send_mail", outlook) is None
+        outlook["body"]["Message"]["toRecipients"].append({"emailAddress": {"address": "evil@x.example"}})
+        assert gw._check_m365_recipients("ms365__send_mail", outlook) is not None
+        # Someone no rule lets go, a Waits rule, a look-alike domain and a
+        # free-mail domain still wait.
+        for to in (
+            "leo@vendor.example", "dana@vendor.example", "ann@notpartner.example",
+            "ann@partner.example.evil", "anyone@gmail.com",
+        ):
+            assert send(to) is not None
+        # A domain rule matches one plain address, never a list in one string.
+        assert "evil@x.example,ann@partner.example" not in gw._roster_allow_set(goes=True)
+        # A share always waits: a Goes rule never lets anyone be given access.
+        assert "ann@partner.example" not in gw._roster_allow_set()
+        share = {"action": "share", "scope_type": "user", "scope_value": "pat.lane@vendor.example"}
+        assert gw._check_calendar_share("google_workspace__manage_calendar", share) is not None
+        # Careful: no Goes rule counts.
+        level["now"] = outside_mode.ASK
+        assert send("pat.lane@vendor.example") is not None
+        level["now"] = outside_mode.OUTSIDERS
+        oc.end_turn(state)
+        # Nor on a turn that read something from outside, nor one whose words
+        # may be someone else's, nor with no turn at all.
+        state = turn()
+        oc.mark(oc.SENDER)
+        assert send("pat.lane@vendor.example") is not None
+        oc.end_turn(state)
+        state = turn(from_host=True)
+        assert send("pat.lane@vendor.example") is not None
+        oc.end_turn(state)
+        current_session.set(None)
+        assert send("pat.lane@vendor.example") is not None
+
+    asyncio.run(go())

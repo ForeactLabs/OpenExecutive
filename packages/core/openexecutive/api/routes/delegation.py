@@ -72,6 +72,9 @@ Routes:
   PUT    /delegation/replies/{id}/text — {text}: change a reply's words
   PUT    /delegation/replies/{id}/recipients — {everyone}: the sender only,
          or everyone the email went to
+  PUT    /delegation/replies/{id}/from — {executive}: from the Executive's
+         own mailbox with the caller on cc, or from the caller
+         (delegation.send_from)
                                     before Send, on its card and in their
                                     Drafts when it is there too. Needs a
                                     caller the API knows is that person, like
@@ -430,6 +433,11 @@ class ReplyCardOut(BaseModel):
     work_now: str = ""
     # The files the reply carries, by name; attached when it is sent.
     files: list[str] = Field(default_factory=list)
+    # Goes from the Executive's own mailbox with the caller on cc (PUT
+    # .../from); False: from the caller.
+    from_executive: bool = False
+    # The Executive's name, for the card's From choice.
+    executive_name: str = ""
 
 
 class RepliesOut(BaseModel):
@@ -458,6 +466,14 @@ class ReplyRecipientsUpdate(BaseModel):
 
     # True: everyone the email went to; False: the sender only.
     everyone: bool
+
+
+class ReplyFromUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # True: from the Executive's own mailbox, with the caller on cc; False:
+    # from the caller.
+    executive: bool
 
 
 class ReplyAnswerIn(BaseModel):
@@ -1264,6 +1280,40 @@ async def update_delegation_reply_recipients(
     try:
         await card_drafts.set_recipients(
             instance, caller=api_caller.caller(request), resolver=person_id, everyone=body.everyone,
+        )
+    except SendRefused as refused:
+        raise HTTPException(
+            status_code=refused.status, detail={"code": refused.code, "message": refused.message, **refused.extra},
+        ) from None
+    card = next((c for c in cards(person) if c.decision_id == decision_id), None)
+    if card is None:
+        raise _refuse(404, "not_found", "That reply isn't waiting for you any more.")
+    return ReplyCardOut(**{k: v for k, v in asdict(card).items() if k in ReplyCardOut.model_fields})
+
+
+@router.put("/delegation/replies/{decision_id}/from", response_model=ReplyCardOut)
+async def update_delegation_reply_from(
+    request: Request, decision_id: int, body: ReplyFromUpdate,
+) -> ReplyCardOut:
+    """Send one of the caller's replies from the Executive's own mailbox,
+    with them on cc, or from them again (``delegation.send_from.switch``):
+    the words are rewritten as the Executive writing for them, or put back
+    as they were. The same checks as any change on the card. Their own cards
+    only; sends nothing."""
+    from openexecutive.delegation import send_from
+    from openexecutive.delegation.inbox import DECISION_CLASS
+    from openexecutive.delegation.replies import cards
+    from openexecutive.delegation.reply_send import SendRefused
+    from openexecutive.memory.decision_ledger import get_decision_instance
+
+    person = _caller(request)
+    person_id = _person_id(person)
+    instance = get_decision_instance(decision_id)
+    if instance is None or instance.decision_class != DECISION_CLASS or instance.approver_person_id != person_id:
+        raise _refuse(404, "not_found", "That reply isn't waiting for you any more.")
+    try:
+        await send_from.switch(
+            instance, caller=api_caller.caller(request), resolver=person_id, executive=body.executive,
         )
     except SendRefused as refused:
         raise HTTPException(

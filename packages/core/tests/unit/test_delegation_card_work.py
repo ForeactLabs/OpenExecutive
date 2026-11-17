@@ -589,7 +589,7 @@ def _slow_exec(monkeypatch: pytest.MonkeyPatch, seen: list[str]) -> None:
             progress = kwargs["on_progress"]
             progress({"type": "activity", "label": "Reading your email…"})
             progress({"type": "activity", "label": "Working…"})
-            progress({"type": "activity", "label": "Reading an attachment…"})
+            progress({"type": "activity", "label": "Opening an attachment in your email…"})
             await asyncio.sleep(30)
             return ""
 
@@ -620,11 +620,11 @@ def test_steps_show_while_it_works_and_stop_keeps_them(
         await card_work.ended(card.id)
 
     asyncio.run(go())
-    assert shown == {"working": True, "steps": ["Reading your email"], "now": "Reading an attachment…"}
+    assert shown == {"working": True, "steps": ["Reading your email"], "now": "Opening an attachment in your email…"}
     after = replies.cards(owner)[0]
     assert after.working is False and after.work_steps == []
     last = after.conversation[-1]
-    assert (last["state"], last["text"], last["steps"]) == ("stopped", "Stopped.", ["Reading your email", "Reading an attachment"])
+    assert (last["state"], last["text"], last["steps"]) == ("stopped", "Stopped.", ["Reading your email", "Opening an attachment in your email"])
     assert not card_work.stop(card.id)
 
 
@@ -691,7 +691,7 @@ def test_a_hand_back_that_couldnt_finish_offers_its_next_steps(
     card_work._RUNNING.add(card.id)
     try:
         assert card_work._set_work(card.id, card_work.WORKING)
-        card_work._progress(card.id)({"type": "activity", "label": "Reading an attachment…"})
+        card_work._progress(card.id)({"type": "activity", "label": "Opening an attachment in your email…"})
         changed = asyncio.run(card_work.apply(
             card.id, owner, body="", note="I read 26 of 44 pages; the rest are too faint.", files=[], gmail=mailbox,
             choices=card_work.clean_choices(["Make it with the 26", "Try again", "Try again", "Ask for a clearer copy", "x"]),
@@ -699,7 +699,7 @@ def test_a_hand_back_that_couldnt_finish_offers_its_next_steps(
     finally:
         card_work._RUNNING.discard(card.id)
     last = changed["conversation"][-1]
-    assert last["state"] == "stuck" and last["steps"] == ["Reading an attachment"]
+    assert last["state"] == "stuck" and last["steps"] == ["Opening an attachment in your email"]
     assert last["choices"] == ["Make it with the 26", "Try again", "Ask for a clearer copy"]
 
 

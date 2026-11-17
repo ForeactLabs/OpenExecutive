@@ -82,8 +82,9 @@ GROUPS: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     "files": (
         "work on any file (an email attachment, a Drive file, one sent in chat): split, merge or "
-        "convert PDFs and spreadsheets, analysis, charts, documents (Python jobs); save a file "
-        "into a Drive or OneDrive folder",
+        "convert PDFs and spreadsheets, analysis, documents (Python jobs); any chart, graph or plot "
+        "the person asks for, drawn as an image to show in the answer (never as text bars); save a "
+        "file into a Drive or OneDrive folder",
         ("run_python_job", "save_file"),
     ),
     "documents": (

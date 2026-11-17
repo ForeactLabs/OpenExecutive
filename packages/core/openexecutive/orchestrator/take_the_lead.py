@@ -931,6 +931,26 @@ def goes_rules(
     return out
 
 
+def goes_reach() -> tuple[frozenset[str], frozenset[str]]:
+    """Who the company's Goes rules let mail reach on Balanced, as
+    ``(addresses, domains)``: a person rule by address, and a company rule.
+    A person rule by name names someone in People already. The egress
+    checks count them as known (``mcp_gateway._roster_allow_set``), so
+    someone a rule lets go is not someone new. Never raises: an error is
+    nobody."""
+    try:
+        rules = [r for r in list_rules([SCOPE_COMPANY]) if r.effect == EFFECT_GO]
+    except Exception:
+        logger.warning("take_the_lead: couldn't read the Goes rules", exc_info=True)
+        return frozenset(), frozenset()
+    from openexecutive.people.identity import FREEMAIL_DOMAINS
+
+    addresses = frozenset(r.value.lower() for r in rules if r.kind == RULE_PERSON and "@" in r.value)
+    # A free-mail domain proves nothing: anyone can have an address on it.
+    domains = frozenset(r.value.lower() for r in rules if r.kind == RULE_DOMAIN) - FREEMAIL_DOMAINS
+    return addresses, domains
+
+
 # What a Goes rule lets go where Balanced would ask: a person or company
 # rule, anything only to them; an amount rule, the money. A delete or share
 # always waits.

@@ -39,7 +39,7 @@ import {
   splitOlder,
   waitedOnFirst,
 } from "@/lib/needsYou";
-import { BRIEFING_REFRESH_INTERVAL_MS, shouldRefreshOnFocus } from "@/lib/narrativeFreshness";
+import { BRIEFING_TICK_MS, newestAnswer, shouldRefreshOnFocus, shouldRefreshOnTick } from "@/lib/narrativeFreshness";
 import type { SnoozeChoice } from "@/lib/snooze";
 import InfoTip from "./InfoTip";
 import { ACTION_CARDS_TIP, ActionCardItem, useActionCards } from "./ActionCards";
@@ -141,13 +141,23 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
   // the stale-but-still-usable view rather than erroring the briefing.
   const [mountedAt] = useState(() => Date.now());
   const lastFetchRef = useRef(mountedAt);
-  const refreshToday = useCallback(() => {
+  // Every pull of /today goes through here. An answer older than one already
+  // shown is dropped (a timed refresh overtaken by Approve's would put old
+  // counts back); an older answer still shows when the newer pull hasn't
+  // landed, so a slow first load isn't lost to a focus refresh.
+  const [pulls] = useState(newestAnswer);
+  const pullToday = useCallback(async () => {
     lastFetchRef.current = Date.now();
-    getToday().then(setToday).catch(() => { /* keep current view on failure */ });
-  }, []);
+    const seq = pulls.begin();
+    const t = await getToday();
+    if (pulls.accept(seq)) setToday(t);
+  }, [pulls]);
+  const refreshToday = useCallback(() => {
+    pullToday().catch(() => { /* keep current view on failure */ });
+  }, [pullToday]);
 
-  // Keep Home current when the tab comes back, and every few minutes while
-  // it is open.
+  // Keep Home current when the tab or window comes back (a card answered on
+  // another device meanwhile), and every minute while it is open.
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState === "visible" && shouldRefreshOnFocus(lastFetchRef.current, Date.now())) {
@@ -155,11 +165,15 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
       }
     };
     document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
     const interval = setInterval(() => {
-      if (document.visibilityState === "visible") refreshToday();
-    }, BRIEFING_REFRESH_INTERVAL_MS);
+      if (document.visibilityState === "visible" && shouldRefreshOnTick(lastFetchRef.current, Date.now())) {
+        refreshToday();
+      }
+    }, BRIEFING_TICK_MS);
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
       clearInterval(interval);
     };
   }, [refreshToday]);
@@ -347,12 +361,11 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
 
   useEffect(() => {
     let cancelled = false;
-    getToday()
-      .then((t) => { if (!cancelled) setToday(t); })
+    pullToday()
       .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load"); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, []);
+  }, [pullToday]);
 
   // Replies the Executive drafted in the owner's own mailbox (Act as me):
   // cards in Needs you. Empty for everyone else.
@@ -401,17 +414,23 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
   // What Right now's rows open: the email (and its reply card, shared with
   // Needs you). ✕ on a row clears it at once; the server keeps it out until
   // something newer lands on it.
+  // A pull already under way may predate the change, so its answer is dropped.
   const onDismissRow = useCallback((row: RightNowRow) => {
+    pulls.changedHere();
     setToday((t) => t && { ...t, right_now: (t.right_now ?? []).filter((r) => r.key !== row.key) });
     dismissRightNowRow(row.key)
-      .then((kept) => {
-        if (!kept) return getToday().then(setToday);
+      .then(() => {
+        // Any pull begun before the dismissal was saved may still carry the
+        // row, so drop those and show the board as it is now.
+        pulls.changedHere();
+        return pullToday();
       })
       .catch((e) => console.error("Dismissing a Right now row failed", e));
-  }, []);
+  }, [pulls, pullToday]);
   const onRowGone = useCallback((row: RightNowRow) => {
+    pulls.changedHere();
     setToday((t) => t && { ...t, right_now: (t.right_now ?? []).filter((r) => r.key !== row.key) });
-  }, []);
+  }, [pulls]);
   const rightNowActions = { replies, onContinue, onDismiss: onDismissRow, onGone: onRowGone };
 
   const dateLabel = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
@@ -685,7 +704,7 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
 
   return (
     <div className="flex flex-col h-full bg-surface">
-      <main className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
           <header className="mb-6">
             <p className="text-sm font-medium text-fg-muted">{showHeadline ? `${hello} · ${dateLabel}` : dateLabel}</p>
@@ -953,7 +972,7 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
             </>
           )}
         </div>
-      </main>
+      </div>
     </div>
   );
 }

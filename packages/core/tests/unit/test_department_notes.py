@@ -87,15 +87,10 @@ def test_old_notes_expire() -> None:
 
 
 def test_factory_reset_and_blank_slot_clear_the_table() -> None:
-    import inspect
+    from openexecutive.cli.fixture_loader import RESET_KEEPS
 
-    from openexecutive.cli.fixture_loader import reset_all_state
-    from openexecutive.clients.slots import _BLANK_WIPE_TABLES
-
-    assert dn.TABLE in _BLANK_WIPE_TABLES
-    assert f'"{dn.TABLE}"' in inspect.getsource(reset_all_state)
-    # Before departments, like the department's other rows.
-    assert _BLANK_WIPE_TABLES.index(dn.TABLE) < _BLANK_WIPE_TABLES.index("departments")
+    # Both empty every table they don't keep.
+    assert dn.TABLE not in RESET_KEEPS
 
 
 def test_a_turn_private_to_the_principal_keeps_nothing() -> None:
