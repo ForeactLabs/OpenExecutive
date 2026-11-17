@@ -701,30 +701,6 @@ def _load_history(session_id: str) -> list[dict[str, Any]]:
         return []
 
 
-def _save_turn(
-    session_id: str, sender_name: str, sender_person: Any, session: Any, text: str, response: str
-) -> None:
-    """Keep the exchange in the conversation's history. A failure here must
-    not cost the person their answer, so it is only logged."""
-    from openexecutive.memory.session_store import (
-        create_session,
-        save_message,
-        update_session_timestamp,
-    )
-
-    person_id = sender_person.id if sender_person is not None else None
-    try:
-        create_session(
-            session_id, f"Google Chat {sender_name}", session.created_at.isoformat(),
-            caller_person_id=person_id,
-        )
-        save_message(session_id, "user", text, sender_person_id=person_id)
-        save_message(session_id, "assistant", response)
-        update_session_timestamp(session_id)
-    except Exception:
-        logger.exception("Google Chat: failed to keep the turn for %s", session_id)
-
-
 async def _send_cards(
     space_name: str,
     thread_name: str,
@@ -870,64 +846,30 @@ async def _answer(
         logger.exception("Google Chat: failed to schedule alert evaluation")
 
     try:
-        from openexecutive.integrations.channel_context import (
-            attach_briefing_context,
-            build_channel_context_block,
-        )
-        from openexecutive.knowledge.retriever import chat_builtin_results, retrieve
-        from openexecutive.memory.episodic import format_for_prompt
-        from openexecutive.onboarding.profile_builder import load_or_create_profile
-        from openexecutive.orchestrator.executive import Executive
-        from openexecutive.orchestrator.mcp_gateway import get_active_gateway
-        from openexecutive.orchestrator.session import Session
+        from openexecutive.integrations import channel_turn
 
-        profile = load_or_create_profile()
-        session = Session(
-            session_id=session_id,
-            company_profile=profile if not profile.is_empty() else None,
-            # Names the surface for logging and the `<channel>` block.
-            origin_channel="google_chat",
-            origin_channel_ref=space_name,
-        )
+        session_facts: dict[str, bool] = {
+            # Anywhere but the DM between the app and the sender alone, others
+            # write into the conversation this turn reads, and unlike Slack's
+            # channels not only people on People (Google Chat turns no one
+            # away). So it is a shared chat, as a web chat shared with
+            # teammates is.
+            "shared_chat": not one_on_one,
+            # And anyone may have written last, so the turn is one that read
+            # outside words: the Approvals level decides what its steps do.
+            "others_spoke_last": not one_on_one,
+        }
         if sender_person is not None:
             # A sender on People is signed in here, as on Slack: Google
             # signed the event (the JWT checked above), and its `user.email`
             # is the Google account that sent it, never anything the message
-            # says. So the turn is theirs, verified, in a space or a DM, and
-            # their Approvals level decides what runs. Anyone else stays
-            # unverified, with no caller, and what
-            # they ask to send or change waits on the owner's card.
-            session.caller_person_id = sender_person.id
-            session.speaker_verified = True
+            # says. So the turn is theirs, verified, in a space or a DM.
+            session_facts["speaker_verified"] = True
             # A DM between the app and the sender alone is read by them
-            # alone, like a Slack DM, so what is private to them (Act as me,
-            # Apps, recalled notes) may be offered there. Anything else never:
-            # a space, or a DM between two people the app was added to.
-            session.private_chat = one_on_one
-        # Anywhere but that DM, others write into the conversation this turn
-        # reads, and unlike Slack's channels not only people on People
-        # (Google Chat turns no one away). So it is a shared chat, as a web
-        # chat shared with teammates is: the principal-only tools and what
-        # else a shared chat withholds stay off, whoever speaks.
-        session.shared_chat = not one_on_one
-        # And anyone may have written last, so the turn is held as one that
-        # read outside words: under the Approvals level, its actions wait on
-        # a card rather than run from words someone else planted.
-        session.others_spoke_last = not one_on_one
-        # The conversation so far, so a follow-up ("add a few more bullets")
-        # has what it follows.
-        history = await asyncio.to_thread(_load_history, session_id)
-        if history:
-            session.conversation_history = history
-        retrieved_context = retrieve(
-            query=message_text, max_chars=get_settings().knowledge_chat_max_chars, n_builtin=chat_builtin_results()
-        )
-        episodic_context = format_for_prompt()
-        # The open-alert board, in the sender's own DM only (the helper
-        # returns "" anywhere else, and for someone who isn't on People).
-        briefing_context = await asyncio.to_thread(
-            attach_briefing_context, session, is_dm=one_on_one and sender_person is not None, person=sender_person
-        )
+            # alone, like a Slack DM, so what is private to them may be
+            # offered there. Anything else never: a space, or a DM between
+            # two people the app was added to.
+            session_facts["private_chat"] = one_on_one
 
         own_text = message_text
         # Quoted only for people on the team: the quote is text the sender
@@ -953,27 +895,40 @@ async def _answer(
                 f"the team: {names})\n\n{message_text}"
             )
 
-        from openexecutive.integrations.channel_cards import shows_cards
-
-        # A DM between the app and its person alone shows the reply's cards
-        # with Approve and Skip buttons (integrations.channel_cards).
-        cards_here = shows_cards(session)
-        cards: list[int] = []
-        response = await Executive(mcp_gateway=get_active_gateway()).chat(
-            user_message=chat_message,
-            session=session,
-            retrieved_context=retrieved_context,
-            episodic_context=episodic_context,
-            briefing_context=briefing_context,
-            channel_context_block=build_channel_context_block("google_chat", cards_here=cards_here),
-            cards=cards if cards_here else None,
-            person_id=sender_person.id if sender_person is not None else None,
-            attachment_blocks=image_blocks or None,
-            # The quote is not the person's words: memory keeps their own.
-            memory_text=own_text if reply_context else None,
+        result = await channel_turn.run(
+            channel_turn.ChannelTurn(
+                channel="google_chat",
+                channel_ref=space_name,
+                session_id=session_id,
+                own_text=own_text,
+                turn_text=own_text,
+                model_text=chat_message,
+                person=sender_person,
+                # The open cards, in the DM of a sender on People only.
+                is_dm=one_on_one and sender_person is not None,
+                # The quote is not the person's words: memory keeps their own.
+                memory_text=own_text if reply_context else None,
+                image_blocks=image_blocks or None,
+                # A DM between the app and its person alone shows the reply's
+                # cards with Approve and Skip buttons (integrations.channel_cards).
+                offers_cards=True,
+                session_facts=session_facts,
+                # The conversation so far, so a follow-up ("add a few more
+                # bullets") has what it follows.
+                history=await asyncio.to_thread(_load_history, session_id),
+            )
         )
+        response = result.response
+        cards = result.cards
         await asyncio.to_thread(
-            _save_turn, session_id, sender_name, sender_person, session, own_text, response
+            channel_turn.save_turn,
+            session_id=session_id,
+            title=f"Google Chat {sender_name}",
+            created_at=result.session.created_at.isoformat(),
+            owner_person_id=result.person_id,
+            user_text=own_text,
+            assistant_text=response,
+            sender_person_id=result.person_id,
         )
         from openexecutive.orchestrator.disclosure import with_chat_line
 

@@ -8505,6 +8505,26 @@ auth:
     read/click into the frame.
 
 integrations:
+  channel_turn: |
+    One turn runner for every chat channel (integrations/channel_turn.py).
+    Slack, Discord, Telegram and Google Chat used
+    to assemble a turn by hand, and the copies drifted (Slack once had no
+    history, one did not cap knowledge, some blocked the event
+    loop). An adapter now fills in a ChannelTurn (channel, channel_ref,
+    session_id, own_text, turn_text, person, is_dm, and optionally
+    model_text, memory_text, seen_ref, reply_ref, image_blocks,
+    co_present_person_ids, offers_cards, session_facts, history, store,
+    chat_scope) and channel_turn.run does the rest in one order: Session,
+    history, retrieve (own words, KNOWLEDGE_CHAT_MAX_CHARS) and the active
+    projects off the event loop, attach_briefing_context (the person's own
+    direct message only), hydrate_user_message when reply_ref is given
+    (model only, never kept), then Executive.chat. The adapter posts the
+    reply and cards; channel_turn.save_turn keeps the exchange and
+    owner_or_principal picks whose chat list it shows in. Adapters keep
+    sender lookup, conversation ids, locks and posting. Run-or-wait is not
+    decided here: that stays in orchestrator/levels inside Executive.chat.
+    A new chat channel calls this runner; it never builds a Session or
+    calls Executive.chat itself.
   chat_directory: |
     No raw chat ids: the person page, Add person and a department's
     Channels settings pick Slack, Discord and Telegram people and rooms by

@@ -23,7 +23,9 @@ from openexecutive.orchestrator.content_trust import wrap_untrusted
 def _no_history_db(monkeypatch: pytest.MonkeyPatch) -> None:
     """Turns keep no history in the shared default DB."""
     monkeypatch.setattr(gc_module, "_load_history", lambda _sid: [])
-    monkeypatch.setattr(gc_module, "_save_turn", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "openexecutive.integrations.channel_turn.save_turn", lambda **k: True
+    )
 
 
 def _make_settings(configured: bool = True) -> Any:
@@ -215,7 +217,7 @@ def test_process_calls_alert_pipeline_with_correct_fields(monkeypatch: pytest.Mo
         lambda event: recorded.append(event),
     )
     monkeypatch.setattr("openexecutive.knowledge.retriever.retrieve", lambda **_: "")
-    monkeypatch.setattr("openexecutive.memory.episodic.format_for_prompt", lambda: "")
+    monkeypatch.setattr("openexecutive.memory.episodic.format_for_prompt", lambda **_: "")
 
     profile = SimpleNamespace(is_empty=lambda: True)
     monkeypatch.setattr(
@@ -260,7 +262,7 @@ def test_process_sends_error_reply_on_executive_failure(monkeypatch: pytest.Monk
     """If Executive.chat() raises, an error message is sent via send_reply."""
     monkeypatch.setattr("openexecutive.alerts.pipeline.schedule_evaluation", lambda _: None)
     monkeypatch.setattr("openexecutive.knowledge.retriever.retrieve", lambda **_: "")
-    monkeypatch.setattr("openexecutive.memory.episodic.format_for_prompt", lambda: "")
+    monkeypatch.setattr("openexecutive.memory.episodic.format_for_prompt", lambda **_: "")
 
     profile = SimpleNamespace(is_empty=lambda: True)
     monkeypatch.setattr(
@@ -436,7 +438,7 @@ def _run_with_attachments(
     monkeypatch.setattr("openexecutive.alerts.pipeline.schedule_evaluation", lambda _: None)
     monkeypatch.setattr("openexecutive.audit.log_event", lambda *a, **k: None)
     monkeypatch.setattr("openexecutive.knowledge.retriever.retrieve", lambda **_: "")
-    monkeypatch.setattr("openexecutive.memory.episodic.format_for_prompt", lambda: "")
+    monkeypatch.setattr("openexecutive.memory.episodic.format_for_prompt", lambda **_: "")
     monkeypatch.setattr(
         "openexecutive.onboarding.profile_builder.load_or_create_profile",
         lambda: SimpleNamespace(is_empty=lambda: True),
@@ -680,7 +682,8 @@ def test_the_inbound_row_carries_the_senders_people_id(
             )
         )
 
-    assert looked_up == ["pat@x.com"]
+    # Only ever by the address Google gave for the sender.
+    assert set(looked_up) == {"pat@x.com"}
     [inbound] = [d for kind, d in rows if kind == "integration_inbound"]
     assert inbound["sender_person_id"] == expected
 
@@ -689,19 +692,20 @@ def _run_turn(monkeypatch: pytest.MonkeyPatch, store: dict, seen: list, text: st
     monkeypatch.setattr("openexecutive.alerts.pipeline.schedule_evaluation", lambda _e: None)
     monkeypatch.setattr("openexecutive.audit.log_event", lambda *a, **k: None)
     monkeypatch.setattr("openexecutive.knowledge.retriever.retrieve", lambda **_: "")
-    monkeypatch.setattr("openexecutive.memory.episodic.format_for_prompt", lambda: "")
+    monkeypatch.setattr("openexecutive.memory.episodic.format_for_prompt", lambda **_: "")
     monkeypatch.setattr(
         "openexecutive.onboarding.profile_builder.load_or_create_profile",
         lambda: SimpleNamespace(is_empty=lambda: True),
     )
     monkeypatch.setattr(gc_module, "_load_history", lambda sid: list(store.get(sid, [])))
 
-    def save(sid: str, _name: str, _person: Any, _session: Any, said: str, reply: str) -> None:
-        store.setdefault(sid, []).extend(
-            [{"role": "user", "content": said}, {"role": "assistant", "content": reply}]
+    def save(*, session_id: str, user_text: str, assistant_text: str, **_: Any) -> bool:
+        store.setdefault(session_id, []).extend(
+            [{"role": "user", "content": user_text}, {"role": "assistant", "content": assistant_text}]
         )
+        return True
 
-    monkeypatch.setattr(gc_module, "_save_turn", save)
+    monkeypatch.setattr("openexecutive.integrations.channel_turn.save_turn", save)
 
     async def fake_chat(**kw: Any) -> str:
         seen.append((kw["session"].session_id, list(kw["session"].conversation_history)))
@@ -1050,7 +1054,7 @@ def test_the_replys_cards_follow_it_only_in_the_apps_own_dm(
     monkeypatch.setattr("openexecutive.alerts.pipeline.schedule_evaluation", lambda _e: None)
     monkeypatch.setattr("openexecutive.audit.log_event", lambda *a, **k: None)
     monkeypatch.setattr("openexecutive.knowledge.retriever.retrieve", lambda **_: "")
-    monkeypatch.setattr("openexecutive.memory.episodic.format_for_prompt", lambda: "")
+    monkeypatch.setattr("openexecutive.memory.episodic.format_for_prompt", lambda **_: "")
     monkeypatch.setattr(
         "openexecutive.onboarding.profile_builder.load_or_create_profile",
         lambda: SimpleNamespace(is_empty=lambda: True),

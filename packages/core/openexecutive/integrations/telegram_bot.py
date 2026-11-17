@@ -404,116 +404,51 @@ async def _process_and_reply(
 
         message_text = with_context(reply_context, message_text)
 
-    from openexecutive.integrations.channel_context import (
-        attach_briefing_context,
-        build_channel_context_block,
-    )
-    from openexecutive.knowledge.retriever import chat_builtin_results, retrieve
-    from openexecutive.memory.episodic import format_for_prompt
-    from openexecutive.memory.session_store import (
-        create_session,
-        load_messages,
-        save_message,
-        update_session_timestamp,
-    )
-    from openexecutive.onboarding.profile_builder import load_or_create_profile
-    from openexecutive.orchestrator.executive import Executive
-    from openexecutive.orchestrator.mcp_gateway import get_active_gateway
-    from openexecutive.orchestrator.session import Session
+    from openexecutive.integrations import channel_turn
 
-    response: str | None = None
     async with _chat_lock(chat_id):
         # Again under the lock: a /new queued behind an earlier turn may have
         # started the next conversation since this message was picked up.
         session_id = await asyncio.to_thread(conversation_for, f"telegram:{chat_id}")
         try:
-            profile = load_or_create_profile()
-            # See the note in slack_bot: lets an approval gate raised in
-            # this turn be answered by a reply in this same conversation.
-            session = Session(
-                session_id=session_id,
-                company_profile=profile if not profile.is_empty() else None,
-                origin_channel="telegram",
-                origin_channel_ref=str(chat_id),
-            )
-            history = load_messages(session_id)
-            if history:
-                session.conversation_history = history
-            # Record this channel_ref as user-initiated so the Executive may
-            # schedule follow-ups back to this chat.
-            session.seen_channel_refs.add(("telegram", str(chat_id)))
-            retrieved_context = retrieve(
-                query=own_text, max_chars=get_settings().knowledge_chat_max_chars, n_builtin=chat_builtin_results()
-            )
-            episodic_context = format_for_prompt(session_id=session_id)
-
-            # Look up the OE Person record so Honcho can key per-person
-            # memory off Person.id (shared across channels). No match →
-            # person_id stays None and the Honcho layer no-ops.
+            # No match leaves the turn with no person: nothing is kept under
+            # their name, and the chat shows in the principal's list.
             from openexecutive.people.store import find_person_by_telegram_chat_id
+
             person = find_person_by_telegram_chat_id(str(chat_id))
-            person_id = person.id if person else None
-            # Bound here rather than at construction because the id is only
-            # resolved now; an approval gate raised later in this turn reads it.
-            session.caller_person_id = person_id
-
-            # Hydrate with the context of any recent outbound DM oe sent this
-            # chat, so a reply oe solicited from another session lands with its
-            # backstory. Injected into the model's copy only — message_text is
-            # persisted to history below and must stay free of the one-shot
-            # block. One-shot consumed inside the helper.
-            #
-            # Gated to 1:1 private chats (positive chat_id; Telegram groups and
-            # channels are negative) so private outbound context can never be
-            # pulled into a group — mirrors the Discord is_dm / Slack mode=="dm"
-            # guards.
-            chat_user_message = message_text
-            if chat_id > 0:
-                from openexecutive.integrations.inbound_hydration import (
-                    hydrate_user_message,
-                )
-
-                chat_user_message = hydrate_user_message(
+            # Telegram private chats are 1:1 (a positive chat id); groups and
+            # channels are negative. Only a private chat gets the person's
+            # open cards and the backstory of a message sent to them earlier.
+            private = chat_id > 0
+            result = await channel_turn.run(
+                channel_turn.ChannelTurn(
                     channel="telegram",
                     channel_ref=str(chat_id),
-                    user_message=message_text,
+                    session_id=session_id,
+                    own_text=own_text,
+                    turn_text=message_text,
+                    person=person,
+                    is_dm=private,
+                    # The quote is not the person's words: memory keeps their own.
+                    memory_text=own_text if reply_context else None,
+                    # This chat wrote to the Executive, so it may schedule
+                    # follow-ups back to it.
+                    seen_ref=("telegram", str(chat_id)),
+                    reply_ref=("telegram", str(chat_id)) if private else None,
+                    image_blocks=att_image_blocks or None,
+                    # A private chat on a webhook only Telegram can call shows
+                    # the reply's cards with Approve and Skip buttons.
+                    offers_cards=True,
                 )
-
-            from openexecutive.integrations.channel_cards import shows_cards
-
-            # A private chat on a webhook only Telegram can call shows the
-            # reply's cards with Approve and Skip buttons.
-            cards_here = shows_cards(session)
-            cards: list[int] = []
-
-            briefing_context = await asyncio.to_thread(
-                attach_briefing_context,
-                session,
-                # Telegram private chats are 1:1; a group chat is not.
-                is_dm=(str(chat_id).lstrip("-").isdigit() and not str(chat_id).startswith("-")),
-                person=person,
             )
-
-            response = await Executive(mcp_gateway=get_active_gateway()).chat(
-                user_message=chat_user_message,
-                session=session,
-                retrieved_context=retrieved_context,
-                episodic_context=episodic_context,
-                attachment_blocks=att_image_blocks or None,
-                briefing_context=briefing_context,
-                channel_context_block=build_channel_context_block("telegram", cards_here=cards_here),
-                person_id=person_id,
-                cards=cards if cards_here else None,
-                # The quote is not the person's words: memory keeps their own.
-                memory_text=own_text if reply_context else None,
-            )
+            response = result.response
             from openexecutive.orchestrator.disclosure import with_chat_line
 
             await send_message(
                 token, chat_id, with_chat_line(response, f"telegram:{session_id}")
             )
-            if cards:
-                await _send_cards(token, chat_id, cards)
+            if result.cards:
+                await _send_cards(token, chat_id, result.cards)
         except Exception:
             logger.exception("Telegram: handler error for message %s", message_id)
             try:
@@ -526,33 +461,16 @@ async def _process_and_reply(
                 logger.exception("Telegram: also failed to send error reply")
             return
 
-        # Persist only after a successful reply. Failures here must not trigger
-        # a user-facing error — the user already got their answer.
-        #
-        # Channel sessions are owned by the resolved sender if mapped to a
-        # Person, otherwise fall back to the principal so unrostered channel
-        # threads still appear in the operator's sidebar (instead of becoming
-        # invisible NULL-owner rows).
-        from openexecutive.people.store import find_principal_person
-        session_owner_id = person_id
-        if session_owner_id is None:
-            principal = find_principal_person()
-            session_owner_id = principal.id if principal is not None else None
-        try:
-            create_session(
-                session_id,
-                f"Telegram {sender_name}",
-                session.created_at.isoformat(),
-                caller_person_id=session_owner_id,
-            )
-            save_message(session_id, "user", message_text, sender_person_id=person_id)
-            save_message(session_id, "assistant", response)
-            update_session_timestamp(session_id)
-        except Exception:
-            logger.exception(
-                "Telegram: failed to persist turn for session %s", session_id
-            )
-        else:
+        # Kept only after the reply is sent.
+        if channel_turn.save_turn(
+            session_id=session_id,
+            title=f"Telegram {sender_name}",
+            created_at=result.session.created_at.isoformat(),
+            owner_person_id=channel_turn.owner_or_principal(result.person_id),
+            user_text=message_text,
+            assistant_text=response,
+            sender_person_id=result.person_id,
+        ):
             from openexecutive.integrations.conversations import title_after_turn
 
             title_after_turn(session_id, own_text, response)

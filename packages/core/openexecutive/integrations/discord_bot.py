@@ -969,22 +969,9 @@ async def _handle_message(
     # this whole function, so referencing it later when the branch did not run
     # raises UnboundLocalError.
     from openexecutive.config import get_settings
-    from openexecutive.integrations.channel_context import (
-        attach_briefing_context,
-        build_channel_context_block,
-    )
-    from openexecutive.knowledge.retriever import chat_builtin_results, retrieve
-    from openexecutive.memory.episodic import format_for_prompt
     from openexecutive.memory.session_store import (
-        create_session,
         load_messages,
-        save_message,
-        update_session_timestamp,
     )
-    from openexecutive.onboarding.profile_builder import load_or_create_profile
-    from openexecutive.orchestrator.executive import Executive
-    from openexecutive.orchestrator.mcp_gateway import get_active_gateway
-    from openexecutive.orchestrator.session import Session
 
     # Response gate: in a bot-owned thread with prior turns, ask the shared
     # gate (response_gate.should_respond) whether this message warrants a
@@ -1053,99 +1040,45 @@ async def _handle_message(
     # early-return inside the try doesn't leave the post-lock reference
     # reading a stale name from an earlier turn.
     route_result: MentionRouteResult | None = None
+    from openexecutive.integrations import channel_turn
+
     async with _session_lock(session_id):
         try:
-            profile = load_or_create_profile()
-            # See the note in slack_bot: lets an approval gate raised in
-            # this turn be answered by a reply in this same conversation.
-            session = Session(
-                session_id=session_id,
-                company_profile=profile if not profile.is_empty() else None,
-                origin_channel="discord",
-                origin_channel_ref=str(discord_user_id or ""),
-            )
-            history = load_messages(session_id)
-            if history:
-                session.conversation_history = history
-            else:
-                is_first_turn = True
-            if is_dm and discord_user_id:
-                session.seen_channel_refs.add(("discord_dm", discord_user_id))
-
-            retrieved_context = retrieve(
-                query=own_text, max_chars=get_settings().knowledge_chat_max_chars, n_builtin=chat_builtin_results()
-            )
-            episodic_context = format_for_prompt(session_id=session_id)
-
-            # Sender was already resolved at the roster gate above; reuse it
-            # so we don't hit the DB twice in the hot path.
-            person_id = sender_person.id
-            # Bound here rather than at construction because the id is only
-            # resolved now; an approval gate raised later in this turn reads it.
-            session.caller_person_id = person_id
-
-            # Multi-peer co-presence: resolve every other thread
-            # participant's Person.id so Honcho can add them as peers
-            # in the session (enables peer-of-peer reasoning via the
-            # ask_about_person tool). The caller passed us the raw
-            # discord-user-id list because they have `message` in
-            # scope; we do the Person-lookup here so the resolution
-            # logic stays colocated with `find_person_by_discord_id`.
+            # Every other thread participant on People, so the turn knows who
+            # else is in the conversation. The caller passed the raw Discord
+            # ids because it has `message` in scope.
             co_present_person_ids: list[int] = []
             for other_uid in co_present_discord_user_ids or ():
                 if other_uid == discord_user_id:
-                    continue  # sender already covered by person_id
+                    continue  # sender already covered by the turn's person
                 other = find_person_by_discord_id(other_uid)
                 if other and other.id is not None:
                     co_present_person_ids.append(other.id)
 
-            # On the 1:1 DM path, hydrate the turn with the context of any
-            # recent outbound DM oe sent this person (e.g. the principal told
-            # oe to "DM Alex about X" in another session). Inject into the
-            # copy handed to the model only — NOT formatted_user_text, which is
-            # persisted to history below and must stay free of this one-shot
-            # block. One-shot consumed inside the helper.
-            chat_user_message = formatted_user_text
-            if is_dm and discord_user_id:
-                from openexecutive.integrations.inbound_hydration import (
-                    hydrate_user_message,
+            dm_ref = ("discord_dm", discord_user_id) if is_dm and discord_user_id else None
+            result = await channel_turn.run(
+                channel_turn.ChannelTurn(
+                    channel="discord",
+                    channel_ref=str(discord_user_id or ""),
+                    session_id=session_id,
+                    own_text=own_text,
+                    # Author-prefixed in a thread (`[Alice]: ...`).
+                    turn_text=formatted_user_text,
+                    person=sender_person,
+                    is_dm=is_dm,
+                    # The quote is not the person's words: memory keeps their own.
+                    memory_text=own_text if reply_context else None,
+                    seen_ref=dm_ref,
+                    reply_ref=dm_ref,
+                    image_blocks=attachment_blocks or None,
+                    co_present_person_ids=co_present_person_ids or None,
+                    # A DM shows the reply's cards with Approve and Skip
+                    # buttons (integrations.channel_cards), sent by ``send_card``.
+                    offers_cards=is_dm and send_card is not None,
                 )
-
-                chat_user_message = hydrate_user_message(
-                    channel="discord_dm",
-                    channel_ref=discord_user_id,
-                    user_message=formatted_user_text,
-                )
-
-            briefing_context = await asyncio.to_thread(
-                attach_briefing_context,
-                session,
-                is_dm=is_dm,
-                person=sender_person,
             )
-
-            from openexecutive.integrations.channel_cards import shows_cards
-
-            # A DM shows the reply's cards with Approve and Skip buttons
-            # (integrations.channel_cards), sent by ``send_card``.
-            cards_here = is_dm and send_card is not None and shows_cards(session)
-            cards: list[int] = []
-
-            executive = Executive(mcp_gateway=get_active_gateway())
-            response = await executive.chat(
-                user_message=chat_user_message,
-                session=session,
-                retrieved_context=retrieved_context,
-                episodic_context=episodic_context,
-                attachment_blocks=attachment_blocks or None,
-                briefing_context=briefing_context,
-                channel_context_block=build_channel_context_block("discord", cards_here=cards_here),
-                cards=cards if cards_here else None,
-                person_id=person_id,
-                co_present_person_ids=co_present_person_ids or None,
-                # The quote is not the person's words: memory keeps their own.
-                memory_text=own_text if reply_context else None,
-            )
+            response = result.response
+            is_first_turn = result.first_turn
 
             # Late routing: for the @mention auto-thread path, the router
             # decides inline-vs-thread after seeing the full reply. The
@@ -1166,8 +1099,7 @@ async def _handle_message(
 
             # Empty-reply guard. ``_split_message("")`` yields ``[""]`` and
             # Discord rejects empty message sends with HTTP 400. An empty
-            # response usually means executive.chat short-circuited (e.g.
-            # tool-use loop bailout) and there's nothing to say — better
+            # response usually means the turn had nothing to say — better
             # to silently no-op than to spam the channel with an error
             # message that itself confuses users.
             if response.strip():
@@ -1176,8 +1108,8 @@ async def _handle_message(
                 reply = with_chat_line(response, f"discord:{session_id}")
                 for chunk in _split_message(reply):
                     await effective_send_fn(chunk)
-                if cards and send_card is not None:
-                    await _send_cards(send_card, cards)
+                if result.cards and send_card is not None:
+                    await _send_cards(send_card, result.cards)
             else:
                 logger.info(
                     "Discord: executive returned empty response for session %s — "
@@ -1192,70 +1124,35 @@ async def _handle_message(
             )
             return
 
-        # Persist only after a successful reply. Failures here must not trigger
-        # a user-facing error — the user already got their answer.
-        #
-        # Channel sessions are owned by the resolved sender if mapped to a
-        # Person, otherwise fall back to the principal so unrostered channel
-        # threads still appear in the operator's sidebar (instead of becoming
-        # invisible NULL-owner rows).
-        from openexecutive.people.store import find_principal_person
-        session_owner_id = person_id
-        if session_owner_id is None:
-            principal = find_principal_person()
-            session_owner_id = principal.id if principal is not None else None
-        try:
-            create_session(
-                session_id,
-                session_title,
-                session.created_at.isoformat(),
-                caller_person_id=session_owner_id,
-            )
-            save_message(
-                session_id, "user", formatted_user_text, sender_person_id=person_id
-            )
-            save_message(session_id, "assistant", response)
-            update_session_timestamp(session_id)
-        except Exception:
-            logger.exception(
-                "Discord: failed to persist turn for session %s", session_id
-            )
-        else:
+        # Kept only after the reply is sent.
+        created_at = result.session.created_at.isoformat()
+        session_owner_id = channel_turn.owner_or_principal(result.person_id)
+        if channel_turn.save_turn(
+            session_id=session_id,
+            title=session_title,
+            created_at=created_at,
+            owner_person_id=session_owner_id,
+            user_text=formatted_user_text,
+            assistant_text=response,
+            sender_person_id=result.person_id,
+        ):
             from openexecutive.integrations.conversations import title_after_turn
 
             title_after_turn(session_id, own_text, response)
 
-        # Promoted-thread double-write: when the router opened a brand-
-        # new bot-owned thread for this reply, also persist the turn
-        # under that thread's session_id so future thread-continuation
-        # messages in it see the original Q+A in context. The rolling
-        # channel session above is the primary source of truth; this is
-        # an idempotent secondary copy.
+        # When the router opened a brand-new thread for this reply, the turn
+        # is also kept under that thread's conversation, so a message that
+        # continues the thread sees the original question and answer.
         if route_result is not None and route_result.promoted_thread_id:
-            promoted_session_id = f"discord:thread:{route_result.promoted_thread_id}"
-            promoted_title = (
-                route_result.promoted_session_title or session_title
+            channel_turn.save_turn(
+                session_id=f"discord:thread:{route_result.promoted_thread_id}",
+                title=route_result.promoted_session_title or session_title,
+                created_at=created_at,
+                owner_person_id=session_owner_id,
+                user_text=formatted_user_text,
+                assistant_text=response,
+                sender_person_id=result.person_id,
             )
-            try:
-                create_session(
-                    promoted_session_id,
-                    promoted_title,
-                    session.created_at.isoformat(),
-                    caller_person_id=session_owner_id,
-                )
-                save_message(
-                    promoted_session_id,
-                    "user",
-                    formatted_user_text,
-                    sender_person_id=person_id,
-                )
-                save_message(promoted_session_id, "assistant", response)
-                update_session_timestamp(promoted_session_id)
-            except Exception:
-                logger.exception(
-                    "Discord: failed to double-write promoted thread session %s",
-                    promoted_session_id,
-                )
 
     # First-turn hook (e.g. rename a freshly-created thread). Runs outside the
     # session lock so a slow Haiku call doesn't block the next inbound turn
