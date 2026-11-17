@@ -705,6 +705,23 @@ def test_a_send_without_an_id_is_left_out_of_a_listing_by_subject_and_time(
         assert "Crates on Monday" in _run(FakeMailbox({SEARCH: listing}), SEARCH, query=f"to:{DANA}")
 
 
+@pytest.mark.parametrize("case", ["other subject", "outside the send's time", "send has an id"])
+def test_a_listing_entry_matches_a_send_only_by_its_subject_its_time_and_no_id(
+    roster: SimpleNamespace, case: str
+) -> None:
+    result = "Email sent! Message ID: s9" if case == "send has an id" else "Email sent! Message ID: "
+    with _reader(roster.owner):
+        tm.note_sent(subject="Crates on Monday", recipients={DANA}, result=result)
+    subject = "Pallets on Tuesday" if case == "other subject" else "Crates on Monday"
+    if case == "outside the send's time":
+        with tm._open() as conn:
+            conn.execute(f"UPDATE {tm.SENT_TABLE} SET at = datetime('now', '-1 hour')")
+    listing = _listing(EXEC).replace("Subject 1", subject).replace("Mon, 5 Oct 2026", _now())
+    with _reader(roster.ben):
+        out = _run(FakeMailbox({SEARCH: listing}), SEARCH, query=f"to:{DANA}")
+    assert subject in out and "Left out" not in out
+
+
 def test_a_new_message_with_the_same_subject_is_no_reply(roster: SimpleNamespace) -> None:
     _send_for(roster.ben, mid="s1", subject="Invoice")
     roster.session.mail_ids_seen.update({f"{roster.owner}:r6", f"{roster.owner}:r7"})
