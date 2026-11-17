@@ -3053,6 +3053,10 @@ class Executive:
                 and last_written.get("id") == tool_uses[-1]["id"]
                 else None
             )
+            # The cut call's half-written input is never read: drop it from
+            # the history, which every later round sends again.
+            if cut_id is not None and last_written is not None:
+                last_written["input"] = {}
             for i, tu in enumerate(tool_uses):
                 if tu["id"] == cut_id:
                     continue

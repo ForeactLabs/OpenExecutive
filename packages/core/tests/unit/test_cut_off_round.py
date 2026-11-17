@@ -230,3 +230,20 @@ def test_the_claim_check_reads_the_cut_text_with_the_rest_of_the_reply(
     asyncio.run(_run(provider))
 
     assert read == ["I've added the meeting to your calendar and sent the invite."]
+
+
+def test_the_cut_call_input_is_not_sent_again() -> None:
+    provider = _ScriptedProvider(
+        [
+            _FinalMsg([_ToolUseBlock("big", "draft_artifact", {"title": "Tax bills", "rows": ["x"] * 50})],
+                      "max_tokens"),
+            _FinalMsg([_TextBlock("Done.")], "end_turn"),
+        ]
+    )
+    asyncio.run(_run(provider, {"draft_artifact": lambda *_a, **_k: "published"}))
+
+    sent = [
+        b for m in provider.calls[1]["messages"] if m["role"] == "assistant" and isinstance(m["content"], list)
+        for b in m["content"] if b.get("type") == "tool_use" and b.get("id") == "big"
+    ]
+    assert sent and sent[0]["input"] == {}
