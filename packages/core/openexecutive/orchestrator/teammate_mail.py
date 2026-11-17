@@ -140,10 +140,9 @@ OUTLOOK_THEIRS_NOTE = (
 )
 
 
-# Mail the Executive sent for someone (rule 4). The newest rows are read on
-# every mailbox call; older sends fall out of reach of the subject match only.
+# Mail the Executive sent for someone (rule 4). Every row's ids are read on
+# each mailbox call; its subject only while it is recent.
 SENT_TABLE = "mail_sent_for"
-SENT_READ_MAX = 5000
 SUBJECT_MATCH_DAYS = 30
 _open = db.opener(db.company_path, schema=(
     f"CREATE TABLE IF NOT EXISTS {SENT_TABLE} ("
@@ -183,6 +182,9 @@ class _Sides:
     # by subject.
     sent_ids: set[str] = field(default_factory=set)
     sent_subjects: dict[str, list[set[str]]] = field(default_factory=dict)
+    # The reader's own sends, which win over anyone else's.
+    own_ids: set[str] = field(default_factory=set)
+    own_subjects: dict[str, list[set[str]]] = field(default_factory=dict)
     # Off only outside any session (a scheduled workflow step), which has
     # nowhere to keep what it was shown; its searches and reads stay filtered.
     gate_ids: bool = True
@@ -317,14 +319,12 @@ def _sides(session: Any) -> _Sides | None:
     # in reach.
     mine = reader_id if session is not None else _workflow_person()
     try:
-        sent = [s for s in _sent_rows() if s.person_id != mine]
+        rows = _sent_rows()
     except Exception:
         logger.warning("teammate_mail: sent mail read failed — refusing", exc_info=True)
         return None
-    sent_subjects: dict[str, list[set[str]]] = {}
-    for row in sent:
-        if row.subject:
-            sent_subjects.setdefault(row.subject, []).append(row.recipients)
+    sent = [s for s in rows if s.person_id != mine]
+    own = [s for s in rows if s.person_id == mine]
     return _Sides(
         reader=RosterAllow(reader),
         others=RosterAllow(others),
@@ -339,9 +339,19 @@ def _sides(session: Any) -> _Sides | None:
         reader_is_principal=any(p.is_principal for p in reader),
         seen=seen if isinstance(seen, set) else set(),
         sent_ids={i for row in sent for i in row.ids},
-        sent_subjects=sent_subjects,
+        sent_subjects=_by_subject(sent),
+        own_ids={i for row in own for i in row.ids},
+        own_subjects=_by_subject(own),
         gate_ids=session is not None,
     )
+
+
+def _by_subject(rows: list[_Sent]) -> dict[str, list[set[str]]]:
+    out: dict[str, list[set[str]]] = {}
+    for row in rows:
+        if row.subject:
+            out.setdefault(row.subject, []).append(row.recipients)
+    return out
 
 
 def _sent_rows() -> list[_Sent]:
@@ -351,9 +361,7 @@ def _sent_rows() -> list[_Sent]:
     with _open() as conn:
         rows = conn.execute(
             f"SELECT person_id, message_id, thread_id, subject, recipients, "  # noqa: S608
-            f"at >= datetime('now', '-{SUBJECT_MATCH_DAYS} days') AS recent FROM {SENT_TABLE} "
-            "ORDER BY id DESC LIMIT ?",
-            (SENT_READ_MAX,),
+            f"at >= datetime('now', '-{SUBJECT_MATCH_DAYS} days') AS recent FROM {SENT_TABLE}"
         ).fetchall()
     return [
         _Sent(
@@ -458,17 +466,20 @@ def _sent_for_other(unit: str, headers: str, sides: _Sides, *, ids: list[str] | 
     if not sides.sent_ids and not sides.sent_subjects:
         return False
     found = ids if ids is not None else _LISTED_ID_RE.findall(unit)
+    if any(i in sides.own_ids for i in found):
+        return False
     if any(i in sides.sent_ids for i in found):
         return True
     if subject is None:
         block = re.split(r"\n[ \t]*\n", unit.lstrip("\n"), maxsplit=1)[0]
         match = _SUBJECT_RE.search(block)
         subject = match.group(1) if match else ""
-    kept = sides.sent_subjects.get(_subject_key(subject))
-    if not kept:
-        return False
+    key = _subject_key(subject)
     on_it = set(_addresses(headers.lower()))
-    return any(recipients & on_it for recipients in kept)
+    if any(recipients & on_it for recipients in sides.own_subjects.get(key, [])):
+        # The reader sent with this subject to this person too: theirs.
+        return False
+    return any(recipients & on_it for recipients in sides.sent_subjects.get(key, []))
 
 
 def _text_headers(unit: str) -> str:

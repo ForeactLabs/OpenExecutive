@@ -577,3 +577,22 @@ def test_the_gateway_keeps_whom_a_gmail_send_was_for(roster: SimpleNamespace) ->
                                    "Email sent! Message ID: g7")
     [row] = tm._sent_rows()
     assert (row.person_id, row.ids, row.subject, row.recipients) == (roster.ben, {"g7"}, "crates", {DANA})
+
+
+def test_the_readers_own_send_with_the_same_subject_wins(roster: SimpleNamespace) -> None:
+    _send_for(roster.ben, mid="s1", subject="Order for next week")
+    _send_for(roster.owner, mid="s2", subject="Order for next week")
+    roster.session.mail_ids_seen.add(f"{roster.owner}:r4")
+    reply = _sent_by_exec("r4", "Re: Order for next week", EXEC, sender=DANA)
+    with _reader(roster.owner):
+        out = _run(FakeMailbox({READ: reply}), READ, message_id="r4")
+    assert "withheld" not in out
+
+
+def test_an_old_send_keeps_its_id(roster: SimpleNamespace) -> None:
+    _send_for(roster.ben, mid="m1", subject="Invoice")
+    with tm._open() as conn:
+        conn.execute(f"UPDATE {tm.SENT_TABLE} SET at = datetime('now', '-400 days')")
+    with _reader(roster.owner):
+        out = _run(FakeMailbox({SEARCH: _listing(EXEC)}), SEARCH, query="q")
+    assert "Subject 1" not in out
