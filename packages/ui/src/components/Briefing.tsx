@@ -141,16 +141,20 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
   // the stale-but-still-usable view rather than erroring the briefing.
   const [mountedAt] = useState(() => Date.now());
   const lastFetchRef = useRef(mountedAt);
-  // Every pull of /today goes through here, and only the newest one's answer
-  // is shown: an older one that lands later (a timed refresh overtaken by
-  // Approve's, a slow first load overtaken by a focus refresh) would put old
-  // counts back.
+  // Every pull of /today goes through here. An answer older than one already
+  // shown is dropped (a timed refresh overtaken by Approve's would put old
+  // counts back); an older answer still shows when the newer pull hasn't
+  // landed, so a slow first load isn't lost to a focus refresh.
   const pullSeqRef = useRef(0);
+  const shownSeqRef = useRef(0);
   const pullToday = useCallback(async () => {
     lastFetchRef.current = Date.now();
     const seq = ++pullSeqRef.current;
     const t = await getToday();
-    if (seq === pullSeqRef.current) setToday(t);
+    if (seq > shownSeqRef.current) {
+      shownSeqRef.current = seq;
+      setToday(t);
+    }
   }, []);
   const refreshToday = useCallback(() => {
     pullToday().catch(() => { /* keep current view on failure */ });
