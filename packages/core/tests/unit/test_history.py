@@ -269,10 +269,12 @@ def test_shown_summary_puts_you_in_front_of_the_verb() -> None:
 
 
 def test_the_executive_reads_a_correction_in_note_form() -> None:
-    from openexecutive.memory.history import note_form
+    from openexecutive.memory.history import note_form, shown_summary
 
     assert note_form("You told Dana the deck comes Monday.") == "Told Dana the deck comes Monday."
     assert note_form("You said Dana it might slip") == "Said Dana it might slip"
     assert note_form("Shipped Friday, not Monday") == "Shipped Friday, not Monday"
     assert note_form("Your deck is late") == "Your deck is late"
+    assert note_form("you told Dana the deck comes Monday") == "Told Dana the deck comes Monday"
+    assert shown_summary("Advised Dana to wait") == "You advised Dana to wait"
     assert note_form("") == ""

@@ -164,6 +164,7 @@ _REGULAR_VERBS = frozenset({
     "shared", "shipped", "signed", "started", "submitted", "suggested",
     "tested", "used", "wanted", "warned", "worked",
     "clarified", "stated", "corrected",
+    "rescheduled", "responded", "advised", "arranged",
     "provided", "acknowledged", "thanked", "informed", "notified", "pushed",
 })
 _IRREGULAR_VERBS = frozenset({
@@ -199,7 +200,7 @@ def note_form(text: str) -> str:
     correction typed over that text starts with "You told …"; the Executive
     reads it as "Told …", the way it reads every note."""
     words = (text or "").strip().split(" ", 2)
-    if len(words) > 1 and words[0] == "You" and _past_tense(words[1]):
+    if len(words) > 1 and words[0].lower() == "you" and _past_tense(words[1]):
         rest = " ".join(words[1:])
         return rest[:1].upper() + rest[1:]
     return text
