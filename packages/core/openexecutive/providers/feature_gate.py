@@ -39,9 +39,10 @@ class FeatureSpec:
 
 
 # What a non-Claude model is asked to write at most. Hosted models cap their
-# output at different limits (gpt-4o at 16,384) and refuse a larger request;
-# 8192 is under all of them, as it was for every model before Claude got more.
-NON_CLAUDE_MAX_OUTPUT_TOKENS = 8192
+# output at different limits (gpt-4o at 16,384) and refuse a larger request.
+# 16,000 is what the PDF reader and the fixture generator already ask of them,
+# so the cap never lowers a request those callers made before.
+NON_CLAUDE_MAX_OUTPUT_TOKENS = 16_000
 
 
 # Claude models that reject a forced ``tool_choice`` (``any`` or a named
