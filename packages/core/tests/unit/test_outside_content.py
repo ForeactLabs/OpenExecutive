@@ -863,6 +863,15 @@ def test_who_a_goes_rule_lets_go_is_not_someone_new_on_balanced(monkeypatch: pyt
         state = turn()
         assert send("Pat.Lane@vendor.example") is None
         assert send("ann@partner.example") is None
+        # An invite and an Outlook send read the same list.
+        invite = {"action": "create", "attendees": ["ann@partner.example"]}
+        assert gw._check_calendar_attendees("google_workspace__manage_event", invite) is None
+        invite["attendees"] = ["ann@partner.example", "evil@x.example"]
+        assert gw._check_calendar_attendees("google_workspace__manage_event", invite) is not None
+        outlook = {"body": {"Message": {"toRecipients": [{"emailAddress": {"address": "ann@partner.example"}}]}}}
+        assert gw._check_m365_recipients("ms365__send_mail", outlook) is None
+        outlook["body"]["Message"]["toRecipients"].append({"emailAddress": {"address": "evil@x.example"}})
+        assert gw._check_m365_recipients("ms365__send_mail", outlook) is not None
         # Someone no rule lets go, a Waits rule, a look-alike domain and a
         # free-mail domain still wait.
         for to in (

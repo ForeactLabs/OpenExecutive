@@ -557,11 +557,13 @@ def _place(alert_id: int, db_path: Path | None) -> int:
             )
             if other.id not in own_action
         ]
+        ids = [o.id for o in others]
         put_away = {
             int(r["id"]) for r in conn.execute(
-                f"SELECT id FROM alerts WHERE archived_at IS NOT NULL AND {_open('')}",
+                f"SELECT id FROM alerts WHERE archived_at IS NOT NULL AND id IN ({','.join('?' * len(ids))})",
+                ids,
             ).fetchall()
-        }
+        } if ids else set()
         if card.approve and card.thread:
             # A newer send to the same people on the same thread, asked on a
             # turn with the same person, replaces the one waiting.
