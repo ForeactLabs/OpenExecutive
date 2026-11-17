@@ -155,7 +155,8 @@ _COLUMNS = (
 
 # Past-tense verbs a note can start with. A known list, not any word ending
 # in "ed", so a name (Fred, Ahmed) or a noun (Seed) is never read as a verb.
-# Words often used as adjectives ("Expected revenue …") are left out.
+# Words often used as adjectives ("Expected revenue …", "Used car …") are
+# left out.
 _REGULAR_VERBS = frozenset({
     "accepted", "added", "agreed", "announced", "answered", "approved", "asked",
     "assigned", "booked", "called", "cancelled", "canceled", "changed", "checked",
@@ -169,7 +170,7 @@ _REGULAR_VERBS = frozenset({
     "received", "recommended", "rejected", "reminded",
     "removed", "replied", "reported", "requested", "reviewed",
     "shared", "shipped", "signed", "started", "submitted", "suggested",
-    "tested", "used", "wanted", "warned", "worked",
+    "tested", "wanted", "warned", "worked",
     "clarified", "stated", "corrected",
     "rescheduled", "responded", "advised", "arranged",
     "provided", "acknowledged", "thanked", "informed", "notified", "pushed",
@@ -201,13 +202,22 @@ def shown_summary(summary: str) -> str:
     return "You " + first[:1].lower() + text[1:]
 
 
+# Past tenses spelled like the present: as the first word they read as an order.
+_SAME_AS_PRESENT = frozenset({"put", "let", "quit"})
+
+
 def note_form(text: str) -> str:
     """Text as the Executive reads it: a note, never "You said …". The
     screens put "You" in front of a note (:func:`shown_summary`), so a
     correction typed over that text starts with "You told …"; the Executive
-    reads it as "Told …", the way it reads every note."""
+    reads it as "Told …", the way it reads every note. A verb spelled like
+    its present ("You put Dana in charge") keeps "You", or the note would
+    read as an order ("Put Dana in charge")."""
     words = (text or "").strip().split(" ", 2)
-    if len(words) > 1 and words[0].lower() == "you" and _past_tense(words[1]):
+    if (
+        len(words) > 1 and words[0].lower() == "you" and _past_tense(words[1])
+        and words[1].rstrip(",.;:").lower() not in _SAME_AS_PRESENT
+    ):
         rest = " ".join(words[1:])
         return rest[:1].upper() + rest[1:]
     return text

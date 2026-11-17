@@ -690,32 +690,35 @@ def test_a_stranger_needs_more_certainty_and_gets_a_holding_reply(
     assert asyncio.run(inbox.relation_of(stranger, mailbox)) == "correspondent"
 
 
-def test_per_sender_and_stranger_limits(db: Path, owner: Any, models: dict[str, Any]) -> None:
+def test_every_email_from_one_sender_gets_its_card(db: Path, owner: Any, models: dict[str, Any]) -> None:
+    # No count per sender: a third email from the same person the same day
+    # is drafted like the first, and so is a second one from a stranger.
     mailbox = FakeInbox()
     for i in range(3):
         mailbox.add(_msg(f"m{i}", f"t{i}", minutes_ago=60 - i))
-    result = _scan(owner, mailbox)
-    assert result.drafted == 2  # two a day from one sender
-    # Oldest first: the newest waits for a later scan, unrecorded.
-    assert _ledger(db)["m0"][0] == "drafted" and "m2" not in _ledger(db)
+    assert _scan(owner, mailbox).drafted == 3
+    assert all(_ledger(db)[f"m{i}"][0] == "drafted" for i in range(3))
 
     stranger = FakeInbox()
     for i in range(2):
         stranger.add(_msg(f"s{i}", f"u{i}", sender="sam@unknown.example", minutes_ago=60 - i))
     _scan(owner, stranger, now=NOW + timedelta(minutes=1))
     drafted = [k for k, v in _ledger(db).items() if k.startswith("s") and v[0] == "drafted"]
-    assert len(drafted) == 1  # one a day from a stranger
+    assert len(drafted) == 2
 
 
-def test_the_daily_limits_leave_mail_for_later(
+def test_no_daily_count_holds_inbox_mail(
     db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # However many drafts were written today (chat's own limit full too),
+    # an email that needs a reply still gets its card.
     monkeypatch.setattr(caps, "drafts_today", lambda _pid: 10_000)
+    monkeypatch.setattr(caps, "reserve", lambda *a, **kw: "reached")
     mailbox = FakeInbox()
     mailbox.add(_msg("m1", "t1"))
-    assert _scan(owner, mailbox).status == "daily_limit"
-    assert _ledger(db) == {} and models["classified"] == []
-    assert inbox.get_watch(owner.id).status == "daily_limit"
+    result = _scan(owner, mailbox)
+    assert result.status == "ok" and result.drafted == 1
+    assert _ledger(db)["m1"][0] == "drafted"
 
 
 def test_a_full_backlog_drafts_nothing_new(owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1206,19 +1209,6 @@ def test_a_card_that_couldnt_be_made_takes_its_draft_back(
     assert len(inbox.open_cards(owner.id)) == 1
 
 
-def test_a_limit_reached_while_reading_leaves_the_message_for_later(
-    db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    reserve = caps.reserve
-    monkeypatch.setattr(caps, "reserve", lambda *a, **kw: "daily_limit")
-    mailbox = FakeInbox()
-    mailbox.add(_msg("m1", "t1"))
-    assert _scan(owner, mailbox).status == "daily_limit"
-    assert _ledger(db)["m1"] == ("retry", "daily_limit")
-    monkeypatch.setattr(caps, "reserve", reserve)
-    assert _scan(owner, mailbox, now=NOW + timedelta(minutes=5)).drafted == 1
-
-
 def test_older_threads_are_reached_after_a_burst(db: Path, owner: Any, models: dict[str, Any]) -> None:
     """The cap on threads a scan looks at applies after settled ones are
     passed over, so the older ones are reached on the next scans."""
@@ -1401,7 +1391,7 @@ def test_reply_from_home_refuses_what_it_cannot_answer(db: Path, owner: Any, mod
     assert _ask(owner, mailbox, "t1", "m1") == "theirs_last"
     assert _ask(owner, mailbox, "nope", "m1") == "not_found"
     assert _ask(owner, mailbox, "t1", "gone") == "not_found"
-    assert set(inbox.ASK_REFUSALS) >= {"theirs_last", "not_found", "busy", "daily_limit", "not_now"}
+    assert set(inbox.ASK_REFUSALS) >= {"theirs_last", "not_found", "busy", "not_now"}
     assert mailbox.specs == [] and inbox.open_cards(owner.id) == []
 
 

@@ -729,7 +729,7 @@ def test_a_run_started_by_a_newer_email_keeps_what_they_said(owner: Any) -> None
     assert prompt.index("Only the summary") < prompt.index("Sort by due date")
 
 
-def test_joining_counts_for_the_sender_and_reads_only_what_came_after(
+def test_a_joined_thread_reads_only_what_came_after(
     db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     async def redirect(*_a: Any, **_k: Any) -> bool:
@@ -752,8 +752,6 @@ def test_joining_counts_for_the_sender_and_reads_only_what_came_after(
     thread = asyncio.run(mailbox.get_thread("t2"))
     # Only mail after the joining email is newer mail for this card.
     assert inbox.later_messages(thread, payload, now=NOW) == []
-    # The join is work for this sender: it counts toward their daily limit.
-    assert inbox._cap_reason(owner.id, _msg("m3", "t3"), "teammate", NOW) == "sender_limit"
 
 
 def test_a_stuck_turn_with_a_partial_reply_never_goes_on_its_own(

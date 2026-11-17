@@ -405,6 +405,7 @@ async def handle_create_alert(tool_input: dict[str, Any], *, as_written: bool = 
             "from": from_address,
             "raised_by": raised_by,
             "user": raised_by or None,
+            "from_executive": True,
         })
         # Carry department and person routing hints via the channel field
         # (AlertEvent.channel is a free-text tag used by the pipeline).
