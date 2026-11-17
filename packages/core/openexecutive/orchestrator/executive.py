@@ -1043,6 +1043,16 @@ CUT_OFF_NOTE = (
 # What the person sees for a round that was cut off: the step it was on was
 # writing something long, not the read before it.
 CUT_OFF_LABEL = "Writing it in shorter parts…"
+# Cut rounds in a row that wrote nothing at all (no text, no call: a model
+# that spends its whole answer thinking) after which a turn ends. Such a round
+# is no step of the work, so this never stops a job that is getting written;
+# without it the loop would bill a full answer each round, forever.
+MAX_EMPTY_CUT_ROUNDS = 3
+# Said when it ends that way.
+EMPTY_CUTS_REPLY = (
+    "I kept running out of room before I could write anything for this. "
+    "Ask me to carry on, or to do it in smaller steps."
+)
 
 
 # Said in place of a round's results when nothing came back to put there (a
@@ -2528,6 +2538,8 @@ class Executive:
         # Reply text of cut rounds the next round carries on: the claim
         # check reads it with the round that finishes the reply.
         cut_text = ""
+        # Cut rounds in a row that wrote nothing (MAX_EMPTY_CUT_ROUNDS).
+        empty_cuts = 0
         claim_checked = False
         # Set once the person asks to finish the work themselves: the next
         # round writes up what the turn has, and runs no tool.
@@ -2694,6 +2706,15 @@ class Executive:
             # end the turn on half a step. A cut tool call is answered with
             # CUT_OFF_RESULT below and never runs; cut text gets CUT_OFF_NOTE.
             cut_off = final_msg.stop_reason == "max_tokens"
+            wrote = any(
+                b.get("type") == "tool_use" or (b.get("type") == "text" and str(b.get("text", "")).strip())
+                for b in response_content
+            )
+            empty_cuts = empty_cuts + 1 if cut_off and not wrote else 0
+            if empty_cuts > MAX_EMPTY_CUT_ROUNDS:
+                logger.warning("round %d: %d cut rounds in a row wrote nothing; ending the turn", iteration, empty_cuts)
+                yield ("\n\n" if streamed_tail else "") + EMPTY_CUTS_REPLY
+                return
             if cut_off:
                 logger.warning(
                     "round %d cut off at max_tokens=%d; carrying on", iteration, MAX_OUTPUT_TOKENS,

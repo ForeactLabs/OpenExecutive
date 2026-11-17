@@ -5406,7 +5406,10 @@ chat:
     draft_artifact call was cut at 8192 twice and showed "couldn't finish"
     with the mark on the read before it. A turn has no step limit: it runs
     rounds, cut ones included, until the model answers (Stop ends it), so a
-    big job is never stopped at a count. A call whose block closed before the cut (cut in the
+    big job is never stopped at a count. The one exception is a cut round that wrote
+    nothing at all (no text, no call: a model spending its whole answer
+    thinking), which is no step of the work: after MAX_EMPTY_CUT_ROUNDS (3)
+    of those in a row the turn ends with EMPTY_CUTS_REPLY. A call whose block closed before the cut (cut in the
     text after it) is whole and runs as usual. Only Claude is asked for
     32,000: every non-Claude FeatureSpec (OpenRouter, OpenAI, unknown slugs)
     carries NON_CLAUDE_MAX_OUTPUT_TOKENS (16,000, what the PDF reader already asked), since hosted models cap

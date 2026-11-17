@@ -297,3 +297,19 @@ def test_the_claim_check_reads_text_cut_after_a_closed_call(monkeypatch: pytest.
     asyncio.run(_run(provider, {"read_sheet": _read}))
 
     assert read == ["I've emailed the summary to Dana and filed it."]
+    assert read == ["I've emailed the summary to Dana and filed it."]
+
+
+def test_a_turn_whose_cut_rounds_write_nothing_ends_and_says_so() -> None:
+    """A round that spends its whole answer thinking is no step of the work:
+    after MAX_EMPTY_CUT_ROUNDS of those in a row the turn ends, plainly."""
+    from openexecutive.orchestrator.executive import EMPTY_CUTS_REPLY, MAX_EMPTY_CUT_ROUNDS
+
+    provider = _ScriptedProvider(
+        [_FinalMsg([], "max_tokens") for _ in range(MAX_EMPTY_CUT_ROUNDS + 1)]
+        + [_FinalMsg([_TextBlock("never reached")], "end_turn")]
+    )
+    items = asyncio.run(_run(provider))
+
+    assert len(provider.calls) == MAX_EMPTY_CUT_ROUNDS + 1
+    assert EMPTY_CUTS_REPLY in "".join(i for i in items if isinstance(i, str))
