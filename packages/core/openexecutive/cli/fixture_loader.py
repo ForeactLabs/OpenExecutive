@@ -644,13 +644,15 @@ async def unload_fixture(settings: Any) -> dict[str, Any]:
             # seeded, so every table is the user's again, not only the ones
             # a fixture has. Same restore as a client switch.
             # What isn't the company's stays as it is now: the instance-level
-            # rows a reset keeps, the operator's workflows, and the audit
-            # trail of what happened while the fixture was loaded.
+            # rows a reset keeps. Leaving a fixture also keeps the workflows
+            # and the audit trail, which a fixture never swaps. Leaving a
+            # client doesn't: those were the client's and are in its slot.
             from openexecutive.clients.slots import _BLANK_KEEPS, restore_company_db
 
-            restore_company_db(
-                backup / "state.db", carry=RESET_KEEPS | set(_BLANK_KEEPS) | {"audit_log"}
-            )
+            carry = set(RESET_KEEPS)
+            if summary_client is None:
+                carry |= set(_BLANK_KEEPS) | {"audit_log"}
+            restore_company_db(backup / "state.db", carry=carry)
             forget_company_caches()
             summary["database_restored"] = True
         if summary_client is not None:
