@@ -108,6 +108,13 @@ class Note:
     correction: str | None
     corrected_at: str | None
 
+    @property
+    def corrected(self) -> str:
+        """The correction as the Executive reads it, in note form
+        (:func:`note_form`); empty when there is none. Every reader that
+        hands a correction to a model uses this, never ``correction``."""
+        return note_form(self.correction) if self.correction else ""
+
     def as_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,

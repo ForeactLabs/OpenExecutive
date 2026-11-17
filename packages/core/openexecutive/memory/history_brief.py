@@ -83,7 +83,6 @@ def _clean(text: str, limit: int) -> str:
 def note_line(note: Any, *, lead: str) -> str:
     """One quoted line for a brief: ``lead`` (when it is due), what kind of
     note, who it was with and where, then their own words."""
-    from openexecutive.memory.history import note_form
     from openexecutive.utils.prompt_blocks import no_tags
 
     who = _clean(note.counterpart, 120).replace("<", "(").replace(">", ")")
@@ -91,7 +90,7 @@ def note_line(note: Any, *, lead: str) -> str:
     kind = _KIND_LABEL.get(note.kind, note.kind)
     head = f"- {lead}{kind}, {where}" + (f", with {who}" if who else "")
     if note.correction:
-        body = f"{_clean(note_form(note.correction), 300)} (as they corrected it)"
+        body = f"{_clean(note.corrected, 300)} (as they corrected it)"
     else:
         body = f'their words: "{_clean(note.quote, 300)}" (noted as: {_clean(note.summary, 240)})'
     return no_tags(f"{head} [{note.occurred_at[:10]}]: {body}")
