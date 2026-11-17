@@ -417,7 +417,10 @@ def _scan_new_text(body: list[str]) -> tuple[list[str], int | None, bool]:
     replied = False
     while i < len(body):
         text = body[i].strip()
-        if _FORWARDED_RE.match(text) or (not replied and _BEGIN_FORWARDED_RE.match(text)):
+        if _FORWARDED_RE.match(text) or (
+            not replied and _BEGIN_FORWARDED_RE.match(text)
+            and not (text.startswith(">") and _after_attribution(body, i))
+        ):
             return kept, i, True
         if _ORIGINAL_MESSAGE_RE.match(text) or _OUTLOOK_RULE_RE.match(text):
             return kept, i, False
@@ -459,12 +462,13 @@ def readable_text(
     """What an email says, to read it: its sender's own words
     (``sender_new_text``), then any message they forwarded, under
     ``FORWARDED_HEADING`` with the forward's own ">" quoting taken off
-    (``split_forward``). ``max_chars`` caps the sender's words,
-    ``forwarded_chars`` (else ``max_chars``) the forwarded message."""
+    (``split_forward``). With ``forwarded_chars``, ``max_chars`` caps the
+    sender's words and ``forwarded_chars`` the forwarded message; without
+    it, ``max_chars`` caps the whole text."""
     own, inner = split_forward(body, subject, max_chars=max_chars, forwarded_chars=forwarded_chars)
-    if not inner:
-        return own
-    return f"{own}\n\n{FORWARDED_HEADING}\n{inner}".strip()
+    text = f"{own}\n\n{FORWARDED_HEADING}\n{inner}".strip() if inner else own
+    # Without forwarded_chars, max_chars is the cap on the whole text.
+    return text[:max_chars] if max_chars is not None and forwarded_chars is None else text
 
 
 def _first_unattributed_quote(lines: list[str]) -> int | None:
@@ -474,8 +478,24 @@ def _first_unattributed_quote(lines: list[str]) -> int | None:
         if _attribution_end(lines, i) is not None:
             return None
         if line.lstrip().startswith(">"):
-            return i
+            return None if _after_attribution(lines, i) else i
     return None
+
+
+# What a reply attribution in any language looks like: a line ending in ":"
+# that names an address or a date ("Le lun. 3 nov. 2026, Dana <d@x> a écrit :",
+# "Am 03.11.2026 schrieb Dana:").
+_ATTRIBUTION_ANY_RE = re.compile(r"^(?=.*[@\d]).{8,300}:\s*$")
+
+
+def _after_attribution(lines: list[str], i: int) -> bool:
+    """Whether the ">" line at ``i`` is the start of a quote under a reply
+    attribution: the last non-blank line before it looks like one."""
+    for j in range(i - 1, -1, -1):
+        prev = lines[j].strip()
+        if prev:
+            return not prev.startswith(">") and _ATTRIBUTION_ANY_RE.match(prev) is not None
+    return False
 
 
 def split_forward(

@@ -141,3 +141,17 @@ def test_a_forward_with_its_marker_in_another_language_is_read() -> None:
     assert "Rechnung 42" in forwarded and ">" not in forwarded
     # A reply's quote is still history, whatever the subject.
     assert split_forward("Ja.\n\nOn Mon, A <a@example.com> wrote:\n> old", "WG: Rechnung") == ("Ja.", "")
+
+
+def test_a_quoted_forward_under_a_reply_in_another_language_is_history() -> None:
+    from openexecutive.integrations.email_poller import _new_text_lines
+
+    body = "Merci.\n\nLe lun. 3 nov. 2026 à 10:00, Dana <d@example.com> a écrit :\n> Begin forwarded message:\n> old"
+    text = readable_text(body, "RE: x")
+    assert FORWARDED_HEADING not in text and "old" not in text
+    assert _new_text_lines(body.splitlines())[1] is False
+
+
+def test_max_chars_alone_caps_the_whole_text() -> None:
+    body = "x" * 50 + "\n\n---------- Forwarded message ---------\n" + "y" * 500
+    assert len(readable_text(body, max_chars=100)) == 100
