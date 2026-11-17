@@ -2937,6 +2937,10 @@ class Executive:
                     if response_content:
                         current_messages.append({"role": "assistant", "content": response_content})
                     current_messages.append({"role": "user", "content": [{"type": "text", "text": CUT_OFF_NOTE}]})
+                    # The next round carries on the cut text where it
+                    # stopped: no paragraph break between them
+                    # (_round_separator).
+                    streamed_tail = ""
                     continue
             if final_msg.stop_reason != "tool_use" and not cut_off:
                 # A reply with no tool call still gets the queued files and

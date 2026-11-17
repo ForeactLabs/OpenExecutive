@@ -114,3 +114,14 @@ def test_cut_off_call_dropped_by_the_provider_is_named_as_writing() -> None:
     assert sent[-1]["content"][0]["text"] == CUT_OFF_NOTE
     labels = [i["label"] for i in items if isinstance(i, dict) and i.get("type") == "activity"]
     assert labels == [CUT_OFF_LABEL]
+
+
+def test_cut_off_reply_text_runs_on_without_a_paragraph_break() -> None:
+    from tests.unit._agent_loop_fakes import FinalMsg, TextBlock
+    from tests.unit.test_reply_rounds import _reply
+
+    text = _reply([
+        FinalMsg([TextBlock("Revenue grew 12% in Q")], "max_tokens"),
+        FinalMsg([TextBlock("3, driven by renewals.")], "end_turn"),
+    ])
+    assert text == "Revenue grew 12% in Q3, driven by renewals."
