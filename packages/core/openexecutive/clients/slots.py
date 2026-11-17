@@ -31,6 +31,7 @@ Invariants:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import shutil
@@ -820,7 +821,7 @@ async def create_client_slot(
             # this copy and not an older one. A failed snapshot stops before
             # the slot exists, since unload would otherwise restore stale data.
             try:
-                snapshot_user_state(settings)
+                await asyncio.to_thread(snapshot_user_state, settings)
             except Exception as exc:
                 logger.exception("client-slots: pre-create user snapshot failed")
                 raise ClientSlotError(
@@ -924,7 +925,7 @@ async def activate_client_slot(
             # nothing. A failed snapshot stops the switch, since the switch
             # would replace data nothing has saved.
             try:
-                snapshot_user_state(settings)
+                await asyncio.to_thread(snapshot_user_state, settings)
             except Exception as exc:
                 logger.exception("client-slots: pre-activation user snapshot failed")
                 raise ClientSlotError(

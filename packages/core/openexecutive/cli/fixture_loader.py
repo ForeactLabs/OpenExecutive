@@ -341,7 +341,7 @@ async def _load_from_dir(
         # an older copy over the user's newer work.
         auto_snapshot_taken = False
         if live_is_users:
-            snapshot_user_state(settings)
+            await asyncio.to_thread(snapshot_user_state, settings)
             auto_snapshot_taken = True
 
         summary = await _apply_state_from_source(fixture_dir, settings)
@@ -1026,6 +1026,14 @@ def forget_company_caches() -> None:
     people_registry.invalidate()
 
 
+# The tables SQLite's full-text search (FTS3/4/5) and R-tree modules keep
+# behind each virtual table, as "<virtual table>_<part>".
+_SHADOW_TABLE_PARTS = (
+    "config", "content", "data", "docsize", "idx", "segdir", "segments",
+    "stat", "node", "parent", "rowid",
+)
+
+
 def _delete_every_table(db_path: Path, *, keep: Collection[str]) -> dict[str, int]:
     """DELETE every row of every table in ``db_path`` except those in ``keep``.
 
@@ -1041,14 +1049,21 @@ def _delete_every_table(db_path: Path, *, keep: Collection[str]) -> dict[str, in
     conn = sqlite3.connect(str(db_path))
     try:
         conn.execute("PRAGMA foreign_keys = OFF")
-        # SQLite names each table's kind. A virtual table (full-text search,
-        # R-tree) is emptied through itself; its shadow tables hold its
-        # structure and break it if emptied directly, so they are skipped.
-        tables = [
-            row[1]
-            for row in conn.execute("PRAGMA main.table_list")
-            if row[2] in ("table", "virtual") and not row[1].startswith("sqlite_")
+        # A virtual table (full-text search, R-tree) is emptied through itself;
+        # its shadow tables ("<virtual table>_<part>") hold its structure and
+        # break it if emptied directly, so they are skipped. Read from
+        # sqlite_master, which every SQLite version has.
+        rows = conn.execute(
+            "SELECT name, sql FROM sqlite_master"
+            " WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'"
+        ).fetchall()
+        virtual = [
+            name
+            for name, sql in rows
+            if (sql or "").upper().startswith("CREATE VIRTUAL TABLE")
         ]
+        shadows = {f"{vt}_{part}" for vt in virtual for part in _SHADOW_TABLE_PARTS}
+        tables = [name for name, _sql in rows if name not in shadows]
         for table in sorted(tables):
             if table in keep:
                 continue
@@ -1154,7 +1169,7 @@ async def snapshot_user_state_async(
     here so the lock serialises against concurrent load / unload.
     """
     async with _FIXTURE_OP_LOCK:
-        return snapshot_user_state(settings, force=force)
+        return await asyncio.to_thread(snapshot_user_state, settings, force=force)
 
 
 def snapshot_user_state(settings: Any, *, force: bool = False) -> dict[str, Any]:
