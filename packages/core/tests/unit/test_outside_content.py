@@ -883,7 +883,7 @@ def test_who_a_goes_rule_lets_go_is_not_someone_new_on_balanced(monkeypatch: pyt
         oc.mark(oc.SENDER)
         assert send("pat.lane@vendor.example") is not None
         oc.end_turn(state)
-        state = turn(run_unproven=True)
+        state = turn(from_host=True)
         assert send("pat.lane@vendor.example") is not None
         oc.end_turn(state)
         current_session.set(None)
