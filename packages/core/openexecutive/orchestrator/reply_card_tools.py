@@ -253,7 +253,8 @@ async def handle_update_reply_card(tool_input: dict[str, Any]) -> str:
     # Who it goes from first, while the card still shows it being worked on:
     # a Send tapped before the switch would otherwise go as the person.
     sender = tool_input.get("send_from")
-    if sender in ("executive", "me"):
+    switched = sender in ("executive", "me")
+    if switched:
         from openexecutive.delegation import send_from
 
         try:
@@ -268,6 +269,8 @@ async def handle_update_reply_card(tool_input: dict[str, Any]) -> str:
             choices=card_work.clean_choices(tool_input.get("choices")),
         )
     except SendRefused as refused:
+        if switched:
+            return _error(f"Who it goes from was changed, but nothing else was: {refused.message}")
         return _error(f"Nothing was changed: {refused.message}")
     if artifact_ids:
         # Only the card's wording: it never stops the hand-back.

@@ -409,6 +409,8 @@ async def send(
             except Exception as exc:
                 logger.warning("delegation.send_from: the send failed (%s)", type(exc).__name__)
                 finish_execution(instance.id, STATUS_FAILED, final_payload={"from_executive": True, "error": type(exc).__name__})
+                # The card's history says why it closed.
+                _set_outcome(person.id, str(payload.get("message_id") or ""), CLOSED, reason="send_unconfirmed")
                 raise SendRefused(
                     502, "send_unconfirmed",
                     "Something went wrong, so it may not have gone. Check the Executive's Sent mail before trying again.",

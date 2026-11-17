@@ -424,3 +424,49 @@ def test_a_change_saved_while_it_checks_is_not_sent(
         ))
     assert err.value.code == "already_handled" and sends == []
     assert _fresh(card).status == "proposed"
+
+
+def test_the_cards_work_switches_it_before_it_hands_back(
+    db: Path, owner: Any, models: dict[str, Any], rewrites: list[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.delegation import card_work
+    from openexecutive.orchestrator import reply_card_tools
+    from openexecutive.orchestrator.schedule_tools import current_session
+    from openexecutive.orchestrator.session import Session
+
+    mailbox, card = _card(owner)
+    order: list[str] = []
+    real_apply, real_switch = card_work.apply, send_from.switch_for_work
+
+    async def apply(*a: Any, **k: Any) -> Any:
+        order.append("apply")
+        return await real_apply(*a, **k)
+
+    async def switch(*a: Any, **k: Any) -> Any:
+        order.append("switch")
+        return await real_switch(*a, **k)
+
+    monkeypatch.setattr(card_work, "still_working", lambda c: True)
+    monkeypatch.setattr(card_work, "keep", lambda coro: coro.close())
+    monkeypatch.setattr(card_work, "apply", apply)
+    monkeypatch.setattr(send_from, "switch_for_work", switch)
+    writer = type("W", (), {"person": owner, "mailbox": mailbox})()
+    monkeypatch.setattr("openexecutive.orchestrator.delegation_tools._writer", lambda name: writer)
+    token = current_session.set(Session(reply_card_work=card.id))
+    try:
+        out = json.loads(asyncio.run(reply_card_tools.handle_update_reply_card(
+            {"note": "Sending it from me.", "send_from": "executive"},
+        )))
+        assert out["status"] == "ok" and order == ["switch", "apply"]
+        assert inbox.card_payload(_fresh(card)).get(send_from.FROM_EXECUTIVE) is True
+
+        async def refused(*a: Any, **k: Any) -> None:
+            raise SendRefused(409, "gone", "It was sent.")
+
+        monkeypatch.setattr(card_work, "apply", refused)
+        out = json.loads(asyncio.run(reply_card_tools.handle_update_reply_card({"send_from": "me"})))
+        assert out["error"].startswith("Who it goes from was changed, but nothing else was")
+        out = json.loads(asyncio.run(reply_card_tools.handle_update_reply_card({"send_from": "someone"})))
+        assert out["error"].startswith("Nothing was changed")
+    finally:
+        current_session.reset(token)
