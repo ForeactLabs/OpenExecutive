@@ -591,6 +591,44 @@ def test_the_gateway_keeps_whom_a_gmail_send_was_for(roster: SimpleNamespace) ->
     assert (row.person_id, row.message_id, row.subject, row.recipients) == (roster.ben, "g7", "crates", {DANA})
 
 
+def test_an_outlook_reply_is_kept_for_whoever_asked(roster: SimpleNamespace) -> None:
+    from datetime import UTC, datetime
+
+    from openexecutive.orchestrator import mcp_gateway
+
+    calls: list[dict] = []
+
+    async def fetch(session, tool, arguments, discover=None):  # noqa: ANN001, ANN202
+        calls.append(arguments)
+        return {"id": "o9", "subject": "Crates on Monday", "from": {"emailAddress": {"address": DANA}}}
+
+    reply = "microsoft_365__reply_mail_message"
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(mcp_gateway, "_fetch_m365_json", fetch)
+        sent_by_id = asyncio.run(mcp_gateway._m365_sent_by_id(None, {"messageId": "o9"}))
+    assert calls == [{"messageId": "o9", "select": mcp_gateway._M365_MESSAGE_LOOKUP_SELECT}]
+    with _reader(roster.ben):
+        mcp_gateway._note_sent_for(reply, reply, {"messageId": "o9", "comment": "Yes"}, "Sent.", sent_by_id)
+    [row] = tm._sent_rows()
+    assert (row.subject, row.recipients, row.started) == ("crates on monday", {DANA}, False)
+    sent = {**_item(EXEC, "RE: Crates on Monday", "o10"), "toRecipients": [{"emailAddress": {"address": DANA}}],
+            "receivedDateTime": datetime.now(UTC).isoformat()}
+    with _reader(roster.owner):
+        out = json.loads(_run(FakeMailbox({OUTLOOK_LIST: json.dumps({"value": [sent]})}), OUTLOOK_LIST))
+    assert out["value"] == []
+
+
+def test_an_outlook_forward_is_kept_with_its_new_recipients(roster: SimpleNamespace) -> None:
+    from openexecutive.orchestrator import mcp_gateway
+
+    forward = "microsoft_365__forward_mail_message"
+    args = {"messageId": "o9", "body": {"comment": "FYI", "toRecipients": [{"emailAddress": {"address": DANA}}]}}
+    with _reader(roster.ben):
+        mcp_gateway._note_sent_for(forward, forward, args, "Sent.", {"id": "o9", "subject": "Price list"})
+    [row] = tm._sent_rows()
+    assert (row.subject, row.recipients, row.started) == ("price list", {DANA}, True)
+
+
 def test_the_readers_own_send_with_the_same_subject_wins(roster: SimpleNamespace) -> None:
     _send_for(roster.ben, mid="s1", subject="Order for next week")
     _send_for(roster.owner, mid="s2", subject="Order for next week")

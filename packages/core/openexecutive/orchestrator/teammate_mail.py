@@ -167,6 +167,11 @@ _DATE_RE = re.compile(r"^\s*date\s*:(.*)$", re.IGNORECASE | re.MULTILINE)
 _SKEW = timedelta(minutes=2)
 
 
+def is_reply_subject(subject: object) -> bool:
+    """Whether a subject reads as a reply or forward ("Re: ...")."""
+    return bool(_REPLY_PREFIX_RE.match(str(subject or "")))
+
+
 def _subject_key(subject: object) -> str:
     """A subject as a reply or forward of it reads: "Re: Fwd: Plan" is "plan"."""
     text = " ".join(str(subject or "").split())
@@ -531,7 +536,7 @@ def _sent_for_other(unit: str, headers: str, sides: _Sides, *, ids: list[str] | 
         match = _SUBJECT_RE.search(block)
         subject = match.group(1) if match else ""
     key = _subject_key(subject)
-    reply = bool(_REPLY_PREFIX_RE.match(str(subject or "")))
+    reply = is_reply_subject(subject)
     on_it = set(_addresses(headers.lower()))
 
     def answers(rows: list[_Sent]) -> bool:
