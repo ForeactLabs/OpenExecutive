@@ -278,7 +278,8 @@ class TriageAgent(BaseAgent):
                 if not cut_off:
                     return _parse_decision(block.input)
                 if isinstance(block.input, dict) and block.input.get("alert") is True:
-                    return _no_decision(event, mute_patterns or [], "cut_off", raise_it=True)
+                    kept = _no_decision(event, mute_patterns or [], "cut_off", raise_it=True)
+                    return _with_partial_delivery(kept, block.input)
 
         logger.warning(
             "Triage gave no whole decision for event %s", event.external_id,
@@ -315,6 +316,20 @@ def _no_decision(
         dedup_key=f"{why}-{event.source}-{event.external_id}",
         reason_if_suppressed=why,
     )
+
+
+def _with_partial_delivery(kept: TriageDecision, raw: dict) -> TriageDecision:
+    """A kept card keeps the severity and channels a cut-off review had
+    already given, so an urgent one is still delivered as urgent."""
+    if not kept.alert:
+        return kept
+    said = _parse_decision(raw)
+    update: dict[str, Any] = {}
+    if str(raw.get("severity") or "").lower() in AlertSeverity._value2member_map_:
+        update["severity"] = said.severity
+    if raw.get("channels") and said.channels != [AlertChannel.PERSISTED]:
+        update["channels"] = said.channels
+    return kept.model_copy(update=update) if update else kept
 
 
 def _kept_key(event: AlertEvent) -> str:

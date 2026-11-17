@@ -209,6 +209,16 @@ def test_a_cut_off_review_that_said_raise_keeps_any_card() -> None:
     assert asyncio.run(TriageAgent().triage(event, client=client)).alert is False
 
 
+def test_a_cut_off_review_keeps_the_severity_it_gave() -> None:
+    event = AlertEvent(source="monitoring", external_id="w-2", subject="Site down", body="Checkout fails.")
+    said = SimpleNamespace(type="tool_use", name="emit_alert_decision",
+                           input={"alert": True, "severity": "urgent", "channels": ["web", "slack_dm"]})
+    client = _client(return_value=SimpleNamespace(content=[said], stop_reason="max_tokens"))
+    decision = asyncio.run(TriageAgent().triage(event, client=client))
+    assert decision.severity == AlertSeverity.URGENT
+    assert AlertChannel.SLACK_DM in decision.channels and AlertChannel.PERSISTED in decision.channels
+
+
 def test_triage_swallows_client_exceptions() -> None:
     """LLM error → quiet fallback for an ordinary event, never propagates."""
     client = SimpleNamespace(
