@@ -1048,7 +1048,7 @@ async def get_delegation_mail(request: Request, thread_id: str, message_id: str)
     mailbox only: the client is theirs, so another person's ids find
     nothing. Reads; changes nothing."""
     from openexecutive.delegation.gmail import GmailNotFound, mailbox_link
-    from openexecutive.delegation.inbox import card_payload, open_cards
+    from openexecutive.delegation.inbox import card_on_thread, open_cards
     from openexecutive.delegation.inbox_classifier import their_last_words
     from openexecutive.integrations.email_poller import sender_new_text
 
@@ -1070,9 +1070,7 @@ async def get_delegation_mail(request: Request, thread_id: str, message_id: str)
     message = next((m for m in thread.messages if m.id == message_id), None)
     if message is None:
         raise _refuse(404, "not_found", "That email isn't in your mailbox any more.")
-    card = next(
-        (c for c in open_cards(person_id) if card_payload(c).get("thread_id") == thread.id), None
-    )
+    card = card_on_thread(open_cards(person_id), thread.id)
     return MailViewOut(
         thread_id=thread.id,
         message_id=message.id,

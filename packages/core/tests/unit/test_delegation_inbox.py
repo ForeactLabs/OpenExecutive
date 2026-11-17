@@ -1368,6 +1368,23 @@ def test_reply_from_home_drafts_what_the_watcher_passed_over(
     assert _ask(owner, mailbox, "t1", "m1") == card.id and len(mailbox.specs) == 1
 
 
+def test_reply_from_home_on_a_joined_email_finds_its_card(owner: Any, models: dict[str, Any]) -> None:
+    from openexecutive.delegation import card_work
+
+    mailbox, card = _one_card(owner, models)
+    payload = inbox.card_payload(ledger.get_decision_instance(card.id))
+    assert ledger.update_open_payload(card.id, {
+        **payload, card_work.JOINED_KEY: ["t2"], card_work.JOINED_AT_KEY: {"t2": NOW.isoformat()},
+    })
+    mailbox.add(_msg("j1", "t2", minutes_ago=20, text="Here is the list."))
+    specs = len(mailbox.specs)
+    # Reply on the email that joined the card: the same card, no second one.
+    assert _ask(owner, mailbox, "t2", "j1") == card.id
+    assert [c.id for c in inbox.open_cards(owner.id)] == [card.id] and len(mailbox.specs) == specs
+    assert inbox.card_on_thread(inbox.open_cards(owner.id), "t2").id == card.id  # type: ignore[union-attr]
+    assert "t2" in inbox.card_threads(inbox.open_cards(owner.id))
+
+
 def test_reply_from_home_reuses_the_card_on_the_conversation(owner: Any, models: dict[str, Any]) -> None:
     mailbox = FakeInbox()
     mailbox.add(_msg("m1", "t1"))

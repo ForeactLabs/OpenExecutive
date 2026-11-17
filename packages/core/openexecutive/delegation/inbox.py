@@ -562,8 +562,21 @@ def card_payload(card: Any) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
-def _open_card_for_thread(person_id: int, thread_id: str) -> bool:
-    return any(card_payload(c).get("thread_id") == thread_id for c in open_cards(person_id))
+def card_threads(cards: list[Any]) -> set[str]:
+    """Every thread the open ``cards`` hold: each card's own and those that
+    joined it (``card_work.threads``)."""
+    from openexecutive.delegation import card_work
+
+    return {t for c in cards for t in card_work.threads(card_payload(c)) if t}
+
+
+def card_on_thread(cards: list[Any], thread_id: str) -> Any | None:
+    """The open card among ``cards`` that holds ``thread_id``, its own or
+    one that joined it, else None. Every lookup of a card by thread goes
+    through here, so a joined thread never gets a second card."""
+    from openexecutive.delegation import card_work
+
+    return next((c for c in cards if thread_id in card_work.threads(card_payload(c))), None)
 
 
 # --------------------------------------------------------------------------- #
@@ -1160,10 +1173,9 @@ async def _scan(person: Any, client: Any, watch: InboxWatch, now: datetime) -> S
     if len(cards) >= OPEN_CARDS_MAX:
         result.status = "backlog_full"
         return result
-    from openexecutive.delegation import card_work
 
     # Every thread of an open card's conversation, those that joined it too.
-    carded = {t for c in cards for t in card_work.threads(card_payload(c))} | invites.carded_threads(person.id)
+    carded = card_threads(cards) | invites.carded_threads(person.id)
     since = _parse(watch.watch_since) or now
     listed = await client.inbox_message_ids(after=since, max_results=SCAN_LIST)
     # The newest message of each thread that still needs a look, newest
@@ -1622,7 +1634,7 @@ async def draft_on_request(
     person_id = int(person.id)
     email = (person.email or "").strip().lower()
     cards = open_cards(person_id)
-    on_thread = next((c for c in cards if card_payload(c).get("thread_id") == thread_id), None)
+    on_thread = card_on_thread(cards, thread_id)
     if on_thread is not None:
         return int(on_thread.id)
     client = gmail if gmail is not None else gmail_for(email)
