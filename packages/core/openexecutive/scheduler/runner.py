@@ -40,19 +40,20 @@ logger = logging.getLogger(__name__)
 
 # Strong refs so GC cannot cancel in-flight tasks mid-execution.
 _inflight: set[asyncio.Task[None]] = set()
-# The ids of the actions those tasks run: a restore of a saved company
-# database leaves these rows running (``clients.slots.restore_company_db``),
-# since their handlers are still going and will finish and chain them.
-_inflight_ids: set[int] = set()
+# The actions those tasks run, as (id, kind, run_at): a restore of a saved
+# company database leaves these rows running (``clients.slots.
+# restore_company_db``), since their handlers are still going and will finish
+# and chain them. Ids alone can repeat across two companies' databases.
+_inflight_actions: set[tuple[int, str, str]] = set()
 
 
-def in_flight_action_ids() -> frozenset[int]:
-    """The ids of the scheduled actions running in this process now."""
-    return frozenset(_inflight_ids)
+def in_flight_actions() -> frozenset[tuple[int, str, str]]:
+    """The scheduled actions running in this process now: (id, kind, run_at)."""
+    return frozenset(_inflight_actions)
 
 
-def _forget_inflight_id(action_id: int, _task: asyncio.Task[None]) -> None:
-    _inflight_ids.discard(action_id)
+def _forget_inflight(key: tuple[int, str, str], _task: asyncio.Task[None]) -> None:
+    _inflight_actions.discard(key)
 
 # Liveness for the Setup status page (api/setup_checks.py): when this
 # loop started, and when its last tick finished and how. Every tick ends by
@@ -420,8 +421,9 @@ async def run_scheduler(
                 _inflight.add(task)
                 task.add_done_callback(_inflight.discard)
                 if row.id is not None:
-                    _inflight_ids.add(row.id)
-                    task.add_done_callback(functools.partial(_forget_inflight_id, row.id))
+                    key = (row.id, row.kind, row.run_at)
+                    _inflight_actions.add(key)
+                    task.add_done_callback(functools.partial(_forget_inflight, key))
             _beat("ran")
         except asyncio.CancelledError:
             raise

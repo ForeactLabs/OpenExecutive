@@ -400,9 +400,9 @@ def restore_company_db(state_src: Path) -> None:
     # chains as usual; a recurring job among the closed ones is then seeded
     # afresh at its next time (each seed skips a kind still pending).
     from openexecutive.memory.episodic import settle_restored_queue
-    from openexecutive.scheduler.runner import in_flight_action_ids, seed_recurring_jobs
+    from openexecutive.scheduler.runner import in_flight_actions, seed_recurring_jobs
 
-    if settle_restored_queue(_episodic_db_path(), in_flight=in_flight_action_ids()):
+    if settle_restored_queue(_episodic_db_path(), in_flight=in_flight_actions()):
         seed_recurring_jobs()
 
 

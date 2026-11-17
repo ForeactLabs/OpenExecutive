@@ -782,7 +782,13 @@ async def test_blank_switch_then_unload_brings_every_table_back(
     )
     from openexecutive.scheduler import runner
 
-    monkeypatch.setattr(runner, "_inflight_ids", {in_flight_id})
+    in_flight = episodic.get_scheduled_action(in_flight_id)
+    assert in_flight is not None
+    # Same id, another job: a row of another company's copy is not in flight.
+    monkeypatch.setattr(runner, "_inflight_actions", {
+        (in_flight_id, "dynamic_workflow", in_flight.run_at),
+        (rotation_id, "reminder", "2099-01-01T00:00:00+00:00"),
+    })
     with sqlite3.connect(str(env.db_path)) as conn:
         conn.execute(
             "UPDATE scheduled_actions SET status = 'running' "
