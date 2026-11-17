@@ -1364,6 +1364,9 @@ def open_card_from(person_id: int, message: Any) -> Any | None:
         and card_payload(c).get("sender_verified") is True
         and card_payload(c).get("source") != FOLLOW_UP_SOURCE
         and message.thread_id not in card_work.threads(card_payload(c))
+        # Each joined thread is read on every scan: a card that holds
+        # MAX_JOINED of them takes no more, and the next email gets its own.
+        and len(card_work.threads(card_payload(c))) <= card_work.MAX_JOINED
     ]
     return max(found, key=lambda c: str(c.created_at or ""), default=None)
 

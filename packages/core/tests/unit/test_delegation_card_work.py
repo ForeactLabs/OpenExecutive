@@ -767,3 +767,36 @@ def test_a_newer_email_restarting_the_work_isnt_their_words(
     turns = asyncio.run(go())
     stopped = [t["text"] for t in turns if t.get("state") == "stopped"]
     assert stopped[0] == "Stopped to read the newer email."
+
+
+def test_a_card_full_of_joined_emails_takes_no_more(db: Path, owner: Any, models: dict[str, Any]) -> None:
+    from openexecutive.memory.decision_ledger import update_open_payload
+
+    mailbox = FakeInbox()
+    mailbox.add(_msg("m1", "t1", minutes_ago=40))
+    _scan(owner, mailbox)
+    card = inbox.open_cards(owner.id)[0]
+    assert inbox.open_card_from(owner.id, _msg("m9", "t9")) is not None
+    payload = inbox.card_payload(_fresh(card))
+    full = [f"j{n}" for n in range(card_work.MAX_JOINED)]
+    assert update_open_payload(card.id, {**payload, card_work.JOINED_KEY: full})
+    assert inbox.open_card_from(owner.id, _msg("m9", "t9")) is None
+
+
+def test_a_run_stopped_before_its_first_step_still_ends(
+    db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mailbox, card = _card(owner)
+    monkeypatch.setattr(card_work, "start", _REAL_START)
+    _slow_exec(monkeypatch, [])
+
+    async def go() -> None:
+        assert card_work.start(owner, card.id, gmail=mailbox)
+        # Stopped in the same moment it started: _run never began.
+        assert card_work.stop(card.id)
+        await card_work.ended(card.id)
+
+    asyncio.run(go())
+    assert not card_work.running(card.id)
+    payload = inbox.card_payload(_fresh(card))
+    assert payload[card_work.WORK_KEY] == "" and payload["conversation"][-1]["text"] == "Stopped."

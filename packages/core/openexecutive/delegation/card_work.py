@@ -65,6 +65,8 @@ FILES_KEY = "files"  # [{"name", "mime", "size"}], what the reply carries
 STEPS_KEY = "work_steps"  # what the running work did so far, one line each
 NOW_KEY = "work_now"  # what it is doing right now ("" between rounds)
 JOINED_KEY = "joined_threads"  # other mail threads that joined this card
+# At most this many other threads join one card (each is read every scan).
+MAX_JOINED = 4
 # When each joined thread joined (the joining email's received_at): mail
 # there counts as newer only after it.
 JOINED_AT_KEY = "joined_at"
@@ -384,7 +386,11 @@ def start(person: Any, card_id: int, *, gmail: Any = None, ask: str = "") -> boo
             return False
         _RUNNING.add(card_id)
         _STARTED[card_id] = datetime.now(UTC)
-        _TASK[card_id] = keep(_run(person, card_id, gmail=gmail, ask=ask))
+        task = keep(_run(person, card_id, gmail=gmail, ask=ask))
+        _TASK[card_id] = task
+        # A run stopped before its first step never enters _run, so its
+        # finally never runs: close it here instead (once; _close lets go).
+        task.add_done_callback(lambda done: _close(card_id) if _TASK.get(card_id) is done else None)
         return True
     except Exception:
         logger.exception("delegation.card_work: couldn't start the work on card %s", card_id)
@@ -530,27 +536,30 @@ async def _run(person: Any, card_id: int, *, gmail: Any, ask: str) -> None:
     except Exception:
         logger.exception("delegation.card_work: the work on card %s failed", card_id)
     finally:
-        _RUNNING.discard(card_id)
-        _STARTED.pop(card_id, None)
-        _TASK.pop(card_id, None)
-        ending = _ENDING.pop(card_id, "")
-        # Ended without handing anything back: the run stays on the card as
-        # stopped (their Stop, or their new words) or stuck, and one that
-        # would have gone on its own waits for them instead, since what the
-        # email asked wasn't done.
-        if ending == STOPPED:
-            ended = _update(card_id, lambda p: {**_end_turn(p, state=STOPPED, text="Stopped."), WORK_KEY: ""})
-        elif ending in (CHANGED, NEWER):
-            why = "Stopped to do it your way." if ending == CHANGED else "Stopped to read the newer email."
-            ended = _update(card_id, lambda p: {**_end_turn(p, state=STOPPED, text=why), WORK_KEY: ""})
-        else:
-            ended = _update(card_id, lambda p: {
-                **_end_turn(p, state=STUCK, text="I stopped before finishing.", choices=[TRY_AGAIN]),
-                WORK_KEY: "",
-            })
-        if ended is not None:
-            _hand_back_unfinished(card_id)
+        _close(card_id)
 
+def _close(card_id: int) -> None:
+    """The run on ``card_id`` is over: it leaves the running set, and when
+    it ended without handing anything back it stays on the card as stopped
+    (their Stop, their new words, a newer email) or stuck, and one that
+    would have gone on its own waits for them instead, since what the email
+    asked wasn't done."""
+    _RUNNING.discard(card_id)
+    _STARTED.pop(card_id, None)
+    _TASK.pop(card_id, None)
+    ending = _ENDING.pop(card_id, "")
+    if ending == STOPPED:
+        ended = _update(card_id, lambda p: {**_end_turn(p, state=STOPPED, text="Stopped."), WORK_KEY: ""})
+    elif ending in (CHANGED, NEWER):
+        why = "Stopped to do it your way." if ending == CHANGED else "Stopped to read the newer email."
+        ended = _update(card_id, lambda p: {**_end_turn(p, state=STOPPED, text=why), WORK_KEY: ""})
+    else:
+        ended = _update(card_id, lambda p: {
+            **_end_turn(p, state=STUCK, text="I stopped before finishing.", choices=[TRY_AGAIN]),
+            WORK_KEY: "",
+        })
+    if ended is not None:
+        _hand_back_unfinished(card_id)
 
 async def apply(
     card_id: int, person: Any, *, body: str, note: str, files: list[tuple[str, str, bytes]],
