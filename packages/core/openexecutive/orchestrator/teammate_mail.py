@@ -61,6 +61,8 @@ import logging
 import re
 from collections.abc import Awaitable, Callable, Iterator
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 from openexecutive.people.identity import RosterAllow, addresses_of
@@ -92,7 +94,9 @@ _GMAIL_ID_KEYS = frozenset({"message_id", "message_ids", "thread_id", "thread_id
 _M365_ID_KEYS = frozenset({"messageid"})
 _M365_PATH_ID_RE = re.compile(r"/messages/([^/?$]+)", re.IGNORECASE)
 _M365_LIST_TOOLS = frozenset({"list_mail_messages", "list_mail_folder_messages"})
-_M365_PARTY_FIELDS = "id,conversationId,from,sender,toRecipients,ccRecipients,bccRecipients"
+_M365_PARTY_FIELDS = (
+    "id,conversationId,from,sender,toRecipients,ccRecipients,bccRecipients,receivedDateTime,sentDateTime"
+)
 _GRAPH_PARTY_KEYS = frozenset({
     "from", "sender", "torecipients", "ccrecipients", "bccrecipients", "replyto",
 })
@@ -140,8 +144,11 @@ OUTLOOK_THEIRS_NOTE = (
 )
 
 
-# Mail the Executive sent for someone (rule 4). Every row's ids are read on
-# each mailbox call; its subject only while it is recent.
+# Mail the Executive sent for someone (rule 4). The sent message itself is
+# theirs for good. A message dated after the send is theirs too when it is
+# in the send's thread, or (while the send is recent) has its subject and
+# one of its recipients: a reply. Mail from before the send never is, so a
+# teammate's reply into a shared thread hides nothing that was there.
 SENT_TABLE = "mail_sent_for"
 SUBJECT_MATCH_DAYS = 30
 _open = db.opener(db.company_path, schema=(
@@ -153,6 +160,9 @@ _open = db.opener(db.company_path, schema=(
 _SUBJECT_RE = re.compile(r"^\s*(?:\d+\.\s*)?subject\s*:(.*)$", re.IGNORECASE | re.MULTILINE)
 _REPLY_PREFIX_RE = re.compile(r"^(?:\s*(?:re|fwd?|aw|sv)\s*:\s*)+", re.IGNORECASE)
 _SENT_ID_RE = re.compile(r"Message ID:\s*(\S+)")
+_DATE_RE = re.compile(r"^\s*date\s*:(.*)$", re.IGNORECASE | re.MULTILINE)
+# A reply dated a little before its send's row is clock skew.
+_SKEW = timedelta(minutes=2)
 
 
 def _subject_key(subject: object) -> str:
@@ -164,9 +174,11 @@ def _subject_key(subject: object) -> str:
 @dataclass
 class _Sent:
     person_id: int
-    ids: set[str]
+    message_id: str
+    thread_id: str
     subject: str
     recipients: set[str]
+    at: datetime
 
 
 @dataclass
@@ -178,13 +190,10 @@ class _Sides:
     reader_id: int | None = None
     reader_is_principal: bool = False
     seen: set[str] = field(default_factory=set)
-    # What the Executive sent for anyone but the reader (rule 4), by id and
-    # by subject.
-    sent_ids: set[str] = field(default_factory=set)
-    sent_subjects: dict[str, list[set[str]]] = field(default_factory=dict)
-    # The reader's own sends, which win over anyone else's.
-    own_ids: set[str] = field(default_factory=set)
-    own_subjects: dict[str, list[set[str]]] = field(default_factory=dict)
+    # What the Executive sent for anyone but the reader (rule 4), and for
+    # the reader, whose own sends win.
+    sent: list[_Sent] = field(default_factory=list)
+    own: list[_Sent] = field(default_factory=list)
     # Off only outside any session (a scheduled workflow step), which has
     # nowhere to keep what it was shown; its searches and reads stay filtered.
     gate_ids: bool = True
@@ -338,40 +347,48 @@ def _sides(session: Any) -> _Sides | None:
         reader_id=reader_id,
         reader_is_principal=any(p.is_principal for p in reader),
         seen=seen if isinstance(seen, set) else set(),
-        sent_ids={i for row in sent for i in row.ids},
-        sent_subjects=_by_subject(sent),
-        own_ids={i for row in own for i in row.ids},
-        own_subjects=_by_subject(own),
+        sent=sent,
+        own=own,
         gate_ids=session is not None,
     )
 
 
-def _by_subject(rows: list[_Sent]) -> dict[str, list[set[str]]]:
-    out: dict[str, list[set[str]]] = {}
-    for row in rows:
-        if row.subject:
-            out.setdefault(row.subject, []).append(row.recipients)
-    return out
-
-
 def _sent_rows() -> list[_Sent]:
-    """The newest kept sends. A send's ids count for good; its subject only
-    for ``SUBJECT_MATCH_DAYS``, so a later unrelated "Invoice" from the same
-    vendor is not taken for a reply to it."""
+    """Every kept send. Its subject counts only for ``SUBJECT_MATCH_DAYS``,
+    so a later unrelated "Invoice" from the same vendor is not taken for a
+    reply to it."""
     with _open() as conn:
         rows = conn.execute(
-            f"SELECT person_id, message_id, thread_id, subject, recipients, "  # noqa: S608
+            f"SELECT person_id, message_id, thread_id, subject, recipients, at, "  # noqa: S608
             f"at >= datetime('now', '-{SUBJECT_MATCH_DAYS} days') AS recent FROM {SENT_TABLE}"
         ).fetchall()
     return [
         _Sent(
             person_id=int(r["person_id"]),
-            ids={i for i in (r["message_id"], r["thread_id"]) if i},
+            message_id=str(r["message_id"] or ""),
+            thread_id=str(r["thread_id"] or ""),
             subject=str(r["subject"] or "") if r["recent"] else "",
             recipients=set(str(r["recipients"] or "").split()),
+            at=datetime.fromisoformat(str(r["at"])).replace(tzinfo=UTC),
         )
         for r in rows
     ]
+
+
+def _when(value: object) -> datetime | None:
+    """A message's date (an RFC 2822 Date header or an ISO time), in UTC;
+    None when it can't be read."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        when = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            when = parsedate_to_datetime(text)
+        except (TypeError, ValueError, IndexError):
+            return None
+    return when if when.tzinfo is not None else when.replace(tzinfo=UTC)
 
 
 def _workflow_person() -> int | None:
@@ -447,7 +464,7 @@ def _addresses(text: str) -> list[str]:
 
 
 def _theirs(unit: str, headers: str, sides: _Sides, *, ids: list[str] | None = None,
-            subject: str | None = None) -> bool:
+            subject: str | None = None, when: datetime | None = None) -> bool:
     """Whether ``unit`` is someone else's mail and none of the reader's
     addresses is in ``headers``: an address of another teammate is anywhere
     in it, or the Executive sent it for someone else (rule 4)."""
@@ -455,31 +472,44 @@ def _theirs(unit: str, headers: str, sides: _Sides, *, ids: list[str] | None = N
         return False
     if any(a in sides.others for a in _addresses(unit)):
         return True
-    return _sent_for_other(unit, headers, sides, ids=ids, subject=subject)
+    return _sent_for_other(unit, headers, sides, ids=ids, subject=subject, when=when)
 
 
 def _sent_for_other(unit: str, headers: str, sides: _Sides, *, ids: list[str] | None = None,
-                    subject: str | None = None) -> bool:
+                    subject: str | None = None, when: datetime | None = None) -> bool:
     """Whether the Executive sent ``unit`` for someone other than the
-    reader, or it answers one: one of its ids is a kept send's, or it has a
-    kept send's subject and one of the people it went to."""
-    if not sides.sent_ids and not sides.sent_subjects:
+    reader, or it answers one (rule 4): it is a kept send's message, or it
+    is dated after a kept send and is in its thread or has its subject and
+    one of the people it went to. The reader's own sends win."""
+    if not sides.sent:
         return False
-    found = ids if ids is not None else _LISTED_ID_RE.findall(unit)
-    if any(i in sides.own_ids for i in found):
+    found = set(ids if ids is not None else _LISTED_ID_RE.findall(unit))
+    if any(r.message_id in found for r in sides.own if r.message_id):
         return False
-    if any(i in sides.sent_ids for i in found):
+    if any(r.message_id in found for r in sides.sent if r.message_id):
         return True
+    block = re.split(r"\n[ \t]*\n", unit.lstrip("\n"), maxsplit=1)[0]
+    if when is None:
+        dated = _DATE_RE.search(block)
+        when = _when(dated.group(1)) if dated else None
+    if when is None:
+        return False
     if subject is None:
-        block = re.split(r"\n[ \t]*\n", unit.lstrip("\n"), maxsplit=1)[0]
         match = _SUBJECT_RE.search(block)
         subject = match.group(1) if match else ""
     key = _subject_key(subject)
     on_it = set(_addresses(headers.lower()))
-    if any(recipients & on_it for recipients in sides.own_subjects.get(key, [])):
-        # The reader sent with this subject to this person too: theirs.
-        return False
-    return any(recipients & on_it for recipients in sides.sent_subjects.get(key, []))
+
+    def answers(rows: list[_Sent]) -> bool:
+        return any(
+            when >= r.at - _SKEW and (
+                (r.thread_id and r.thread_id in found)
+                or (r.subject and r.subject == key and bool(r.recipients & on_it))
+            )
+            for r in rows
+        )
+
+    return not answers(sides.own) and answers(sides.sent)
 
 
 def _text_headers(unit: str) -> str:
@@ -608,11 +638,6 @@ def _filter_listing(text: str, sides: _Sides) -> str | None:
     if not starts:
         return "No messages to show."
     entries = [body[s:e] for s, e in zip(starts, [*starts[1:], len(body)], strict=True)]
-    # A reply in the thread of a kept send is that person's too.
-    for entry in entries:
-        listed = _LISTED_ID_RE.findall(entry)
-        if any(i in sides.sent_ids for i in listed):
-            sides.sent_ids.update(listed)
     # An entry whose headers didn't come back can't be checked: dropped.
     kept = [e for e in entries if "From:" in e and not _theirs(e, _text_headers(e), sides)]
     for entry in kept:
@@ -670,8 +695,9 @@ def _graph_parties(item: Any) -> str:
 def _graph_theirs(item: Any, sides: _Sides) -> bool:
     ids = [str(item[k]) for k in ("id", "conversationId") if isinstance(item, dict) and item.get(k)]
     subject = item.get("subject") if isinstance(item, dict) else None
+    when = _when(item.get("receivedDateTime") or item.get("sentDateTime")) if isinstance(item, dict) else None
     return _theirs(json.dumps(item, ensure_ascii=False), _graph_parties(item), sides, ids=ids,
-                   subject=subject if isinstance(subject, str) else None)
+                   subject=subject if isinstance(subject, str) else None, when=when)
 
 
 def _filter_graph(text: str, sides: _Sides, listing: bool) -> str:
@@ -707,7 +733,7 @@ def _filter(name: str, text: str, sides: _Sides) -> str:
     if n == _GW_PREFIX + "search_gmail_messages":
         listing = _filter_listing(text, sides)
         return text if listing is None else listing
-    if not any(a in sides.others for a in _addresses(text)) and not _sent_for_other(text, text, sides):
+    if not any(a in sides.others for a in _addresses(text)) and not sides.sent:
         return text
     if "batch" in n:
         # Decided message by message: one of the reader's in the batch must
@@ -817,7 +843,7 @@ def guard_call_tool(call: CallTool) -> CallTool:
         sides = _sides(session)
         if sides is None:
             return _refusal(ROSTER_NOTE.format(tool=name))
-        if (not sides.other_addresses and not sides.sent_ids and not sides.sent_subjects) or not isinstance(
+        if (not sides.other_addresses and not sides.sent) or not isinstance(
             arguments, dict,
         ):
             return await call(tool_input)
