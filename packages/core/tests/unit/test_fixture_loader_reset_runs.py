@@ -89,11 +89,13 @@ def test_reset_clears_workflow_runs_audit_log_and_eval_runs(
 
 def test_reset_all_state_keeps_none_of_the_run_history_or_act_as_me() -> None:
     """A reset empties every table but RESET_KEEPS, so run, audit and eval
-    history, the decision ledger and every Act as me table go."""
+    history, the decision ledger and every Act as me table go, except the
+    marker of its one-time upgrades."""
     from openexecutive.cli.fixture_loader import RESET_KEEPS
     from openexecutive.delegation.schema import TABLES as DELEGATION_TABLES
+    from openexecutive.delegation.schema import UPGRADES_TABLE
 
     for table in ("workflow_runs", "audit_log", "eval_runs", "decision_instances",
                   "decision_class_state", *DELEGATION_TABLES):
-        assert table not in RESET_KEEPS
+        assert (table in RESET_KEEPS) == (table == UPGRADES_TABLE)
 

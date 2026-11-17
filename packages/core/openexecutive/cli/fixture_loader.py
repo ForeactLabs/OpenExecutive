@@ -111,6 +111,8 @@ RESET_KEEPS: frozenset[str] = frozenset({
     "facts_meta",
     "review_meta",
     "dynamic_workflows_meta",
+    "departments_meta",  # check-ins already moved to company time
+    "delegation_upgrades",
     "generated_fixtures",
     "executive_control",
     "eval_scenarios",
