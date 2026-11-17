@@ -16,7 +16,7 @@ from typing import Any
 
 from openexecutive.orchestrator import tool_groups
 from openexecutive.providers.feature_gate import ReadingLimits
-from openexecutive.workflows import step_script
+from openexecutive.workflows import step_script, tool_catalog
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,11 @@ _TURN_BUDGET_FLOOR = 3_000
 _NEVER_CUT_BY_TURN_BUDGET = frozenset(
     {step_script.RUN_SCRIPT_TOOL, tool_groups.OPEN_TOOLS, "search_tools"}
 )
+
+# Calls that change nothing a held result came from, though their names
+# don't start with a read verb (tool_catalog.read_only_label): asking a
+# specialist, and finding or opening tools.
+_READS_NOTHING = frozenset({"consult_specialist", tool_groups.OPEN_TOOLS, "search_tools"})
 
 
 def _safe_tool_name(tool_name: Any) -> str:
@@ -158,15 +163,21 @@ class TurnReadingBudget:
     part (``replay``) and never runs the tool again. Replaying rather than
     re-running matters: any tool's result can be long, and a repeated write
     (an event, a message) would happen twice.
+
+    A held result is the one in hand when it ran. Once a round runs a call
+    that may change things (``ran``: anything not plainly a read), the held
+    parts are dropped, so a repeat after a click or an edit runs the tool
+    again and reads what is there now. The content check's notice on a
+    result (``notice``) goes on every one of its parts.
     """
 
     def __init__(self, limits: ReadingLimits) -> None:
         self.per_result = limits.per_read
         self.turn_budget = limits.per_turn
         self.used = 0
-        # Each result that came back in parts, by call: its whole text and
-        # where the next part starts.
-        self._parts: dict[str, tuple[str, int]] = {}
+        # Each result that came back in parts, by call: its whole text, where
+        # the next part starts, and the notice each part carries.
+        self._parts: dict[str, tuple[str, int, str]] = {}
         # tool_use ids answered by ``replay``: already sized, not cut again.
         self._replayed: set[str] = set()
 
@@ -185,11 +196,12 @@ class TurnReadingBudget:
         held = self._parts.get(key)
         if held is None:
             return None
-        text, start = held
+        text, start, notice = held
         name = _safe_tool_name(tool_use["name"])
         limit, budget_spent = _turn_result_limit(
             tool_use["name"], per_result=self.per_result, turn_budget=self.turn_budget, used=self.used
         )
+        limit = max(_MIN_USEFUL_CAP, limit - len(notice))
         if budget_spent:
             # Nothing more fits: say so, and keep the rest for no one.
             del self._parts[key]
@@ -207,14 +219,28 @@ class TurnReadingBudget:
         else:
             room = max(1, limit - len(_part_marker(name, start=start, end=start + limit, total=len(text))))
             end = start + room
-            self._parts[key] = (text, end)
+            self._parts[key] = (text, end, notice)
             part = text[start:end] + _part_marker(name, start=start, end=end, total=len(text))
         self._replayed.add(tool_use["id"])
-        return part
+        return notice + part
 
-    def cap(self, name: str, tool_input: Any, text: Any, tool_use_id: str = "") -> Any:
+    def ran(self, tool_uses: list[dict[str, Any]]) -> None:
+        """Note the calls a round ran: one that may have changed something
+        (not plainly a read) drops every held part, so the next repeat reads
+        afresh. Next parts handed back by ``replay`` ran nothing."""
+        for tu in tool_uses:
+            if tu.get("id") in self._replayed:
+                continue
+            name = str(tu.get("name") or "")
+            if name in _READS_NOTHING or tool_catalog.read_only_label(name, {}):
+                continue
+            self._parts.clear()
+            return
+
+    def cap(self, name: str, tool_input: Any, text: Any, tool_use_id: str = "", notice: str = "") -> Any:
         """``text`` sized for the prompt (its first part when it is long),
-        counted against the turn's reading."""
+        counted against the turn's reading. ``notice`` is the content check's
+        notice ``text`` starts with, for its later parts too."""
         if tool_use_id and tool_use_id in self._replayed:
             content = text
         else:
@@ -224,7 +250,11 @@ class TurnReadingBudget:
             content = _cap_tool_result(text, tool_name=name, limit=limit, budget_spent=budget_spent)
             if not budget_spent and isinstance(text, str) and content is not text:
                 # Where the next part starts: what the first part showed.
-                self._parts[self._key(name, tool_input)] = (text, content.rindex("\n\n[PART"))
+                start = content.rindex("\n\n[PART")
+                if notice and text.startswith(notice) and start > len(notice):
+                    self._parts[self._key(name, tool_input)] = (text[len(notice):], start - len(notice), notice)
+                else:
+                    self._parts[self._key(name, tool_input)] = (text, start, "")
         if name != "consult_specialist" and isinstance(content, str):
             self.used += len(content)
         return content

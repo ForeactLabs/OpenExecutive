@@ -925,10 +925,14 @@ async def run_action_step(
 
         _append_assistant(messages, blocks)
         results: list[dict[str, Any]] = []
+        # A repeat of a call whose result came in parts gets the next part;
+        # a call that may change something drops the parts held from before.
+        replays = {str(u["id"]): r for u in tool_uses if (r := reading.replay(u)) is not None}
+        reading.ran(tool_uses)
         for use in tool_uses:
             name = str(use["name"])
             arguments = use["input"] if isinstance(use["input"], dict) else {}
-            replayed = reading.replay(use)
+            replayed = replays.get(str(use["id"]))
             if replayed is not None:
                 # The next part of a long result the step already has: the
                 # tool does not run again.

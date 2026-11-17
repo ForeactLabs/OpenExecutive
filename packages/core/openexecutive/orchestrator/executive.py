@@ -2548,6 +2548,9 @@ class Executive:
             carries_on, run_on = run_on, False
             tool_uses: list[dict[str, Any]] = []
             response_content: list[dict[str, Any]] = []
+            # The content check's notice on each result this round, for every
+            # part of it (orchestrator.reading).
+            read_notices: dict[str, str] = {}
 
             # If specialists were already consulted, this is the synthesis pass.
             # Emit synthesis_start before text chunks begin streaming.
@@ -3790,7 +3793,8 @@ class Executive:
                             elif kind == "done":
                                 script_result, script_failed = payload
                     logger.info("← run_script  result=%s", _trunc(script_result))
-                    results_by_id[tu["id"]] = "".join(dict.fromkeys(notices)) + script_result
+                    read_notices[tu["id"]] = "".join(dict.fromkeys(notices))
+                    results_by_id[tu["id"]] = read_notices[tu["id"]] + script_result
                     # Agent Activity: the built tool as one card, with the
                     # calls it made (the result lists them, capped). Sent by
                     # the round's event replay below, like specialist events.
@@ -3876,6 +3880,7 @@ class Executive:
                     )
                     if notice:
                         results_by_id[tu["id"]] = _with_notice(results_by_id.get(tu["id"], ""), notice)
+                        read_notices[tu["id"]] = notice
             # The owner's own mail this round read is checked the same way,
             # and decides how much of the Act as me lockdown holds from the
             # next round on (delegation.lockdown.mail_lock_holds).
@@ -3891,6 +3896,7 @@ class Executive:
                     results_by_id[tu["id"]] = checked
                     if notice:
                         results_by_id[tu["id"]] = _with_notice(results_by_id.get(tu["id"], ""), notice)
+                        read_notices[tu["id"]] = notice
                 # A script that ran beside the read may have read mail the
                 # loop never checks: the turn stays unvetted.
                 ran_script = any(
@@ -3912,12 +3918,16 @@ class Executive:
                 claim_calls.append(
                     (claim_check.call_label(tu["name"], tu["input"]), str(results_by_id.get(tu["id"], "")))
                 )
+            # A call that may have changed something drops the parts held
+            # from before it (orchestrator.reading).
+            reading_budget.ran(tool_uses)
             for tu in tool_uses:
                 content = reading_budget.cap(
                     tu["name"],
                     tu["input"],
                     app_links.for_model(results_by_id.get(tu["id"], f"Unknown tool: {tu['name']}")),
                     tu["id"],
+                    read_notices.get(tu["id"], ""),
                 )
                 content = tool_images.content(content, images_by_id.get(tu["id"]), sees=sees)
                 tool_results.append({"type": "tool_result", "tool_use_id": tu["id"], "content": content})
