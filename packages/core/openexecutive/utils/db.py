@@ -60,12 +60,12 @@ def opener(
         # sqlite3 waits 5 seconds on another writer by default and sets the
         # connection's busy timeout to match, so neither is repeated here.
         conn = sqlite3.connect(str(resolve(db_path)))
-        conn.row_factory = sqlite3.Row
-        if wal:
-            conn.execute("PRAGMA journal_mode=WAL")
-        if foreign_keys:
-            conn.execute("PRAGMA foreign_keys = ON")
         try:
+            conn.row_factory = sqlite3.Row
+            if wal:
+                conn.execute("PRAGMA journal_mode=WAL")
+            if foreign_keys:
+                conn.execute("PRAGMA foreign_keys = ON")
             if schema is not None:
                 conn.executescript(schema)
             yield conn

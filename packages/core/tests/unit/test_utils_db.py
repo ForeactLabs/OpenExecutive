@@ -72,3 +72,24 @@ def test_a_store_defaults_to_the_companys_database_as_it_is_now(
     assert db.company_path() == tmp_path / "company.db"
     assert db.company_path(None) == tmp_path / "company.db"
     assert db.company_path(tmp_path / "other.db") == tmp_path / "other.db"
+
+
+def test_a_failed_set_up_still_closes_the_connection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Switching WAL on can fail (another writer holds the file); the
+    connection must not be left open when it does."""
+    closed: list[bool] = []
+
+    class Conn:
+        row_factory = None
+
+        def execute(self, sql: str) -> None:
+            raise sqlite3.OperationalError("database is locked")
+
+        def close(self) -> None:
+            closed.append(True)
+
+    monkeypatch.setattr(sqlite3, "connect", lambda path: Conn())
+    open_db = db.opener(lambda p: tmp_path / "x.db", wal=True)
+    with pytest.raises(sqlite3.OperationalError), open_db():
+        pass
+    assert closed == [True]
