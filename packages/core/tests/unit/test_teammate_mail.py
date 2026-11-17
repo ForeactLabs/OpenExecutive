@@ -454,3 +454,94 @@ def test_a_query_with_a_bracket_inside_quotes_is_refused() -> None:
         assert not tm._balanced(query), query
     for query in ['subject:"q3 plan" OR {from:a to:b}', "(invoice OR bill) -label:paid", ""]:
         assert tm._balanced(query), query
+
+
+# ── mail the Executive sent for someone ──────────────────────────────────
+
+DANA = "dana@acme.example"
+
+
+def _sent_by_exec(mid: str, subject: str, to: str, sender: str = EXEC) -> str:
+    return (
+        f"Message ID: {mid}\nSubject: {subject}\nFrom: Executive <{sender}>\n"
+        f"To: {to}\n\n--- BODY ---\nHello.\n"
+    )
+
+
+def _send_for(person_id: int, mid: str = "s1", subject: str = "Crates on Monday") -> None:
+    with _reader(person_id):
+        tm.note_sent(subject=subject, recipients={DANA}, result=f"Email sent! Message ID: {mid}")
+
+
+def test_mail_sent_for_a_teammate_is_left_out_of_the_owners_search(roster: SimpleNamespace) -> None:
+    _send_for(roster.ben, mid="m2")
+    mailbox = FakeMailbox({SEARCH: _listing(VENDOR, EXEC)})
+    with _reader(roster.owner):
+        out = _run(mailbox, SEARCH, query=f"to:{DANA}")
+    assert "Subject 1" in out and "Subject 2" not in out
+    assert "Left out 1 message" in out
+    assert not any(i.endswith(":m2") for i in roster.session.mail_ids_seen)
+
+
+def test_the_teammate_finds_mail_sent_for_them(roster: SimpleNamespace) -> None:
+    _send_for(roster.ben, mid="m2")
+    with _reader(roster.ben):
+        out = _run(FakeMailbox({SEARCH: _listing(VENDOR, EXEC)}), SEARCH, query=f"to:{DANA}")
+    assert "Subject 2" in out and "Left out" not in out
+
+
+def test_mail_sent_for_the_owner_is_left_out_of_a_teammates_search(roster: SimpleNamespace) -> None:
+    _send_for(roster.owner, mid="m1")
+    with _reader(roster.ben):
+        out = _run(FakeMailbox({SEARCH: _listing(EXEC)}), SEARCH, query="q")
+    assert "Subject 1" not in out and "Left out 1 message" in out
+
+
+def test_a_reply_to_mail_sent_for_a_teammate_is_theirs_too(roster: SimpleNamespace) -> None:
+    _send_for(roster.ben, mid="s1", subject="Crates on Monday")
+    roster.session.mail_ids_seen.add(f"{roster.owner}:r1")
+    reply = _sent_by_exec("r1", "Re: Crates on Monday", EXEC, sender=DANA)
+    with _reader(roster.owner):
+        out = json.loads(_run(FakeMailbox({READ: reply}), READ, message_id="r1"))
+    assert out["withheld"] is True
+
+
+def test_other_outside_mail_with_another_subject_reads(roster: SimpleNamespace) -> None:
+    _send_for(roster.ben, mid="s1", subject="Crates on Monday")
+    roster.session.mail_ids_seen.add(f"{roster.owner}:r2")
+    other = _sent_by_exec("r2", "Invoice 44", EXEC, sender=DANA)
+    with _reader(roster.owner):
+        out = _run(FakeMailbox({READ: other}), READ, message_id="r2")
+    assert "Invoice 44" in out
+
+
+def test_a_thread_of_mail_sent_for_a_teammate_is_withheld(roster: SimpleNamespace) -> None:
+    _send_for(roster.ben, mid="s1", subject="Taxes")
+    text = _thread((EXEC, DANA, "Hello."), (DANA, EXEC, "Thanks."))
+    roster.session.mail_ids_seen.add(f"{roster.owner}:t1")
+    with _reader(roster.owner):
+        out = json.loads(_run(FakeMailbox({THREAD: text}), THREAD, thread_id="t1"))
+    assert out["withheld"] is True
+
+
+def test_an_outlook_item_sent_for_a_teammate_is_dropped(roster: SimpleNamespace) -> None:
+    _send_for(roster.ben, subject="Crates on Monday")
+    sent = {**_item(EXEC, "Crates on Monday", "o2"), "toRecipients": [{"emailAddress": {"address": DANA}}]}
+    text = json.dumps({"value": [_item(VENDOR, "Invoice", "o1"), sent]})
+    with _reader(roster.owner):
+        out = json.loads(_run(FakeMailbox({OUTLOOK_LIST: text}), OUTLOOK_LIST))
+    assert [i["id"] for i in out["value"]] == ["o1"]
+
+
+def test_an_approved_send_is_for_whoever_asked(roster: SimpleNamespace) -> None:
+    from openexecutive.orchestrator import levels
+
+    with patch.object(levels, "is_approved", lambda: True), \
+            patch.object(levels, "approved_requester", lambda: roster.ben):
+        assert tm.sent_for() == roster.ben
+
+
+def test_a_send_no_one_can_be_told_of_is_not_kept(roster: SimpleNamespace) -> None:
+    with _reader(None):
+        tm.note_sent(subject="Hi", recipients={DANA}, result="Email sent! Message ID: x9")
+    assert tm._sent_rows() == []

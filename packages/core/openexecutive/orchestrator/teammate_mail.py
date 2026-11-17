@@ -30,6 +30,14 @@ from chat) with three rules:
    the rest and says how many it left out; a single read is withheld. A
    reply that would quote such a thread (``quote_original``) is refused.
 
+4. **Mail the Executive sent for someone is theirs.** It carries only the
+   Executive's address and the outside person's, so no teammate address
+   marks it. Every send the mailbox accepts is kept here with whom it was
+   for (``note_sent``: its message id, its thread, its subject and who it
+   went to), and a message with one of those ids, or with that subject and
+   one of those people on it, is that person's: hidden from everyone else
+   as a teammate's own mail is.
+
 Outside mail (vendors, counsel, the principal's contacts) and the reader's
 own mail are untouched. The reader is the principal or a teammate on a
 surface that proved who they are, or the teammate whose own email the turn
@@ -56,6 +64,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from openexecutive.people.identity import RosterAllow, addresses_of
+from openexecutive.utils import db
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +140,35 @@ OUTLOOK_THEIRS_NOTE = (
 )
 
 
+# Mail the Executive sent for someone (rule 4). The newest rows are read on
+# every mailbox call; older sends fall out of reach of the subject match only.
+SENT_TABLE = "mail_sent_for"
+SENT_READ_MAX = 5000
+_open = db.opener(db.company_path, schema=(
+    f"CREATE TABLE IF NOT EXISTS {SENT_TABLE} ("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT, person_id INTEGER NOT NULL, "
+    "message_id TEXT NOT NULL DEFAULT '', thread_id TEXT NOT NULL DEFAULT '', "
+    "subject TEXT NOT NULL DEFAULT '', recipients TEXT NOT NULL DEFAULT '', at TEXT NOT NULL);"
+))
+_SUBJECT_RE = re.compile(r"^\s*(?:\d+\.\s*)?subject\s*:(.*)$", re.IGNORECASE | re.MULTILINE)
+_REPLY_PREFIX_RE = re.compile(r"^(?:\s*(?:re|fwd?|aw|sv)\s*:\s*)+", re.IGNORECASE)
+_SENT_ID_RE = re.compile(r"Message ID:\s*(\S+)")
+
+
+def _subject_key(subject: object) -> str:
+    """A subject as a reply or forward of it reads: "Re: Fwd: Plan" is "plan"."""
+    text = " ".join(str(subject or "").split())
+    return _REPLY_PREFIX_RE.sub("", text).strip().lower()
+
+
+@dataclass
+class _Sent:
+    person_id: int
+    ids: set[str]
+    subject: str
+    recipients: set[str]
+
+
 @dataclass
 class _Sides:
     reader: RosterAllow
@@ -140,6 +178,10 @@ class _Sides:
     reader_id: int | None = None
     reader_is_principal: bool = False
     seen: set[str] = field(default_factory=set)
+    # What the Executive sent for anyone but the reader (rule 4), by id and
+    # by subject.
+    sent_ids: set[str] = field(default_factory=set)
+    sent_subjects: dict[str, list[set[str]]] = field(default_factory=dict)
     # Off only outside any session (a scheduled workflow step), which has
     # nowhere to keep what it was shown; its searches and reads stay filtered.
     gate_ids: bool = True
@@ -269,6 +311,15 @@ def _sides(session: Any) -> _Sides | None:
     reader = [p for p in team if reader_id is not None and p.id == reader_id]
     others = [p for p in team if reader_id is None or p.id != reader_id]
     seen = getattr(session, "mail_ids_seen", None) if session is not None else None
+    try:
+        sent = [s for s in _sent_rows() if s.person_id != reader_id]
+    except Exception:
+        logger.warning("teammate_mail: sent mail read failed — refusing", exc_info=True)
+        return None
+    sent_subjects: dict[str, list[set[str]]] = {}
+    for row in sent:
+        if row.subject:
+            sent_subjects.setdefault(row.subject, []).append(row.recipients)
     return _Sides(
         reader=RosterAllow(reader),
         others=RosterAllow(others),
@@ -282,8 +333,72 @@ def _sides(session: Any) -> _Sides | None:
         reader_id=reader_id,
         reader_is_principal=any(p.is_principal for p in reader),
         seen=seen if isinstance(seen, set) else set(),
+        sent_ids={i for row in sent for i in row.ids},
+        sent_subjects=sent_subjects,
         gate_ids=session is not None,
     )
+
+
+def _sent_rows() -> list[_Sent]:
+    with _open() as conn:
+        rows = conn.execute(
+            f"SELECT person_id, message_id, thread_id, subject, recipients FROM {SENT_TABLE} "  # noqa: S608
+            "ORDER BY id DESC LIMIT ?",
+            (SENT_READ_MAX,),
+        ).fetchall()
+    return [
+        _Sent(
+            person_id=int(r["person_id"]),
+            ids={i for i in (r["message_id"], r["thread_id"]) if i},
+            subject=str(r["subject"] or ""),
+            recipients=set(str(r["recipients"] or "").split()),
+        )
+        for r in rows
+    ]
+
+
+def sent_for() -> int | None:
+    """Whom a send happening now is for: inside an approved step, the person
+    who asked for it (the principal when they approved their own); else this
+    turn's reader (``_reader_id``). None when no one can be told."""
+    from openexecutive.orchestrator import levels
+    from openexecutive.orchestrator.schedule_tools import current_session
+    from openexecutive.people.store import find_principal_person
+
+    try:
+        if levels.is_approved():
+            asker = levels.approved_requester()
+            if asker is not None:
+                return int(asker)
+            principal = find_principal_person()
+            return principal.id if principal is not None else None
+        session = current_session.get()
+        return _reader_id(session) if session is not None else None
+    except Exception:
+        logger.warning("teammate_mail: couldn't tell whom a send was for", exc_info=True)
+        return None
+
+
+def note_sent(*, subject: object, recipients: list[str] | set[str], thread_id: object = "", result: str = "") -> None:
+    """Keep a send the mailbox accepted with whom it was for (rule 4): its
+    message id (from the send's result, "Message ID: ..."), its thread, its
+    subject and who it went to. Never raises: the send already happened."""
+    try:
+        person = sent_for()
+        if person is None:
+            return
+        found = _SENT_ID_RE.search(result or "")
+        with _open() as conn:
+            conn.execute(
+                f"INSERT INTO {SENT_TABLE} (person_id, message_id, thread_id, subject, recipients, at) "  # noqa: S608
+                "VALUES (?, ?, ?, ?, ?, datetime('now'))",
+                (
+                    int(person), found.group(1) if found else "", str(thread_id or "").strip(),
+                    _subject_key(subject), " ".join(sorted({a.strip().lower() for a in recipients if a.strip()})),
+                ),
+            )
+    except Exception:
+        logger.exception("teammate_mail: couldn't keep whom a send was for")
 
 
 def allow_mail_ids(session: Any, *ids: str) -> None:
@@ -298,12 +413,37 @@ def _addresses(text: str) -> list[str]:
     return _ADDRESS_RE.findall(text)
 
 
-def _theirs(unit: str, headers: str, sides: _Sides) -> bool:
-    """Whether ``unit`` is another teammate's mail: one of their addresses
-    is anywhere in it and none of the reader's is in ``headers``."""
-    if not any(a in sides.others for a in _addresses(unit)):
+def _theirs(unit: str, headers: str, sides: _Sides, *, ids: list[str] | None = None,
+            subject: str | None = None) -> bool:
+    """Whether ``unit`` is someone else's mail and none of the reader's
+    addresses is in ``headers``: an address of another teammate is anywhere
+    in it, or the Executive sent it for someone else (rule 4)."""
+    if any(a in sides.reader for a in _addresses(headers)):
         return False
-    return not any(a in sides.reader for a in _addresses(headers))
+    if any(a in sides.others for a in _addresses(unit)):
+        return True
+    return _sent_for_other(unit, headers, sides, ids=ids, subject=subject)
+
+
+def _sent_for_other(unit: str, headers: str, sides: _Sides, *, ids: list[str] | None = None,
+                    subject: str | None = None) -> bool:
+    """Whether the Executive sent ``unit`` for someone other than the
+    reader, or it answers one: one of its ids is a kept send's, or it has a
+    kept send's subject and one of the people it went to."""
+    if not sides.sent_ids and not sides.sent_subjects:
+        return False
+    found = ids if ids is not None else _LISTED_ID_RE.findall(unit)
+    if any(i in sides.sent_ids for i in found):
+        return True
+    if subject is None:
+        block = re.split(r"\n[ \t]*\n", unit.lstrip("\n"), maxsplit=1)[0]
+        match = _SUBJECT_RE.search(block)
+        subject = match.group(1) if match else ""
+    kept = sides.sent_subjects.get(_subject_key(subject))
+    if not kept:
+        return False
+    on_it = set(_addresses(headers.lower()))
+    return any(recipients & on_it for recipients in kept)
 
 
 def _text_headers(unit: str) -> str:
@@ -432,6 +572,11 @@ def _filter_listing(text: str, sides: _Sides) -> str | None:
     if not starts:
         return "No messages to show."
     entries = [body[s:e] for s, e in zip(starts, [*starts[1:], len(body)], strict=True)]
+    # A reply in the thread of a kept send is that person's too.
+    for entry in entries:
+        listed = _LISTED_ID_RE.findall(entry)
+        if any(i in sides.sent_ids for i in listed):
+            sides.sent_ids.update(listed)
     # An entry whose headers didn't come back can't be checked: dropped.
     kept = [e for e in entries if "From:" in e and not _theirs(e, _text_headers(e), sides)]
     for entry in kept:
@@ -452,7 +597,14 @@ def _filter_thread(text: str, sides: _Sides) -> str:
         if _theirs(text, _text_headers(text), sides):
             return json.dumps({"withheld": True, "note": PRIVATE_NOTE})
         return text
-    kept = [m for m in messages if not _theirs(m, _text_headers(m), sides)]
+    head_ids = _LISTED_ID_RE.findall(head)
+    found = _SUBJECT_RE.search(head)
+    subject = found.group(1) if found else None
+    kept = [
+        m for m in messages
+        if not _theirs(m, _text_headers(m), sides, ids=[*head_ids, *_LISTED_ID_RE.findall(m)],
+                       subject=_subject_or(m, subject))
+    ]
     dropped = len(messages) - len(kept)
     if not dropped:
         return text
@@ -461,6 +613,12 @@ def _filter_thread(text: str, sides: _Sides) -> str:
     # The head's subject is the first message's, which may be one left out.
     head = "".join(line for line in head.splitlines(keepends=True) if line.startswith("Thread ID:"))
     return head + "\n" + "".join(kept) + "\n" + _left_out(dropped)
+
+
+def _subject_or(unit: str, fallback: str | None) -> str | None:
+    """A thread message's own subject line, else the thread's."""
+    found = _SUBJECT_RE.search(re.split(r"\n[ \t]*\n", unit.lstrip("\n"), maxsplit=1)[0])
+    return found.group(1) if found else fallback
 
 
 def _graph_parties(item: Any) -> str:
@@ -474,7 +632,10 @@ def _graph_parties(item: Any) -> str:
 
 
 def _graph_theirs(item: Any, sides: _Sides) -> bool:
-    return _theirs(json.dumps(item, ensure_ascii=False), _graph_parties(item), sides)
+    ids = [str(item[k]) for k in ("id", "conversationId") if isinstance(item, dict) and item.get(k)]
+    subject = item.get("subject") if isinstance(item, dict) else None
+    return _theirs(json.dumps(item, ensure_ascii=False), _graph_parties(item), sides, ids=ids,
+                   subject=subject if isinstance(subject, str) else None)
 
 
 def _filter_graph(text: str, sides: _Sides, listing: bool) -> str:
@@ -510,7 +671,7 @@ def _filter(name: str, text: str, sides: _Sides) -> str:
     if n == _GW_PREFIX + "search_gmail_messages":
         listing = _filter_listing(text, sides)
         return text if listing is None else listing
-    if not any(a in sides.others for a in _addresses(text)):
+    if not any(a in sides.others for a in _addresses(text)) and not _sent_for_other(text, text, sides):
         return text
     if "batch" in n:
         # Decided message by message: one of the reader's in the batch must
@@ -620,7 +781,9 @@ def guard_call_tool(call: CallTool) -> CallTool:
         sides = _sides(session)
         if sides is None:
             return _refusal(ROSTER_NOTE.format(tool=name))
-        if not sides.other_addresses or not isinstance(arguments, dict):
+        if (not sides.other_addresses and not sides.sent_ids and not sides.sent_subjects) or not isinstance(
+            arguments, dict,
+        ):
             return await call(tool_input)
         refused, arguments = _prepare(name, arguments, sides)
         if refused is not None:

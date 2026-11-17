@@ -3479,6 +3479,26 @@ def _note_mail_sent(tool_name: str, normalized: str, arguments: dict[str, Any]) 
         logger.exception("note_mail_sent: could not record the send (non-fatal)")
 
 
+def _note_sent_for(tool_name: str, normalized: str, arguments: dict[str, Any], result_text: str) -> None:
+    """Keep whom a Gmail or Outlook send the mailbox accepted was for, so it
+    stays that person's mail (``teammate_mail.note_sent``). Never raises."""
+    from openexecutive.orchestrator import teammate_mail
+
+    try:
+        if tool_name == "google_workspace__send_gmail_message":
+            subject, thread_id = arguments.get("subject"), arguments.get("thread_id")
+        elif normalized == _M365_RECORD_SEND_TOOL:
+            subject, thread_id = _ci_get(_ci_get(_ci_get(arguments, "body"), "message"), "subject"), ""
+        else:
+            return
+        teammate_mail.note_sent(
+            subject=subject, recipients=_sent_to(tool_name, normalized, arguments),
+            thread_id=thread_id if isinstance(thread_id, str) else "", result=result_text,
+        )
+    except Exception:
+        logger.exception("note_sent_for: could not keep whom a send was for (non-fatal)")
+
+
 # extensible-mcp's refusal for a tool no search in this session has returned
 # (DiscoveredToolsFilter, surfaced by its call_tool handler as "Error: ...").
 _UNDISCOVERED_MARKER = "has not been discovered via search_tools"
@@ -4204,6 +4224,7 @@ class MCPGateway:
         # either: marking it would hide the unanswered-email card.
         if not _is_error_payload(result_text) and not result_text.lstrip().lower().startswith("error"):
             _note_mail_sent(tool_name, normalized, arguments)
+            _note_sent_for(tool_name, normalized, arguments, result_text)
             # Kept per person, so the next email from them knows what was
             # sent (integrations.email_replies).
             _keep_sent_mail(tool_name, normalized, arguments)
