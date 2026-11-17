@@ -191,15 +191,19 @@ def test_due_dates_and_review_lines() -> None:
         last_seen_at=(NOW - timedelta(hours=1)).isoformat(), superseded_count=2,
         last_reviewed_at=(NOW - timedelta(minutes=5)).isoformat(),
     )
-    assert r.review is not None and (r.review.title, r.review.text) == ("Updated", "Dana replied.")
-    assert [c.label for c in r.chips] == ["seen ×3", "2 folded in"]
-    assert r.chips[0].title == "Last seen 1h ago"
+    # The rewritten card already says it: no note repeating it, and no count
+    # of how often the same thing was seen.
+    assert r.review is None
+    assert [c.label for c in r.chips] == ["2 folded in", "Updated by the Executive"]
+    note = view(review_verdict="still_relevant", review_note="Dana hasn't replied.")
+    assert note.review is not None and (note.review.title, note.review.text) == ("Since you last looked", "Dana hasn't replied.")
     assert r.reviewed == "Reviewed 5m ago · changed"
 
 
 def test_visible_tags() -> None:
     v = view(topic_tags=["board", "private:principal", "external:news"])
-    assert [(c.label, c.tone) for c in v.tags] == [("board", "neutral"), ("external:news", "sky")]
+    # How a card was made ("external:news") is not a topic of theirs.
+    assert [(c.label, c.tone) for c in v.tags] == [("board", "neutral")]
 
 
 def test_the_plan_heading() -> None:

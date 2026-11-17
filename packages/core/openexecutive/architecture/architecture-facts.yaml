@@ -5311,8 +5311,9 @@ today:
     still-open row to `#alert-<id>`; Undo → `POST /alerts/{id}/reopen`),
     nothing rendered when empty. The "Executive handled N overnight" status
     pill is unchanged. UI: cards lead with `review_note`
-    (amber "Likely stale" / "Updated" / "Since you last looked"), chips for
-    age, seen ×N, why-now / due, folded-in, draft-ready, a "Reviewed <ago>"
+    (amber "Likely stale" / "Since you last looked"; a rewritten card gets an
+    "Updated by the Executive" chip instead, since its text already says it),
+    chips for age, why-now / due, folded-in, draft-ready, a "Reviewed <ago>"
     footer, a primary move control (Nudge <owner> → chat handoff; Run
     <workflow> → /jobs/<name>); "Needs you" shows "Start here" + 8 cards +
     "Show N more", then one "Older (N)" line for cards untouched 3+ days

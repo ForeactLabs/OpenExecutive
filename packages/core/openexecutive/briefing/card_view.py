@@ -254,16 +254,12 @@ def _lifecycle(item: Any, now: datetime | None) -> tuple[CardReview | None, list
     verdict = item.review_verdict or ""
     stale = verdict == "likely_stale"
     review = None
-    if item.review_note:
-        title = "Likely stale" if stale else "Updated" if verdict == "changed" else "Since you last looked"
+    # A card the review rewrote already says the new text, so its note would
+    # only say it again: the chip below marks it instead.
+    if item.review_note and verdict != "changed":
+        title = "Likely stale" if stale else "Since you last looked"
         review = CardReview(title=title, text=item.review_note, tone="amber" if stale else "neutral")
     chips: list[CardChip] = []
-    if (item.occurrence_count or 1) > 1:
-        seen = age_label(item.last_seen_at, now)
-        chips.append(CardChip(
-            label=f"seen ×{item.occurrence_count}",
-            title=f"Last seen {seen} ago" if seen else "",
-        ))
     due = days_until(item.due_at, now)
     if item.why_now or due is not None:
         when = "" if due is None else "overdue" if due < 0 else "due today" if due == 0 else f"due in {due}d"
@@ -272,7 +268,7 @@ def _lifecycle(item: Any, now: datetime | None) -> tuple[CardReview | None, list
         chips.append(CardChip(label="Likely stale", tone="amber"))
     if (item.superseded_count or 0) > 0:
         chips.append(CardChip(label=f"{item.superseded_count} folded in"))
-    if verdict == "changed" and not item.review_note:
+    if verdict == "changed":
         chips.append(CardChip(label="Updated by the Executive", tone="sky"))
     if verdict == "drafted":
         chips.append(CardChip(label="Draft ready in your queue", tone="amber"))
@@ -466,11 +462,9 @@ def card_view(
         review=review,
         chips=chips,
         surfaced=item.surfaced_reason or "",
-        tags=[
-            CardChip(label=t, tone="sky" if t.startswith("external:") else "neutral")
-            for t in tags
-            if t != ARTIFACT_TAG and (":" not in t or t.startswith("external:"))
-        ],
+        # Only a person's own words for a topic: "external:query" and the
+        # like are how the card was made, and the source line already says it.
+        tags=[CardChip(label=t, tone="neutral") for t in tags if t != ARTIFACT_TAG and ":" not in t],
         document=artifact,
         reviewed=reviewed,
         buttons=buttons,

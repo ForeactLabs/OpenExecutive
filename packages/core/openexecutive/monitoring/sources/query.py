@@ -80,6 +80,10 @@ _QUERY_SYSTEM_PROMPT = (
     "Never invent results or URLs.\n"
     "- Prefer recent developments over evergreen background.\n"
     "- Each result needs a working source URL the principal can click.\n"
+    "- When a result raises a question another search can answer (who is "
+    "named, whether a claim or credit is right, when it was published), "
+    "search for it and put the answer in the summary. Never leave the "
+    "principal a check to do; say plainly what is still unknown.\n"
     "- An empty results list is the correct answer when nothing new and "
     "relevant turned up."
 )

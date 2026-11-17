@@ -188,3 +188,21 @@ def test_parse_decision_reads_the_buttons_words() -> None:
     )
     assert decision.action_label == "Email Dana"
     assert _parse_decision({"alert": True, "severity": "medium"}).action_label == ""
+
+
+def test_no_writer_hands_the_reader_a_look_up() -> None:
+    """A watch card said "check the listing's attribution": a look-up the
+    Executive could do. The watch's own search does it, and triage and the
+    review never write one for the reader, nor make one the card's step."""
+    from openexecutive.monitoring.sources.query import _QUERY_SYSTEM_PROMPT
+    from openexecutive.prompts.alert_review_prompt import ALERT_REVIEW_PROMPT
+    from openexecutive.prompts.triage_prompt import TRIAGE_PROMPT
+
+    start = TRIAGE_PROMPT.index("## External Signals")
+    signals = TRIAGE_PROMPT[start:TRIAGE_PROMPT.index("## Output Field Requirements", start)]
+    assert "A look-up is not a step" in signals
+    assert "leave `suggested_action` empty" in signals
+    assert "never hands the reader a look-up" in signals
+    assert "Check Stripe's status page" not in signals
+    assert "never hands the reader a look-up" in ALERT_REVIEW_PROMPT
+    assert "Never leave the principal a check to do" in _QUERY_SYSTEM_PROMPT
