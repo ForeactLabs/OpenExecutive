@@ -99,9 +99,9 @@ def test_triage_returns_parsed_decision_and_passes_context() -> None:
     assert call.kwargs["tools"] == [TRIAGE_TOOL]
 
 
-def test_triage_falls_back_when_no_tool_use() -> None:
-    """If the model replies with text only (or anything non-tool_use), we get
-    a safe persisted-only fallback rather than crashing."""
+def test_triage_keeps_the_card_when_no_tool_use() -> None:
+    """If the model replies with text only (or anything non-tool_use), review
+    made no decision, so the card shows as raised: a card is never lost."""
     text_block = SimpleNamespace(type="text", text="Just chatting")
     client = SimpleNamespace(
         messages=SimpleNamespace(create=AsyncMock(return_value=SimpleNamespace(content=[text_block])))
@@ -113,13 +113,34 @@ def test_triage_falls_back_when_no_tool_use() -> None:
             client=client,
         )
     )
-    assert decision.alert is False
-    assert decision.channels == [AlertChannel.PERSISTED]
-    assert decision.reason_if_suppressed == "no_decision"
+    assert decision.alert is True
+    assert AlertChannel.WEB in decision.channels
+    assert (decision.headline, decision.body) == ("hi", "b")
+    assert decision.reason_if_suppressed == ""
 
 
-def test_triage_swallows_client_exceptions() -> None:
-    """LLM error → safe fallback decision, never propagates."""
+def test_triage_keeps_the_card_when_its_answer_is_cut_off() -> None:
+    """An answer stopped at max_tokens is a partial decision whose missing
+    ``alert`` would read as "no card": the card shows as raised instead."""
+    cut = SimpleNamespace(type="tool_use", name="emit_alert_decision", input={"severity": "medium"})
+    client = SimpleNamespace(
+        messages=SimpleNamespace(create=AsyncMock(
+            return_value=SimpleNamespace(content=[cut], stop_reason="max_tokens"),
+        ))
+    )
+    decision = asyncio.run(
+        TriageAgent().triage(
+            AlertEvent(source="email", external_id="m-4", subject="Leo asks about Friday", body="Open Friday?"),
+            client=client,
+        )
+    )
+    assert decision.alert is True
+    assert decision.headline == "Leo asks about Friday"
+    assert client.messages.create.call_args.kwargs["max_tokens"] >= 1024
+
+
+def test_triage_keeps_the_card_on_client_exceptions() -> None:
+    """LLM error: the card shows as raised, and the error never propagates."""
     client = SimpleNamespace(
         messages=SimpleNamespace(create=AsyncMock(side_effect=RuntimeError("boom")))
     )
@@ -130,8 +151,8 @@ def test_triage_swallows_client_exceptions() -> None:
             client=client,
         )
     )
-    assert decision.alert is False
-    assert decision.reason_if_suppressed == "triage_error"
+    assert decision.alert is True
+    assert decision.headline == "x"
 
 
 def test_parse_decision_coerces_persisted_in_and_caps_lengths() -> None:

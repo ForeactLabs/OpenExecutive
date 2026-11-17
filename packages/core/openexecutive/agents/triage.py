@@ -245,7 +245,9 @@ class TriageAgent(BaseAgent):
         # ``messages_create`` — branch only on the call shape.
         create_kwargs: dict[str, Any] = {
             "model": self.effective_model(),
-            "max_tokens": 512,
+            # Room for the whole decision: a body of up to 2000 characters
+            # plus the headline, action and tags.
+            "max_tokens": 1536,
             "timeout": _TRIAGE_TIMEOUT,
             "system": self.effective_system_prompt(),
             "tools": [TRIAGE_TOOL],
@@ -260,34 +262,35 @@ class TriageAgent(BaseAgent):
                 message = await caller.messages_create(**create_kwargs)  # type: ignore[union-attr]
         except Exception:
             logger.exception("Triage LLM call failed for event %s", event.external_id)
-            return TriageDecision(
-                alert=False,
-                severity=AlertSeverity.LOW,
-                channels=[AlertChannel.PERSISTED],
-                headline=event.subject or event.title or event.source,
-                body=(event.body or "")[:280],
-                dedup_key=f"fallback-{event.source}-{event.external_id}",
-                reason_if_suppressed="triage_error",
-            )
+            return _kept_as_raised(event)
         log_model_usage(message, model=self.effective_model(), actor="triage")
 
-        for block in message.content:
-            if block.type == "tool_use" and block.name == "emit_alert_decision":
-                return _parse_decision(block.input)
+        # An answer cut off at max_tokens is a partial decision: its missing
+        # fields would read as "no card". The card is kept as raised instead.
+        if getattr(message, "stop_reason", None) != "max_tokens":
+            for block in message.content:
+                if block.type == "tool_use" and block.name == "emit_alert_decision":
+                    return _parse_decision(block.input)
 
         logger.warning(
-            "Triage returned no tool_use for event %s — treating as low/persisted",
+            "Triage gave no whole decision for event %s; the card is kept as raised",
             event.external_id,
         )
-        return TriageDecision(
-            alert=False,
-            severity=AlertSeverity.LOW,
-            channels=[AlertChannel.PERSISTED],
-            headline=event.subject or event.title or event.source,
-            body=(event.body or "")[:280],
-            dedup_key=f"no-tool-{event.source}-{event.external_id}",
-            reason_if_suppressed="no_decision",
-        )
+        return _kept_as_raised(event)
+
+
+def _kept_as_raised(event: AlertEvent) -> TriageDecision:
+    """The card as it was raised, when review gave no decision (the model
+    call failed, or its answer was cut off or missing). A review that
+    couldn't run never loses a card: only a decision it made can."""
+    return TriageDecision(
+        alert=True,
+        severity=AlertSeverity.MEDIUM,
+        channels=[AlertChannel.WEB, AlertChannel.PERSISTED],
+        headline=(event.subject or event.title or event.source)[:200],
+        body=(event.body or "")[:2000],
+        dedup_key=f"kept-{event.source}-{event.external_id}",
+    )
 
 def _parse_decision(raw: dict) -> TriageDecision:
     """Tolerantly coerce the tool input into a TriageDecision."""
