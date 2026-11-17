@@ -1654,6 +1654,27 @@ def requeue_orphaned_running(db_path: Path | None = None) -> int:
         return int(cursor.rowcount)
 
 
+def close_restored_running(db_path: Path | None = None) -> int:
+    """Close the 'running' rows of a database copy that was just made live.
+
+    The copy was taken while those jobs ran, and they finished in this
+    process against the database it replaced, so running them again would
+    do the work twice (a rotation, a send). Nothing would ever claim them
+    either, so they are marked 'cancelled' with the reason. Returns the
+    count closed.
+    """
+    resolved = _resolve_db_path(db_path)
+    if not resolved.exists():
+        return 0
+    with _get_conn(resolved) as conn:
+        cursor = conn.execute(
+            "UPDATE scheduled_actions SET status = 'cancelled', "
+            "last_error = 'was running when this copy was saved' "
+            "WHERE status = 'running'"
+        )
+        return int(cursor.rowcount)
+
+
 def claim_due_actions(
     now: datetime, db_path: Path | None = None, limit: int = 20
 ) -> list[ScheduledAction]:

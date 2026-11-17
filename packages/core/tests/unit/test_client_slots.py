@@ -735,8 +735,15 @@ async def test_blank_switch_then_unload_brings_every_table_back(
         run_at="2099-01-01T00:00:00+00:00", channel="email", channel_ref="pat@example.com",
         intent_text="Call the bank", kind="reminder",
     )
+    rotation_id = episodic.insert_scheduled_action(
+        run_at="2099-01-01T00:00:00+00:00", channel="__internal__", channel_ref="practice",
+        intent_text="Rotate clients", kind="client_rotation",
+    )
     with sqlite3.connect(str(env.db_path)) as conn:
-        conn.execute("UPDATE scheduled_actions SET status = 'running' WHERE kind = 'reminder'")
+        conn.execute(
+            "UPDATE scheduled_actions SET status = 'running' "
+            "WHERE kind IN ('reminder', 'client_rotation')"
+        )
         conn.execute("CREATE TABLE IF NOT EXISTS audit_log (note TEXT)")
         conn.execute("INSERT INTO audit_log VALUES ('mine')")
         conn.execute("CREATE TABLE IF NOT EXISTS dynamic_workflows (name TEXT)")
@@ -773,10 +780,14 @@ async def test_blank_switch_then_unload_brings_every_table_back(
         assert conn.execute(
             "SELECT value FROM departments_meta WHERE key = 'mine_only'"
         ).fetchall() == [("x",)]
-        # Nothing would ever claim a restored 'running' row again.
+        # A job running when the copy was saved finished here: it is closed,
+        # never run a second time (a rotation, a send).
         assert conn.execute(
             "SELECT status FROM scheduled_actions WHERE kind = 'reminder'"
-        ).fetchall() == [("pending",)]
+        ).fetchall() == [("cancelled",)]
+        assert conn.execute(
+            "SELECT status FROM scheduled_actions WHERE id = ?", (rotation_id,)
+        ).fetchall() == [("cancelled",)]
 
 
 async def test_every_first_activation_saves_your_company_again(
