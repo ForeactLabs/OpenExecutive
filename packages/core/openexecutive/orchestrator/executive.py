@@ -2938,7 +2938,12 @@ class Executive:
                         yield {"type": "activity", "label": CUT_OFF_LABEL, "tool": "", "iteration": iteration}
                     if response_content:
                         current_messages.append({"role": "assistant", "content": response_content})
-                    current_messages.append({"role": "user", "content": [{"type": "text", "text": CUT_OFF_NOTE}]})
+                    note: list[dict[str, Any]] = [{"type": "text", "text": CUT_OFF_NOTE}]
+                    # The next round is the last and runs no tool: say so, as
+                    # after any other round.
+                    if iteration == max_iterations - 1:
+                        note.append({"type": "text", "text": LAST_ROUND_NOTE})
+                    current_messages.append({"role": "user", "content": note})
                     # The next round carries on the cut text where it
                     # stopped: no paragraph break between them
                     # (_round_separator). A cut that streamed nothing keeps

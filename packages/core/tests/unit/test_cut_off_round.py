@@ -160,3 +160,26 @@ def test_a_cut_that_wrote_nothing_keeps_the_break_after_earlier_text() -> None:
         FinalMsg([TextBlock("Revenue grew 12%.")], "end_turn"),
     ])
     assert text == "Let me pull the numbers.\n\nRevenue grew 12%."
+
+
+def test_a_cut_before_the_last_round_says_no_tools_are_left() -> None:
+    from openexecutive.orchestrator.executive import LAST_ROUND_NOTE
+
+    provider = _ScriptedProvider(
+        [
+            _FinalMsg([], "max_tokens"),
+            _FinalMsg([_TextBlock("Here is what I have.")], "end_turn"),
+        ]
+    )
+
+    async def _go() -> None:
+        with patch("openexecutive.orchestrator.executive.get_provider", return_value=provider):
+            async for _ in Executive()._stream_agent_loop(
+                system_blocks=[], messages=[{"role": "user", "content": "x"}], model="claude-test",
+                max_iterations=2,
+            ):
+                pass
+
+    asyncio.run(_go())
+    texts = [b["text"] for b in provider.calls[1]["messages"][-1]["content"]]
+    assert texts == [CUT_OFF_NOTE, LAST_ROUND_NOTE]
