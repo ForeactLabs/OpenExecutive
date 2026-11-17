@@ -997,6 +997,32 @@ def mentions_money(text: str) -> bool:
     )
 
 
+def money_quote(text: str) -> str:
+    """The words that made ``mentions_money`` say yes ("$250", "wire 15k"),
+    a few either side, so a card can show why; "" when none. The same
+    patterns, read for where they matched."""
+    patterns = (
+        _AMOUNT_VALUE_RE, _AMOUNT_SIGN_RE, _SPELLED_MONEY_RE, _CODE_AMOUNT_RE, _SCALED_RE,
+        _WORD_CURRENCY_RE, _PRICE_SHARE_RE, _PAYMENT_DETAILS_RE,
+    )
+    hits = [m for rx in patterns for m in [rx.search(text or "")] if m is not None]
+    for m in _BARE_MONEY_RE.finditer(text or ""):
+        first_digit = m.start() + re.search(r"\d", m.group(0)).start()  # type: ignore[union-attr]
+        if not re.search(r"[$€£¥₹]\s?$", text[:first_digit]):
+            hits.append(m)
+            break
+    if not hits:
+        return ""
+    first = min(hits, key=lambda m: m.start())
+    line_start = text.rfind("\n", 0, first.start()) + 1
+    line_end = text.find("\n", first.end())
+    line_end = len(text) if line_end == -1 else line_end
+    start = max(line_start, first.start() - 30)
+    end = min(line_end, first.end() + 30)
+    quote = " ".join(text[start:end].split())
+    return ("…" if start > line_start else "") + quote + ("…" if end < line_end else "")
+
+
 def _all_parsed(text: str, found: list[float]) -> bool:
     """Whether ``amounts`` read every amount in ``text`` right: no
     percentage, no spelled-out or unknown-scale amount, every number next to

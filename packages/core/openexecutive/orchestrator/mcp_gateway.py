@@ -4186,6 +4186,8 @@ class MCPGateway:
             result_text = _hide_saved_files(result_text, hidden.files)
             result_text = _hide_saved_folders(result_text, hidden.folders)
         self._note_grant_health(tool_name, result_text)
+        # A file's name, so an Approve card for a step on it names it.
+        drive_reads.remember_names(_normalize_tool_name(tool_name), result_text)
         if tool_name in drive_reads.DRIVE_READ_TOOLS:
             result_text = _remember_drive_read(tool_name, arguments, result_text)
         if normalized == _M365_DOWNLOAD_TOOL and isinstance(arguments.get("target"), str):

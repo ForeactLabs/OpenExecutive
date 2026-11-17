@@ -5,6 +5,7 @@
 // on the server; it stays off until the whole call has loaded, since the
 // card's headline keeps only the start of it.
 
+import { CardDetailValue } from "@/components/CardDetailValue";
 import { useEffect, useState } from "react";
 
 import HeldFieldsEdit from "@/components/HeldFieldsEdit";
@@ -97,7 +98,7 @@ export default function HeldActionCard({
           {held.details.map((d) => (
             <div key={d.field} className="min-w-0">
               <dt className="text-xs font-semibold uppercase tracking-wide text-fg-muted">{d.field}</dt>
-              <dd className="whitespace-pre-wrap break-words text-[15px] leading-snug text-fg">{d.value}</dd>
+              <dd className="whitespace-pre-wrap break-words text-[15px] leading-snug text-fg"><CardDetailValue detail={d} /></dd>
             </div>
           ))}
         </dl>

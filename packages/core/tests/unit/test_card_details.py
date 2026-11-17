@@ -24,7 +24,8 @@ def test_a_drive_upload_shows_name_kind_size_and_folder() -> None:
     assert shown == [
         {"field": "File name", "value": "Harbor Lane Q3 Report.pdf"},
         {"field": "File", "value": "PDF file, 293 KB"},
-        {"field": "Folder", "value": "https://drive.google.com/drive/folders/1UX0G1Z8qUk8cmaeXp0CCG3eeyeF-HlnL"},
+        {"field": "Folder", "value": "Open the folder",
+         "href": "https://drive.google.com/drive/folders/1UX0G1Z8qUk8cmaeXp0CCG3eeyeF-HlnL"},
     ]
     text = json.dumps(shown)
     assert _PDF[:50] not in text and "user_google_email" not in text and "ab" * 32 not in text
@@ -145,3 +146,134 @@ def test_a_carried_out_step_serves_no_bytes_either() -> None:
     assert _PDF[:50] not in shown.proposed_payload_json
     assert shown.final_payload_json is not None and _PDF[:50] not in shown.final_payload_json
     assert json.loads(shown.final_payload_json)["result"] == "created"
+
+
+# --------------------------------------------------------------------------- #
+# Every app's card reads plainly: a file by its name, rows as a table, a Doc
+# edit as a line, anything with parts as "Name: value" lines.
+# --------------------------------------------------------------------------- #
+_SHEET_ID = "1mOCHqPWC2OZT9I0QBskZf0KKVgFp0tdro8dNAb1zi3s"
+_SHEET_CALL = {
+    "user_google_email": "ai@example.com",
+    "spreadsheet_id": _SHEET_ID,
+    "range_name": "A1:C3",
+    "values": [["Workstream", "Status", "Owner"], ["Launch date", "Nov 16 passed", "Sam"], ["Waitlist", "Wave 1", "Ari"]],
+}
+
+
+def _names(monkeypatch, names: dict[str, str]) -> None:
+    monkeypatch.setattr(card_details, "file_name", lambda file_id: names.get(file_id, ""))
+
+
+def test_a_sheet_update_shows_the_sheet_by_name_its_cells_and_a_table(monkeypatch) -> None:
+    _names(monkeypatch, {_SHEET_ID: "Launch tracker"})
+    shown = card_details.plain("google_workspace__modify_sheet_values", _SHEET_CALL)
+    assert shown[0] == {"field": "Sheet", "value": "Launch tracker", "href": f"https://drive.google.com/open?id={_SHEET_ID}"}
+    assert shown[1] == {"field": "Cells", "value": "Rows 1 to 3, columns A to C"}
+    assert shown[2]["field"] == "Values"
+    assert shown[2]["table"] == _SHEET_CALL["values"]
+    # Where a table can't be drawn (a chat app), every cell as a line.
+    assert shown[2]["value"].splitlines() == [
+        "3 rows", "Workstream | Status | Owner", "Launch date | Nov 16 passed | Sam", "Waitlist | Wave 1 | Ari",
+    ]
+    assert "[[" not in json_text(shown)
+
+
+def json_text(shown: list) -> str:
+    return "\n".join(str(d["value"]) for d in shown)
+
+
+def test_a_sheet_whose_name_isnt_known_says_open_the_sheet(monkeypatch) -> None:
+    _names(monkeypatch, {})
+    shown = card_details.plain("google_workspace__modify_sheet_values", _SHEET_CALL)
+    assert shown[0]["value"] == "Open the sheet" and shown[0]["href"].endswith(_SHEET_ID)
+
+
+def test_rows_sent_as_a_json_string_are_a_table_too(monkeypatch) -> None:
+    _names(monkeypatch, {})
+    call = {**_SHEET_CALL, "values": json.dumps(_SHEET_CALL["values"])}
+    assert card_details.plain("google_workspace__modify_sheet_values", call)[2]["table"] == _SHEET_CALL["values"]
+
+
+def test_ranges_read_as_words() -> None:
+    assert card_details.cells("Sheet1!A1:F13") == "Sheet1, rows 1 to 13, columns A to F"
+    assert card_details.cells("'Q4 Plan'!A:G") == "Q4 Plan, columns A to G"
+    assert card_details.cells("B2") == "Cell B2"
+    assert card_details.cells("2:5") == "Rows 2 to 5"
+    assert card_details.cells("Pipeline") == "Pipeline"
+
+
+def test_a_doc_edit_reads_as_a_line(monkeypatch) -> None:
+    _names(monkeypatch, {"1docdocdocdoc": "Board memo"})
+    shown = card_details.plain("google_workspace__modify_doc_text", {
+        "document_id": "1docdocdocdoc", "start_index": 10, "end_index": 24, "bold": True, "italic": True,
+    })
+    assert shown[0] == {"field": "Change", "value": "Make characters 10 to 24 bold and italic"}
+    assert shown[1]["value"] == "Board memo"
+    assert {"field": "Bold", "value": "Yes"} in shown
+    assert not any(d["field"] in ("From character", "To character") for d in shown)
+    added = card_details.plain("google_workspace__modify_doc_text", {"document_id": "1docdocdocdoc", "start_index": 1, "text": "Hi"})
+    assert added[0] == {"field": "Change", "value": "Add the text below at character 1"}
+
+
+def test_anything_with_parts_reads_as_name_value_lines_never_brackets() -> None:
+    shown = card_details.plain("crm__update_deal", {
+        "properties": {"dealname": "Harbor Lane", "closed": False},
+        "associations": [{"to": {"id": 7}, "types": ["primary"]}],
+    })
+    assert shown[0] == {"field": "Properties", "value": "Dealname: Harbor Lane\nClosed: No"}
+    assert shown[1] == {"field": "Associations", "value": "- To:\n    Id: 7\n  Types: primary"}
+    assert not any("{" in d["value"] or "[" in d["value"] for d in shown)
+
+
+def test_the_page_and_chat_apps_name_the_file_in_the_title(monkeypatch) -> None:
+    from openexecutive.orchestrator import take_the_lead
+
+    _names(monkeypatch, {_SHEET_ID: "Launch tracker"})
+    tool = "google_workspace__modify_sheet_values"
+    payload = {
+        "tool": tool, "mcp": True, "input": _SHEET_CALL, "kind": "money", "reason": "it's about money",
+        "headline": take_the_lead.title(tool, _SHEET_CALL, mcp=True, private=True),
+        "summary": take_the_lead.summarize(tool, _SHEET_CALL, mcp=True),
+    }
+    assert payload["headline"] == "Update a spreadsheet (Google Sheets)"
+    served = card_details.served(payload)
+    assert served["headline"] == "Update Launch tracker (Google Sheets)"
+    assert served["summary"].startswith("Update Launch tracker")
+    # No amount in it: nothing is quoted.
+    assert not any(d["field"] == "The amount it saw" for d in served["details"])
+
+
+def test_a_money_card_quotes_the_amount_it_saw(monkeypatch) -> None:
+    _names(monkeypatch, {})
+    call = {**_SHEET_CALL, "values": [["Plan", "Price"], ["Growth", "Growth plan is $200 a month for teams"]]}
+    served = card_details.served({"tool": "google_workspace__modify_sheet_values", "mcp": True, "input": call, "kind": "money"})
+    assert served["details"][-1] == {"field": "The amount it saw", "value": "“Growth plan is $200 a month for teams”"}
+
+
+def test_a_chat_app_card_names_the_sheet_and_lists_its_rows(monkeypatch) -> None:
+    from openexecutive.api.routes import decisions
+    from openexecutive.memory import decision_ledger
+    from openexecutive.orchestrator import take_the_lead
+
+    _names(monkeypatch, {_SHEET_ID: "Launch tracker"})
+    tool = "google_workspace__modify_sheet_values"
+    payload = {
+        "tool": tool, "mcp": True, "input": dict(_SHEET_CALL), "held": True, "reason": "a rule says to wait",
+        "summary": take_the_lead.summarize(tool, _SHEET_CALL, mcp=True),
+    }
+    instance = DecisionInstance(
+        id=8, decision_class="take_the_lead_action", created_at="2026-11-04T00:00:00+00:00", department="executive",
+        originating_session_id=None, proposed_payload_json=json.dumps(payload), idempotency_key=None,
+        gate_mode="propose", approver_person_id=1, confidence=None, status="proposed", resolved_at=None,
+        resolver_person_id=None, final_payload_json=None, external_event_id=None, reversal_reason=None, severity="",
+    )
+    monkeypatch.setattr(decision_ledger, "get_decision_instance", lambda _id: instance)
+    monkeypatch.setattr(decisions, "shown_in_chat", lambda _i: True)
+    text = channel_cards.card_text(8)
+    assert text is not None
+    assert "Update Launch tracker (Google Sheets)" in text
+    assert f"Sheet: Launch tracker (https://drive.google.com/open?id={_SHEET_ID})" in text
+    assert "Cells: Rows 1 to 3, columns A to C" in text
+    assert "Launch date | Nov 16 passed | Sam" in text
+    assert "[[" not in text

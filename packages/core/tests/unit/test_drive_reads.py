@@ -274,3 +274,16 @@ def test_a_search_whose_lines_all_fail_is_not_an_empty_search(db: Path) -> None:
     assert drive_reads.parse_search_result(unparsable) is None
     assert not drive_reads.record_drive_result("s1", 7, SEARCH, {"query": "q"}, unparsable)
     assert drive_reads.format_drive_memory("s1", 7) == ""
+
+
+def test_a_file_named_in_any_google_answer_is_known_by_its_id(db: Path) -> None:
+    info = 'Spreadsheet: "Launch tracker" (ID: 1mOCHqPWC2OZT9I0QBsk)\nSheets (1):\n  - "Sheet1" (ID: 0) | Size: 13x6'
+    assert drive_reads.remember_names("google_workspace__get_spreadsheet_info", info, db_path=db) == 1
+    made = "Successfully created spreadsheet 'Q4 plan' (ID: 1NewSheetId000)"
+    drive_reads.remember_names("google_workspace__create_spreadsheet", made, db_path=db)
+    assert drive_reads.name_of("1mOCHqPWC2OZT9I0QBsk", db_path=db) == "Launch tracker"
+    assert drive_reads.name_of("1NewSheetId000", db_path=db) == "Q4 plan"
+    assert drive_reads.name_of("1Unknown000000", db_path=db) == ""
+    # Another app's answer, or an error, names nothing.
+    assert drive_reads.remember_names("slack__post", 'x "A" (ID: 1Other0000000)', db_path=db) == 0
+    assert drive_reads.remember_names("google_workspace__x", 'Error: "A" (ID: 1Other0000000)', db_path=db) == 0

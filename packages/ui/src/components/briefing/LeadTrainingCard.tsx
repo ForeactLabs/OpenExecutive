@@ -8,6 +8,7 @@
 // Edit changes it first, and with "Do it like this next time" ticked keeps
 // the edit as an example and allows it. Answered here, never through chat.
 
+import { CardDetailValue } from "@/components/CardDetailValue";
 import { useEffect, useState } from "react";
 
 import GoOnItsOwnOffer from "@/components/briefing/GoOnItsOwnOffer";
@@ -114,12 +115,12 @@ export default function LeadTrainingCard({
                 {shownFields.length > 1 && (
                   <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-fg-muted">{f.label}</span>
                 )}
-                {f.value}
+                <CardDetailValue detail={f} />
               </div>
             ) : (
               <div key={f.field} className="text-[15px] leading-snug text-fg break-words">
                 <span className="text-fg-muted">{f.label}: </span>
-                {f.value}
+                <CardDetailValue detail={f} />
               </div>
             ),
           )}

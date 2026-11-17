@@ -1,5 +1,7 @@
 "use client";
 
+import { CardDetailValue } from "@/components/CardDetailValue";
+import { cardDetails, type CardDetail } from "@/lib/cardDetails";
 import { useEffect, useState } from "react";
 
 import HeldFieldsEdit, { heldFields } from "@/components/HeldFieldsEdit";
@@ -21,7 +23,7 @@ import {
 interface HeldPayload {
   summary: string;
   reason: string;
-  details: { field: string; value: string }[];
+  details: CardDetail[];
   fields: LeadCardField[];
 }
 
@@ -33,10 +35,7 @@ function readPayload(instance: DecisionInstance): HeldPayload | null {
     return {
       summary: raw.summary,
       reason: typeof raw.reason === "string" ? raw.reason : "",
-      details: details.map((d: { field?: unknown; value?: unknown }) => ({
-        field: String(d.field ?? ""),
-        value: String(d.value ?? ""),
-      })),
+      details: cardDetails(details),
       fields: heldFields(raw.fields),
     };
   } catch {
@@ -107,7 +106,7 @@ export default function ChatHeldActionCard({ id }: { id: number }) {
           {payload.details.map((d) => (
             <div key={d.field} className="min-w-0">
               <dt className="text-xs font-semibold uppercase tracking-wide text-fg-muted">{d.field}</dt>
-              <dd className="whitespace-pre-wrap break-words text-[15px] leading-snug text-fg">{d.value}</dd>
+              <dd className="whitespace-pre-wrap break-words text-[15px] leading-snug text-fg"><CardDetailValue detail={d} /></dd>
             </div>
           ))}
         </dl>

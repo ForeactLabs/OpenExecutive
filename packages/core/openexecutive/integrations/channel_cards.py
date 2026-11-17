@@ -221,21 +221,25 @@ def card_text(decision_id: int) -> str | None:
         if payload.get("clashes"):
             lines.append("It clashes with something on your calendar.")
     elif instance.decision_class in ("take_the_lead_action", "department_action"):
+        # Everything the call says, as the web card shows it before Approve
+        # (``card_details.served``: the file by name, rows as lines).
+        from openexecutive.orchestrator import card_details
+
+        if not card_details.held_steps(payload):
+            return None
+        shown = card_details.served(payload)
         if payload.get("requested_by"):
             lines.append(f"{str(payload['requested_by'])[:120]} asked for this.")
-        lines.append(str(payload.get("summary") or payload.get("tool") or "").strip()[:400])
+        lines.append(str(shown.get("summary") or payload.get("tool") or "").strip()[:400])
         reason = str(payload.get("reason") or "").strip()[:300]
         if reason:
             lines.append(f"It waited because {reason.removesuffix('.')}.")
-        # Everything the call says, as the web card shows it before Approve.
-        from openexecutive.orchestrator import card_details
-
-        steps = card_details.held_steps(payload)
-        if not steps:
-            return None
         lines.append("")
-        for detail in card_details.plain_steps(str(payload.get("tool") or ""), steps):
-            lines.append(f"{detail['field']}: {detail['value']}")
+        for detail in shown.get("details") or []:
+            value = str(detail.get("value") or "")
+            if detail.get("href"):
+                value = f"{value} ({detail['href']})"
+            lines.append(f"{detail['field']}: {value}")
     elif instance.decision_class == "app_action":
         # Written by the server from the change itself (workflow_change.card_text).
         # Never cut: workflow_change stages only a card that fits.

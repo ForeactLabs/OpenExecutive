@@ -79,6 +79,11 @@ CREATE TABLE IF NOT EXISTS session_drive_searches (
 );
 CREATE INDEX IF NOT EXISTS idx_session_drive_searches
     ON session_drive_searches(session_id, person_id, query);
+CREATE TABLE IF NOT EXISTS drive_file_names (
+    file_id TEXT PRIMARY KEY,
+    name    TEXT NOT NULL,
+    seen_at TEXT NOT NULL
+);
 """
 
 # workspace-mcp output shapes (gdrive/drive_tools.py), as of 2.4.2. Since 2.0
@@ -411,3 +416,70 @@ def delete_session_drive_memory(session_id: str, db_path: Path | None = None) ->
             conn.execute("DELETE FROM session_drive_searches WHERE session_id = ?", (session_id,))
     except sqlite3.OperationalError:
         return
+
+
+# --------------------------------------------------------------------------- #
+# File names, for Approve cards
+# --------------------------------------------------------------------------- #
+# Any Google Workspace answer that names a file with its id: a search's
+# "- Name: "Q4 plan" (ID: …", an info read's "Spreadsheet: "Q4 plan" (ID: …",
+# a create's "created spreadsheet 'Q4 plan' (ID: …". An Approve card for a
+# step on that file then shows its name instead of a bare link
+# (``orchestrator.card_details``). Only the name and id are kept, company-wide:
+# a card goes to whoever asked, about a file they named by its id.
+_NAMED_ID_RE = re.compile(
+    r"""["'](?P<name>[^"'\n]{1,200})["']\s*\(ID:\s*(?P<id>[A-Za-z0-9_-]{10,128})\b"""
+)
+_MAX_NAMES_KEPT = 5000
+
+
+def remember_names(tool_name: str, result_text: str, db_path: Path | None = None) -> int:
+    """Keep each file a Google Workspace answer names with its id; how many.
+    Never raises."""
+    if not isinstance(tool_name, str) or not tool_name.startswith("google_workspace__"):
+        return 0
+    if not isinstance(result_text, str) or result_text.lstrip().lower().startswith("error"):
+        return 0
+    found = {m["id"]: _clip(m["name"], _NAME_CHARS) for m in _NAMED_ID_RE.finditer(result_text[:200_000])}
+    found = {k: v for k, v in found.items() if v}
+    if not found:
+        return 0
+    try:
+        now = _now()
+        with episodic._get_conn(_db_path(db_path)) as conn:
+            _ensure_schema(conn)
+            conn.executemany(
+                "INSERT INTO drive_file_names (file_id, name, seen_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(file_id) DO UPDATE SET name = excluded.name, seen_at = excluded.seen_at",
+                [(fid, name, now) for fid, name in found.items()],
+            )
+            conn.execute(
+                "DELETE FROM drive_file_names WHERE file_id NOT IN "
+                "(SELECT file_id FROM drive_file_names ORDER BY seen_at DESC LIMIT ?)",
+                (_MAX_NAMES_KEPT,),
+            )
+    except Exception:
+        logger.warning("drive_reads: couldn't keep file names", exc_info=True)
+        return 0
+    return len(found)
+
+
+def name_of(file_id: str, db_path: Path | None = None) -> str:
+    """The name a Google answer last gave ``file_id``, or "". Never raises."""
+    path = _db_path(db_path)
+    if not isinstance(file_id, str) or not file_id or not path.exists():
+        return ""
+    try:
+        with episodic._get_conn(path) as conn:
+            row = conn.execute("SELECT name FROM drive_file_names WHERE file_id = ?", (file_id,)).fetchone()
+            if row is None:
+                row = conn.execute(
+                    "SELECT name FROM session_drive_files WHERE file_id = ? ORDER BY last_seen_at DESC LIMIT 1",
+                    (file_id,),
+                ).fetchone()
+    except sqlite3.OperationalError:
+        return ""
+    except Exception:
+        logger.warning("drive_reads: couldn't read a file's name", exc_info=True)
+        return ""
+    return str(row[0]) if row is not None else ""
