@@ -233,14 +233,33 @@ async def test_create_from_current_snapshots_original_company(
     await create_client_slot(env.settings, display_name="My Real Co", source="current")
     assert snapshots == ["taken"]
 
-    # An existing backup is never overwritten by a later create.
+    # An older backup is never reused: a later create saves your company
+    # again, so unload brings back this copy and not the first one.
     backup = env.company / "_user_backup"
     backup.mkdir(exist_ok=True)
     (backup / "profile.yaml").write_text("name: Original\n")
     # Exit client mode, then re-enter via a fresh create-from-current.
     (env.company / "_client_slots" / ".active_client").unlink()
     await create_client_slot(env.settings, display_name="Second", source="current")
-    assert snapshots == ["taken"]  # no second snapshot
+    assert snapshots == ["taken", "taken"]
+
+
+async def test_create_from_current_stops_when_the_snapshot_fails(
+    env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Entering client mode without a fresh copy of your company would let
+    unload bring back an older one, so a failed snapshot stops the create
+    before any client exists."""
+    _seed_live_company(env, "My Real Co")
+
+    def _fail(_settings: Any) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(slots, "snapshot_user_state", _fail)
+    with pytest.raises(slots.ClientSlotError):
+        await create_client_slot(env.settings, display_name="Acme", source="current")
+    assert not (env.company / "_client_slots" / "acme").exists()
+    assert get_active_client(env.settings) is None
 
 
 async def test_save_active_client_checkpoints_without_switching(env: SimpleNamespace) -> None:

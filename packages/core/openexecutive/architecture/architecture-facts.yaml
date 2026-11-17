@@ -10901,9 +10901,10 @@ clients:
       credential is a file outside the slot, re-checked against the live
       roster on every use, and no verbatim exemplars are learned while a
       slot is active.
-    - First activation with no active client auto-snapshots the user's
-      original company to _user_backup (same restore point the fixture
-      switcher uses; POST /fixtures/unload brings it back).
+    - First activation, or a create from current, with no active client
+      snapshots the user's company to _user_backup every time (same restore
+      point the fixture switcher uses; POST /fixtures/unload brings it back).
+      A failed snapshot stops the switch or create.
   honcho: |
     Each client gets a STABLE Honcho workspace override
     (openexec-client-<slug>, no uuid) so per-person peer memory persists

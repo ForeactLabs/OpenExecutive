@@ -813,6 +813,19 @@ async def create_client_slot(
             if errors:
                 raise ClientSlotError("Invalid bundle: " + "; ".join(errors))
 
+        if source == "current":
+            # The live state is your own company and this enters client mode:
+            # save all of it to _user_backup every time, so unload brings back
+            # this copy and not an older one. A failed snapshot stops before
+            # the slot exists, since unload would otherwise restore stale data.
+            try:
+                snapshot_user_state(settings)
+            except Exception as exc:
+                logger.exception("client-slots: pre-create user snapshot failed")
+                raise ClientSlotError(
+                    "Couldn't save your company before switching. Nothing was changed."
+                ) from exc
+
         slot.mkdir(parents=True, exist_ok=True)
         _write_meta(
             slot,
@@ -823,19 +836,6 @@ async def create_client_slot(
         )
 
         if source == "current":
-            # Preserve the user's original company in _user_backup before
-            # entering client mode, so POST /fixtures/unload remains a working
-            # "exit client mode" path (the slot holds the same data, but
-            # unload restores from _user_backup specifically).
-            if not (
-                settings.company_profile_path.parent / "_user_backup" / "profile.yaml"
-            ).exists():
-                try:
-                    snapshot_user_state(settings)
-                except Exception:
-                    logger.exception(
-                        "client-slots: pre-create user snapshot failed"
-                    )
             saved = _save_slot_state(settings, slot)
             _active_client_sentinel(settings).write_text(slug, encoding="utf-8")
             _set_honcho_client_workspace(slug)
