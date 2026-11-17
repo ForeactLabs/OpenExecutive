@@ -141,9 +141,15 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
   // the stale-but-still-usable view rather than erroring the briefing.
   const [mountedAt] = useState(() => Date.now());
   const lastFetchRef = useRef(mountedAt);
+  // Only the newest refresh's answer is shown: an older one that lands
+  // later (a timed refresh overtaken by Approve's) would put old counts back.
+  const refreshSeqRef = useRef(0);
   const refreshToday = useCallback(() => {
     lastFetchRef.current = Date.now();
-    getToday().then(setToday).catch(() => { /* keep current view on failure */ });
+    const seq = ++refreshSeqRef.current;
+    getToday()
+      .then((t) => { if (seq === refreshSeqRef.current) setToday(t); })
+      .catch(() => { /* keep current view on failure */ });
   }, []);
 
   // Keep Home current when the tab or window comes back (a card answered on
