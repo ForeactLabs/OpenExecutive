@@ -1415,7 +1415,9 @@ async def join_card(person: Any, client: Any, card: Any, message: Any, thread: A
             # The work reads every email of the card: it starts again with
             # this one (a run going now stops and its steps stay on the card).
             await asyncio.to_thread(answers.add_news, card.id, [message])
-            await card_work.redirect(person, card.id, "", gmail=client)
+            if not await card_work.redirect(person, card.id, "", gmail=client):
+                # The run going now didn't let go: the card says it moved on.
+                _add_flag(person.id, str(joined.get("message_id") or ""), "thread_moved_on")
         else:
             fresh = get_decision_instance(card.id)
             if fresh is not None and not await answers.catch_up(

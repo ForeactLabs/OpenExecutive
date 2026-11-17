@@ -1351,6 +1351,9 @@ async def change_delegation_reply(request: Request, decision_id: int, body: Repl
         raise HTTPException(
             status_code=refused.status, detail={"code": refused.code, "message": refused.message, **refused.extra},
         ) from None
+    if not started and card_work.running(decision_id):
+        # The run going now hasn't let go yet: their words weren't taken.
+        raise _refuse(409, "busy", "I'm still finishing the last step. Try again in a moment.")
     if not started:
         raise _refuse(404, "not_found", "That reply isn't waiting for you any more.")
     card = next((c for c in cards(person) if c.decision_id == decision_id), None)

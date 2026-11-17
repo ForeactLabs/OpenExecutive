@@ -96,6 +96,7 @@ _STARTED: dict[int, datetime] = {}
 _TASK: dict[int, asyncio.Task[None]] = {}
 _ENDING: dict[int, str] = {}
 CHANGED = "changed"
+NEWER = "newer"  # a run ended because a newer email joined the card
 
 
 _db = db.company_path
@@ -357,7 +358,8 @@ async def redirect(person: Any, card_id: int, ask: str, *, gmail: Any = None) ->
     their words. False when the card isn't waiting."""
     task = _TASK.get(card_id)
     if task is not None and not task.done() and card_id in _RUNNING:
-        _ENDING[card_id] = CHANGED
+        # Their words, or (no words) a newer email that joined the card.
+        _ENDING[card_id] = CHANGED if ask.strip() else NEWER
         task.cancel()
         await ended(card_id)
     return start(person, card_id, gmail=gmail, ask=ask)
@@ -538,10 +540,9 @@ async def _run(person: Any, card_id: int, *, gmail: Any, ask: str) -> None:
         # email asked wasn't done.
         if ending == STOPPED:
             ended = _update(card_id, lambda p: {**_end_turn(p, state=STOPPED, text="Stopped."), WORK_KEY: ""})
-        elif ending == CHANGED:
-            ended = _update(
-                card_id, lambda p: {**_end_turn(p, state=STOPPED, text="Stopped to do it your way."), WORK_KEY: ""},
-            )
+        elif ending in (CHANGED, NEWER):
+            why = "Stopped to do it your way." if ending == CHANGED else "Stopped to read the newer email."
+            ended = _update(card_id, lambda p: {**_end_turn(p, state=STOPPED, text=why), WORK_KEY: ""})
         else:
             ended = _update(card_id, lambda p: {
                 **_end_turn(p, state=STUCK, text="I stopped before finishing.", choices=[TRY_AGAIN]),
@@ -689,6 +690,11 @@ async def _after(person: Any, card_id: int, *, gmail: Any) -> None:
             # people they know; for anyone else it waits for them to look.
             _hand_back(card, "work_stranger")
             return
+        if payload.get(WORK_KEY) == DONE and last_state(payload) == STUCK:
+            # It couldn't finish (it left next steps to tap): what it put on
+            # the reply is part of it, so it waits for them.
+            _hand_back(card, "work_unfinished")
+            return
         if payload.get(WORK_KEY) == DONE and payload.get(REWROTE_KEY) is False:
             # Only a note: what the email asks is theirs to do, so the
             # holding reply waits with it rather than going on its own.
@@ -706,6 +712,15 @@ async def _after(person: Any, card_id: int, *, gmail: Any) -> None:
         await _send_on_its_own(person, gmail, card_id, ScanResult(status="ok"), now=datetime.now(UTC))
     except Exception:
         logger.exception("delegation.card_work: couldn't settle card %s after the work", card_id)
+
+
+def last_state(payload: dict[str, Any]) -> str:
+    """How the card's latest run ended (done, stopped or stuck), or ""."""
+    turns = payload.get("conversation")
+    for turn in reversed(turns if isinstance(turns, list) else []):
+        if isinstance(turn, dict) and turn.get("state"):
+            return str(turn["state"])
+    return ""
 
 
 def _hand_back_unfinished(card_id: int) -> None:

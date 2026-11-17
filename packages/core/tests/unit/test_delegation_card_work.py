@@ -718,3 +718,52 @@ def test_joining_counts_for_the_sender_and_reads_only_what_came_after(
     assert inbox.later_messages(thread, payload, now=NOW) == []
     # The join is work for this sender: it counts toward their daily limit.
     assert inbox._cap_reason(owner.id, _msg("m3", "t3"), "teammate", NOW) == "sender_limit"
+
+
+def test_a_stuck_turn_with_a_partial_reply_never_goes_on_its_own(
+    db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.delegation import handle_it
+
+    mailbox, card = _card(owner)
+    held: list[str | None] = []
+    sent: list[int] = []
+    monkeypatch.setattr(inbox, "_hand_back", lambda c, reason: held.append(reason))
+    monkeypatch.setattr(ledger, "get_decision_instance", _with_gate(ledger.get_decision_instance))
+    monkeypatch.setattr(handle_it, "content_hold", lambda *a, **k: None)
+
+    async def send(*_a: Any, **_k: Any) -> None:
+        sent.append(card.id)
+
+    monkeypatch.setattr(inbox, "_send_on_its_own", send)
+    card_work._RUNNING.add(card.id)
+    try:
+        assert card_work._set_work(card.id, card_work.WORKING)
+        asyncio.run(card_work.apply(
+            card.id, owner, body="Here are the first 26 rows.", note="I read 26 of 40 rows.", files=[],
+            gmail=mailbox, choices=["Make it with the 26 I read", "Try again"],
+        ))
+    finally:
+        card_work._RUNNING.discard(card.id)
+    asyncio.run(card_work.finished(owner, card.id, gmail=mailbox))
+    assert held == ["work_unfinished"] and sent == []
+
+
+def test_a_newer_email_restarting_the_work_isnt_their_words(
+    db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mailbox, card = _card(owner)
+    monkeypatch.setattr(card_work, "start", _REAL_START)
+    _slow_exec(monkeypatch, [])
+
+    async def go() -> list[dict[str, Any]]:
+        assert card_work.start(owner, card.id, gmail=mailbox)
+        await asyncio.sleep(0.05)
+        await card_work.redirect(owner, card.id, "", gmail=mailbox)
+        card_work.stop(card.id)
+        await card_work.ended(card.id)
+        return inbox.card_payload(_fresh(card))["conversation"]
+
+    turns = asyncio.run(go())
+    stopped = [t["text"] for t in turns if t.get("state") == "stopped"]
+    assert stopped[0] == "Stopped to read the newer email."
