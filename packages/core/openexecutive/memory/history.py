@@ -171,7 +171,7 @@ _IRREGULAR_VERBS = frozenset({
     "were", "let", "cut", "read", "built", "spent", "lent", "meant", "heard",
     "held", "won", "quit", "forgot", "became", "knew", "saw", "showed",
     "understood", "taught", "caught", "dealt", "drove", "flew", "fought", "hid",
-    "lost", "rang", "rose", "shut", "sought", "spoke", "stood", "swore", "threw",
+    "lost", "rang", "shut", "sought", "spoke", "stood", "swore", "threw",
     "wore", "withdrew", "undertook", "overtook", "forgave", "forbade", "froze",
 })
 
@@ -189,10 +189,15 @@ def shown_summary(summary: str) -> str:
     first = words[0]
     if not first[:1].isupper() or not _past_tense(first):
         return summary
-    # "Fred asked …" or "Ahmed confirmed …": a name, then the verb.
-    if len(words) > 1 and words[1][:1].islower() and _past_tense(words[1]):
+    # A known verb, then another one, is a word that is also a name; but
+    # "Had promised …" and "Were told …" are an auxiliary and the verb.
+    if (first.lower() not in _AUXILIARIES and len(words) > 1 and words[1][:1].islower()
+            and _past_tense(words[1])):
         return summary
     return "You " + first[:1].lower() + text[1:]
+
+
+_AUXILIARIES = frozenset({"had", "were", "did"})
 
 
 def stored_text(text: str) -> str:

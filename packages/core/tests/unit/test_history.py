@@ -255,3 +255,6 @@ def test_shown_summary_puts_you_in_front_of_the_verb() -> None:
     assert shown_summary("Confirmed the scans come Friday") == "You confirmed the scans come Friday"
     assert shown_summary("Expected revenue is $2M for Q4") == "Expected revenue is $2M for Q4"
     assert shown_summary("Updated pricing goes out Friday") == "Updated pricing goes out Friday"
+    assert shown_summary("Had promised Dana the deck by Friday") == "You had promised Dana the deck by Friday"
+    assert shown_summary("Were told the launch slips a week") == "You were told the launch slips a week"
+    assert shown_summary("Rose will send the deck") == "Rose will send the deck"
