@@ -652,7 +652,9 @@ def list_notes(
         f"SELECT {_COLUMNS} FROM {NOTES_TABLE} WHERE person_id = ? AND {_live_clause()}"  # noqa: S608 — constant table name and columns
     )
     params: list[Any] = [person_id, _now(now).isoformat()]
-    words = [w for w in (query or "").lower().split() if len(w) > 1][:6]
+    # "you" is only in the shown text ("You said …", shown_summary), never
+    # stored, so a search typed from the screen still matches.
+    words = [w for w in (query or "").lower().split() if len(w) > 1 and w != "you"][:6]
     for word in words:
         like = f"%{word.replace('%', '').replace('_', '')}%"
         sql += (
