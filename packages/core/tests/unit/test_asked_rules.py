@@ -144,6 +144,18 @@ def test_the_owners_own_ask_meets_the_rules_too(owner: Any, monkeypatch: pytest.
         assert ttl.asked_checks_apply(SimpleNamespace(unattended=False)) is True
 
 
+def test_the_owners_own_ask_holds_when_the_rules_cant_be_read(
+    owner: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fails closed for the owner as for anyone: unreadable rules hold."""
+    def _broken(*_: object) -> list[Any]:
+        raise RuntimeError("rules unreadable")
+
+    monkeypatch.setattr(ttl, "list_rules", _broken)
+    hit = ttl._asked_hit("message_person", {"person_id": owner.id, "text": "Hi"}, mcp=False)
+    assert hit is not None and hit.reason == "its rules couldn't be read"
+
+
 def test_careful_holds_even_the_owners_own_ask(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """Careful asks before anything goes: the owner's own chat ask waits on
     a card too, a teammate's as well; on Balanced the owner's meets Your
