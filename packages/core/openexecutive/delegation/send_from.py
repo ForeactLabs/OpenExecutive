@@ -265,6 +265,25 @@ async def switch_for_work(card_id: int, person: Any, *, executive: bool, gmail: 
     return saved
 
 
+def _claim_as_checked(instance: Any, resolver: int | None) -> bool:
+    """Claim the card only as it was when the checks read it: a change
+    saved during the mailbox reads (another tab, the card's work) is never
+    sent unchecked. The person's own Send reads its draft again likewise."""
+    from openexecutive.memory.decision_ledger import (
+        claim_for_execution,
+        get_decision_instance,
+        release_claim,
+    )
+
+    if not claim_for_execution(instance.id, resolver_person_id=resolver):
+        return False
+    now = get_decision_instance(instance.id)
+    if now is None or now.proposed_payload_json != instance.proposed_payload_json:
+        release_claim(instance.id)
+        return False
+    return True
+
+
 def _recipients(person: Any, payload: dict[str, Any], spec: Any) -> tuple[list[str], list[str]]:
     """To and Cc: the card's (a reply kept on its card alone), or for one
     saved in their mailbox, the sender it answers and everyone else on
@@ -338,7 +357,6 @@ async def send(
     from openexecutive.memory.decision_ledger import (
         STATUS_APPROVED_UNCHANGED,
         STATUS_FAILED,
-        claim_for_execution,
         finish_execution,
         release_claim,
     )
@@ -380,8 +398,10 @@ async def send(
         }
         SENDING.add(instance.id)
         try:
-            if not claim_for_execution(instance.id, resolver_person_id=resolver):
-                raise SendRefused(409, "already_handled", "This reply was already sent or dismissed.")
+            if not _claim_as_checked(instance, resolver):
+                raise SendRefused(
+                    409, "already_handled", "This reply changed, or was sent or dismissed, just now, so nothing was sent.",
+                )
             try:
                 result = await take_the_lead.carry_out(
                     step, by_principal=bool(getattr(person, "is_principal", False)), own_card=True,

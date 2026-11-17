@@ -394,3 +394,33 @@ def test_new_words_stay_when_the_switch_asked_with_them_fails(
     ))
     assert "Shorter." in saved["draft_body"] and saved.get(send_from.FROM_EXECUTIVE) is not True
     assert saved["conversation"][-1]["text"] == send_from.NOTE_NOT_SWITCHED
+
+
+def test_a_change_saved_while_it_checks_is_not_sent(
+    db: Path, owner: Any, models: dict[str, Any], rewrites: list[str], sends: list[dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.memory.decision_ledger import update_open_payload
+
+    mailbox, card = _card(owner)
+    _switch(card, mailbox, owner, True)
+    tapped = _fresh(card)
+    read = mailbox.get_thread
+
+    async def changed_meanwhile(thread_id: str) -> Any:
+        # Another tab saves new words while the mailbox is being read.
+        now = _fresh(card)
+        update_open_payload(
+            now.id, {**inbox.card_payload(now), "draft_body": "Newer words."},
+            expected_json=now.proposed_payload_json,
+        )
+        return await read(thread_id)
+
+    monkeypatch.setattr(mailbox, "get_thread", changed_meanwhile)
+    with pytest.raises(SendRefused) as err:
+        asyncio.run(send_approved_reply(
+            tapped, caller=LOCAL, resolver=owner.id, gmail=mailbox, confirm=_seen(card),
+            now=NOW + timedelta(minutes=30),
+        ))
+    assert err.value.code == "already_handled" and sends == []
+    assert _fresh(card).status == "proposed"
