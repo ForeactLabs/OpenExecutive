@@ -296,3 +296,10 @@ def test_an_emptied_field_is_shown_never_dropped() -> None:
     assert shown == [{"field": "Properties", "value": "Owner: (empty)\nClosedate: (empty)\nAmount: 1"}]
     flat = card_details.plain("google_workspace__find_and_replace_doc", {"find_text": "Acme Corp", "replace_text": ""})
     assert {"field": "Replace with", "value": "(nothing: it deletes what it finds)"} in flat
+
+
+def test_another_apps_range_and_offsets_keep_their_own_words() -> None:
+    shown = card_details.plain("crm__report", {"range": "Q4", "start_index": 0, "end_index": 50, "replace_text": ""})
+    assert shown == [
+        {"field": "Range", "value": "Q4"}, {"field": "Start index", "value": "0"}, {"field": "End index", "value": "50"},
+    ]

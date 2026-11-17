@@ -52,12 +52,18 @@ _LABELS: dict[str, str] = {
     "file_name": "File name", "filename": "File name", "name": "Name", "title": "Title",
     "folder_id": "Folder", "parent_folder_id": "Folder", "parent_id": "Folder", "parents": "Folder",
     "file_id": "File", "document_id": "Doc", "spreadsheet_id": "Sheet",
-    "presentation_id": "Slides", "range_name": "Cells", "range": "Cells", "a1_range": "Cells",
-    "values": "Values", "find_text": "Find", "replace_text": "Replace with",
-    "start_index": "From character", "end_index": "To character",
+    "presentation_id": "Slides",
     "start": "Start", "end": "End", "start_time": "Start", "end_time": "End",
     "attendees": "Guests", "description": "Description", "location": "Where",
     "attachments": "Attachments", "content": "Content",
+}
+
+# A Google Sheets or Docs call's own fields; another app's "range" or
+# "start_index" may mean something else (a quarter, a page offset).
+_GOOGLE_LABELS: dict[str, str] = {
+    "range_name": "Cells", "range": "Cells", "a1_range": "Cells", "values": "Values",
+    "find_text": "Find", "replace_text": "Replace with",
+    "start_index": "From character", "end_index": "To character",
 }
 
 _FOLDER_KEYS = frozenset({"folder_id", "parent_folder_id", "parent_id", "parents"})
@@ -362,6 +368,11 @@ def plain(tool: str, tool_input: Any) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     refs: list[dict[str, Any]] = []
     seen: set[str] = set()
+
+    def label(key: str) -> str:
+        own = _GOOGLE_LABELS.get(key.strip().lower()) if google else None
+        return own or _label(key)
+
     start_key = next((k for k in _STARTS if k in tool_input), None)
     end_key = next((k for k in _ENDS if k in tool_input), None)
     shown_when = when(tool_input.get(start_key), tool_input.get(end_key)) if start_key else None
@@ -380,10 +391,10 @@ def plain(tool: str, tool_input: Any) -> list[dict[str, Any]]:
                 seen.add("With")
                 continue
         if norm in _REFS and value not in (None, "", [], {}):
-            refs.append({"field": _label(key), "value": _text(value)})
+            refs.append({"field": label(key), "value": _text(value)})
             continue
-        if norm == "replace_text" and value == "":
-            out.append({"field": _label(key), "value": "(nothing: it deletes what it finds)"})
+        if google and norm == "replace_text" and value == "":
+            out.append({"field": label(key), "value": "(nothing: it deletes what it finds)"})
             continue
         if (google and norm in _GOOGLE_ACCOUNT) or norm in _HIDDEN or value is None or value == "" or value == [] or value == {}:
             continue
@@ -399,14 +410,14 @@ def plain(tool: str, tool_input: Any) -> list[dict[str, Any]]:
             link = str(_drive_link(norm, value))
             ident = value[0] if isinstance(value, list) else value
             name = file_name(str(ident))
-            field, text = _label(key), name or _OPENS.get(norm, "Open the folder")
+            field, text = label(key), name or _OPENS.get(norm, "Open the folder")
             extra = {"href": link}
-        elif norm in _RANGE_KEYS and isinstance(value, str):
-            field, text = _label(key), cells(value)
+        elif google and norm in _RANGE_KEYS and isinstance(value, str):
+            field, text = label(key), cells(value)
         elif rows is not None:
             # A sheet's rows: a table on the page, every cell as a line where
             # a table can't be drawn.
-            field, text = _label(key), _rows_text(rows)
+            field, text = label(key), _rows_text(rows)
             # The first row is a header only when the rows start at row 1.
             area = next((tool_input[k] for k in _RANGE_KEYS if isinstance(tool_input.get(k), str)), "")
             start = _CELLS.fullmatch(str(area).rpartition("!")[2].strip())
@@ -414,7 +425,7 @@ def plain(tool: str, tool_input: Any) -> list[dict[str, Any]]:
             extra = {"table": rows, "header": header}
         else:
             # Words are shown whole: Approve does exactly what the card shows.
-            field, text = _label(key), _text(value)
+            field, text = label(key), _text(value)
         if field in seen:
             field = f"{field} ({key.replace('_', ' ')})"
         seen.add(field)
