@@ -3,7 +3,8 @@
 Offered only on that turn (``Session.reply_card_work``, started by
 ``delegation.card_work``), with Act as me's tools, so it is checked the same
 way (``_writer``: the pinned person and their mailbox). It changes the reply
-waiting on the person's own card, never sends it: the reply still goes from
+waiting on the person's own card, and who it goes from (``send_from``), never
+sends it: the reply still goes from
 its card (Send, or on its own when Approvals lets it).
 """
 from __future__ import annotations
@@ -48,6 +49,15 @@ UPDATE_REPLY_CARD_TOOL: dict[str, Any] = {
                 "type": "array",
                 "items": {"type": "string"},
                 "description": "Files from the email's own threads to attach, by handle (mail:<message_id>#<n>).",
+            },
+            "send_from": {
+                "type": "string",
+                "enum": ["executive", "me"],
+                "description": (
+                    "Only when they asked who it goes from: \"executive\" sends it from your own "
+                    "mailbox with them on cc (the card rewrites it as you writing for them), \"me\" "
+                    "from them again. The card still sends it; never send it yourself."
+                ),
             },
             "choices": {
                 "type": "array",
@@ -249,6 +259,14 @@ async def handle_update_reply_card(tool_input: dict[str, Any]) -> str:
         )
     except SendRefused as refused:
         return _error(f"Nothing was changed: {refused.message}")
+    sender = tool_input.get("send_from")
+    if sender in ("executive", "me"):
+        from openexecutive.delegation import send_from
+
+        try:
+            await send_from.switch_for_work(card_id, writer.person, executive=sender == "executive", gmail=writer.mailbox)
+        except SendRefused as refused:
+            return _error(f"The rest was saved, but who it goes from wasn't changed: {refused.message}")
     if artifact_ids:
         # Only the card's wording: it never stops the hand-back.
         try:

@@ -11,7 +11,8 @@ keep it that way:
 
 - ``send_approved_reply``, after the person approved that card
   (``POST /decisions/{id}/approve``, a class only the card's own person sees
-  or resolves). Only that route calls it. Sending is the person's own act: it
+  or resolves). Only that route calls it. A card they switched to go from
+  the Executive (``send_from``) goes from the Executive's mailbox instead. Sending is the person's own act: it
   works while the Executive is paused.
 - ``send_on_its_own``, called only by the inbox watcher (``inbox._consider``)
   for a card it made as ``auto_execute`` after ``handle_it.refusal`` found
@@ -107,7 +108,7 @@ _NOT_YOURS = "Only the person this reply was written for can send it."
 _CONFIRM_TEXT = {
     "recipients_changed": "The draft's recipients changed since it was written.",
     "thread_moved_on": "A newer message arrived in this conversation after the draft was written.",
-    "changed_in_chat": "The reply was changed from chat since this card was shown.",
+    "changed_in_chat": "The reply was changed since this card was shown.",
 }
 
 
@@ -147,10 +148,17 @@ async def send_approved_reply(
     raises ``SendRefused``. Not while the Executive is still doing what the
     email asks (delegation.card_work): the reply is about to change."""
     from openexecutive.audit import rows_for_person
-    from openexecutive.delegation import card_work
+    from openexecutive.delegation import card_work, send_from
+    from openexecutive.delegation.inbox import card_payload
 
     if card_work.still_working(instance):
         raise SendRefused(409, "working", "I'm still doing what the email asks. The reply will be ready shortly.")
+    if send_from.is_from_executive(card_payload(instance)):
+        # Switched to go from the Executive on its card: its own mailbox.
+        return await send_from.send(
+            instance, caller=caller, resolver=resolver, confirm=confirm or {}, gmail=gmail,
+            now=now or datetime.now(UTC),
+        )
     owner = getattr(instance, "approver_person_id", None)
     with rows_for_person(owner if isinstance(owner, int) else None):
         return await _send(
@@ -371,7 +379,7 @@ async def _send_checked(
         reasons.append("thread_moved_on")
     # Changed from chat (card_drafts.from_chat): only a card that showed
     # that version sends it, never one shown before, nor on its own.
-    chat = str(payload.get(card_drafts.CHANGED_IN_CHAT) or "")
+    chat = card_drafts.changed_since_shown(payload)
     if chat and seen_chat != chat:
         reasons.append("changed_in_chat")
     if reasons:

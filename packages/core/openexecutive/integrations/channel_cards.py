@@ -197,9 +197,13 @@ def card_text(decision_id: int) -> str | None:
         if who:
             lines.append("With " + ", ".join(who))
     elif instance.decision_class == "delegation_reply":
+        from openexecutive.delegation import send_from
+
         sender = str(payload.get("from_name") or payload.get("from_email") or "").strip()[:120]
         if sender:
             lines.append(f"To {sender}")
+        if send_from.is_from_executive(payload):
+            lines.append(f"From {send_from.executive_name()}, with you on cc")
         to = [str(a) for a in payload.get("draft_to") or [] if a][:10]
         if to:
             lines.append("Goes to " + ", ".join(to))
@@ -271,9 +275,21 @@ def card_buttons(decision_id: int) -> tuple[str, ...]:
 
     instance = get_decision_instance(decision_id)
     label = _APPROVE_LABEL.get(instance.decision_class, "Approve") if instance is not None else "Approve"
+    if instance is not None and instance.decision_class == "delegation_reply" and _from_executive(instance):
+        label = "Send from Executive"
     if instance is not None and allow_label(instance):
         return label, "Skip", f"{label} + on its own next time"
     return label, "Skip"
+
+
+def _from_executive(instance: Any) -> bool:
+    from openexecutive.delegation import send_from
+    from openexecutive.delegation.inbox import card_payload
+
+    try:
+        return send_from.is_from_executive(card_payload(instance))
+    except Exception:
+        return False
 
 
 def allow_label(instance: Any) -> str | None:

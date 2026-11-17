@@ -518,6 +518,10 @@ def prompt_for(person: Any, payload: dict[str, Any], card_id: int, *, ask: str =
         "If none of it is something you can do (it needs them in person, their signature, or "
         "a choice only they can make), call update_reply_card with only a note saying in a "
         "few words what is theirs to do. Never send the reply yourself: it goes from the card.",
+        f"If {first} asks for the reply to go from you instead of from them (\"send it from you\", "
+        "\"cc me\"), or back from them, call update_reply_card with send_from (\"executive\" or "
+        "\"me\") and a note: the card then sends it from your own mailbox with them on cc. "
+        "Never write or send a separate email for it.",
         "",
         f"Everything happens on this card: never tell {first} to ask you in chat or "
         "elsewhere. If you can't finish all of it (a file you can't fully read, a part you "
@@ -696,6 +700,10 @@ async def apply(
         changed["draft_body"] = words
         changed["gist"] = clean_gist(text)
         changed[card_drafts.QUESTIONS_SETTLED] = True
+        # Written in the person's voice: it goes from them again.
+        from openexecutive.delegation import send_from
+
+        changed.update(send_from.as_you_again(payload))
     # None given keeps what the reply already carries (card, draft and Send agree).
     new_files = bool(files)
     if not new_files:

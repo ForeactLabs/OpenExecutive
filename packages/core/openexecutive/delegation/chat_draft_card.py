@@ -253,6 +253,7 @@ async def change(
     from openexecutive.delegation.answers import (
         CONVERSATION_KEY,
         NeedsWork,
+        SendFrom,
         changed_sentences,
         rewrite,
     )
@@ -272,10 +273,12 @@ async def change(
 
     try:
         saved, note = await _save(person, row_id, caller=caller, gmail=gmail, now=now, words_for=rewritten)
-    except NeedsWork as work:
+    except (NeedsWork, SendFrom) as work:
         # Looking things up takes the Executive's tools, which this card
-        # doesn't have: the draft stays as it is.
-        what = "answer that" if work.question else "do that"
+        # doesn't have, and sending it from the Executive is done in the chat,
+        # where it writes the email from its own mailbox: the draft stays as
+        # it is.
+        what = "answer that" if isinstance(work, NeedsWork) and work.question else "do that"
         raise SendRefused(
             409, "needs_work", f"I need to look things up to {what}. Ask me in the chat, and the draft stays as it is.",
         ) from None

@@ -226,8 +226,9 @@ def reply_goes_to(payload: dict[str, Any]) -> list[str]:
 
 def can_allow_reply(person_id: int, payload: dict[str, Any], trained: Training, *, db_path: Path | None = None) -> bool:
     """Whether a reply card offers "on its own next time": In training is
-    on and someone it goes to isn't allowed yet."""
-    if not trained.training:
+    on and someone it goes to isn't allowed yet. Not on one switched to go
+    from the Executive (``send_from``): what it learns is replies as them."""
+    if not trained.training or payload.get("from_executive") is True:
         return False
     going = reply_goes_to(payload)
     return bool(going) and all_allowed(person_id, going, db_path=db_path) is None
