@@ -280,6 +280,9 @@ class TriageAgent(BaseAgent):
                 if isinstance(block.input, dict) and block.input.get("alert") is True:
                     kept = _no_decision(event, mute_patterns or [], "cut_off", raise_it=True)
                     return _with_partial_delivery(kept, block.input)
+                if isinstance(block.input, dict) and block.input.get("alert") is False:
+                    # It had decided not to raise it: that decision stands.
+                    return _parse_decision(block.input)
 
         logger.warning(
             "Triage gave no whole decision for event %s", event.external_id,
@@ -343,12 +346,13 @@ def _kept_key(event: AlertEvent) -> str:
 
 
 def _names_muted_topic(event: AlertEvent, mute_patterns: list[str]) -> bool:
-    """Whether a mute pattern appears as whole words in the event's subject
-    or body: with no review there are no topic tags to match, so the words
-    stand in. Whole words, so a short mute like "ai" never hits "email"."""
+    """Whether a mute pattern starts a word in the event's subject or body:
+    with no review there are no topic tags to match, so the words stand in.
+    A word's start, so "newsletter" holds "newsletters" back but a short
+    mute like "ai" never hits "email"."""
     text = f"{event.subject}\n{event.title or ''}\n{event.body}".lower()
     return any(
-        p.strip() and re.search(rf"\b{re.escape(p.strip().lower())}\b", text)
+        p.strip() and re.search(rf"\b{re.escape(p.strip().lower())}", text)
         for p in mute_patterns
     )
 

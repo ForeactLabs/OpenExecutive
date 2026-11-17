@@ -219,6 +219,22 @@ def test_a_cut_off_review_keeps_the_severity_it_gave() -> None:
     assert AlertChannel.SLACK_DM in decision.channels and AlertChannel.PERSISTED in decision.channels
 
 
+def test_a_cut_off_review_that_said_no_card_stands() -> None:
+    said = SimpleNamespace(type="tool_use", name="emit_alert_decision",
+                           input={"alert": False, "severity": "low"})
+    client = _client(return_value=SimpleNamespace(content=[said], stop_reason="max_tokens"))
+    assert asyncio.run(TriageAgent().triage(_raised(), client=client)).alert is False
+
+
+def test_a_mute_holds_back_its_plural_when_review_fails() -> None:
+    event = AlertEvent(source="email", external_id="m-7", subject="Q3 newsletters ready",
+                       body="Two drafts.", from_executive=True)
+    decision = asyncio.run(TriageAgent().triage(
+        event, mute_patterns=["newsletter"], client=_client(side_effect=RuntimeError("boom")),
+    ))
+    assert decision.alert is False
+
+
 def test_triage_swallows_client_exceptions() -> None:
     """LLM error → quiet fallback for an ordinary event, never propagates."""
     client = SimpleNamespace(
