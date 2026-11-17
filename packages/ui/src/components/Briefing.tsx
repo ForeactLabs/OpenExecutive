@@ -39,7 +39,7 @@ import {
   splitOlder,
   waitedOnFirst,
 } from "@/lib/needsYou";
-import { BRIEFING_REFRESH_INTERVAL_MS, shouldRefreshOnFocus } from "@/lib/narrativeFreshness";
+import { BRIEFING_TICK_MS, shouldRefreshOnFocus, shouldRefreshOnTick } from "@/lib/narrativeFreshness";
 import type { SnoozeChoice } from "@/lib/snooze";
 import InfoTip from "./InfoTip";
 import { ACTION_CARDS_TIP, ActionCardItem, useActionCards } from "./ActionCards";
@@ -162,12 +162,11 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
     };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
-    // A tick right after another refresh (focus, Approve) is skipped.
     const interval = setInterval(() => {
-      if (document.visibilityState === "visible" && Date.now() - lastFetchRef.current >= BRIEFING_REFRESH_INTERVAL_MS / 2) {
+      if (document.visibilityState === "visible" && shouldRefreshOnTick(lastFetchRef.current, Date.now())) {
         refreshToday();
       }
-    }, BRIEFING_REFRESH_INTERVAL_MS);
+    }, BRIEFING_TICK_MS);
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);

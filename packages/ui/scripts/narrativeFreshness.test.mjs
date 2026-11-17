@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  BRIEFING_REFRESH_INTERVAL_MS,
+  BRIEFING_TICK_MS,
   FOCUS_REFRESH_MIN_GAP_MS,
   narrativeRepollDelay,
   narrativeUpdatedLabel,
   shouldRefreshOnFocus,
+  shouldRefreshOnTick,
 } from "../src/lib/narrativeFreshness.ts";
 
 test("re-polls a few times while the header is rewritten, then stops", () => {
@@ -19,6 +22,17 @@ test("re-polls a few times while the header is rewritten, then stops", () => {
 test("focus refresh is throttled", () => {
   assert.equal(shouldRefreshOnFocus(0, FOCUS_REFRESH_MIN_GAP_MS - 1), false);
   assert.equal(shouldRefreshOnFocus(0, FOCUS_REFRESH_MIN_GAP_MS), true);
+});
+
+test("timed refresh comes a minute after the last pull of any kind", () => {
+  assert.equal(shouldRefreshOnTick(0, BRIEFING_REFRESH_INTERVAL_MS - 1), false);
+  assert.equal(shouldRefreshOnTick(0, BRIEFING_REFRESH_INTERVAL_MS), true);
+  // A pull at 31 s (Approve, focus): the next timed one is due at 91 s and
+  // the tick catches it within one tick, so nothing waits much past a minute.
+  const due = 31_000 + BRIEFING_REFRESH_INTERVAL_MS;
+  const tick = Math.ceil(due / BRIEFING_TICK_MS) * BRIEFING_TICK_MS;
+  assert.equal(shouldRefreshOnTick(31_000, tick), true);
+  assert.ok(tick - 31_000 < BRIEFING_REFRESH_INTERVAL_MS + BRIEFING_TICK_MS);
 });
 
 test("updated label reads as recency, then as a local clock time", () => {

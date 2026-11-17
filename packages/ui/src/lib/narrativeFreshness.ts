@@ -28,6 +28,16 @@ export function narrativeRepollDelay(attempt: number): number | null {
   return NARRATIVE_REPOLL_DELAYS_MS[attempt] ?? null;
 }
 
+/** How often the open Briefing checks whether its timed refresh is due. */
+export const BRIEFING_TICK_MS = 15_000;
+
+/** Whether a timed check should re-pull /today: a minute since the last
+ * pull of any kind (focus, Approve or timed), so no change waits longer
+ * than a minute and a tick never follows another refresh closely. */
+export function shouldRefreshOnTick(lastFetchMs: number, nowMs: number): boolean {
+  return nowMs - lastFetchMs >= BRIEFING_REFRESH_INTERVAL_MS;
+}
+
 /** Whether a tab that just became visible should re-pull /today. */
 export function shouldRefreshOnFocus(lastFetchMs: number, nowMs: number): boolean {
   return nowMs - lastFetchMs >= FOCUS_REFRESH_MIN_GAP_MS;
