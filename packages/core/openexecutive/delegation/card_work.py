@@ -105,6 +105,10 @@ _NEXT: set[int] = set()
 # The next run of a card whose run hadn't ended yet when ``redirect`` gave
 # up waiting: it starts as that run closes.
 _QUEUED: dict[int, tuple[Any, Any, str]] = {}
+# Cards with a ``redirect`` waiting on the run going now, and those of them
+# the person stopped meanwhile: that redirect then starts nothing.
+_WAITING: set[int] = set()
+_HALTED: set[int] = set()
 CHANGED = "changed"
 NEWER = "newer"  # a run ended because a newer email joined the card
 
@@ -364,16 +368,18 @@ def _end_turn(payload: dict[str, Any], *, state: str, text: str, choices: list[s
 def stop(card_id: int) -> bool:
     """End the work running on ``card_id`` (the person's Stop). False when
     none is running. The card shows the run as stopped."""
-    if _QUEUED.pop(card_id, None) is not None:
-        # Their Stop also ends the run that was to start next: what the
-        # run going now handed back waits for them.
+    halted = _QUEUED.pop(card_id, None) is not None or card_id in _WAITING
+    if halted:
+        # Their Stop also ends the run that was to start next (queued, or
+        # about to start once the run going now ends): what that run
+        # handed back waits for them.
+        if card_id in _WAITING:
+            _HALTED.add(card_id)
         _NEXT.discard(card_id)
         _hand_back_unfinished(card_id)
-        if card_id in _HANDED:
-            return True
     task = _TASK.get(card_id)
     if task is None or task.done() or card_id not in _RUNNING or card_id in _HANDED:
-        return False
+        return halted
     _ENDING[card_id] = STOPPED
     task.cancel()
     return True
@@ -393,16 +399,23 @@ async def redirect(person: Any, card_id: int, ask: str, *, gmail: Any = None) ->
                 task.cancel()
             # A run that handed back already finishes settling first, sending
             # nothing on its own: the new run decides.
+            _WAITING.add(card_id)
             await ended(card_id)
         finally:
-            if card_id in _RUNNING:
+            _WAITING.discard(card_id)
+            halted = card_id in _HALTED
+            _HALTED.discard(card_id)
+            if halted:
+                # They pressed Stop while this waited: nothing starts.
+                _NEXT.discard(card_id)
+            elif card_id in _RUNNING:
                 # Still settling: the new run starts as it closes (their
                 # words stay the ask when a newer email comes after them).
                 if ask.strip() or card_id not in _QUEUED:
                     _QUEUED[card_id] = (person, gmail, ask)
             else:
                 _NEXT.discard(card_id)
-        if card_id in _QUEUED:
+        if halted or card_id in _QUEUED:
             return True
     return start(person, card_id, gmail=gmail, ask=ask)
 

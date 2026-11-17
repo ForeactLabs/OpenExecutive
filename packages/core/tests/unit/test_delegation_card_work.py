@@ -487,11 +487,15 @@ def _no_running() -> Any:
     card_work._HANDED.clear()
     card_work._NEXT.clear()
     card_work._QUEUED.clear()
+    card_work._WAITING.clear()
+    card_work._HALTED.clear()
     yield
     card_work._RUNNING.clear()
     card_work._HANDED.clear()
     card_work._NEXT.clear()
     card_work._QUEUED.clear()
+    card_work._WAITING.clear()
+    card_work._HALTED.clear()
 
 
 _ = (db, models, owner, local_login, NOW, timedelta)
@@ -1159,3 +1163,32 @@ def test_stop_ends_a_queued_run_too(
     finally:
         card_work._RUNNING.discard(card.id)
     assert started == [] and held == ["work_unfinished"] and card.id not in card_work._NEXT
+
+
+def test_stop_while_a_newer_email_waits_on_the_run_starts_nothing(
+    db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mailbox, card = _card(owner)
+    started: list[str] = []
+    monkeypatch.setattr(card_work, "start", lambda _p, _id, **k: started.append(k.get("ask", "")) or True)
+
+    async def go() -> bool:
+        settling = asyncio.Event()
+        card_work._RUNNING.add(card.id)
+        card_work._TASK[card.id] = asyncio.create_task(settling.wait())
+        assert card_work._set_work(card.id, card_work.WORKING)
+        await card_work.apply(card.id, owner, body="The figure is 14k.", note="Done.", files=[], gmail=mailbox)
+        joining = asyncio.create_task(card_work.redirect(owner, card.id, "", gmail=mailbox))
+        await asyncio.sleep(0)
+        stopped = card_work.stop(card.id)  # they press Stop while it waits
+        settling.set()
+        await card_work._TASK[card.id]
+        card_work._close(card.id)
+        assert await joining
+        return stopped
+
+    try:
+        assert asyncio.run(go())
+    finally:
+        card_work._RUNNING.discard(card.id)
+    assert started == [] and card.id not in card_work._NEXT and card.id not in card_work._HALTED
