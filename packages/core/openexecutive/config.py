@@ -361,6 +361,10 @@ class Settings(BaseSettings):
     # more than the model's context, and the Executive asks for up to 32,000.
     # 0 = no cap.
     local_max_output_tokens: int = Field(8192, ge=0, alias="LOCAL_MAX_OUTPUT_TOKENS")
+    # How many tokens the local server's model holds (its context window).
+    # A turn's reads fill a share of it (providers.feature_gate), so set it
+    # to what the server is started with.
+    local_context_tokens: int = Field(32_768, ge=4_096, alias="LOCAL_CONTEXT_TOKENS")
     # Optional `reasoning_effort` sent on every local request (e.g. "low").
     # Thinking-only models (GLM on Fireworks) otherwise spend the whole
     # max_tokens budget reasoning and return no tool call. Unset = not sent.
@@ -737,22 +741,8 @@ class Settings(BaseSettings):
         return None if _blank_or_comment(v) else v
 
     # ---- Tool results ----
-    # Upper bound on a single tool result's characters before it enters the
-    # prompt. A circuit breaker against an unbounded result (a large document
-    # fetch) dominating a turn and then being re-sent on every remaining
-    # iteration of the tool loop. 20,000 characters (about 5,500 tokens) is
-    # well above a typical result; a longer one is cut with a marker that
-    # asks for a narrower request. Applies to every tool, not just MCP.
-    tool_result_max_chars: int = Field(
-        20_000, alias="TOOL_RESULT_MAX_CHARS", ge=1_000
-    )
-    # What all of one turn's tool results may add together, in characters
-    # (specialists' answers aside): each stays in the prompt for every later
-    # call of the turn. Past it a result shows its first 3,000 characters and
-    # says the turn has read enough. 0 turns it off.
-    tool_results_turn_max_chars: int = Field(
-        40_000, alias="TOOL_RESULTS_TURN_MAX_CHARS", ge=0
-    )
+    # How much a read may hold comes from the model (providers.registry.
+    # reading_limits_for), not from a setting.
     # Workflow action steps may also act through one short sandboxed script
     # (`run_script`, workflows/step_script.py) that calls the step's own tools
     # — each call through the same allowlist, budget, target check and audit.

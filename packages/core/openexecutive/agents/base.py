@@ -7,6 +7,7 @@ from typing import Any, Literal
 from openexecutive.audit.usage import log_model_usage
 from openexecutive.config import get_settings
 from openexecutive.providers import get_provider, model_supports_deep_reasoning
+from openexecutive.providers.feature_gate import MAX_OUTPUT_TOKENS
 
 _SPECIALIST_TIMEOUT = 180.0
 
@@ -163,7 +164,8 @@ class BaseAgent(ABC):
 
         create_kwargs: dict = {
             "model": model,
-            "max_tokens": 4096,
+            # What the Executive's own answers may write (feature_gate).
+            "max_tokens": MAX_OUTPUT_TOKENS,
             # Per-request timeout — keeps cancellation semantics aligned with
             # the previous per-client timeout, but the provider singleton no
             # longer needs to recreate the SDK client to set it.
@@ -186,7 +188,6 @@ class BaseAgent(ABC):
             # Tune via SPECIALIST_EFFORT (low / medium / high / xhigh / max).
             create_kwargs["thinking"] = {"type": "adaptive"}
             create_kwargs["output_config"] = {"effort": settings.specialist_effort}
-            create_kwargs["max_tokens"] = 16000
 
         # Resolve provider per-call by model so a Council UI override that
         # flips this agent to a non-Anthropic slug routes correctly. Today
@@ -217,7 +218,7 @@ class BaseAgent(ABC):
         *,
         tools: list[dict[str, Any]],
         system_addendum: str = "",
-        max_tokens: int = 4096,
+        max_tokens: int = MAX_OUTPUT_TOKENS,
         timeout_seconds: float = _SPECIALIST_TIMEOUT,
         model_override: str | None = None,
         deep_reasoning_override: bool | None = None,

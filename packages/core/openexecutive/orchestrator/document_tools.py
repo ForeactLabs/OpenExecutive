@@ -171,8 +171,8 @@ async def _read_handle(tool_input: dict[str, Any]) -> str:
 
 
 async def _read_path(resolved: Path, tool_input: dict[str, Any]) -> str:
-    from openexecutive.config import get_settings
     from openexecutive.knowledge.loader import read_document_text
+    from openexecutive.providers.registry import reading_limits_for
 
     pages_raw = str(tool_input.get("pages") or "").strip()
     start = tool_input.get("start") or 0
@@ -208,12 +208,13 @@ async def _read_path(resolved: Path, tool_input: dict[str, Any]) -> str:
     # A long file comes back in parts, whatever its kind: the note names
     # where to read on, so the rest is one more call (not a Python job). A
     # part leaves room under the turn's per-result cap for the header and the
-    # notes, so that cap never cuts the note off.
+    # notes, so a part never cuts the note off. The part is what one read of
+    # the default model holds (providers.registry.reading_limits_for).
     total = len(result.text)
     if start >= total:
         return _err(f"that file has only {total} characters")
     head = "".join(header)
-    end = start + max(1, get_settings().tool_result_max_chars - len(head) - _NOTES_ROOM)
+    end = start + max(1, reading_limits_for().per_read - len(head) - _NOTES_ROOM)
     text = result.text[start:end]
     if start:
         text = f"…[from character {start} of {total}]\n" + text

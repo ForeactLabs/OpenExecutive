@@ -24,7 +24,13 @@ from openexecutive.config import get_settings
 from openexecutive.observability import wrap_provider
 from openexecutive.providers import openrouter_catalog
 from openexecutive.providers.anthropic_provider import AnthropicProvider
-from openexecutive.providers.feature_gate import NON_CLAUDE_MAX_OUTPUT_TOKENS, FeatureSpec
+from openexecutive.providers.feature_gate import (
+    NON_CLAUDE_MAX_OUTPUT_TOKENS,
+    FeatureSpec,
+    ReadingLimits,
+    context_tokens,
+    reading_limits,
+)
 from openexecutive.providers.openai_compatible import OpenAICompatibleProvider
 from openexecutive.providers.openrouter_provider import OpenRouterProvider
 from openexecutive.providers.provider import LLMProvider
@@ -530,3 +536,19 @@ def _reset_for_tests() -> None:
     _anthropic_provider = None
     _openrouter_provider = None
     _local_provider = None
+
+
+def reading_limits_for(model: str = "") -> ReadingLimits:
+    """How much a turn on ``model`` may read (feature_gate.reading_limits).
+
+    The one source of read sizes: every reader takes them from here rather
+    than from a number of its own. "" is the default model.
+    """
+    settings = get_settings()
+    return reading_limits(
+        context_tokens(
+            model or settings.default_model,
+            local_models=_local_models(settings),
+            local_context_tokens=int(getattr(settings, "local_context_tokens", 0) or 0),
+        )
+    )

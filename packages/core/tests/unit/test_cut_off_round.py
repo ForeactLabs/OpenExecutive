@@ -18,7 +18,7 @@ from openexecutive.orchestrator.executive import (
     MAX_OUTPUT_TOKENS,
     Executive,
 )
-from tests.unit.test_tool_result_cap import _FinalMsg, _ScriptedProvider, _TextBlock, _ToolUseBlock
+from tests.unit.test_reading import _FinalMsg, _ScriptedProvider, _TextBlock, _ToolUseBlock
 
 
 @pytest.fixture(autouse=True)
@@ -85,21 +85,6 @@ def test_cut_off_reply_text_carries_on() -> None:
     assert sent[-2]["content"] == [{"type": "text", "text": "Here is the first half"}]
 
 
-def test_cut_off_on_the_last_round_ends_as_written() -> None:
-    provider = _ScriptedProvider([_FinalMsg([_TextBlock("All I could write")], "max_tokens")])
-
-    async def _go() -> None:
-        with patch("openexecutive.orchestrator.executive.get_provider", return_value=provider):
-            async for _ in Executive()._stream_agent_loop(
-                system_blocks=[], messages=[{"role": "user", "content": "x"}], model="claude-test",
-                max_iterations=1,
-            ):
-                pass
-
-    asyncio.run(_go())
-    assert len(provider.calls) == 1
-
-
 def test_cut_off_call_dropped_by_the_provider_is_named_as_writing() -> None:
     provider = _ScriptedProvider(
         [
@@ -162,29 +147,6 @@ def test_a_cut_that_wrote_nothing_keeps_the_break_after_earlier_text() -> None:
         FinalMsg([TextBlock("Revenue grew 12%.")], "end_turn"),
     ])
     assert text == "Let me pull the numbers.\n\nRevenue grew 12%."
-
-
-def test_a_cut_before_the_last_round_says_no_tools_are_left() -> None:
-    from openexecutive.orchestrator.executive import LAST_ROUND_NOTE
-
-    provider = _ScriptedProvider(
-        [
-            _FinalMsg([], "max_tokens"),
-            _FinalMsg([_TextBlock("Here is what I have.")], "end_turn"),
-        ]
-    )
-
-    async def _go() -> None:
-        with patch("openexecutive.orchestrator.executive.get_provider", return_value=provider):
-            async for _ in Executive()._stream_agent_loop(
-                system_blocks=[], messages=[{"role": "user", "content": "x"}], model="claude-test",
-                max_iterations=2,
-            ):
-                pass
-
-    asyncio.run(_go())
-    texts = [b["text"] for b in provider.calls[1]["messages"][-1]["content"]]
-    assert texts == [CUT_OFF_NOTE, LAST_ROUND_NOTE]
 
 
 def test_a_cut_call_before_a_trailing_reasoning_block_never_runs() -> None:
@@ -291,16 +253,16 @@ def test_the_cut_call_is_not_counted_as_a_call_made() -> None:
     ]
 
 
-def test_a_turn_that_keeps_being_cut_ends_after_max_cut_rounds() -> None:
-    from openexecutive.orchestrator.executive import MAX_CUT_ROUNDS
-
+def test_a_turn_carries_on_through_every_cut_until_it_is_done() -> None:
+    """No count of cut rounds ends a turn: it keeps going until the model
+    finishes (Stop stays)."""
     provider = _ScriptedProvider(
-        [_FinalMsg([_ToolUseBlock(f"c{i}", "draft_artifact", {})], "max_tokens") for i in range(MAX_CUT_ROUNDS + 1)]
-        + [_FinalMsg([_TextBlock("never reached")], "end_turn")]
+        [_FinalMsg([_ToolUseBlock(f"c{i}", "draft_artifact", {})], "max_tokens") for i in range(6)]
+        + [_FinalMsg([_TextBlock("Done.")], "end_turn")]
     )
     asyncio.run(_run(provider, {"draft_artifact": lambda *_a, **_k: "published"}))
 
-    assert len(provider.calls) == MAX_CUT_ROUNDS + 1
+    assert len(provider.calls) == 7
 
 
 def test_text_cut_after_a_closed_call_runs_on() -> None:

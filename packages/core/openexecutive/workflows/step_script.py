@@ -417,7 +417,7 @@ async def run_script(
 
     def payload(**fields: Any) -> str:
         # The record of calls first: a long result is cut from the end
-        # (TOOL_RESULT_MAX_CHARS), and the list of writes that already ran
+        # (orchestrator.reading), and the list of writes that already ran
         # must survive the cut.
         head: dict[str, Any] = {}
         if "error" in fields:

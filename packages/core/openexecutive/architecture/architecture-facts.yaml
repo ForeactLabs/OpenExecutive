@@ -313,33 +313,32 @@ caching:
     the loop, orchestrator.history_tools) joins the same way when
     history_tools.recall_person allows it, before the same sort.
   turn_reading_budget: |
-    TOOL_RESULTS_TURN_MAX_CHARS (default 40,000; 0 = off) bounds what all of
-    one turn's tool results add together, since every result is re-sent on
-    each later call of the turn. executive._turn_result_limit gives each
-    result min(TOOL_RESULT_MAX_CHARS, what is left), never below 3,000
-    (_TURN_BUDGET_FLOOR), and _cap_tool_result(budget_spent=True) replaces the
-    marker's "call the tool again more narrowly" advice (that re-read would be
-    cut too) with: the question has read as much as it can: answer from what you
-    have and say what you could not read, and never edit, rewrite or replace
-    anything from that cut result, so a partial read never becomes a lossy
-    write. The read the question needs to edit may be the cut one, so
-    executive._TurnReadingBudget gives each turn one full re-read: repeating a
-    cut call with the same tool and input (compared as sorted JSON) is answered
-    with the stored full result (replay, before dispatch) under the per-result
-    cap, never by running the tool again (the cut may have been a write), and
-    the marker offers that while it is left;
-    after it, the marker says to offer the edit as its own request (a fresh
-    budget). A turn so reads at most the budget plus one result. A result short
-    enough not to be cut never spends the re-read. consult_specialist results neither
-    count nor are cut (they are the analysis, not a read); run_script results
-    count but are never cut below the per-result cap, since step_script puts
-    the list of writes that already ran at their head and a 3,000-character
-    cut would hide some, so the model would repeat them. open_tools and
-    search_tools results are treated the same way (_NEVER_CUT_BY_TURN_BUDGET):
-    they are the schema the next call needs. Pairs with
-    TOOL_BUILDING_ADDENDUM's multi-read rule: an answer that needs three or
-    more reads builds a run_script tool that returns only what answers the
-    question, so the budget is rarely reached.
+    Read sizes come from the turn's model, not from settings
+    (providers.registry.reading_limits_for, which reads
+    providers.feature_gate.context_tokens and reading_limits): a turn's reads
+    may fill 40% of the model's window at 3 characters a token
+    (ReadingLimits.per_turn: 1,200,000 characters for a 1M-token Claude,
+    240,000 for Haiku 4.5, a share of LOCAL_CONTEXT_TOKENS for a self-hosted
+    model), and one part of one read is half that (per_read). So an ordinary
+    long document fits whole. orchestrator/reading.py holds it for the
+    Executive's loop and a workflow action step alike (TurnReadingBudget). A
+    longer result comes back in parts: the first part ends in a marker naming
+    the tool and both character counts and saying to repeat the call with the
+    same input; that repeat (same tool, input compared as sorted JSON) is
+    answered with the next part from the result in hand (replay, before
+    dispatch), never by running the tool again (it may have been a write),
+    and the last part says it is the last. Only a turn that has read all its
+    model holds stops short: a further result shows 3,000 characters
+    (_TURN_BUDGET_FLOOR) and its note says plainly the question has read all
+    it can hold, to answer from what it has, say what it has not read and
+    offer to carry on, and never to edit from the cut result.
+    consult_specialist results neither count nor are cut (they are the
+    analysis, not a read); run_script, open_tools and search_tools results
+    count but are never cut by the turn (_NEVER_CUT_BY_TURN_BUDGET): one lists
+    the writes that already ran, the others are the schema the next call
+    needs. Why: the fixed 20,000 / 40,000-character caps, set when every read
+    was re-sent uncached, stopped a report a quarter of the way through a
+    56-body document.
   extensions: |
     orchestrator.extensions lets an install add chat tools and kinds of
     document without changing this code. OPENEXECUTIVE_EXTENSIONS names
@@ -429,7 +428,7 @@ caching:
     pinned flat while the prompt grows iteration over iteration.
     The marker MOVES rather than accumulates — each pass sweeps every
     tool_result clean before re-marking the newest. Left in place per
-    iteration it would reach max_iterations breakpoints and blow the 4-block
+    iteration it would reach one breakpoint per round and blow the 4-block
     limit. Sweeping first also makes the helper idempotent and self-healing:
     there is no bookkeeping index to drift out of sync.
     The marker must stay at the tool_result block's own top level —
@@ -437,21 +436,16 @@ caching:
     a marker nested inside tool_result["content"] would survive the gate and
     reach a backend that rejects the field.
   tool_result_bound: |
-    TOOL_RESULT_MAX_CHARS (default 20,000, about 5k tokens) caps one tool result before it
-    enters the prompt. Applied at the single point every result reaches the
-    model (the tool_results comprehension in _stream_agent_loop), not at each
-    producer: that also covers specialist output, tool errors and the
-    unknown-tool fallback, and leaves non-model consumers — the
-    propose_form_values json.loads, the audit trail — reading the full text.
-    Capping upstream of that parse would feed it truncated JSON and silently
-    drop the form_patch SSE event.
-    A circuit breaker, not a routine clipper: the default is set so ordinary
-    tool output (a status, an email thread, a specialist's analysis) never
-    reaches it; a long document read does, and the marker asks for a
-    narrower request (a page range, a section). A cut result carries an explicit marker
-    naming the tool and stating the result is incomplete — silent truncation
-    is worse than none, because the model reads the cut text as the whole
-    answer and confabulates the rest.
+    One tool result is sized at the single point every result reaches the
+    model (TurnReadingBudget.cap in _stream_agent_loop), not at each producer:
+    that also covers specialist output, tool errors and the unknown-tool
+    fallback, and leaves non-model consumers (the propose_form_values
+    json.loads, the audit trail) reading the full text. Sizing upstream of
+    that parse would feed it cut JSON and silently drop the form_patch SSE
+    event. The size is the model's (turn_reading_budget); a longer result
+    comes back in parts, each with a marker naming the tool and both counts:
+    a silent cut is worse than none, because the model reads the cut text as
+    the whole answer and confabulates the rest.
   openrouter_passthrough: |
     When OPENROUTER_ENABLED=true and the selected model is in the Claude
     family, cache_control markers pass through the OpenRouter translator
@@ -5401,7 +5395,7 @@ today:
 chat:
   round_cut_off: |
     Each Executive round (and the committee revision) may write
-    MAX_OUTPUT_TOKENS (32,000; was 8192) in orchestrator/executive.py. A
+    MAX_OUTPUT_TOKENS (32,000; was 8192) in providers/feature_gate.py; a specialist's analysis takes the same (agents/base.py, was 4,096). A
     round that reaches it (stop_reason max_tokens) no longer ends the turn:
     the tool call it was still writing (the last one) is answered with
     CUT_OFF_RESULT and never runs, since its input is unfinished; with no
@@ -5410,9 +5404,9 @@ chat:
     CUT_OFF_LABEL ("Writing it in shorter parts…"), so a card's step list
     names the real stop. Why: a reply card writing a long spreadsheet as one
     draft_artifact call was cut at 8192 twice and showed "couldn't finish"
-    with the mark on the read before it. After MAX_CUT_ROUNDS (3) cut
-    rounds in a row the turn ends as written. The last round (no tools) keeps
-    what it wrote. A call whose block closed before the cut (cut in the
+    with the mark on the read before it. A turn has no step limit: it runs
+    rounds, cut ones included, until the model answers (Stop ends it), so a
+    big job is never stopped at a count. A call whose block closed before the cut (cut in the
     text after it) is whole and runs as usual. Only Claude is asked for
     32,000: every non-Claude FeatureSpec (OpenRouter, OpenAI, unknown slugs)
     carries NON_CLAUDE_MAX_OUTPUT_TOKENS (16,000, what the PDF reader already asked), since hosted models cap

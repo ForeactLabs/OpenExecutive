@@ -38,11 +38,79 @@ class FeatureSpec:
     max_output_tokens: int | None = None
 
 
+# The most one answer may write: every Executive round, the committee
+# revision and a specialist's analysis. Claude takes it; every other model
+# gets at most NON_CLAUDE_MAX_OUTPUT_TOKENS, and a self-hosted one
+# LOCAL_MAX_OUTPUT_TOKENS. An Executive round that reaches it carries on in
+# the next round (orchestrator/executive.py, CUT_OFF_NOTE), so a long file or
+# answer is written in parts rather than stopped.
+MAX_OUTPUT_TOKENS = 32_000
+
+
 # What a non-Claude model is asked to write at most. Hosted models cap their
 # output at different limits (gpt-4o at 16,384) and refuse a larger request.
 # 16,000 is what the PDF reader and the fixture generator already ask of them,
 # so the cap never lowers a request those callers made before.
 NON_CLAUDE_MAX_OUTPUT_TOKENS = 16_000
+
+
+# How much each model can hold (its context window, in tokens). Claude from
+# 4.6 on, and every Claude 5, holds 1,000,000; older Claude 200,000. Another
+# hosted model is taken at 128,000 (gpt-4o's window, and the smallest of the
+# hosted models offered); a self-hosted one holds LOCAL_CONTEXT_TOKENS.
+CLAUDE_CONTEXT_TOKENS = 1_000_000
+OLDER_CLAUDE_CONTEXT_TOKENS = 200_000
+NON_CLAUDE_CONTEXT_TOKENS = 128_000
+
+# Claude ids and OpenRouter slugs with their version (``claude-opus-5-5``,
+# ``anthropic/claude-haiku-4.5``, ``claude-sonnet-4-6-20260115``).
+_CLAUDE_VERSION_RE = re.compile(
+    r"^(?:anthropic/)?claude-[a-z]+-(?P<major>\d{1,3})(?:[-.](?P<minor>\d{1,2}))?(?:-\d{8})?$"
+)
+
+# What one turn's reads may fill: a share of the model's window, the rest
+# left for the instructions, the conversation and the answer. Counted at 3
+# characters a token, under what English text takes (about 4), so a dense
+# read (figures, code, another language) still fits.
+_READ_SHARE = 0.4
+_CHARS_PER_TOKEN = 3
+
+
+def context_tokens(model: str, *, local_models: Any = (), local_context_tokens: int = 0) -> int:
+    """How many tokens ``model`` can hold.
+
+    ``local_models`` / ``local_context_tokens`` are the self-hosted models
+    and what their server holds (LOCAL_MODELS, LOCAL_CONTEXT_TOKENS).
+    """
+    if local_context_tokens and model in local_models:
+        return local_context_tokens
+    m = _CLAUDE_VERSION_RE.match(model.lower())
+    if m is None:
+        return NON_CLAUDE_CONTEXT_TOKENS
+    major, minor = int(m.group("major")), int(m.group("minor") or 0)
+    if major >= 5 or (major == 4 and minor >= 6):
+        return CLAUDE_CONTEXT_TOKENS
+    return OLDER_CLAUDE_CONTEXT_TOKENS
+
+
+@dataclass(frozen=True)
+class ReadingLimits:
+    """How much a turn may read, in characters, from its model's window.
+
+    ``per_read`` is one part of one read (a file, a page, a tool's answer):
+    a longer one comes back in parts. ``per_turn`` is what all of a turn's
+    reads may add together, since each stays in the prompt for the rest of
+    the turn.
+    """
+
+    per_read: int
+    per_turn: int
+
+
+def reading_limits(window_tokens: int) -> ReadingLimits:
+    """The reading limits for a model that holds ``window_tokens``."""
+    per_turn = int(window_tokens * _READ_SHARE) * _CHARS_PER_TOKEN
+    return ReadingLimits(per_read=per_turn // 2, per_turn=per_turn)
 
 
 # Claude models that reject a forced ``tool_choice`` (``any`` or a named

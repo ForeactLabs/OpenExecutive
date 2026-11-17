@@ -55,6 +55,8 @@ from typing import Any
 from openexecutive.agents.workflow_actor import WORKFLOW_ACTOR_AGENT_ID, WorkflowActorAgent
 from openexecutive.config import get_settings
 from openexecutive.orchestrator import turn_live
+from openexecutive.orchestrator.reading import TurnReadingBudget
+from openexecutive.providers.registry import reading_limits_for
 from openexecutive.providers.translator import reasoning_replay_block
 from openexecutive.workflows import step_script, tool_catalog
 from openexecutive.workflows.approved_targets import approved_values, normalize_value
@@ -869,6 +871,9 @@ async def run_action_step(
         actions=actions,
     )
 
+    # How much the step's reads may hold, from its model; a long result
+    # comes back in parts (orchestrator.reading).
+    reading = TurnReadingBudget(reading_limits_for(resolved_model))
     max_turns = step.max_tool_calls + _EXTRA_TURNS
     fanout_hinted = False
     turn = 0
@@ -923,7 +928,12 @@ async def run_action_step(
         for use in tool_uses:
             name = str(use["name"])
             arguments = use["input"] if isinstance(use["input"], dict) else {}
-            if scripts and name == step_script.RUN_SCRIPT_TOOL:
+            replayed = reading.replay(use)
+            if replayed is not None:
+                # The next part of a long result the step already has: the
+                # tool does not run again.
+                content, is_error = replayed, False
+            elif scripts and name == step_script.RUN_SCRIPT_TOOL:
                 yield ("progress", "Running a script…")
                 content, is_error = json.dumps({"error": "the script did not finish"}), True
                 stats: dict[str, Any] = {}
@@ -957,7 +967,7 @@ async def run_action_step(
                 {
                     "type": "tool_result",
                     "tool_use_id": use["id"],
-                    "content": _truncate(str(content), settings.tool_result_max_chars),
+                    "content": reading.cap(name, use["input"], str(content), str(use["id"])),
                     "is_error": is_error,
                 }
             )

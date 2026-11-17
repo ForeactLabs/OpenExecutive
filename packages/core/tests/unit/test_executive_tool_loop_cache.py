@@ -216,7 +216,7 @@ def test_newest_tool_result_is_marked_and_is_the_last_block() -> None:
 
 
 def test_marker_moves_instead_of_accumulating() -> None:
-    """The regression that blows the 4-breakpoint limit at max_iterations=15."""
+    """The regression that blows the 4-breakpoint limit on a long turn."""
     provider = _scripted_three_iterations()
     _run_loop(provider)
 
