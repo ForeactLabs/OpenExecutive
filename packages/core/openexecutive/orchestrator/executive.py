@@ -1239,8 +1239,9 @@ LAST_ROUND_NOTE = (
 )
 
 
-# The most one round of the Executive may write (a self-hosted model gets
-# less when LOCAL_MAX_OUTPUT_TOKENS says so: providers.feature_gate). A round that reaches it is
+# The most one round of the Executive may write. Claude takes it; every other
+# model gets at most NON_CLAUDE_MAX_OUTPUT_TOKENS, and a self-hosted one
+# LOCAL_MAX_OUTPUT_TOKENS (providers.feature_gate). A round that reaches it is
 # cut off mid-answer (stop_reason "max_tokens"): a long file (a spreadsheet,
 # a document) written as one tool call stopped the whole turn before this was
 # raised from 8192. Every Executive round and the committee revision use it.
@@ -2940,8 +2941,10 @@ class Executive:
                     current_messages.append({"role": "user", "content": [{"type": "text", "text": CUT_OFF_NOTE}]})
                     # The next round carries on the cut text where it
                     # stopped: no paragraph break between them
-                    # (_round_separator).
-                    streamed_tail = ""
+                    # (_round_separator). A cut that streamed nothing keeps
+                    # the break after earlier rounds' text.
+                    if full_text:
+                        streamed_tail = ""
                     continue
             if final_msg.stop_reason != "tool_use" and not cut_off:
                 # A reply with no tool call still gets the queued files and

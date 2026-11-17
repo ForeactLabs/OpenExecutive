@@ -148,3 +148,15 @@ def test_a_call_that_closed_before_the_cut_still_runs() -> None:
     results = provider.calls[1]["messages"][-1]["content"]
     answered = {b["tool_use_id"]: b["content"] for b in results if b.get("type") == "tool_result"}
     assert answered["ok"] != CUT_OFF_RESULT
+
+
+def test_a_cut_that_wrote_nothing_keeps_the_break_after_earlier_text() -> None:
+    from tests.unit._agent_loop_fakes import FinalMsg, TextBlock, ToolUseBlock
+    from tests.unit.test_reply_rounds import _reply
+
+    text = _reply([
+        FinalMsg([TextBlock("Let me pull the numbers."), ToolUseBlock("t1", "nothing_here", {})], "tool_use"),
+        FinalMsg([], "max_tokens"),
+        FinalMsg([TextBlock("Revenue grew 12%.")], "end_turn"),
+    ])
+    assert text == "Let me pull the numbers.\n\nRevenue grew 12%."

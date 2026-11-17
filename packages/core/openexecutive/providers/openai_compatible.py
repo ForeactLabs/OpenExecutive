@@ -38,6 +38,7 @@ from typing import Any
 import httpx
 
 from openexecutive.providers.feature_gate import (
+    NON_CLAUDE_MAX_OUTPUT_TOKENS,
     FeatureSpec,
     apply_feature_gates,
     fit_claude_generation,
@@ -160,6 +161,7 @@ class OpenAICompatibleProvider:
                 supports_web_search=False,
                 supports_tool_use=True,
                 supports_pdf_input=False,
+                max_output_tokens=NON_CLAUDE_MAX_OUTPUT_TOKENS,
             ),
         )
         return slug, spec

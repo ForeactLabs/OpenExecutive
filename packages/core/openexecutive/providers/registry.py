@@ -24,7 +24,7 @@ from openexecutive.config import get_settings
 from openexecutive.observability import wrap_provider
 from openexecutive.providers import openrouter_catalog
 from openexecutive.providers.anthropic_provider import AnthropicProvider
-from openexecutive.providers.feature_gate import FeatureSpec
+from openexecutive.providers.feature_gate import NON_CLAUDE_MAX_OUTPUT_TOKENS, FeatureSpec
 from openexecutive.providers.openai_compatible import OpenAICompatibleProvider
 from openexecutive.providers.openrouter_provider import OpenRouterProvider
 from openexecutive.providers.provider import LLMProvider
@@ -149,6 +149,7 @@ _DEFAULT_NON_CLAUDE_SPEC = FeatureSpec(
     supports_thinking=False,
     supports_web_search=True,
     supports_tool_use=True,
+    max_output_tokens=NON_CLAUDE_MAX_OUTPUT_TOKENS,
 )
 
 # Non-Claude model whose live catalog entry advertises ``reasoning``
@@ -160,6 +161,7 @@ _NON_CLAUDE_REASONING_SPEC = FeatureSpec(
     supports_thinking=True,
     supports_web_search=True,
     supports_tool_use=True,
+    max_output_tokens=NON_CLAUDE_MAX_OUTPUT_TOKENS,
 )
 
 # Self-hosted OpenAI-compatible backend: tools only. There is no search

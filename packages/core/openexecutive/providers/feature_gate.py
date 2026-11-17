@@ -38,6 +38,12 @@ class FeatureSpec:
     max_output_tokens: int | None = None
 
 
+# What a non-Claude model is asked to write at most. Hosted models cap their
+# output at different limits (gpt-4o at 16,384) and refuse a larger request;
+# 8192 is under all of them, as it was for every model before Claude got more.
+NON_CLAUDE_MAX_OUTPUT_TOKENS = 8192
+
+
 # Claude models that reject a forced ``tool_choice`` (``any`` or a named
 # ``tool``) with HTTP 400: Opus 5.5, Sonnet 5.5, Fable 5.1 and Mythos 5.1.
 # Matched as an Anthropic id (``claude-opus-5-5``, optionally date-pinned)
