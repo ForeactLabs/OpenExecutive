@@ -218,3 +218,10 @@ def test_a_forward_quoted_under_a_reply_in_another_language_is_history() -> None
     assert _new_text_lines(body.splitlines())[1] is False
     assert sender_new_text("Ja.\n\nAm 03.11.2026 schrieb Dana:\n> alt") == "Ja."
 
+
+def test_a_chinese_reply_attribution_is_history() -> None:
+    from openexecutive.integrations.email_poller import split_forward
+
+    body = "好的\n\nDana <d@x.com> 于2026年11月3日周一 10:00写道：\n> 旧的"
+    assert split_forward(body, "Fwd: x") == ("好的", "")
+

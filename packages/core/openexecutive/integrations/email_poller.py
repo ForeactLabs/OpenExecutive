@@ -505,8 +505,8 @@ def _first_unattributed_quote(lines: list[str]) -> int | None:
 # "Am 03.11.2026 schrieb Dana:"). A lead-in such as "Please review by
 # 11/20/2026:" or "Forwarding this from Dana <d@x.com>:" says nobody wrote.
 _ATTRIBUTION_ANY_RE = re.compile(
-    r"^.{0,300}\b(wrote|writes|schrieb|a écrit|escribió|escreveu|ha scritto|schreef|skrev|"
-    r"kirjoitti|napisał|napsal|írta|написал|написала|yazdı|έγραψε|寫道|写道)\b.{0,100}:\s*$",
+    r"^.{0,300}(\b(wrote|writes|schrieb|a écrit|escribió|escreveu|ha scritto|schreef|skrev|"
+    r"kirjoitti|napisał|napsal|írta|написал|написала|yazdı|έγραψε)\b|寫道|写道).{0,100}[:：]\s*$",
     re.IGNORECASE,
 )
 
