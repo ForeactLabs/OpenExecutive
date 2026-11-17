@@ -700,10 +700,11 @@ async def apply(
         changed["draft_body"] = words
         changed["gist"] = clean_gist(text)
         changed[card_drafts.QUESTIONS_SETTLED] = True
-        # Written in the person's voice: it goes from them again.
+        # Written in the person's voice: on a card that goes from the
+        # Executive, kept as theirs and written again as the Executive's.
         from openexecutive.delegation import send_from
 
-        changed.update(send_from.as_you_again(payload))
+        changed = await send_from.restyled(person, changed, words)
     # None given keeps what the reply already carries (card, draft and Send agree).
     new_files = bool(files)
     if not new_files:
@@ -741,7 +742,7 @@ async def _save(
     is kept in their mailbox too, replace it there with one that carries it
     all (when ``rewrote``: new words or new files). ``SendRefused`` when the
     card changed or went meanwhile."""
-    from openexecutive.delegation import card_drafts, drafts
+    from openexecutive.delegation import card_drafts, drafts, send_from
     from openexecutive.delegation.gmail import GmailError, gmail_for, normalize_email
     from openexecutive.delegation.inbox import SENDING
     from openexecutive.delegation.reply_send import SendRefused
@@ -755,7 +756,8 @@ async def _save(
         return
     client = gmail if gmail is not None else gmail_for(normalize_email(person.email))
     try:
-        created = await client.create_draft(card_drafts.spec_for(changed, files))
+        # Their mailbox holds their own words, never the Executive's.
+        created = await client.create_draft(card_drafts.spec_for(send_from.theirs(changed), files))
     except GmailError as exc:
         raise SendRefused(502, "gmail_error", "Couldn't save the reply in their mailbox.") from exc
     changed["draft_id"], changed["draft_message_id"] = created.draft_id, created.message_id

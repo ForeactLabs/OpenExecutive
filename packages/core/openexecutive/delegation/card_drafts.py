@@ -345,11 +345,14 @@ async def edit(
             # the draft says, so the card falls back to what they wrote.
             extra: dict[str, Any] = {} if recipients is not None else {QUESTIONS_SETTLED: True, "gist": ""}
             if rewrite is not None:
-                written, extra = await rewrite(person, payload)
+                # Rewritten from the person's own words, in their voice, also
+                # on a card that goes from the Executive (``_edit`` writes it
+                # again as the Executive's there).
+                written, extra = await rewrite(person, send_from.theirs(payload))
                 words = _check_words(written)
-                # Rewritten in the person's voice: it goes from them again.
-                extra = {**send_from.as_you_again(payload), **extra}
-            return await _edit(instance, person, payload, words, gmail, extra, recipients)
+            return await _edit(
+                instance, person, payload, words, gmail, extra, recipients, theirs=rewrite is not None,
+            )
         finally:
             _EDITING.discard(instance.id)
 
@@ -376,9 +379,10 @@ async def redraft(instance: Any, person: Any, gmail: Any, rewrite: Rewrite) -> d
     try:
         from openexecutive.delegation import send_from
 
-        written, extra = await rewrite(person, payload)
-        extra = {**send_from.as_you_again(payload), **extra}
-        return await _edit(instance, person, payload, _check_words(written), gmail, extra, by_hand=False)
+        written, extra = await rewrite(person, send_from.theirs(payload))
+        return await _edit(
+            instance, person, payload, _check_words(written), gmail, extra, by_hand=False, theirs=True,
+        )
     finally:
         _EDITING.discard(instance.id)
 
@@ -398,13 +402,56 @@ def version(payload: dict[str, Any]) -> str:
 
 def changed_since_shown(payload: dict[str, Any]) -> str:
     """The part of ``version`` a card shown before must have seen: changed
-    from chat (``CHANGED_IN_CHAT``) and who it goes from switched
-    (``send_from.SWITCHED_AT``). "" when neither happened."""
-    from openexecutive.delegation.send_from import SWITCHED_AT
+    from chat (``CHANGED_IN_CHAT``) and who it goes from switched, either
+    way (``send_from.SWITCHED_AT`` / ``SWITCHED_BACK_AT``). "" when none
+    happened."""
+    from openexecutive.delegation.send_from import SWITCHED_AT, SWITCHED_BACK_AT
 
     chat = str(payload.get(CHANGED_IN_CHAT) or "")
-    switched = str(payload.get(SWITCHED_AT) or "")
-    return f"{chat}+{switched}" if switched else chat
+    to = str(payload.get(SWITCHED_AT) or "")
+    back = str(payload.get(SWITCHED_BACK_AT) or "")
+    return f"{chat}+{to}+{back}" if to or back else chat
+
+
+def _shows_now(payload: dict[str, Any], confirm: dict[str, Any], shown_at: str) -> bool:
+    """Whether the card that was tapped shows what goes now. A web or phone
+    card hands back the version it showed (``seen_caught_up_at``). A chat
+    app's card is shown once, when it is posted (``shown_at``): it shows
+    what goes when nothing was changed from chat since, and it showed the
+    same sender as now (``send_from.showed_executive``)."""
+    from openexecutive.delegation import send_from
+
+    changed = changed_since_shown(payload)
+    if not changed or str(confirm.get("seen_caught_up_at") or "").partition("|")[2] == changed:
+        return True
+    if not shown_at:
+        return False
+    chat = str(payload.get(CHANGED_IN_CHAT) or "")
+    return (not chat or chat <= shown_at) and send_from.showed_executive(payload, shown_at) == (
+        send_from.is_from_executive(payload)
+    )
+
+
+def asks_again(
+    payload: dict[str, Any], confirm: dict[str, Any], *, moved_on: bool, shown_at: str = "",
+) -> list[str]:
+    """Why a Send must be shown again before it goes, whoever's mailbox it
+    goes from: newer mail from someone else (``moved_on``) or a reply brought
+    up to date with it (``answers.CAUGHT_UP_KEY``) that the tapped card
+    didn't show, unless they said yes to it (``thread_moved_on``); and a
+    change made without them (from chat, or who it goes from) that it
+    didn't show (``_shows_now``)."""
+    from openexecutive.delegation.answers import CAUGHT_UP_KEY
+
+    reasons: list[str] = []
+    said_yes = confirm.get("thread_moved_on") is True
+    caught_up = str(payload.get(CAUGHT_UP_KEY) or "")
+    seen_caught_up = str(confirm.get("seen_caught_up_at") or "").partition("|")[0]
+    if not said_yes and (moved_on or (caught_up and seen_caught_up != caught_up)):
+        reasons.append("thread_moved_on")
+    if not _shows_now(payload, confirm, shown_at):
+        reasons.append("changed_in_chat")
+    return reasons
 
 
 async def from_chat(
@@ -435,15 +482,11 @@ async def from_chat(
         raise SendRefused(409, "busy", "This reply is being saved or sent right now.")
     _EDITING.add(instance.id)
     try:
-        from openexecutive.delegation import send_from
-
         signed = ai_disclosure.sign(person.id, words, on_its_own=False)
-        extra = {
-            QUESTIONS_SETTLED: True, "gist": "", CHANGED_IN_CHAT: datetime.now(UTC).isoformat(),
-            **send_from.as_you_again(payload),
-        }
+        extra = {QUESTIONS_SETTLED: True, "gist": "", CHANGED_IN_CHAT: datetime.now(UTC).isoformat()}
         return await _edit(
-            instance, person, payload, _check_words(signed), gmail, extra, (list(to), list(cc)), by_hand=False,
+            instance, person, payload, _check_words(signed), gmail, extra, (list(to), list(cc)),
+            by_hand=False, theirs=True,
         )
     finally:
         _EDITING.discard(instance.id)
@@ -451,11 +494,17 @@ async def from_chat(
 
 async def _edit(
     instance: Any, person: Any, payload: dict[str, Any], words: str, gmail: Any, extra: dict[str, Any],
-    recipients: tuple[list[str], list[str]] | None = None, *, by_hand: bool = True,
+    recipients: tuple[list[str], list[str]] | None = None, *, by_hand: bool = True, theirs: bool = False,
 ) -> dict[str, Any]:
     """``edit`` once its checks passed, one at a time per card. Not
     ``by_hand`` (``redraft``): the words stay the Executive's, so Send and
-    training don't take them for the person's change."""
+    training don't take them for the person's change. ``theirs``: ``words``
+    are in the person's voice (a rewrite, a reply from chat), not the card's
+    own words changed by hand; on a card that goes from the Executive they
+    are kept as theirs and the card's are written again as the Executive's
+    (``send_from.restyled``). A draft in their mailbox always holds their
+    own words."""
+    from openexecutive.delegation import send_from
     from openexecutive.delegation.gmail import (
         BLOCKING_CODES,
         STATUS_MESSAGES,
@@ -477,6 +526,10 @@ async def _edit(
         spec = payload.get(DRAFT_SPEC)
         if isinstance(spec, dict):
             changed[DRAFT_SPEC] = {**spec, "to": to, "cc": cc}
+    if theirs:
+        changed = await send_from.restyled(person, changed, words)
+    # What their mailbox's draft says: their own words, never the Executive's.
+    words = str(send_from.theirs(changed).get("draft_body") or "")
     draft_id = str(payload.get("draft_id") or "")
     if draft_id:
         email = normalize_email(person.email)

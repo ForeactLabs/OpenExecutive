@@ -1235,13 +1235,17 @@ async def _send_reply_from_chat(
     instance: DecisionInstance, tap: Any, resolver: int, *, allow: bool = False,
 ) -> DecisionInstance:
     """Send a reply card's draft on a tap in a chat app, as written. What
-    would ask a second yes on the web card (recipients changed, newer mail)
-    is turned down here with what to do instead. ``allow``: the "next time"
+    would ask a second yes on the web card (recipients changed, newer mail,
+    a change the card, posted at ``shown_at``, didn't show) is turned down
+    here with what to do instead. ``allow``: the "next time"
     button."""
     from openexecutive.delegation.reply_send import SendRefused, send_approved_reply
+    from openexecutive.integrations.channel_cards import shown_at
 
     try:
-        await send_approved_reply(instance, caller=tap, resolver=resolver, confirm={}, allow=allow)
+        await send_approved_reply(
+            instance, caller=tap, resolver=resolver, confirm={}, allow=allow, shown_at=shown_at(instance.id),
+        )
     except SendRefused as refused:
         message = refused.message
         if refused.code == "confirm":

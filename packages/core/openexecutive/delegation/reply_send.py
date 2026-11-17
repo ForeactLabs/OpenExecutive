@@ -140,11 +140,13 @@ async def send_approved_reply(
     example: bool = False,
     gmail: Any = None,
     now: datetime | None = None,
+    shown_at: str = "",
 ) -> str:
     """Send the draft on ``instance``, a ``delegation_reply`` card the caller
     approved. ``allow`` is "on its own next time" (In training): this sender
     (a follow-up's people) is allowed from now on; ``example`` keeps an
-    edited draft as how they write to them. Returns the sent message's id;
+    edited draft as how they write to them. ``shown_at``: when a chat app's
+    card that was tapped was posted (``card_drafts.asks_again``). Returns the sent message's id;
     raises ``SendRefused``. Not while the Executive is still doing what the
     email asks (delegation.card_work): the reply is about to change."""
     from openexecutive.audit import rows_for_person
@@ -157,13 +159,13 @@ async def send_approved_reply(
         # Switched to go from the Executive on its card: its own mailbox.
         return await send_from.send(
             instance, caller=caller, resolver=resolver, confirm=confirm or {}, gmail=gmail,
-            now=now or datetime.now(UTC),
+            now=now or datetime.now(UTC), shown_at=shown_at,
         )
     owner = getattr(instance, "approver_person_id", None)
     with rows_for_person(owner if isinstance(owner, int) else None):
         return await _send(
             instance, caller=caller, resolver=resolver, confirm=confirm or {},
-            gmail=gmail, now=now or datetime.now(UTC), allow=allow, example=example,
+            gmail=gmail, now=now or datetime.now(UTC), allow=allow, example=example, shown_at=shown_at,
         )
 
 
@@ -192,7 +194,7 @@ def _addresses(value: Any) -> list[str] | None:
 
 async def _send(
     instance: Any, *, caller: Any, resolver: int | None, confirm: dict[str, Any], gmail: Any, now: datetime,
-    on_its_own: bool = False, allow: bool = False, example: bool = False,
+    on_its_own: bool = False, allow: bool = False, example: bool = False, shown_at: str = "",
 ) -> str:
     """``_send_checked``, and for a reply kept on its card alone
     (``card_drafts``): the draft it made is taken back out of the mailbox
@@ -203,7 +205,7 @@ async def _send(
     try:
         return await _send_checked(
             instance, caller=caller, resolver=resolver, confirm=confirm, gmail=gmail, now=now,
-            on_its_own=on_its_own, allow=allow, example=example, made=made,
+            on_its_own=on_its_own, allow=allow, example=example, made=made, shown_at=shown_at,
         )
     except SendRefused as refused:
         if made and refused.code != "send_unconfirmed":
@@ -214,10 +216,10 @@ async def _send(
 async def _send_checked(
     instance: Any, *, caller: Any, resolver: int | None, confirm: dict[str, Any], gmail: Any, now: datetime,
     on_its_own: bool = False, allow: bool = False, example: bool = False, made: dict[str, Any],
+    shown_at: str = "",
 ) -> str:
     from openexecutive.config import get_settings
     from openexecutive.delegation import card_drafts, drafts, handle_it, training
-    from openexecutive.delegation.answers import CAUGHT_UP_KEY
     from openexecutive.delegation.gmail import (
         BLOCKING_CODES,
         STATUS_MESSAGES,
@@ -364,24 +366,11 @@ async def _send_checked(
     reasons: list[str] = []
     if recipients != _addresses(payload.get("draft_to")) and _addresses(confirm.get("recipients")) != recipients:
         reasons.append("recipients_changed")
+    # Newer mail, a reply brought up to date with it, or a change made
+    # without them that the tapped card didn't show (the same checks as Send
+    # from the Executive, send_from.send).
     moved_on = any(m.from_addr not in own and "SENT" not in m.labels for m in later)
-    if moved_on and confirm.get("thread_moved_on") is not True:
-        reasons.append("thread_moved_on")
-    # Brought up to date with newer mail on its own (answers.catch_up): Send
-    # goes without asking again only when the card that was tapped showed
-    # that version (edits.seen_caught_up_at).
-    caught_up = str(payload.get(CAUGHT_UP_KEY) or "")
-    seen_caught_up, _, seen_chat = str(confirm.get("seen_caught_up_at") or "").partition("|")
-    if (
-        caught_up and seen_caught_up != caught_up
-        and confirm.get("thread_moved_on") is not True and "thread_moved_on" not in reasons
-    ):
-        reasons.append("thread_moved_on")
-    # Changed from chat (card_drafts.from_chat): only a card that showed
-    # that version sends it, never one shown before, nor on its own.
-    chat = card_drafts.changed_since_shown(payload)
-    if chat and seen_chat != chat:
-        reasons.append("changed_in_chat")
+    reasons += card_drafts.asks_again(payload, confirm, moved_on=moved_on, shown_at=shown_at)
     if reasons:
         raise SendRefused(
             409, "confirm", " ".join(_CONFIRM_TEXT[r] for r in reasons),

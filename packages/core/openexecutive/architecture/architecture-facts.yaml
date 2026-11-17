@@ -11878,8 +11878,14 @@ delegation:
     words_as_you; Send then goes from the Executive's own mailbox with them
     on cc and the card's files, as an approved step via
     take_the_lead.carry_out; typed on the card, the rewrite's send_from or
-    update_reply_card's send_from switches the same card; any rewrite in
-    their voice switches it back; replies on their own always go as them),
+    update_reply_card's send_from switches the same card; a rewrite on a
+    switched card is written from their own words (send_from.theirs) and
+    the card stays from the Executive, written again from them
+    (send_from.restyled), their mailbox's draft keeping their words; Send
+    asks again on newer mail or a change the tapped card didn't show,
+    card_drafts.asks_again, shared with their own Send, a chat app's card
+    judged by when it was posted (channel_cards.shown_at); replies on their
+    own always go as them),
     executive_on_thread when the Executive was, and sender_unverified when
     Gmail's SPF/DKIM/DMARC results don't vouch for the From address
     (fact_confirmation.headers_authenticated). A sincere "are you an AI?"

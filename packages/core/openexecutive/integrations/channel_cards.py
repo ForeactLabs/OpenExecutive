@@ -465,6 +465,24 @@ def _mark_pushed(decision_id: int, person_id: int, channel: str, now: datetime, 
         conn.close()
 
 
+def shown_at(decision_id: int, db_path: Path | None = None) -> str:
+    """When card ``decision_id`` was posted to its person's chat app (an ISO
+    time), so a tap on it is checked against what it showed
+    (``card_drafts.asks_again``). "" when it wasn't, or can't be read."""
+    try:
+        conn = _connect(db_path)
+        try:
+            row = conn.execute(
+                "SELECT pushed_at FROM chat_card_pushes WHERE decision_id = ? AND state = 'sent'", (decision_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+    except Exception:
+        logger.warning("channel_cards: couldn't read when card %d was posted", decision_id, exc_info=True)
+        return ""
+    return str(row[0]) if row else ""
+
+
 def _mark_sent(decision_id: int, sent: bool, db_path: Path | None) -> None:
     conn = _connect(db_path)
     try:

@@ -168,23 +168,101 @@ def test_saying_it_on_the_card_switches_the_same_card(
     assert len(inbox.open_cards(owner.id)) == 1
 
 
-def test_a_rewrite_in_their_voice_turns_it_back_to_them(
+def test_a_rewrite_on_a_switched_card_keeps_it_from_the_executive(
     db: Path, owner: Any, models: dict[str, Any], rewrites: list[str],
 ) -> None:
     mailbox, card = _card(owner)
+    theirs = inbox.card_payload(_fresh(card))["draft_body"]
     _switch(card, mailbox, owner, True)
+    given: list[str] = []
 
     async def write(person: Any, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-        return "Hi Dana,\n\nThursday works.\n\nOlivia", {}
+        given.append(payload["draft_body"])
+        return "Hi Dana,\n\nFriday works.\n\nOlivia", {}
 
     saved = asyncio.run(card_drafts.edit(_fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, rewrite=write))
-    assert saved[send_from.FROM_EXECUTIVE] is False and saved[send_from.WORDS_AS_YOU] == ""
-    # A change by hand keeps the Executive.
+    # Rewritten from their own words, never the Executive's.
+    assert given == [theirs]
+    # Still from the Executive: their new words kept, the card's written again.
+    assert saved[send_from.FROM_EXECUTIVE] is True
+    assert saved[send_from.WORDS_AS_YOU] == "Hi Dana,\n\nFriday works.\n\nOlivia"
+    assert saved["draft_body"].endswith(send_from.sign_off(owner))
+    # Back to them: the new words, as they wrote them.
+    back = _switch(card, mailbox, owner, False)
+    assert back["draft_body"] == "Hi Dana,\n\nFriday works.\n\nOlivia"
+    # A change by hand on the card is the Executive's words, kept as typed.
     _switch(card, mailbox, owner, True)
     kept = asyncio.run(card_drafts.edit(
         _fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, text="Hi Dana,\n\nShort and sweet.",
     ))
-    assert kept[send_from.FROM_EXECUTIVE] is True
+    assert kept[send_from.FROM_EXECUTIVE] is True and kept["draft_body"] == "Hi Dana,\n\nShort and sweet."
+    assert kept[send_from.WORDS_AS_YOU] == "Hi Dana,\n\nFriday works.\n\nOlivia"
+
+
+def test_a_rewrite_keeps_their_words_in_their_mailbox(
+    db: Path, owner: Any, models: dict[str, Any], rewrites: list[str],
+) -> None:
+    inbox.set_mailbox_drafts(owner.id, True, updated_by="test")
+    mailbox, card = _card(owner)
+    _switch(card, mailbox, owner, True)
+
+    async def write(person: Any, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        return "Hi Dana,\n\nFriday works.\n\nOlivia", {}
+
+    saved = asyncio.run(card_drafts.edit(_fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, rewrite=write))
+    there = mailbox.drafts[saved["draft_id"]].message.text
+    assert "Friday works." in there and "asked me" not in there
+
+
+def test_a_chat_app_card_shows_who_it_goes_from_when_posted() -> None:
+    t1, t2, t3, t4 = (f"2026-11-17T1{h}:00:00+00:00" for h in range(4))
+    switched = {send_from.FROM_EXECUTIVE: True, send_from.SWITCHED_AT: t2}
+    back = {send_from.FROM_EXECUTIVE: False, send_from.SWITCHED_AT: t2, send_from.SWITCHED_BACK_AT: t3}
+    # Posted after it switched to the Executive: it showed what goes.
+    assert card_drafts.asks_again(switched, {}, moved_on=False, shown_at=t3) == []
+    # Posted before: it showed them as the sender.
+    assert card_drafts.asks_again(switched, {}, moved_on=False, shown_at=t1) == ["changed_in_chat"]
+    # Switched there and back since it was posted: it shows them, as now.
+    assert card_drafts.asks_again(back, {}, moved_on=False, shown_at=t1) == []
+    assert card_drafts.asks_again(back, {}, moved_on=False, shown_at=t4) == []
+    # Posted while it went from the Executive: not what goes now.
+    assert card_drafts.asks_again(back, {}, moved_on=False, shown_at=t2) == ["changed_in_chat"]
+    # Not known when it was posted: look again.
+    assert card_drafts.asks_again(back, {}, moved_on=False) == ["changed_in_chat"]
+
+
+def test_a_chat_app_tap_sends_from_the_executive(
+    db: Path, owner: Any, models: dict[str, Any], rewrites: list[str], sends: list[dict[str, Any]],
+) -> None:
+    mailbox, card = _card(owner)
+    _switch(card, mailbox, owner, True)
+    posted = (NOW + timedelta(days=3650)).isoformat()
+    asyncio.run(send_approved_reply(
+        _fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, confirm={}, shown_at=posted,
+        now=NOW + timedelta(minutes=30),
+    ))
+    assert len(sends) == 1 and sends[0]["input"]["cc"] == OWNER
+
+
+def test_newer_mail_asks_again_before_the_executive_sends(
+    db: Path, owner: Any, models: dict[str, Any], rewrites: list[str], sends: list[dict[str, Any]],
+) -> None:
+    from .test_delegation_inbox import _msg
+
+    mailbox, card = _card(owner)
+    _switch(card, mailbox, owner, True)
+    mailbox.add(_msg("m9", "t1", sender=DANA, minutes_ago=1, text="Never mind, sorted."))
+    later = NOW + timedelta(minutes=30)
+    with pytest.raises(SendRefused) as err:
+        asyncio.run(send_approved_reply(
+            _fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, confirm=_seen(card), now=later,
+        ))
+    assert err.value.code == "confirm" and err.value.extra["reasons"] == ["thread_moved_on"] and sends == []
+    asyncio.run(send_approved_reply(
+        _fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, now=later,
+        confirm={**_seen(card), "thread_moved_on": True},
+    ))
+    assert len(sends) == 1
 
 
 def test_no_on_its_own_next_time_from_the_executive(db: Path, owner: Any) -> None:

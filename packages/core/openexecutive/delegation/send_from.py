@@ -23,9 +23,15 @@ The card keeps both versions: ``FROM_EXECUTIVE`` says which one goes, and
 card. A reply also saved in their mailbox's Drafts keeps their own words
 there: only the card holds the Executive's, so the draft never goes from
 their address in the Executive's voice. A switch counts as a change since
-the card was shown (``SWITCHED_AT``), so a card shown before it (a chat
-app's, a page not reloaded) sends only once it was shown again. Any rewrite in the person's voice (an answer, a change asked for, newer
-mail, a reply from chat) turns the card back to them (``as_you_again``).
+the card was shown (``SWITCHED_AT``, ``SWITCHED_BACK_AT``), so a card
+shown before it with the other sender (a chat app's, a page not reloaded)
+sends only once it was shown again.
+
+A rewrite on a switched card (an answer, a change asked for, newer mail, a
+reply from chat, the card's work) is written from the person's own words
+(``theirs``), in their voice, and the card stays from the Executive: their
+new words are kept and the card's are written again as the Executive's
+(``restyled``).
 """
 from __future__ import annotations
 
@@ -38,9 +44,11 @@ logger = logging.getLogger(__name__)
 # Card payload keys.
 FROM_EXECUTIVE = "from_executive"
 WORDS_AS_YOU = "words_as_you"
-# When it last switched: a card shown before then sends only once it was
-# shown again (``card_drafts.version``).
+# When it last switched to the Executive, and back to the person: a card
+# shown with the other sender sends only once it was shown again
+# (``card_drafts.version``, ``showed_executive``).
 SWITCHED_AT = "from_switched_at"
+SWITCHED_BACK_AT = "from_switched_back_at"
 
 # What the Executive says on the card when it switched.
 NOTE_TO_EXECUTIVE = "It now goes from me, with you on cc."
@@ -67,10 +75,31 @@ def is_from_executive(payload: dict[str, Any]) -> bool:
     return payload.get(FROM_EXECUTIVE) is True
 
 
-def as_you_again(payload: dict[str, Any]) -> dict[str, Any]:
-    """The payload fields that turn a card back to the person, for a
-    rewrite in their voice. Empty when it already goes from them."""
-    return {FROM_EXECUTIVE: False, WORDS_AS_YOU: ""} if is_from_executive(payload) else {}
+def theirs(payload: dict[str, Any]) -> dict[str, Any]:
+    """``payload`` with the person's own words, for what writes in their
+    voice or keeps their mailbox's draft: as it is when it goes from them."""
+    if not is_from_executive(payload):
+        return payload
+    return {**payload, "draft_body": str(payload.get(WORDS_AS_YOU) or payload.get("draft_body") or "")}
+
+
+async def restyled(person: Any, changed: dict[str, Any], words: str) -> dict[str, Any]:
+    """``changed``, a card whose words are now ``words`` in the person's
+    voice: as it is when it goes from them; when it goes from the Executive,
+    their words kept (``WORDS_AS_YOU``) and the card's written again as the
+    Executive's. Raises ``SendRefused``."""
+    if not is_from_executive(changed):
+        return changed
+    mine = await _as_executive(person, {**changed, "draft_body": words})
+    return {**changed, WORDS_AS_YOU: words, "draft_body": mine}
+
+
+def showed_executive(payload: dict[str, Any], at: str) -> bool:
+    """Whether a card shown at ``at`` (an ISO time) said it goes from the
+    Executive, as far as the last switch each way tells."""
+    to = str(payload.get(SWITCHED_AT) or "")
+    back = str(payload.get(SWITCHED_BACK_AT) or "")
+    return bool(to) and to <= at and not (back > to and back <= at)
 
 
 def executive_name() -> str:
@@ -166,7 +195,7 @@ async def _switch(
             "at": datetime.now(UTC).isoformat(),
         })
         extra[CONVERSATION_KEY] = turns[-CONVERSATION_MAX:]
-        extra[SWITCHED_AT] = datetime.now(UTC).isoformat()
+        extra[SWITCHED_AT if executive else SWITCHED_BACK_AT] = datetime.now(UTC).isoformat()
         # On the card only: a draft in their mailbox keeps their own words.
         changed = {**payload, **extra, "draft_body": card_drafts._check_words(words)}
         if not update_open_payload(instance.id, changed, expected_json=instance.proposed_payload_json):
@@ -236,35 +265,42 @@ def _recipients(person: Any, payload: dict[str, Any], spec: Any) -> tuple[list[s
     return to, copied(person, cc)
 
 
-async def _they_replied(person: Any, payload: dict[str, Any], gmail: Any, now: datetime) -> bool:
-    """Whether the person answered in the conversation themselves since the
-    card was written, as their own Send checks. Unreadable is no."""
+async def _since_written(person: Any, payload: dict[str, Any], gmail: Any, now: datetime) -> tuple[bool, bool]:
+    """Whether, since the card was written, the person answered in the
+    conversation themselves, and whether someone else wrote in it, as their
+    own Send checks. Unreadable is no to both."""
     from openexecutive.delegation.gmail import gmail_for, gmail_status, normalize_email
     from openexecutive.delegation.inbox import later_messages
 
     email = normalize_email(str(person.email or ""))
     thread_id = str(payload.get("thread_id") or "")
     if not email or not thread_id:
-        return False
+        return False, False
     try:
         client = gmail if gmail is not None else gmail_for(email)
         if await gmail_status(email, gmail=client) != "connected":
-            return False
+            return False, False
         own = {email, *await client.send_as_addresses()}
         thread = await client.get_thread(thread_id)
     except Exception:
         logger.warning("delegation.send_from: couldn't read the conversation", exc_info=True)
-        return False
-    return any("SENT" in m.labels and m.from_addr in own for m in later_messages(thread, payload, now=now))
+        return False, False
+    later = later_messages(thread, payload, now=now)
+    return (
+        any("SENT" in m.labels and m.from_addr in own for m in later),
+        any(m.from_addr not in own and "SENT" not in m.labels for m in later),
+    )
 
 
 async def send(
     instance: Any, *, caller: Any, resolver: int | None, confirm: dict[str, Any] | None = None,
-    gmail: Any = None, now: datetime | None = None,
+    gmail: Any = None, now: datetime | None = None, shown_at: str = "",
 ) -> str:
     """Send the reply on ``instance`` from the Executive's own mailbox, on
     its person's tap: to whom the card says, with them on cc, carrying the
-    card's files. Their tap is the OK for this one email. The card closes as
+    card's files. Their tap is the OK for this one email; it asks again, as
+    their own Send does, when the tapped card didn't show newer mail or the
+    latest change (``card_drafts.asks_again``). The card closes as
     sent and the draft in their mailbox, if any, is taken out. Returns ""
     (the Executive's mailbox gives no id back); raises ``SendRefused``."""
     from openexecutive.audit import rows_for_person
@@ -281,7 +317,7 @@ async def send(
         _set_outcome,
         card_payload,
     )
-    from openexecutive.delegation.reply_send import SendRefused
+    from openexecutive.delegation.reply_send import _CONFIRM_TEXT, SendRefused
     from openexecutive.delegation.threads import MAX_RECIPIENTS
     from openexecutive.integrations.workspace.registry import get_mail_provider
     from openexecutive.memory.decision_ledger import (
@@ -296,17 +332,16 @@ async def send(
     person = card_drafts.check(instance, caller=caller, resolver=resolver)
     payload = card_payload(instance)
     with rows_for_person(person.id):
-        # Shown before it switched (or changed from chat): look again first.
-        changed = card_drafts.changed_since_shown(payload)
-        seen = str((confirm or {}).get("seen_caught_up_at") or "").partition("|")[2]
-        if changed and seen != changed:
-            raise SendRefused(
-                409, "confirm", "The reply was changed since this card was shown.",
-                reasons=["changed_in_chat"], recipients=[a for a in payload.get("draft_to") or [] if isinstance(a, str)],
-            )
-        if await _they_replied(person, payload, gmail, now or datetime.now(UTC)):
+        replied, moved_on = await _since_written(person, payload, gmail, now or datetime.now(UTC))
+        if replied:
             _close_card(person.id, instance.id, str(payload.get("message_id") or ""), "you_replied", CLOSED)
             raise SendRefused(409, "you_replied", "You've already replied in this conversation, so this wasn't sent.")
+        reasons = card_drafts.asks_again(payload, confirm or {}, moved_on=moved_on, shown_at=shown_at)
+        if reasons:
+            raise SendRefused(
+                409, "confirm", " ".join(_CONFIRM_TEXT[r] for r in reasons),
+                reasons=reasons, recipients=[a for a in payload.get("draft_to") or [] if isinstance(a, str)],
+            )
         spec = card_drafts._spec(payload)
         to, cc = _recipients(person, payload, spec)
         everyone = {normalize_email(a) for a in [*to, *cc]}
