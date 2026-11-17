@@ -13,6 +13,7 @@ import re
 import shutil
 import sqlite3
 import uuid
+from collections.abc import Collection
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -78,7 +79,8 @@ _SAFE_NAME_RE = re.compile(r"^[a-z0-9_-]+$")
 # Three separate paths swap live company state, and each maintained its own
 # hand-written table list — so this was fixed in one and still live in the other
 # two. They now all consume this constant: `clients.slots._BLANK_WIPE_TABLES`
-# (client switch into a blank/seed slot), `reset_all_state` (factory reset), and
+# (client switch into a blank/seed slot), `reset_all_state` (factory reset, which
+# empties every table but RESET_KEEPS anyway), and
 # `_apply_state_from_source` (fixture load AND unload). Any new per-company
 # cache table goes here, once.
 #
@@ -95,6 +97,25 @@ PER_CLIENT_CACHE_TABLES: tuple[str, ...] = (
     "briefing_narrative",
     "person_insights",
 )
+
+# What a reset keeps in the episodic DB. Everything else goes
+# (``reset_all_state``): bookkeeping that says a one-time migration already
+# ran (deleting it would run the migration again over the empty tables), and
+# the instance-level rows a client switch keeps too (``slots._GLOBAL_TABLES``:
+# saved simulator companies, the pause switch, background cadences), plus
+# the eval scenarios people wrote. SQLite's own tables (``sqlite_*``) are never
+# touched, so ids are never handed out twice.
+RESET_KEEPS: frozenset[str] = frozenset({
+    "app_migrations",
+    "monitoring_migrations",
+    "facts_meta",
+    "review_meta",
+    "dynamic_workflows_meta",
+    "generated_fixtures",
+    "executive_control",
+    "background_prefs",
+    "eval_scenarios",
+})
 
 # Walk up from this file to find the repo root (contains evals/, fixtures/, etc.)
 # Match on ``fixtures/companies`` specifically — NOT a bare ``fixtures`` dir —
@@ -709,7 +730,7 @@ def _reregister_surviving_user_knowledge(db_path: Path) -> int:
 
 
 async def reset_all_state(
-    settings: Any, *, app_state: Any | None = None
+    settings: Any, *, app_state: Any | None = None, keep: Collection[str] = ()
 ) -> dict[str, Any]:
     """Wipe live state AND the snapshot — return to factory-default.
 
@@ -722,16 +743,17 @@ async def reset_all_state(
     so concurrent requests cannot read the old store object after its
     backing collection has been deleted.
 
+    ``keep`` (optional) names tables to keep on top of ``RESET_KEEPS``: a
+    caller that starts a company over but keeps its team passes the people
+    tables. Keeping ``workspace_settings`` also keeps its row as it is.
+
     Steps (under the shared destructive-op lock):
       1. Empty live profile.yaml
       2. Delete + recreate company/docs/, clear ChromaDB company collection
-      3. Wipe episodic rows including chat history (chat_messages first,
-         then sessions, then decisions/initiatives/advice_given/
-         scheduled_actions/voice_personas) AND run/audit history
-         (workflow_runs, audit_log, eval_runs) so /jobs and /audit reset
-         too
-      4. DELETE people + child tables (authority scope, availability)
-      5. DELETE departments + Goals (none are re-created)
+      3. Empty every table in the company DB except ``RESET_KEEPS`` and
+         ``keep``: chats, memory, run and audit history, people, departments
+         and Goals (none are re-created), and any table added later. Of the
+         queue, only the system's own recurring jobs stay
       5a. Reset the workspace settings to the defaults (team, no zone),
           then re-bootstrap principal briefs, department cadences, and (if
           enabled) the nudge-scan heartbeat — without this Today stays
@@ -795,6 +817,11 @@ async def reset_all_state(
         company_skills_dir: Path = settings.company_profile_path.parent / "skills"
         if company_skills_dir.exists():
             shutil.rmtree(company_skills_dir)
+        # Files people attached in chats (orchestrator/conversation_files.py)
+        # and the scripts behind Python-job workflows (workflows/python_job.py):
+        # their rows go in the sweep below, so their files go too.
+        for files_dir in ("conversation_files", "python_jobs"):
+            shutil.rmtree(settings.company_profile_path.parent / files_dir, ignore_errors=True)
         store.delete_documents(
             collection=SKILLS_COLLECTION,
             where={"source": "company"},
@@ -803,83 +830,29 @@ async def reset_all_state(
         # built-in is back in effect.
         sync_builtin_skill_index(store)
 
-        # 3. Episodic rows — includes chat history, voice personas, alerts
-        # state (alerts, mutes, preferences), AND the run/audit
-        # history (workflow_runs, audit_log, eval_runs) so a reset truly
-        # returns the box to factory state. Without the run/audit wipe the
-        # /jobs Runs tab and /audit view kept showing the previous fixture's
-        # executions and made reset look broken.
-        # Order matters under PRAGMA foreign_keys=ON: children before parents
-        # (chat_messages → sessions; external_signals → watchlist). The three
-        # run/audit tables have no
-        # FK relationships into the others, so their position is safe; the
-        # external-monitoring tables (watchlist + external_signals) also live
-        # in this DB and must be wiped so a reset starts with a clean
-        # watchlist instead of the previous company's monitors.
+        # 3. Every company table in the episodic DB: chats, memory, decisions,
+        # tasks, alerts, watches, run and audit history, Act as me, Always in
+        # the loop, Take the lead, people and departments, and whatever table
+        # is added later. One sweep instead of a hand-kept list, so a new
+        # table is wiped by default and can't be missed. Kept: the bookkeeping
+        # in RESET_KEEPS, and whatever the caller asks to ``keep``.
+        # People and departments read their own DB_PATH (bound at import); in
+        # a deployment it is the same file, so each distinct file is swept once.
+        from openexecutive.departments import store as dept_store
         from openexecutive.memory.episodic import DB_PATH as EPISODIC_DB_PATH
-        from openexecutive.monitoring import store as monitoring_store
+        from openexecutive.people import store as people_store
 
-        # Ensure the monitoring schema exists before the DELETE pass — in
-        # production the lifespan inits it, but reset is also called directly
-        # (tests, scripts) against a DB that only has the episodic schema, and
-        # a missing table would raise mid-wipe. Idempotent. Guarded on the DB
-        # already existing so we never *materialise* a DB the caller never
-        # created — that would defeat _delete_all_rows' own exists() short
-        # circuit (and there's nothing to wipe in a DB that isn't there).
-        if EPISODIC_DB_PATH.exists():
-            monitoring_store.initialize_db(EPISODIC_DB_PATH)
-        # Same reasoning for the derived caches in PER_CLIENT_CACHE_TABLES,
-        # which this DELETE pass also covers; the helper is guarded on the
-        # DB existing, exactly like the monitoring init above.
-        _initialize_derived_cache_schemas(EPISODIC_DB_PATH)
-        episodic_cleared = _delete_all_rows(
-            EPISODIC_DB_PATH,
-            (
-                "chat_messages",
-                "sessions",
-                "decisions",
-                "initiatives",
-                "advice_given",
-                "scheduled_actions",
-                "voice_personas",
-                "alerts",
-                "mute_topics",
-                "user_preferences",
-                "workflow_runs",
-                "audit_log",
-                "eval_runs",
-                "external_signals",
-                "watchlist",
-                *PER_CLIENT_CACHE_TABLES,
-            ),
-        )
-
-        # Attunement's daily call counter, outcome ledger and working styles. Created by initialize_db, which an
-        # older DB may not have run yet, so guarded per table (the helper
-        # above only guards the file).
-        if EPISODIC_DB_PATH.exists():
-            from openexecutive.delegation.schema import TABLES as DELEGATION_TABLES
-            from openexecutive.memory.history_schema import TABLES as HISTORY_TABLES
-            from openexecutive.orchestrator.take_the_lead import TABLES as TAKE_THE_LEAD_TABLES
-
-            with sqlite3.connect(str(EPISODIC_DB_PATH)) as _conn:
-                for _table in ("attunement_usage", "proactive_outcomes",
-                               "attunement_profiles", "attunement_profile_history",
-                               # Gated decisions and each class's mode: a
-                               # reset box has proposed nothing yet.
-                               "decision_instances", "decision_class_state",
-                               # Act as me: every table it keeps.
-                               *DELEGATION_TABLES,
-                               # Always in the loop: notes and switches.
-                               *HISTORY_TABLES,
-                               # Take the lead: switches, rules, its log.
-                               *TAKE_THE_LEAD_TABLES,
-                               # Each department's own notes.
-                               "department_notes"):
-                    if _conn.execute(
-                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (_table,)
-                    ).fetchone():
-                        _conn.execute(f"DELETE FROM {_table}")
+        cleared: dict[str, int] = {}
+        for db_path in dict.fromkeys(
+            p.resolve() for p in (EPISODIC_DB_PATH, people_store.DB_PATH, dept_store.DB_PATH)
+        ):
+            for table, count in _delete_every_table(
+                db_path, keep=RESET_KEEPS | {"scheduled_actions"} | set(keep)
+            ).items():
+                cleared[table] = cleared.get(table, 0) + count
+            cleared["scheduled_actions"] = cleared.get("scheduled_actions", 0) + (
+                _clear_company_scheduled_actions(db_path)
+            )
 
         # 3c. Knowledge review state (same DB as the episodic rows above). A
         # "factory reset" that keeps the previous operator's approvals,
@@ -945,33 +918,9 @@ async def reset_all_state(
             except Exception:
                 logger.exception("reset: re-registering user knowledge failed")
 
-        # 4. People (child tables first to satisfy FK ordering)
-        from openexecutive.people import store as people_store
-        from openexecutive.people.roster_requests import TABLES as ROSTER_REQUEST_TABLES
-
-        if people_store.DB_PATH.exists():
-            # So the alias and roster-request tables exist to be wiped on a
-            # DB created before them (idempotent).
-            people_store.initialize_db()
-        people_cleared = _delete_all_rows(
-            people_store.DB_PATH,
-            (
-                *ROSTER_REQUEST_TABLES,
-                "person_emails",
-                "person_authority_scope",
-                "person_availability",
-                "people",
-            ),
-        )
-
-        # 5. Departments + Goals. A reset leaves none, like a new install:
-        # setup (or the Executive's create_goal tool) creates only the ones
-        # the company has.
-        from openexecutive.departments import store as dept_store
-        _delete_all_rows(
-            dept_store.DB_PATH,
-            ("department_goals", "departments", "departments_meta"),
-        )
+        # 4. People and 5. departments went in the sweep above (unless kept).
+        # A reset leaves no departments, like a new install: setup (or the
+        # Executive's create_goal tool) creates only the ones the company has.
         departments_seeded = 0
 
         # 5a. Re-bootstrap the built-in scheduled actions that
@@ -992,10 +941,11 @@ async def reset_all_state(
 
         # Factory state is team mode with no zone of its own — reset it
         # before the bootstraps below, which read both.
-        try:
-            reset_workspace_settings()
-        except Exception:
-            logger.exception("reset: reset_workspace_settings failed")
+        if "workspace_settings" not in keep:
+            try:
+                reset_workspace_settings()
+            except Exception:
+                logger.exception("reset: reset_workspace_settings failed")
         try:
             seed_principal_briefs()
         except Exception:
@@ -1091,9 +1041,68 @@ async def reset_all_state(
         return {
             "reset": True,
             "departments_seeded": departments_seeded,
-            "episodic_cleared": episodic_cleared,
-            "people_cleared": people_cleared,
+            "cleared": cleared,
         }
+
+
+def _delete_every_table(db_path: Path, *, keep: Collection[str]) -> dict[str, int]:
+    """DELETE every row of every table in ``db_path`` except those in ``keep``.
+
+    Returns the rows deleted per table. Skips a DB that doesn't exist yet
+    (fresh install). Foreign keys are off for the pass: every table not kept
+    is emptied, so no row is left pointing at one that went, and the order
+    doesn't matter. A kept table that points at a wiped one keeps its rows
+    (the caller kept it on purpose).
+    """
+    if not db_path.exists():
+        return {}
+    counts: dict[str, int] = {}
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("PRAGMA foreign_keys = OFF")
+        tables = [
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            )
+        ]
+        for table in sorted(tables):
+            if table in keep:
+                continue
+            cursor = conn.execute(f'DELETE FROM "{table}"')  # noqa: S608 - name read from sqlite_master
+            counts[table] = int(cursor.rowcount)
+        conn.commit()
+    finally:
+        conn.close()
+    return counts
+
+
+def _clear_company_scheduled_actions(db_path: Path) -> int:
+    """Delete the company's queued work, keep the instance's own heartbeats.
+
+    Every reminder, follow-up, task and workflow run a person or the
+    Executive queued goes. The system's own recurring jobs (channel
+    ``__internal__``: briefs, scans, document syncs, backups) stay, so a
+    reset doesn't leave them stopped until the next restart; a department's
+    jobs go with the departments. Returns the rows deleted.
+    """
+    if not db_path.exists():
+        return 0
+    conn = sqlite3.connect(str(db_path))
+    try:
+        if not conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='scheduled_actions'"
+        ).fetchone():
+            return 0
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(scheduled_actions)")}
+        where = "channel != '__internal__'"
+        if "department" in columns:
+            where += " OR COALESCE(department, '') != ''"
+        cursor = conn.execute(f"DELETE FROM scheduled_actions WHERE {where}")  # noqa: S608 - fixed text
+        conn.commit()
+        return int(cursor.rowcount)
+    finally:
+        conn.close()
 
 
 def _delete_all_rows(
