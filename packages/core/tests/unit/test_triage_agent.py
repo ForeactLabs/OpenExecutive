@@ -235,6 +235,37 @@ def test_a_mute_holds_back_its_plural_when_review_fails() -> None:
     assert decision.alert is False
 
 
+def test_a_muted_department_holds_back_a_kept_card() -> None:
+    """ "Mute this topic" on a Sales card stores department:sales: a card
+    the Executive raises for Sales stays muted while review is down."""
+    event = AlertEvent(source="unknown", external_id="", subject="Pipeline update", body="Two deals moved.",
+                       department="sales", from_executive=True)
+    decision = asyncio.run(TriageAgent().triage(
+        event, mute_patterns=["department:sales"], client=_client(side_effect=RuntimeError("boom")),
+    ))
+    assert decision.alert is False
+
+
+def test_a_cut_off_review_keeps_its_tags_for_mutes() -> None:
+    said = SimpleNamespace(type="tool_use", name="emit_alert_decision",
+                           input={"alert": True, "topic_tags": ["competitor-pricing"]})
+    event = AlertEvent(source="monitoring", external_id="w-3", subject="Acme price cut", body="20% off.")
+    client = _client(return_value=SimpleNamespace(content=[said], stop_reason="max_tokens"))
+    assert asyncio.run(TriageAgent().triage(event, client=client)).topic_tags == ["competitor-pricing"]
+    client = _client(return_value=SimpleNamespace(content=[said], stop_reason="max_tokens"))
+    muted = asyncio.run(TriageAgent().triage(event, mute_patterns=["competitor-pricing"], client=client))
+    assert muted.alert is False
+
+
+def test_a_mute_starting_with_a_symbol_holds_back_its_word() -> None:
+    event = AlertEvent(source="email", external_id="m-8", subject="re: #launch plan", body="Draft.",
+                       from_executive=True)
+    decision = asyncio.run(TriageAgent().triage(
+        event, mute_patterns=["#launch"], client=_client(side_effect=RuntimeError("boom")),
+    ))
+    assert decision.alert is False
+
+
 def test_triage_swallows_client_exceptions() -> None:
     """LLM error → quiet fallback for an ordinary event, never propagates."""
     client = SimpleNamespace(

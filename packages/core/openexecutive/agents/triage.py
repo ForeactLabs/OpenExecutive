@@ -13,6 +13,7 @@ from openexecutive.alerts.models import (
     AlertSeverity,
     TriageDecision,
 )
+from openexecutive.alerts.preferences import matches_mute
 from openexecutive.audit.usage import log_model_usage
 from openexecutive.providers import get_provider
 
@@ -278,7 +279,8 @@ class TriageAgent(BaseAgent):
                 if not cut_off:
                     return _parse_decision(block.input)
                 if isinstance(block.input, dict) and block.input.get("alert") is True:
-                    kept = _no_decision(event, mute_patterns or [], "cut_off", raise_it=True)
+                    said_tags = [str(t).lower() for t in block.input.get("topic_tags") or []]
+                    kept = _no_decision(event, mute_patterns or [], "cut_off", raise_it=True, tags=said_tags)
                     return _with_partial_delivery(kept, block.input)
                 if isinstance(block.input, dict) and block.input.get("alert") is False:
                     # It had decided not to raise it: that decision stands.
@@ -291,7 +293,8 @@ class TriageAgent(BaseAgent):
 
 
 def _no_decision(
-    event: AlertEvent, mute_patterns: list[str], why: str, *, raise_it: bool = False,
+    event: AlertEvent, mute_patterns: list[str], why: str, *,
+    raise_it: bool = False, tags: list[str] | None = None,
 ) -> TriageDecision:
     """What stands when review made no decision. A card the Executive chose
     to raise (``AlertEvent.from_executive``) is kept as raised: a review that
@@ -301,7 +304,16 @@ def _no_decision(
     ``raise_it`` is a cut-off review that had already said to raise one:
     any event is kept then."""
     headline = (event.subject or event.title or (event.body or "").strip().split("\n", 1)[0] or event.source)[:200]
-    if (raise_it or event.from_executive) and not _names_muted_topic(event, mute_patterns):
+    # The tags a kept card carries: any a cut-off review gave, and the
+    # department or room it came from, so a "mute this topic" holds it here
+    # and in the pipeline's own mute check, as it does a reviewed card.
+    topic_tags = [*(tags or [])]
+    if event.department:
+        topic_tags.append(f"department:{event.department.lower()}")
+    if event.channel:
+        topic_tags.append(event.channel.lower())
+    muted = matches_mute(topic_tags, mute_patterns) or _names_muted_topic(event, mute_patterns)
+    if (raise_it or event.from_executive) and not muted:
         return TriageDecision(
             alert=True,
             severity=AlertSeverity.MEDIUM,
@@ -309,6 +321,7 @@ def _no_decision(
             headline=headline,
             body=(event.body or "")[:2000],
             dedup_key=_kept_key(event),
+            topic_tags=topic_tags[:8],
         )
     return TriageDecision(
         alert=False,
@@ -352,7 +365,7 @@ def _names_muted_topic(event: AlertEvent, mute_patterns: list[str]) -> bool:
     mute like "ai" never hits "email"."""
     text = f"{event.subject}\n{event.title or ''}\n{event.body}".lower()
     return any(
-        p.strip() and re.search(rf"\b{re.escape(p.strip().lower())}", text)
+        p.strip() and re.search(rf"(?<!\w){re.escape(p.strip().lower())}", text)
         for p in mute_patterns
     )
 
