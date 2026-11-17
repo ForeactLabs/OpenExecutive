@@ -1,6 +1,6 @@
 """On-disk cache for per-person brief insight notes.
 
-Mirrors `openexecutive.architecture.cache`: a dedicated table in the shared
+A dedicated table in the shared
 `./episodic_memory.db` SQLite file, keyed by `person_id` and validated against
 an `input_hash` of that person's structured signals. When the signals change
 (or the daily bucket rolls), the hash changes and the cached note is treated as
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # Explicit override slot. Left None in production so the cache follows the
 # episodic DB dynamically (see _resolve_db_path) — capturing episodic.DB_PATH
-# at import time the way architecture/cache.py does would make a test's
+# at import time would make a test's
 # `monkeypatch.setattr(episodic, "DB_PATH", ...)` silently miss this table,
 # leaking rows into the real ./episodic_memory.db.
 DB_PATH: Path | None = None
