@@ -152,7 +152,6 @@ def test_what_the_adapter_vouches_for_lands_on_the_session(turn_env: dict) -> No
     result = asyncio.run(
         channel_turn.run(
             _turn(
-                seen_ref=("slack_dm", "U1"),
                 session_facts={"speaker_verified": True, "shared_chat": True},
                 co_present_person_ids=[8],
                 memory_text="own words",
@@ -161,7 +160,6 @@ def test_what_the_adapter_vouches_for_lands_on_the_session(turn_env: dict) -> No
         )
     )
     assert result.session.speaker_verified is True and result.session.shared_chat is True
-    assert ("slack_dm", "U1") in result.session.seen_channel_refs
     chat = turn_env["chat"]
     assert chat["co_present_person_ids"] == [8]
     assert chat["memory_text"] == "own words"

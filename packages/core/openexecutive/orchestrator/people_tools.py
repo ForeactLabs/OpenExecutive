@@ -818,14 +818,46 @@ def _roster_refusal_reason(session: Any) -> str | None:
     )
 
 
+def approved_speaker() -> Any:
+    """The person whose own card is being carried out right now
+    (``orchestrator.levels.approved``): their tap on their own card is them
+    asking, so a step that needs to know who asked (assign a task, record a
+    fact) acts for them as it would have in their turn. The owner when the
+    approved card names nobody else. None outside an approved step, or when
+    the lookup fails."""
+    try:
+        from openexecutive.orchestrator import levels
+
+        if not levels.is_approved():
+            return None
+        who = levels.approved_requester()
+        if who is None:
+            from openexecutive.people.registry import get_principal
+
+            return get_principal()
+        from openexecutive.people.store import get_person
+
+        person = get_person(int(who))
+        if person is None or person.archived or person.kind != "team":
+            return None
+        return person
+    except Exception:
+        logger.warning("people_tools: couldn't tell whose card this is", exc_info=True)
+        return None
+
+
 def is_principal_on_verified_surface(session: Any) -> bool:
     """Whether this turn was started by the principal on a surface that
     verified it is them — the rule for roster writes above, as a yes/no for
     other principal-only actions (e.g. solo mode's meeting auto-booking, and
     whether the principal's private contacts exist for this turn — see
-    ``contacts_reachable_now``).
+    ``contacts_reachable_now``). The owner's own approved card counts
+    (``approved_speaker``).
     Fails closed: no session, an unverified surface, someone else, or an
     unreadable roster all answer False."""
+    speaker = approved_speaker()
+    if speaker is not None:
+        return bool(getattr(speaker, "is_principal", False))
     try:
         return _roster_refusal_reason(session) is None
     except Exception:
@@ -838,8 +870,12 @@ def teammate_on_verified_surface(session: Any) -> Any:
     in on their own account (record an attributed fact, assign a task): a team
     member (not a contact, not archived, not the principal) on a surface that
     verified who they are — the web app signed in, their own Slack or Discord —
-    in a turn someone is watching, that no email started. None otherwise, or
-    when the lookup fails (fails closed)."""
+    in a turn someone is watching, that no email started, or their own card
+    being carried out (``approved_speaker``). None otherwise, or when the
+    lookup fails (fails closed)."""
+    speaker = approved_speaker()
+    if speaker is not None:
+        return None if getattr(speaker, "is_principal", False) else speaker
     if (
         session is None
         or getattr(session, "unattended", False)

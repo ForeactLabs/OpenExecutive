@@ -132,21 +132,22 @@ def test_asked_handlers_gate_acting_skills_only(owner: Any) -> None:
     assert ran == ["lookup_person", "message_person"]
 
 
-def test_the_owners_own_ask_skips_rules(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The owner's ask is the yes; anyone else's turn is checked."""
+def test_the_owners_own_ask_meets_the_rules_too(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every asked turn is checked, the owner's own included; unattended runs
+    meet the gate another way."""
     from openexecutive.orchestrator import content_trust
 
     assert ttl.asked_checks_apply(None) is True  # no session: fails closed
     assert ttl.asked_checks_apply(SimpleNamespace(unattended=True)) is False
-    monkeypatch.setattr(content_trust, "principal_speaking", lambda _s: True)
-    assert ttl.asked_checks_apply(SimpleNamespace(unattended=False)) is False
-    monkeypatch.setattr(content_trust, "principal_speaking", lambda _s: False)
-    assert ttl.asked_checks_apply(SimpleNamespace(unattended=False)) is True
+    for owner_speaking in (True, False):
+        monkeypatch.setattr(content_trust, "principal_speaking", lambda _s, v=owner_speaking: v)
+        assert ttl.asked_checks_apply(SimpleNamespace(unattended=False)) is True
 
 
 def test_careful_holds_even_the_owners_own_ask(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """Careful asks before anything goes: the owner's own chat ask waits on
-    a card too, a teammate's as well, and on Balanced the owner's goes."""
+    a card too, a teammate's as well; on Balanced the owner's meets Your
+    rules and In training like anyone's."""
     from openexecutive.orchestrator import content_trust, outside_mode
 
     monkeypatch.setattr(content_trust, "principal_speaking", lambda _s: True)
@@ -173,13 +174,19 @@ def test_careful_holds_even_the_owners_own_ask(owner: Any, monkeypatch: pytest.M
         # A teammate's ask waits on Careful too.
         monkeypatch.setattr(content_trust, "principal_speaking", lambda _s: False)
         assert json.loads(asyncio.run(asked(step)))["status"] == "waiting_for_approval"
-        # Balanced: the owner's own ask skips the checks, and a rule alone
-        # doesn't hold it.
+        # Balanced: the owner's own ask meets their Waits rule like anyone's,
+        # and In training holds it too.
         monkeypatch.setattr(content_trust, "principal_speaking", lambda _s: True)
         monkeypatch.setattr(outside_mode, "get_mode", lambda **_k: outside_mode.OUTSIDERS)
-        ttl.add_rule(ttl.SCOPE_COMPANY, "words", "Prices", created_by="t")
-        assert ttl.asked_checks_apply(current_session.get()) is False
         assert ttl._asked_hit(SEND, step["arguments"], mcp=True) is None
+        rule = ttl.add_rule(ttl.SCOPE_COMPANY, "words", "Prices", created_by="t")
+        assert ttl.asked_checks_apply(current_session.get()) is True
+        hit = ttl._asked_hit(SEND, step["arguments"], mcp=True)
+        assert hit is not None and hit.kind == "rule"
+        ttl.delete_rule(rule.id, ttl.SCOPE_COMPANY)
+        ttl.set_(ttl.SCOPE_EXECUTIVE, training=True, ask_first=None, updated_by="t")
+        hit = ttl._asked_hit(SEND, step["arguments"], mcp=True)
+        assert hit is not None and hit.kind == ttl.TRAINING
     finally:
         current_session.reset(token)
 

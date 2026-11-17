@@ -948,49 +948,6 @@ def _build_page_context_block(page_context: PageContext | None) -> str:
     return "\n".join(lines)
 
 
-def _seed_seen_channel_refs(session: Any, person_id: int | None) -> None:
-    """Record the caller's OWN channel addresses as seen on this session.
-
-    `schedule_followup` refuses to queue a send to a `(channel, channel_ref)`
-    the session has not seen — an anti-spam gate, and the reason an injected
-    "email this to attacker@evil" in an alert body cannot become a scheduled
-    send. The chat adapters populate it from the inbound message; nothing
-    populated it for a browser turn.
-
-    The gate was unreachable on web until `set_session` bound the session for
-    the whole stream, so it silently allowed ANY address; reachable, it reads
-    an empty set as "seen nothing" and refuses even the principal's own,
-    breaking "remind me tomorrow at 9am". Seeding the caller's own refs is
-    what makes the gate mean on web what it means everywhere else: you may
-    schedule to yourself, and to whatever this conversation actually used.
-
-    Replaces the set each turn, so it holds this turn's speaker's addresses
-    alone: in a shared chat, a teammate who speaks after the principal can't
-    schedule a message to the principal, and an address removed from the
-    roster stops being one.
-    """
-    session.seen_channel_refs = set()
-    if person_id is None:
-        return
-    try:
-        from openexecutive.people.store import get_person
-
-        person = get_person(person_id)
-    except Exception:
-        logger.warning("chat.seen_refs_seed_failed person_id=%s", person_id, exc_info=True)
-        return
-    if person is None:
-        return
-    for channel, ref in (
-        ("email", getattr(person, "email", None)),
-        ("slack_dm", getattr(person, "slack_user_id", None)),
-        ("discord_dm", getattr(person, "discord_user_id", None)),
-        ("telegram", getattr(person, "telegram_chat_id", None)),
-    ):
-        if ref:
-            session.seen_channel_refs.add((channel, str(ref)))
-
-
 def _resolve_caller_person_id(request: Request) -> int | None:
     """Resolve the calling Person from the `x-caller-email` header.
 
@@ -1310,12 +1267,6 @@ async def _run_chat_turn(
             # auditable next to the message it stood in for.
             full={"message": message, "memory_text": memory_text},
         )
-
-    # Let the caller schedule to their own addresses, and only theirs. Runs per
-    # turn rather than only on session creation: a newly-added address works
-    # without a fresh session, and in a shared chat each speaker gets their
-    # own set.
-    _seed_seen_channel_refs(session, caller_person_id)
 
     # Persist the session row immediately (idempotent INSERT OR IGNORE) so a
     # mid-turn failure never leaves a ghost in-memory session with no DB row.

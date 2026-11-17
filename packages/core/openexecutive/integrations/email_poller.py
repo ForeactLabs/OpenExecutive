@@ -1414,24 +1414,6 @@ async def _run_executive(
                     session.email_sender_authenticated = await prove()
             except Exception:  # noqa: BLE001 - optional step; must not lose the email.
                 logger.warning("sender check failed; teammate mail stays private this turn", exc_info=True)
-    if from_addr:
-        # Only register the sender as a schedulable channel_ref if they
-        # are in the People roster. Without this guard, an attacker who
-        # can spoof a From header could persuade the Executive (via
-        # prompt injection in the body) to schedule outbound mail to
-        # arbitrary third parties. The roster gate in _handle_email
-        # already ensures we only get here for known senders, but
-        # re-verify defensively — _run_executive is also reachable from
-        # other code paths.
-        from openexecutive.people.identity import resolve_email_sender
-
-        settings = get_settings()
-        if (
-            from_addr.lower() == settings.exec_email_address.lower()
-            or resolve_email_sender(from_addr) is not None
-        ):
-            session.seen_channel_refs.add(("email", f"{from_addr}|{thread_id}"))
-            session.seen_channel_refs.add(("email", from_addr))
     # Look up the OE Person record (case-insensitive by email) so Honcho
     # can key per-person memory off Person.id (shared across channels).
     # No match → person_id stays None and the Honcho layer no-ops. Team

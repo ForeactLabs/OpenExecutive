@@ -62,9 +62,7 @@ def set_session(session: Any) -> Iterator[None]:
     alert board off the session; with ``None`` it fell back to an empty set
     and refused every ack the principal asked for, on the one surface they
     actually use. The same ``None`` also blanks the `session_id` on
-    `scheduled_actions` rows and disables `schedule_followup`'s
-    seen-channel_refs anti-spam gate, which only fires when it can see a
-    session.
+    `scheduled_actions` rows.
 
     Save/restore rather than ``Token.reset()``, for the same reason
     `audit.context.set_turn` does it: the Token variant raises ``ValueError:
@@ -807,37 +805,6 @@ def _turn_speaker_id(session: Any) -> int | None:
     return speaker if isinstance(speaker, int) and not isinstance(speaker, bool) else None
 
 
-def _speakers_own_ref(session: Any, channel: str, channel_ref: str) -> bool:
-    """Whether ``channel_ref`` is the turn's speaker's own address on
-    ``channel`` (their People email, Slack, Discord or Telegram id). A
-    follow-up to yourself is allowed from any surface, so "check my inbox at
-    5 and tell me" works from a chat app that seeds no addresses (Google
-    Chat). Fails closed."""
-    speaker = _turn_speaker_id(session)
-    if speaker is None or not channel_ref:
-        return False
-    try:
-        from openexecutive.people.store import get_person
-
-        person = get_person(speaker)
-    except Exception:
-        logger.warning("schedule: couldn't read the speaker", exc_info=True)
-        return False
-    if person is None or getattr(person, "archived", False):
-        return False
-    own = {
-        "email": getattr(person, "email", None),
-        "slack_dm": getattr(person, "slack_user_id", None),
-        "discord_dm": getattr(person, "discord_user_id", None),
-        "telegram": getattr(person, "telegram_chat_id", None),
-    }.get(channel)
-    if not own:
-        return False
-    if channel == "email":
-        return str(own).strip().lower() == channel_ref.strip().lower()
-    return str(own) == channel_ref
-
-
 def _is_principal_recipient(
     channel: str, channel_ref: str, assigned_to_person_id: int | None
 ) -> bool:
@@ -928,19 +895,9 @@ async def handle_schedule_followup(tool_input: dict[str, Any]) -> str:
             "error": f"run_at is more than {settings.max_scheduled_horizon_days} days out",
         })
 
-    # Anti-spam: only allow scheduling to channel_refs the Executive has seen in this session.
+    # Who it may go to is not checked here: when it fires, its send runs
+    # through the one gate (``take_the_lead.gate``) like any other.
     session = current_session.get()
-    seen: set[tuple[str, str]] | None = (
-        getattr(session, "seen_channel_refs", None) if session is not None else None
-    )
-    if seen is not None and (channel, channel_ref) not in seen and not _speakers_own_ref(session, channel, channel_ref):
-        return json.dumps({
-            "error": (
-                f"channel_ref {channel_ref!r} on channel {channel!r} was not seen in this "
-                f"session — refusing to schedule. Only schedule follow-ups to channels the "
-                f"user has actually used, or to the speaker's own address."
-            ),
-        })
 
     pending = count_pending_for_channel_ref(channel, channel_ref)
     if pending >= settings.max_pending_per_channel_ref:
@@ -2661,16 +2618,6 @@ async def handle_suggest_workflow(tool_input: dict[str, Any]) -> str:
         })
 
     session = current_session.get()
-    seen: set[tuple[str, str]] | None = (
-        getattr(session, "seen_channel_refs", None) if session is not None else None
-    )
-    if seen is not None and (channel, channel_ref) not in seen and not _speakers_own_ref(session, channel, channel_ref):
-        return json.dumps({
-            "error": (
-                f"channel_ref {channel_ref!r} on channel {channel!r} was not seen in this "
-                f"session — refusing to schedule."
-            ),
-        })
 
     pending = count_pending_for_channel_ref(channel, channel_ref)
     if pending >= settings.max_pending_per_channel_ref:

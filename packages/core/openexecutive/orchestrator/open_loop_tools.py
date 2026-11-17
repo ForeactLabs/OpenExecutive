@@ -291,12 +291,18 @@ def _assigner(session: Any) -> int | None:
     rostered teammate on one (``people_tools.teammate_on_verified_surface``).
     None for anyone else — an email (even the principal's own address), a
     turn private to the principal, an unattended run, an unrostered or
-    archived caller. Fails closed."""
+    archived caller. The person whose own card is being carried out assigns
+    as they would have in their turn (``people_tools.approved_speaker``).
+    Fails closed."""
     from openexecutive.orchestrator.people_tools import (
+        approved_speaker,
         is_principal_on_verified_surface,
         teammate_on_verified_surface,
     )
 
+    speaker = approved_speaker()
+    if speaker is not None and speaker.id is not None:
+        return int(speaker.id)
     if (
         session is None
         or getattr(session, "unattended", False)

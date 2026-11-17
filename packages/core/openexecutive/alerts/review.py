@@ -1073,24 +1073,13 @@ async def apply_verdict(
 
 
 def _seed_outbound_session() -> Any:
-    """Seed ``current_session`` from the roster so the outbound guard accepts
-    DMs to real people (same invariant as executive_reflection)."""
+    """Bind a fresh ``current_session`` for the pass, so its tool calls read
+    one session of their own."""
     try:
         from openexecutive.orchestrator.schedule_tools import current_session
         from openexecutive.orchestrator.session import Session
-        from openexecutive.people.store import list_people
 
-        seen: set[tuple[str, str]] = set()
-        for person in list_people():
-            if person.slack_user_id:
-                seen.add(("slack_dm", person.slack_user_id))
-            if person.discord_user_id:
-                seen.add(("discord_dm", person.discord_user_id))
-            if person.telegram_chat_id:
-                seen.add(("telegram", person.telegram_chat_id))
-            if person.email:
-                seen.add(("email", person.email))
-        return current_session, current_session.set(Session(seen_channel_refs=seen))
+        return current_session, current_session.set(Session())
     except Exception:
         logger.debug("alert_review: session seed failed", exc_info=True)
         return None

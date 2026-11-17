@@ -56,9 +56,6 @@ class ChannelTurn:
     # The person's own words for the passes that remember the turn, when
     # ``turn_text`` carries more than those (a quote, a file's text).
     memory_text: str | None = None
-    # (channel key, ref) this person can be answered on later, recorded on the
-    # session so a follow-up may be scheduled back to them.
-    seen_ref: tuple[str, str] | None = None
     # (channel key, ref) to look up a message the Executive sent this person
     # earlier, so their reply arrives with its backstory. Direct messages
     # only: a shared conversation must never pull one person's context in.
@@ -167,8 +164,6 @@ async def run(turn: ChannelTurn) -> TurnResult:
         history = await asyncio.to_thread(load_messages, turn.session_id)
     if history:
         session.conversation_history = history
-    if turn.seen_ref is not None:
-        session.seen_channel_refs.add(turn.seen_ref)
 
     retrieved_context, episodic_context, briefing_context = await reads(
         session, query=turn.own_text, person=turn.person, is_dm=turn.is_dm, store=turn.store

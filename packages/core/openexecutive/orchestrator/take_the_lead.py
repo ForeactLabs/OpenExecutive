@@ -2494,43 +2494,26 @@ def gated_call_tool(call_tool: _Handler, *, source: str) -> _Handler:
 # Your rules and In training on a step someone asked for
 # --------------------------------------------------------------------------- #
 # Approvals (orchestrator.levels) decides first on every turn. On a turn
-# someone is in, what it lets run still meets the owner's Waits rules, then
-# Careful, then In training, as an unattended run's steps do (``_hit``). The
-# owner's own ask is the yes, except on Careful, which asks before anything
-# goes: their turns meet Careful alone. Unattended runs go through ``_gated``.
+# someone is in, the owner's included, what it lets run still meets the Waits
+# rules, then Careful, then In training, as an unattended run's steps do
+# (``_hit``). Unattended runs go through ``_gated``.
 
 
 def asked_checks_apply(session: Any) -> bool:
-    """Whether this turn's steps meet the checks here (``_asked_hit``): a
-    turn someone is in (a teammate, a contact's mail, a shared chat) that is
-    not the owner's own ask, or any turn on Careful. Fails closed: no
-    session, or an error, is yes."""
+    """Whether this turn's steps meet the checks here (``_asked_hit``): any
+    turn someone is in, the owner's own ask included. Unattended runs meet
+    them through ``_gated``. Fails closed: no session is yes."""
     if session is None:
         return True
-    if getattr(session, "unattended", False) is True:
-        return False
-    try:
-        from openexecutive.orchestrator.content_trust import principal_speaking
-
-        return not principal_speaking(session) or _careful_turn() is not None
-    except Exception:
-        logger.warning("take_the_lead: couldn't tell who asked — checking the rules", exc_info=True)
-        return True
+    return getattr(session, "unattended", False) is not True
 
 
 def _asked_hit(name: str, tool_input: dict[str, Any], *, mcp: bool) -> Hit | None:
     """Why an asked-for step waits: a Waits rule, then Careful (it asks
     before anything goes, even what the person asked for), then In
-    training. The owner's own ask meets Careful alone. Never raises: an
+    training. The owner's own ask meets the same checks. Never raises: an
     error holds."""
     try:
-        from openexecutive.orchestrator.content_trust import principal_speaking
-        from openexecutive.orchestrator.schedule_tools import current_session
-
-        session = current_session.get()
-        if session is not None and principal_speaking(session):
-            careful = _careful_turn()
-            return Hit("level", careful) if careful else None
         lead = get(SCOPE_EXECUTIVE)
         rules = list_rules([SCOPE_COMPANY])
         addresses, names = _rule_targets(name, tool_input)

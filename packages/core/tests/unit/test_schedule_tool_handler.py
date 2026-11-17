@@ -32,7 +32,6 @@ def isolated_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 @pytest.fixture()
 def session_with_telegram_ref() -> Iterator[Session]:
     s = Session()
-    s.seen_channel_refs.add(("telegram", "42"))
     token = current_session.set(s)
     yield s
     current_session.reset(token)
@@ -96,16 +95,18 @@ def test_rejects_unknown_channel(session_with_telegram_ref: Session) -> None:
     assert "unknown channel" in payload["error"]
 
 
-def test_rejects_unseen_channel_ref(session_with_telegram_ref: Session) -> None:
+def test_any_address_is_scheduled_its_send_meets_the_gate_when_it_fires(
+    session_with_telegram_ref: Session,
+) -> None:
     payload = _call(
         {
             "run_at": _future_iso(),
             "channel": "telegram",
-            "channel_ref": "99",  # not in seen_channel_refs
+            "channel_ref": "99",  # never came up in this chat
             "intent": "x",
         }
     )
-    assert "not seen in this session" in payload["error"]
+    assert payload["status"] == "scheduled"
 
 
 def test_rejects_beyond_horizon(session_with_telegram_ref: Session) -> None:
@@ -158,7 +159,7 @@ def test_rejects_when_pending_cap_exceeded(
     assert "too many pending" in second["error"]
 
 
-def test_a_follow_up_to_the_speakers_own_address_needs_no_seen_ref(
+def test_a_follow_up_goes_to_the_speakers_own_address_or_anyone_elses(
     isolated_db: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # A chat app that seeds no addresses (Google Chat): "check my inbox at 5
@@ -176,7 +177,7 @@ def test_a_follow_up_to_the_speakers_own_address_needs_no_seen_ref(
         own = _call({"run_at": _future_iso(), "channel": "email", "channel_ref": "Olivia@co.example", "intent": "x"})
         assert own["status"] == "scheduled"
         other = _call({"run_at": _future_iso(), "channel": "email", "channel_ref": "eve@x.example", "intent": "x"})
-        assert "not seen in this session" in other["error"]
+        assert other["status"] == "scheduled"
     finally:
         current_session.reset(token)
         people_registry.invalidate()

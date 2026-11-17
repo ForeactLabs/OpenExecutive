@@ -258,8 +258,8 @@
       ]
     },
     {
-      "id": "d02-training-leaves-the-owners-own-ask",
-      "about": "In training, Sam's own chat ask still goes: training holds what the Executive does for others.",
+      "id": "d02-training-holds-the-owners-own-ask-too",
+      "about": "In training, Sam's own chat ask waits on Sam's own card like anyone's: In training comes last, for everyone.",
       "settings": {
         "level": "balanced",
         "training": true
@@ -284,8 +284,24 @@
           },
           "expect": {
             "steps": [
-              "ran"
+              "card"
             ],
+            "cards_for": [
+              "sam"
+            ],
+            "views": [
+              {
+                "kind": "lead",
+                "panel": "lead",
+                "need": "Needs your OK",
+                "buttons": []
+              }
+            ]
+          }
+        },
+        {
+          "approve": "last",
+          "expect": {
             "sent": 1,
             "views": []
           }

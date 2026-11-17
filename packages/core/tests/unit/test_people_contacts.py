@@ -1638,7 +1638,7 @@ def test_unattended_passes_never_reach_a_contact(
     _, handlers = unattended_toolkit(tools, dict(SCHEDULE_TOOL_HANDLERS), mode)
     # Reflection and research run on their own synthetic session: never the
     # principal's verified turn, so contacts do not exist there.
-    with _turn(Session(seen_channel_refs=set())):
+    with _turn(Session()):
         out = json.loads(asyncio.run(handlers["message_person"](
             {"person_id": roster.contact, "text": "Checking in"}
         )))

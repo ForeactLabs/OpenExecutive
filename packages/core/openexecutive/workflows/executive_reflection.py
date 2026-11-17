@@ -842,31 +842,10 @@ class ExecutiveReflectionWorkflow(Workflow):
 
         user_content = await asyncio.to_thread(with_standing_facts, user_content)
 
-        # Seed a synthetic Session into the `current_session` ContextVar
-        # so schedule_followup's anti-spam guard accepts the reflection's
-        # tool calls. Without this, the guard reads `seen=None` and falls
-        # through (allowing any (channel, channel_ref)). Seeding from the
-        # People roster means reflection can only schedule follow-ups to
-        # channels that correspond to a real Person — same invariant the
-        # chat path enforces via session.seen_channel_refs.
-        # Solo seeds only the principal's refs: this unattended pass never
-        # schedules anything to a contact.
-        seen: set[tuple[str, str]] = set()
-        for person in ([principal] if principal is not None else []) if solo else people:
-            if person.slack_user_id:
-                seen.add(("slack_dm", person.slack_user_id))
-            if person.discord_user_id:
-                seen.add(("discord_dm", person.discord_user_id))
-            if person.telegram_chat_id:
-                seen.add(("telegram", person.telegram_chat_id))
-            if person.email:
-                seen.add(("email", person.email))
-
         # Pin the run's mode so its tool handlers agree with its toolkit.
         # ...and its principal's role, so a specialist it consults (or a workflow
         # it starts) sees the role of the turn that started it, not a fresh read.
         reflection_session = Session(
-            seen_channel_refs=seen,
             turn_workspace_mode=mode,
             turn_principal_role=effective_principal_role(outer_session),
         )

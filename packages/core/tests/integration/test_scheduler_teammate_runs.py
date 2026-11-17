@@ -108,7 +108,6 @@ def test_a_teammates_row_runs_as_them_and_reaches_only_them(
     assert session.unattended is True
     assert session.run_for_person_id == sam
     # Nothing it may send or schedule to: the runner delivers.
-    assert session.seen_channel_refs == set()
     assert "Reply with the message text alone" in chat["user_message"]
     # Only the conversation that queued it, never the company-wide list.
     assert calls["episodic"] == [{"session_id": "s-1"}]
@@ -185,7 +184,6 @@ def test_the_principals_row_keeps_the_ordinary_dispatch(
     assert get_scheduled_action(action_id).status == "done"  # type: ignore[union-attr]
     (chat,) = calls["chat"]
     assert chat["session"].run_for_person_id is None
-    assert chat["session"].seen_channel_refs == {("telegram", "1")}
     assert calls["sent"] == []
 
 

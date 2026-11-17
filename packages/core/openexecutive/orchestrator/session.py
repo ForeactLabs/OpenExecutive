@@ -33,10 +33,6 @@ class Session:
     company_profile: CompanyProfile | None = None
     conversation_history: list[dict[str, Any]] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.utcnow)
-    # (channel, channel_ref) pairs the Executive has seen during this session.
-    # Used by schedule_followup to refuse scheduling sends to refs the user
-    # never actually used — anti-spam guard.
-    seen_channel_refs: set[tuple[str, str]] = field(default_factory=set)
     # Mailbox message and thread ids this conversation was shown by a search
     # that left other teammates' mail out (or the inbound email it answers).
     # The model may reach the Executive's mailbox only by these

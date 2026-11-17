@@ -851,28 +851,12 @@ async def _executive_synthesis_loop(
     has_roster = bool(_render_team_roster(roster_people))
     user_content = _render_synthesis_turn(findings, people, mode=mode)
 
-    # Seed a synthetic Session so send_slack_dm / send_discord_dm etc.
-    # don't trip the anti-spam guard the chat path enforces. Identical
-    # mechanism to executive_reflection's setup — channels visible
-    # only when they correspond to a real Person.
-    seen: set[tuple[str, str]] = set()
-    for person in roster_people:
-        if person.slack_user_id:
-            seen.add(("slack_dm", person.slack_user_id))
-        if person.discord_user_id:
-            seen.add(("discord_dm", person.discord_user_id))
-        if person.telegram_chat_id:
-            seen.add(("telegram", person.telegram_chat_id))
-        if person.email:
-            seen.add(("email", person.email))
-
     # Pin the run's mode so its tool handlers agree with its toolkit.
     # ...and its principal's role, so a specialist it consults (or a workflow
     # it starts) sees the role of the turn that started it, not a fresh read.
     from openexecutive.orchestrator.artifact_records import current_viewer
 
     synth_session = Session(
-        seen_channel_refs=seen,
         # What it drafts belongs to whoever's turn started the run.
         documents_viewer=current_viewer(),
         turn_workspace_mode=mode,

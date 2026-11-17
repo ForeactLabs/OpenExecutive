@@ -1068,7 +1068,6 @@ async def _handle_message(
                     is_dm=is_dm,
                     # The quote is not the person's words: memory keeps their own.
                     memory_text=own_text if reply_context else None,
-                    seen_ref=dm_ref,
                     reply_ref=dm_ref,
                     image_blocks=attachment_blocks or None,
                     co_present_person_ids=co_present_person_ids or None,

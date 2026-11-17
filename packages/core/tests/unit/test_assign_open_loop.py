@@ -215,6 +215,27 @@ async def test_tool_refuses_unverified_or_unrostered_speakers(
     assert open_loops.count_open_loops(team.ben) == 0
 
 
+async def test_an_approved_own_card_assigns_for_the_person_who_asked(team: SimpleNamespace) -> None:
+    """A teammate's ask held on their own card: their tap is them asking, so
+    carrying it out (an unattended session, no message) assigns the task for
+    them. A card that names nobody is the owner's, and assigns for them."""
+    from openexecutive.orchestrator import levels
+    from openexecutive.orchestrator.session import Session
+
+    current_session.set(Session(unattended=True))  # type: ignore[arg-type]
+    with levels.approved(team.sara):
+        out = await _tool(person_id=team.sara, task="call Leo Park tomorrow")
+    assert out["status"] == "assigned"
+    [loop] = open_loops.list_open_loops(person_id=team.sara)
+    assert "call Leo Park tomorrow" in loop.description
+    with levels.approved(None):
+        out = await _tool(person_id=team.ben, task="send the deck")
+    assert out["status"] == "assigned"
+    with levels.approved(team.gina):
+        out = await _tool(person_id=team.ben, task="send a third deck")
+    assert out["status"] == "refused"
+
+
 async def test_tool_requires_the_speakers_own_words(team: SimpleNamespace) -> None:
     _speak(team.principal)
     out = await _tool(person_id=team.ben, task="deliver Q3 financials to Pat")

@@ -433,7 +433,6 @@ async def _process_and_reply(
                     memory_text=own_text if reply_context else None,
                     # This chat wrote to the Executive, so it may schedule
                     # follow-ups back to it.
-                    seen_ref=("telegram", str(chat_id)),
                     reply_ref=("telegram", str(chat_id)) if private else None,
                     image_blocks=att_image_blocks or None,
                     # A private chat on a webhook only Telegram can call shows

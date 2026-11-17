@@ -1014,7 +1014,6 @@ def test_solo_meeting_with_a_contact_stays_with_the_principal() -> None:
 def _schedule(channel: str, ref: str, *, session: Session, **extra: Any) -> Any:
     from openexecutive.orchestrator.schedule_tools import handle_schedule_followup
 
-    session.seen_channel_refs.add((channel, ref))
     token = current_session.set(session)
     try:
         raw = asyncio.run(handle_schedule_followup({

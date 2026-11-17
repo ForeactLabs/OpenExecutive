@@ -260,24 +260,6 @@ def _nested_run_refusal(tool_input: dict[str, Any]) -> str | None:
     return None
 
 
-def _seen_channel_refs() -> set[tuple[str, str]]:
-    """The roster's own channels, as the reflection seeds them, so
-    ``schedule_followup`` reaches only a real person's channel."""
-    from openexecutive.people.store import list_people
-
-    seen: set[tuple[str, str]] = set()
-    for person in list_people():
-        if person.slack_user_id:
-            seen.add(("slack_dm", person.slack_user_id))
-        if person.discord_user_id:
-            seen.add(("discord_dm", person.discord_user_id))
-        if person.telegram_chat_id:
-            seen.add(("telegram", person.telegram_chat_id))
-        if person.email:
-            seen.add(("email", person.email))
-    return seen
-
-
 def _session(mode: str) -> Any:
     from openexecutive.memory.workspace_settings import effective_principal_role
     from openexecutive.onboarding.profile_builder import load_or_create_profile
@@ -287,7 +269,6 @@ def _session(mode: str) -> Any:
     profile = load_or_create_profile()
     return Session(
         company_profile=profile if not profile.is_empty() else None,
-        seen_channel_refs=_seen_channel_refs(),
         turn_workspace_mode=mode,
         turn_principal_role=effective_principal_role(None),
         unattended=True,

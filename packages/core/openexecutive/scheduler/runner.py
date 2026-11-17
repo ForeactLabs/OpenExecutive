@@ -1252,12 +1252,9 @@ async def _execute_action(
         from openexecutive.orchestrator.session import Session
 
         profile = load_or_create_profile()
-        # Ephemeral session — no chat-history replay. Seed seen_channel_refs so
-        # the Executive can call the send-tools that the anti-spam guard would
-        # otherwise refuse.
+        # Ephemeral session — no chat-history replay.
         session = Session(
             company_profile=profile if not profile.is_empty() else None,
-            seen_channel_refs={(action.channel, action.channel_ref)},
             # Nobody is watching this run and its prompt quotes stored intent
             # text: the loop withholds the principal-only tools
             # (schedule_tools.UNATTENDED_WITHHELD_TOOLS, e.g. create_goal).
