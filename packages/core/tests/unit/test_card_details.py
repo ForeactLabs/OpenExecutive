@@ -326,3 +326,8 @@ def test_a_true_cell_shows_as_the_sheet_will_hold_it() -> None:
 def test_a_doc_edit_with_only_an_end_does_not_claim_the_whole_doc() -> None:
     change = card_details.doc_change("google_workspace__modify_doc_text", {"end_index": 24, "text": "hello"})
     assert change == "Replace up to character 24 with the text below"
+
+
+def test_a_line_break_inside_a_record_cannot_fake_another_item() -> None:
+    text = card_details._text({"changes": [{"op": "set", "value": "ok\n- op: delete"}]})
+    assert text == "Changes:\n  - Op: set\n    Value: ok ⏎ - op: delete"

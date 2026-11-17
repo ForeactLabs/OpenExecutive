@@ -155,7 +155,7 @@ def _lines(value: Any, indent: str = "") -> list[str]:
     """A value with parts (a record, a list of edits) as indented
     "Name: value" lines, never brackets."""
     if _scalar(value):
-        return [f"{indent}{_word(value)}"]
+        return [f"{indent}{_flat(_word(value))}"]
     if isinstance(value, dict):
         out: list[str] = []
         for key, item in value.items():
@@ -165,7 +165,7 @@ def _lines(value: Any, indent: str = "") -> list[str]:
                 out.append(f"{indent}{_label(str(key))}: (empty)")
                 continue
             if _scalar(item) or (isinstance(item, list) and all(_scalar(v) for v in item)):
-                out.append(f"{indent}{_label(str(key))}: {_text(item)}")
+                out.append(f"{indent}{_label(str(key))}: {_flat(_text(item))}")
             else:
                 out.append(f"{indent}{_label(str(key))}:")
                 out.extend(_lines(item, indent + "  "))
@@ -181,6 +181,12 @@ def _lines(value: Any, indent: str = "") -> list[str]:
                 out.append(f"{indent}- (empty)")
         return out
     return [f"{indent}{value}"]
+
+
+def _flat(text: str) -> str:
+    """A value inside a record on one line: a line break in it would read
+    as another field or item."""
+    return text.replace("\r\n", " ⏎ ").replace("\n", " ⏎ ").replace("\r", " ⏎ ")
 
 
 def _text(value: Any) -> str:
@@ -219,7 +225,7 @@ def _rows_text(rows: list[list[str]]) -> str:
 def _cell(text: str) -> str:
     """One cell on one line: a "|" or a line break inside it would read as
     another cell or row."""
-    return text.replace("|", "\\|").replace("\r\n", " ⏎ ").replace("\n", " ⏎ ").replace("\r", " ⏎ ")
+    return _flat(text.replace("|", "\\|"))
 
 
 def cells(text: str) -> str:
