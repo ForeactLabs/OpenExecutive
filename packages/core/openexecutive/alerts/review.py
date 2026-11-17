@@ -539,6 +539,8 @@ _HELD_DETAIL = "held for their quiet hours or brief"
 # `_dm`'s detail when the card is already on their list and they have no
 # chat app: the card is the message.
 ON_THEIR_LIST = "on their list"
+# How message_person says a person has no chat app it could use at all.
+_NO_CHANNEL = "no reachable channel"
 
 
 def _dm_text(headline: str, text: str) -> str:
@@ -577,8 +579,9 @@ async def _dm(
         parsed = json.loads(raw)
     except Exception as exc:
         return False, f"dm failed: {exc}"
-    if theirs and isinstance(parsed, dict) and "error" in parsed:
-        # No chat app reached them: the card on their list is the message.
+    if theirs and isinstance(parsed, dict) and _NO_CHANNEL in str(parsed.get("error") or ""):
+        # They have no chat app: the card on their list is the message. A
+        # send that failed stays a failure.
         return True, ON_THEIR_LIST
     # Only a real delivery counts. "alerted" means the handler fell back to
     # creating a NEW alert because the person has no channel — for the

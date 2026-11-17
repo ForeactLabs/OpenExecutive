@@ -306,6 +306,7 @@ def test_the_button_label_is_short_one_line_and_follows_its_step(db: Path) -> No
     assert store.clean_label("  Email   Dana.  ") == "Email Dana"
     assert store.clean_label("Reply!") == "Reply"
     assert store.clean_label("x" * 41) == ""
+    assert store.clean_label("...") == ""
     aid = store.insert_alert(
         source="triage", external_id="lbl-1", severity="medium", headline="h", body="",
         suggested_action="Email Dana to renew", action_label="Email Dana.", db_path=db,
