@@ -57,6 +57,14 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _OPEN = ("unread", "read")
+
+
+def _open(alias: str = "a") -> str:
+    """SQL for a card still open where its reader sees it: unread or read,
+    and not put away (``archived_at``). One put away is no card to join."""
+    col = f"{alias}." if alias else ""
+    statuses = ",".join(f"'{s}'" for s in _OPEN)
+    return f"{col}status IN ({statuses}) AND {col}archived_at IS NULL"
 # Where a held step's Approve card comes from (``decision_ledger``).
 _APPROVE_SOURCE = "decision_scheduling"
 _THEN = "\n\nThen: "
@@ -436,9 +444,8 @@ def _replace(older: _Card, newer: _Card, path: Path) -> None:
     with contextlib.closing(_conn(path)) as conn, conn:
         # Opened already or not, its Approve would point at a closed decision.
         conn.execute(
-            f"UPDATE alerts SET superseded_by_alert_id = ?, status = 'dismissed' "
-            f"WHERE id = ? AND status IN ({','.join('?' * len(_OPEN))})",
-            (newer.id, older.id, *_OPEN),
+            f"UPDATE alerts SET superseded_by_alert_id = ?, status = 'dismissed' WHERE id = ? AND {_open('')}",
+            (newer.id, older.id),
         )
         # What had joined the older card moves to the newer one with it.
         old = conn.execute("SELECT body, severity FROM alerts WHERE id = ?", (older.id,)).fetchone()
@@ -535,16 +542,15 @@ def _place(alert_id: int, db_path: Path | None) -> int:
             return alert_id
         own_action = {
             int(r["id"]) for r in conn.execute(
-                f"SELECT id FROM alerts WHERE needs = ? AND status IN ({','.join('?' * len(_OPEN))})",
-                (_OWN_ACTION, *_OPEN),
+                f"SELECT id FROM alerts WHERE needs = ? AND {_open('')}",
+                (_OWN_ACTION,),
             ).fetchall()
         }
         others = [
             other for other in (
                 _card(r) for r in conn.execute(
-                    _SELECT + f"WHERE t.reader = ? AND a.id != ? AND a.status IN ({','.join('?' * len(_OPEN))}) "
-                    "ORDER BY t.created_at, a.id",
-                    (card.reader, alert_id, *_OPEN),
+                    _SELECT + f"WHERE t.reader = ? AND a.id != ? AND {_open()} ORDER BY t.created_at, a.id",
+                    (card.reader, alert_id),
                 ).fetchall()
             )
             if other.id not in own_action
@@ -587,8 +593,8 @@ def approve_waiting(thread: str, *, reader: str, step: str, db_path: Path | None
         with contextlib.closing(_conn(path)) as conn:
             row = conn.execute(
                 _SELECT + f"WHERE t.reader = ? AND t.thread = ? AND t.step = ? AND t.decision_id IS NOT NULL "
-                f"AND a.status IN ({','.join('?' * len(_OPEN))}) LIMIT 1",
-                (reader, _conversation(conn, thread), step, *_OPEN),
+                f"AND {_open()} LIMIT 1",
+                (reader, _conversation(conn, thread), step),
             ).fetchone()
         return row is not None
     except Exception:  # noqa: BLE001
@@ -618,8 +624,8 @@ def open_cards_from(
                 f"WHERE t.person = ? AND t.reader = ? AND t.turn != ? AND a.needs != ? "
                 # A teammate's own message joins nothing the Executive wrote.
                 f"AND t.thread NOT LIKE '{_OWN_MESSAGE}%' "
-                f"AND a.status IN ({','.join('?' * len(_OPEN))}) ORDER BY t.created_at, a.id LIMIT 10",
-                (person, reader, turn, _OWN_ACTION, *_OPEN),
+                f"AND {_open()} ORDER BY t.created_at, a.id LIMIT 10",
+                (person, reader, turn, _OWN_ACTION),
             ).fetchall()
         return [(int(r["id"]), str(r["headline"] or ""), str(r["question"] or "")) for r in rows]
     except Exception:  # noqa: BLE001
