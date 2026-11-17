@@ -1095,3 +1095,67 @@ def test_a_joined_email_waits_for_a_slow_settling_run_then_starts(
         card_work._RUNNING.discard(card.id)
     # It starts as the old run closes, with their words.
     assert started == ["Use 40k"] and card.id not in card_work._NEXT and card.id not in card_work._QUEUED
+
+
+def test_a_joined_email_catches_up_with_mail_still_waiting_on_the_card(
+    db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.memory.decision_ledger import update_open_payload
+
+    mailbox = FakeInbox()
+    mailbox.add(_msg("m1", "t1", minutes_ago=50, text="Can you confirm Thursday?"))
+    _scan(owner, mailbox)
+    card = inbox.open_cards(owner.id)[0]
+    payload = inbox.card_payload(_fresh(card))
+    assert update_open_payload(card.id, {**payload, "open_questions": []})
+    models["verdicts"]["<their_open_email>"] = {
+        "needs_reply": False, "kind": "fyi", "asked_of_them": True, "confidence": 0.9, "continues_open": True,
+    }
+    # A colleague's reply on the card's own thread, not caught up with yet,
+    # then the sender's follow-up on a new thread.
+    mailbox.add(_msg("c1", "t1", sender="lee@else.example", name="Lee", minutes_ago=35, text="Thursday is out."))
+    mailbox.add(_msg("m2", "t2", minutes_ago=30, text="Or Friday works too."))
+    caught: list[list[str]] = []
+
+    async def catch_up(person: Any, row: Any, p: Any, newer: list[Any], **_k: Any) -> bool:
+        caught.append([m.id for m in newer])
+        return len(caught) > 1  # the scan's first try for c1 fails for now
+
+    monkeypatch.setattr(answers, "catch_up", catch_up)
+    _scan(owner, mailbox)
+    assert caught == [["c1"], ["c1", "m2"]]
+
+
+def test_stop_ends_a_queued_run_too(
+    db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mailbox, card = _card(owner)
+    started: list[str] = []
+    held: list[str | None] = []
+    monkeypatch.setattr(inbox, "_hand_back", lambda c, reason: held.append(reason))
+    monkeypatch.setattr(ledger, "get_decision_instance", _with_gate(ledger.get_decision_instance))
+    monkeypatch.setattr(card_work, "start", lambda _p, _id, **k: started.append(k.get("ask", "")) or True)
+
+    async def gave_up(_card_id: int, **_k: Any) -> None:
+        return None
+
+    monkeypatch.setattr(card_work, "ended", gave_up)
+
+    async def go() -> bool:
+        settling = asyncio.Event()
+        card_work._RUNNING.add(card.id)
+        card_work._TASK[card.id] = asyncio.create_task(settling.wait())
+        assert card_work._set_work(card.id, card_work.WORKING)
+        await card_work.apply(card.id, owner, body="The figure is 14k.", note="Done.", files=[], gmail=mailbox)
+        assert await card_work.redirect(owner, card.id, "Use 40k", gmail=mailbox)
+        stopped = card_work.stop(card.id)
+        settling.set()
+        await card_work._TASK[card.id]
+        card_work._close(card.id)
+        return stopped
+
+    try:
+        assert asyncio.run(go())
+    finally:
+        card_work._RUNNING.discard(card.id)
+    assert started == [] and held == ["work_unfinished"] and card.id not in card_work._NEXT

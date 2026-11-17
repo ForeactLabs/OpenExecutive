@@ -364,6 +364,13 @@ def _end_turn(payload: dict[str, Any], *, state: str, text: str, choices: list[s
 def stop(card_id: int) -> bool:
     """End the work running on ``card_id`` (the person's Stop). False when
     none is running. The card shows the run as stopped."""
+    if _QUEUED.pop(card_id, None) is not None:
+        # Their Stop also ends the run that was to start next: what the
+        # run going now handed back waits for them.
+        _NEXT.discard(card_id)
+        _hand_back_unfinished(card_id)
+        if card_id in _HANDED:
+            return True
     task = _TASK.get(card_id)
     if task is None or task.done() or card_id not in _RUNNING or card_id in _HANDED:
         return False

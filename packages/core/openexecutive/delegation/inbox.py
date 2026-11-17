@@ -1335,7 +1335,7 @@ async def _consider(
         return False
     if waiting is not None and verdict.continues_open:
         # The same ask as their email already waiting: it goes on that card.
-        await join_card(person, client, waiting, message, thread, now=now)
+        await join_card(person, client, waiting, message, thread, own=own, now=now)
         return False
     if not wants_draft(verdict, relation, asked):
         reason = verdict.kind if not wants_draft(verdict, relation) else "asks_someone_else"
@@ -1373,7 +1373,9 @@ def open_card_from(person_id: int, message: Any) -> Any | None:
     return max(found, key=lambda c: str(c.created_at or ""), default=None)
 
 
-async def join_card(person: Any, client: Any, card: Any, message: Any, thread: Any, *, now: datetime) -> bool:
+async def join_card(
+    person: Any, client: Any, card: Any, message: Any, thread: Any, *, own: set[str], now: datetime,
+) -> bool:
     """Put ``message`` (claimed, ``PROCESSING``) on ``card``, the open card
     for the same sender's earlier email it continues: its thread joins the
     card's conversation (``card_work.JOINED_KEY``: the scan passes it over,
@@ -1426,9 +1428,15 @@ async def join_card(person: Any, client: Any, card: Any, message: Any, thread: A
                 _add_flag(person.id, str(joined.get("message_id") or ""), "thread_moved_on")
         else:
             fresh = get_decision_instance(card.id)
-            if fresh is not None and not await answers.catch_up(
-                person, fresh, card_payload(fresh), [message], gmail=client, now=now,
-            ):
+            if fresh is None:
+                return True
+            # Everything the card hasn't caught up with goes with it, so its
+            # one caught-up mark never passes mail on another of its threads.
+            payload = card_payload(fresh)
+            own_thread = await client.get_thread(str(payload.get("thread_id") or ""))
+            later, _ = await newer_on_card(client, own_thread, payload, own=own, now=now)
+            pending = [m for m in later if m.id != message.id and not ("SENT" in m.labels and m.from_addr in own)]
+            if not await answers.catch_up(person, fresh, payload, [*pending, message], gmail=client, now=now):
                 _add_flag(person.id, str(joined.get("message_id") or ""), "thread_moved_on")
         return True
     except Exception:
@@ -1780,6 +1788,30 @@ def later_messages(thread: Any, payload: dict[str, Any], *, now: datetime) -> li
     ]
 
 
+async def newer_on_card(
+    client: Any, thread: Any, payload: dict[str, Any], *, own: set[str], now: datetime,
+) -> tuple[list[Any], list[Any]]:
+    """Mail newer than the card has caught up with, on its own thread and on
+    every thread that joined it, and the person's own replies on its own
+    thread. Only their reply there answers its ask (a "thanks, got it" to
+    the email that joined it doesn't), so their mail on a joined thread is
+    left out."""
+    from openexecutive.delegation import card_work
+    from openexecutive.delegation.gmail import GmailNotFound
+
+    later = later_messages(thread, payload, now=now)
+    sent_by_them = [m for m in later if "SENT" in m.labels and m.from_addr in own]
+    for joined in card_work.threads(payload)[1:]:
+        try:
+            later += [
+                m for m in later_messages(await client.get_thread(joined), payload, now=now)
+                if not ("SENT" in m.labels and m.from_addr in own)
+            ]
+        except GmailNotFound:
+            continue
+    return later, sent_by_them
+
+
 def _close_card(person_id: int, card_id: int, message_id: str, reason: str, outcome: str) -> bool:
     """Close a card Gmail settled (compare-and-set), unless it is being sent."""
     from openexecutive.memory.decision_ledger import close_externally
@@ -1833,22 +1865,7 @@ async def _reconcile_card(person: Any, client: Any, card: Any, *, now: datetime,
         thread = await client.get_thread(str(payload.get("thread_id") or ""))
     except GmailNotFound:
         return int(_close_card(person.id, card.id, message_id, "thread_gone", CLOSED))
-    later = later_messages(thread, payload, now=now)
-    # Only their reply on the card's own thread answers its ask (a "thanks,
-    # got it" to the email that joined it doesn't).
-    sent_by_them = [m for m in later if "SENT" in m.labels and m.from_addr in own]
-    from openexecutive.delegation import card_work
-
-    for joined in card_work.threads(payload)[1:]:
-        # The emails that joined the card are its conversation too: newer
-        # mail from others there brings the card up to date.
-        try:
-            later += [
-                m for m in later_messages(await client.get_thread(joined), payload, now=now)
-                if not ("SENT" in m.labels and m.from_addr in own)
-            ]
-        except GmailNotFound:
-            continue
+    later, sent_by_them = await newer_on_card(client, thread, payload, own=own, now=now)
     if draft is None and not card_only:
         if not sent_by_them:
             return int(_close_card(person.id, card.id, message_id, "draft_deleted", CLOSED))
