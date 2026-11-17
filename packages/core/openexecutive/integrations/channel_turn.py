@@ -77,7 +77,9 @@ class ChannelTurn:
     # A warm knowledge store to search with, when the adapter holds one.
     store: Any | None = None
     # Opens a context the Executive's own call runs inside, when the adapter
-    # has something to bind for it (what it knows about the caller).
+    # has a context variable of its own to bind for that call (a channel
+    # added outside this package can need one). Who is asking never goes
+    # here: that is ``person``, which lands on the session.
     chat_scope: Callable[[], AbstractContextManager[Any]] | None = None
 
 
