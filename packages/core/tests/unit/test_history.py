@@ -264,3 +264,15 @@ def test_shown_summary_puts_you_in_front_of_the_verb() -> None:
     assert shown_summary("Clarified the start date with Dana") == "You clarified the start date with Dana"
     assert shown_summary("Sent signed contract to Dana") == "You sent signed contract to Dana"
     assert shown_summary("Shared finished deck with Kyle") == "You shared finished deck with Kyle"
+
+
+def test_a_correction_gets_you_only_when_it_rewords_the_note() -> None:
+    from openexecutive.memory.history import shown_correction, stored_correction
+
+    note = "Told Dana the deck comes Friday."
+    assert stored_correction("You told Dana the deck comes Monday.", note) == "Told Dana the deck comes Monday."
+    assert shown_correction("Told Dana the deck comes Monday.", note) == "You told Dana the deck comes Monday."
+    # The person's own words stay as typed, both ways.
+    assert stored_correction("You got the date wrong, it's Monday", note) == "You got the date wrong, it's Monday"
+    assert shown_correction("Shipped Friday, not Monday", note) == "Shipped Friday, not Monday"
+    assert shown_correction("Closed deals came to $2M", note) == "Closed deals came to $2M"

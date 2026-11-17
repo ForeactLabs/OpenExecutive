@@ -87,8 +87,19 @@ def test_each_person_sees_only_their_own(client: TestClient, ids: dict[str, int]
     assert len(mine["notes"]) == 1 and mine["notes"][0]["quote"] == "I'll send the price list on Friday"
     # The note is the reader's own, so it reads "You told …".
     assert mine["notes"][0]["summary"] == "You told Dana Lee the price list comes Friday."
-    # A correction is the person's own words: kept and shown as typed.
+    # The correct panel starts from the shown text. Saved, it is kept the
+    # way the note is ("Told …"), since the Executive's "you" is itself,
+    # and shown with "You" again.
     nid = mine["notes"][0]["id"]
+    client.patch(f"/memories/history/{nid}", json={"correction": "You told Dana Lee the price list comes Monday."},
+                 headers=OWNER)
+    assert h.get_note(ids["principal"], nid).correction == "Told Dana Lee the price list comes Monday."
+    assert client.get("/memories/history", headers=OWNER).json()["notes"][0]["correction"] == (
+        "You told Dana Lee the price list comes Monday.")
+    # Other text is the person's own words: kept and shown as typed.
+    client.patch(f"/memories/history/{nid}", json={"correction": "You got the date wrong, it's Monday."},
+                 headers=OWNER)
+    assert h.get_note(ids["principal"], nid).correction == "You got the date wrong, it's Monday."
     out = client.patch(f"/memories/history/{nid}", json={"correction": "Shipped Friday, not Monday."},
                        headers=OWNER)
     assert out.status_code == 200
@@ -196,7 +207,7 @@ def test_pin_correct_and_forget_only_your_own(client: TestClient, ids: dict[str,
     out = client.patch(
         f"/memories/history/{nid}", json={"pinned": True, "correction": "Told Dana it comes Monday."}, headers=OWNER
     ).json()
-    assert out["pinned"] is True and out["expires_at"] is None and out["correction"] == "Told Dana it comes Monday."
+    assert out["pinned"] is True and out["expires_at"] is None and out["correction"] == "You told Dana it comes Monday."
     assert client.delete(f"/memories/history/{nid}", headers=OWNER).json() == {"forgotten": 1}
     assert client.delete(f"/memories/history/{nid}", headers=OWNER).status_code == 404
 

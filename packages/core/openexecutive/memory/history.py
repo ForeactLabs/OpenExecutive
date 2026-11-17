@@ -183,13 +183,39 @@ def shown_summary(summary: str) -> str:
     they see it, so the summary is stored starting with the verb ("Said …")
     and the screens put "You" in front. Text that doesn't start with a
     past-tense verb from the known list (which holds no names, so "Fred
-    asked …" is left alone) is shown as it is. A correction is the person's own
-    words, so it is never passed through here."""
+    asked …" is left alone) is shown as it is. A correction goes
+    through :func:`shown_correction` instead."""
     text = (summary or "").strip()
     first = text.split(" ", 1)[0]
     if not first[:1].isupper() or not _past_tense(first):
         return summary
     return "You " + first[:1].lower() + text[1:]
+
+
+def shown_correction(correction: str, summary: str) -> str:
+    """A correction as its owner reads it. One that starts with the note's
+    own verb is the note reworded ("Told Dana it comes Monday"), so it gets
+    "You" like the summary; any other text is shown exactly as typed."""
+    if _first_word(correction) == _first_word(summary):
+        return shown_summary(correction)
+    return correction
+
+
+def stored_correction(text: str, summary: str) -> str:
+    """The reverse of :func:`shown_correction`: the correct panel starts
+    from the shown "You told Dana …", so a correction that starts with
+    "You" and then the note's own verb is kept as "Told Dana …", the way
+    the note is. The Executive reads corrections, and its "you" is itself.
+    Other text, like "You got the date wrong", is kept as typed."""
+    text = (text or "").strip()
+    rest = text[4:] if text.startswith("You ") else ""
+    if rest and shown_summary(summary) != summary and _first_word(rest) == _first_word(summary):
+        return rest[:1].upper() + rest[1:]
+    return text
+
+
+def _first_word(text: str) -> str:
+    return (text or "").strip().split(" ", 1)[0].rstrip(",.;:").lower()
 
 
 def _past_tense(word: str) -> bool:
@@ -897,7 +923,7 @@ def correct_note(
         return None
     from openexecutive.delegation.ghostwriter import one_line
 
-    cleaned = one_line(text or "", MAX_CORRECTION_CHARS)
+    cleaned = one_line(stored_correction(text or "", note.summary), MAX_CORRECTION_CHARS)
     conn = _connect(db_path)
     try:
         conn.execute(
