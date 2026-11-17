@@ -419,10 +419,11 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
     pulls.changedHere();
     setToday((t) => t && { ...t, right_now: (t.right_now ?? []).filter((r) => r.key !== row.key) });
     dismissRightNowRow(row.key)
-      .then((kept) => {
-        // A pull begun while the dismissal was being saved may still carry it.
+      .then(() => {
+        // Any pull begun before the dismissal was saved may still carry the
+        // row, so drop those and show the board as it is now.
         pulls.changedHere();
-        if (!kept) return pullToday();
+        return pullToday();
       })
       .catch((e) => console.error("Dismissing a Right now row failed", e));
   }, [pulls, pullToday]);
