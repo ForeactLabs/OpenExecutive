@@ -28,6 +28,7 @@ Executive may email exactly the addresses inbound mail would match.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
@@ -55,6 +56,11 @@ FREEMAIL_DOMAINS: frozenset[str] = frozenset({
 def normalize_address(addr: str | None) -> str:
     """Trimmed and lowercased — how every match compares an address."""
     return (addr or "").strip().lower()
+
+
+# A local part that could hide another address (an unparsed list or a
+# display name): never matched by domain alone.
+_UNSAFE_LOCAL = re.compile(r'[\s,;<>"@()\[\]\\:]')
 
 
 def split_address(addr: str | None) -> tuple[str, str] | None:
@@ -194,7 +200,8 @@ class RosterAllow:
         norm = normalize_address(addr)
         if norm in self.exact:
             return True
-        if "@" in norm and norm.rsplit("@", 1)[1] in self.any_at:
+        parts = split_address(norm) if self.any_at else None
+        if parts is not None and parts[1] in self.any_at and not _UNSAFE_LOCAL.search(parts[0]):
             return True
         local = company_local(norm, self.domains) if self.domains else None
         return local is not None and local in self.company_locals

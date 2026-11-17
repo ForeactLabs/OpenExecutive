@@ -846,6 +846,7 @@ def test_who_a_goes_rule_lets_go_is_not_someone_new_on_balanced(monkeypatch: pyt
     monkeypatch.setattr(levels, "turn_level", lambda session=None: level["now"])
     ttl.add_rule(ttl.SCOPE_COMPANY, ttl.RULE_PERSON, "pat.lane@vendor.example", created_by="t", effect=ttl.EFFECT_GO)
     ttl.add_rule(ttl.SCOPE_COMPANY, ttl.RULE_DOMAIN, "partner.example", created_by="t", effect=ttl.EFFECT_GO)
+    ttl.add_rule(ttl.SCOPE_COMPANY, ttl.RULE_DOMAIN, "gmail.com", created_by="t", effect=ttl.EFFECT_GO)
     ttl.add_rule(ttl.SCOPE_COMPANY, ttl.RULE_PERSON, "dana@vendor.example", created_by="t")
 
     def send(to: str) -> str | None:
@@ -853,19 +854,39 @@ def test_who_a_goes_rule_lets_go_is_not_someone_new_on_balanced(monkeypatch: pyt
             "google_workspace__send_gmail_message", {"to": to, "subject": "Hello", "body": "Hi"},
         )
 
+    def turn(**kw: Any) -> Any:
+        session = Session(**kw)
+        current_session.set(session)
+        return oc.begin_turn(session)
+
     async def go() -> None:
-        state = oc.begin_turn(Session())
+        state = turn()
         assert send("Pat.Lane@vendor.example") is None
         assert send("ann@partner.example") is None
-        # Someone no rule lets go, a Waits rule and a look-alike domain still wait.
-        for to in ("leo@vendor.example", "dana@vendor.example", "ann@notpartner.example", "ann@partner.example.evil"):
+        # Someone no rule lets go, a Waits rule, a look-alike domain and a
+        # free-mail domain still wait.
+        for to in (
+            "leo@vendor.example", "dana@vendor.example", "ann@notpartner.example",
+            "ann@partner.example.evil", "anyone@gmail.com",
+        ):
             assert send(to) is not None
-        # Careful, and mail from someone not in People: no Goes rule counts.
+        # A domain rule matches one plain address, never a list in one string.
+        assert "evil@x.example,ann@partner.example" not in gw._roster_allow_set()
+        # Careful: no Goes rule counts.
         level["now"] = outside_mode.ASK
         assert send("pat.lane@vendor.example") is not None
         level["now"] = outside_mode.OUTSIDERS
+        oc.end_turn(state)
+        # Nor on a turn that read something from outside, nor one whose words
+        # may be someone else's, nor with no turn at all.
+        state = turn()
         oc.mark(oc.SENDER)
         assert send("pat.lane@vendor.example") is not None
         oc.end_turn(state)
+        state = turn(run_unproven=True)
+        assert send("pat.lane@vendor.example") is not None
+        oc.end_turn(state)
+        current_session.set(None)
+        assert send("pat.lane@vendor.example") is not None
 
     asyncio.run(go())

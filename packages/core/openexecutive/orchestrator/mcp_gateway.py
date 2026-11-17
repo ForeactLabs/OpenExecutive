@@ -931,12 +931,19 @@ def _roster_allow_set() -> RosterAllow:
 
 def _goes_rules_apply() -> bool:
     """Whether the Goes rules count for the step in progress: on Balanced,
-    and never on a turn answering mail from someone not in People (whose
-    words could steer a send). Never raises: an error is no."""
+    on a turn someone on People is in whose words are their own. Never on a
+    turn whose words may be someone else's (``outside_mode._someone_else``)
+    or that read anything from outside (``outside_content``), nor with no
+    turn in progress. Never raises: an error is no."""
     try:
         from openexecutive.orchestrator import levels, outside_content, outside_mode
+        from openexecutive.orchestrator.schedule_tools import current_session
 
-        return not outside_content.answers_off_team_mail() and levels.turn_level() == outside_mode.OUTSIDERS
+        session = current_session.get()
+        state = outside_content.current()
+        if session is None or state is None or state.read or outside_mode._someone_else(session):
+            return False
+        return levels.turn_level(session) == outside_mode.OUTSIDERS
     except Exception:
         logger.warning("mcp_gateway: couldn't tell whether the Goes rules count", exc_info=True)
         return False

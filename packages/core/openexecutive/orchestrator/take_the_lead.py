@@ -943,8 +943,11 @@ def goes_reach() -> tuple[frozenset[str], frozenset[str]]:
     except Exception:
         logger.warning("take_the_lead: couldn't read the Goes rules", exc_info=True)
         return frozenset(), frozenset()
+    from openexecutive.people.identity import FREEMAIL_DOMAINS
+
     addresses = frozenset(r.value.lower() for r in rules if r.kind == RULE_PERSON and "@" in r.value)
-    domains = frozenset(r.value.lower() for r in rules if r.kind == RULE_DOMAIN)
+    # A free-mail domain proves nothing: anyone can have an address on it.
+    domains = frozenset(r.value.lower() for r in rules if r.kind == RULE_DOMAIN) - FREEMAIL_DOMAINS
     return addresses, domains
 
 
