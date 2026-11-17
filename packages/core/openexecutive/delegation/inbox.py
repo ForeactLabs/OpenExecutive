@@ -113,9 +113,6 @@ SCAN_LIST = 100
 SCAN_THREADS = 10
 DRAFTS_PER_SCAN = 5
 CLASSIFICATIONS_PER_DAY = 200
-DRAFTS_PER_SENDER_PER_DAY = 2
-DRAFTS_PER_STRANGER_PER_DAY = 1
-STRANGER_DRAFTS_PER_DAY = 10
 OPEN_CARDS_MAX = 25
 MAX_RECIPIENTS = 10
 AUTH_RECHECK = timedelta(minutes=30)
@@ -679,19 +676,6 @@ def _cap_reason(person_id: int, message: Any, relation: str, now: datetime, db_p
         return "uncountable"
     if shared >= settings.delegation_max_drafts_per_day:
         return "daily_limit"
-    per_sender = DRAFTS_PER_STRANGER_PER_DAY if relation == "stranger" else DRAFTS_PER_SENDER_PER_DAY
-    if _count(
-        f"SELECT COUNT(*) FROM {INBOX_MESSAGES_TABLE} "  # noqa: S608 — constant table name
-        "WHERE person_id = ? AND sender_key = ? AND draft_id IS NOT NULL AND created_at >= ?",
-        (person_id, _sender_key(message.from_addr), day), db_path,
-    ) >= per_sender:
-        return "sender_limit"
-    if relation == "stranger" and _count(
-        f"SELECT COUNT(*) FROM {INBOX_MESSAGES_TABLE} "  # noqa: S608 — constant table name
-        "WHERE person_id = ? AND relation = 'stranger' AND draft_id IS NOT NULL AND created_at >= ?",
-        (person_id, day), db_path,
-    ) >= STRANGER_DRAFTS_PER_DAY:
-        return "stranger_limit"
     return None
 
 

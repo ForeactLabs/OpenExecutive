@@ -690,20 +690,21 @@ def test_a_stranger_needs_more_certainty_and_gets_a_holding_reply(
     assert asyncio.run(inbox.relation_of(stranger, mailbox)) == "correspondent"
 
 
-def test_per_sender_and_stranger_limits(db: Path, owner: Any, models: dict[str, Any]) -> None:
+def test_every_email_from_one_sender_gets_its_card(db: Path, owner: Any, models: dict[str, Any]) -> None:
+    # No count per sender: a third email from the same person the same day
+    # is drafted like the first, and so is a second one from a stranger.
     mailbox = FakeInbox()
     for i in range(3):
         mailbox.add(_msg(f"m{i}", f"t{i}", minutes_ago=60 - i))
-    result = _scan(owner, mailbox)
-    assert result.drafted == 2  # two a day from one sender
-    assert "m0" not in _ledger(db) or _ledger(db)["m0"][0] != "drafted"
+    assert _scan(owner, mailbox).drafted == 3
+    assert all(_ledger(db)[f"m{i}"][0] == "drafted" for i in range(3))
 
     stranger = FakeInbox()
     for i in range(2):
         stranger.add(_msg(f"s{i}", f"u{i}", sender="sam@unknown.example", minutes_ago=60 - i))
     _scan(owner, stranger, now=NOW + timedelta(minutes=1))
     drafted = [k for k, v in _ledger(db).items() if k.startswith("s") and v[0] == "drafted"]
-    assert len(drafted) == 1  # one a day from a stranger
+    assert len(drafted) == 2
 
 
 def test_the_daily_limits_leave_mail_for_later(
