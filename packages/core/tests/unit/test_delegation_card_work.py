@@ -946,37 +946,114 @@ def test_a_joined_email_is_checked_before_the_reply_goes_on_its_own(
     assert "Payment" in seen and held == ["sensitive"]
 
 
-def test_a_joined_email_takes_back_a_reply_already_settling(
+def test_a_joined_email_stops_a_settling_reply_going_on_its_own(
     db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from openexecutive.delegation import handle_it
+
     mailbox, card = _card(owner)
     held: list[str | None] = []
+    sent: list[int] = []
+    started: list[int] = []
+
+    async def send(*_a: Any, **_k: Any) -> None:
+        sent.append(card.id)
+
     monkeypatch.setattr(inbox, "_hand_back", lambda c, reason: held.append(reason))
+    monkeypatch.setattr(inbox, "_send_on_its_own", send)
+    monkeypatch.setattr(handle_it, "content_hold", lambda *a, **k: None)
     monkeypatch.setattr(ledger, "get_decision_instance", _with_gate(ledger.get_decision_instance))
-    monkeypatch.setattr(card_work, "start", lambda *_a, **_k: True)
+    monkeypatch.setattr(card_work, "start", lambda _p, card_id, **_k: started.append(card_id) or True)
 
     async def go() -> None:
         settling = asyncio.Event()
 
         async def run() -> None:
+            # The run that handed back settles while the joined email waits.
             await settling.wait()
-            # By the time the run settles, the reply waits for the person.
-            assert held == ["work_unfinished"]
+            await card_work.finished(owner, card.id, gmail=mailbox)
 
         card_work._RUNNING.add(card.id)
         card_work._TASK[card.id] = asyncio.create_task(run())
         assert card_work._set_work(card.id, card_work.WORKING)
         await card_work.apply(card.id, owner, body="The figure is 14k.", note="Done.", files=[], gmail=mailbox)
-        # A correction joins while the handed-back run is still settling.
         joining = asyncio.create_task(card_work.redirect(owner, card.id, "", gmail=mailbox))
         await asyncio.sleep(0)
         settling.set()
         assert await joining
-        await card_work._TASK[card.id]
 
     try:
         asyncio.run(go())
     finally:
         card_work._RUNNING.discard(card.id)
         card_work._close(card.id)
-    assert held == ["work_unfinished"]
+    # The old words never went; the new run decides, still on its own.
+    assert sent == [] and held == [] and started == [card.id]
+    assert card.id not in card_work._NEXT
+
+
+def test_a_run_ended_for_a_newer_email_keeps_the_card_going_on_its_own(
+    db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mailbox, card = _card(owner)
+    held: list[str | None] = []
+    monkeypatch.setattr(inbox, "_hand_back", lambda c, reason: held.append(reason))
+    monkeypatch.setattr(ledger, "get_decision_instance", _with_gate(ledger.get_decision_instance))
+    card_work._RUNNING.add(card.id)
+    assert card_work._set_work(card.id, card_work.WORKING)
+    card_work._ENDING[card.id] = card_work.NEWER
+    card_work._close(card.id)
+    assert held == []
+    assert inbox.card_payload(_fresh(card))["conversation"][-1]["text"] == "Stopped to read the newer email."
+
+
+def test_words_refused_on_a_working_card_leave_it_going_on_its_own(
+    db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.delegation import settings
+    from openexecutive.delegation.reply_send import SendRefused
+
+    mailbox, card = _card(owner)
+    held: list[str | None] = []
+    monkeypatch.setattr(inbox, "_hand_back", lambda c, reason: held.append(reason))
+    monkeypatch.setattr(settings, "is_enabled", lambda _pid: False)
+    gated = _with_gate(ledger.get_decision_instance)
+    card_work._RUNNING.add(card.id)
+    try:
+        with pytest.raises(SendRefused):
+            asyncio.run(answers.to_work(
+                gated(card.id), caller=_card_tests.LOCAL, resolver=owner.id, text="Use only the 2025 rows",
+            ))
+    finally:
+        card_work._RUNNING.discard(card.id)
+    assert held == []
+
+
+def test_a_join_that_fails_before_it_lands_is_tried_again(
+    db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sqlite3
+
+    async def redirect(*_a: Any, **_k: Any) -> bool:
+        return True
+
+    monkeypatch.setattr(card_work, "redirect", redirect)
+    mailbox = FakeInbox()
+    mailbox.add(_msg("m1", "t1", minutes_ago=50, text="Can you sort my renewals? I will send you last year's list."))
+    _scan(owner, mailbox)
+    card = inbox.open_cards(owner.id)[0]
+    models["verdicts"]["<their_open_email>"] = {
+        "needs_reply": False, "kind": "fyi", "asked_of_them": True, "confidence": 0.9, "continues_open": True,
+    }
+    mailbox.add(_msg("m2", "t2", minutes_ago=40, text="Here it is."))
+    real = ledger.update_open_payload
+
+    def locked(*_a: Any, **_k: Any) -> bool:
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(ledger, "update_open_payload", locked)
+    _scan(owner, mailbox)
+    assert card_work.threads(inbox.card_payload(_fresh(card))) == ["t1"]
+    monkeypatch.setattr(ledger, "update_open_payload", real)
+    _scan(owner, mailbox)
+    assert card_work.threads(inbox.card_payload(_fresh(card))) == ["t1", "t2"]

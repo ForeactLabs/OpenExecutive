@@ -724,13 +724,19 @@ async def to_work(
     hourly limit, then ``card_work.redirect``. False when the card isn't
     waiting any more. Raises ``SendRefused``."""
     from openexecutive.delegation import card_drafts, card_work
-    from openexecutive.memory.decision_ledger import get_decision_instance
 
     card_drafts.owner(instance, caller=caller, resolver=resolver)
-    card_work.take_back(instance.id)
-    instance = get_decision_instance(instance.id) or instance
-    person = card_drafts.check(instance, caller=caller, resolver=resolver)
+    taking = getattr(instance, "gate_mode", "") == "auto_execute" and card_work.running(instance.id)
+    # A reply set to go on its own whose work is still running: checked as
+    # it will be once their words take it back to wait for them, and taken
+    # back only once every check has passed.
+    person = card_drafts.check(
+        instance.model_copy(update={"gate_mode": "propose"}) if taking else instance,
+        caller=caller, resolver=resolver,
+    )
     _check_rate(person.id, now or datetime.now(UTC))
+    if taking:
+        card_work.take_back(instance.id)
     return await card_work.redirect(person, instance.id, text)
 
 

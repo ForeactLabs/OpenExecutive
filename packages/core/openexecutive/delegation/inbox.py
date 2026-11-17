@@ -1381,7 +1381,8 @@ async def join_card(person: Any, client: Any, card: Any, message: Any, thread: A
     email shows on the card as newer mail, and the reply is brought up to
     date with it, by the Executive's work when the card's email asked for
     some, else by a rewrite (``answers.catch_up``). False when the card went
-    meanwhile (the message waits for a later scan). Never raises."""
+    meanwhile (the message waits for a later scan). Raises only before the
+    email is on the card, so the scan tries it again later."""
     from openexecutive.delegation import answers, card_work
     from openexecutive.memory.decision_ledger import (
         STATUS_PROPOSED,
@@ -1389,32 +1390,32 @@ async def join_card(person: Any, client: Any, card: Any, message: Any, thread: A
         update_open_payload,
     )
 
+    joined: dict[str, Any] | None = None
+    for _ in range(3):
+        fresh = get_decision_instance(card.id)
+        if fresh is None or fresh.status != STATUS_PROPOSED:
+            break
+        payload = card_payload(fresh)
+        threads = [t for t in card_work.threads(payload)[1:] if t != thread.id] + [thread.id]
+        since = payload.get(card_work.JOINED_AT_KEY)
+        since = {**since} if isinstance(since, dict) else {}
+        since[thread.id] = str(message.received_at or "")
+        changed = {
+            **payload, card_work.JOINED_KEY: threads,
+            card_work.JOINED_AT_KEY: {t: since.get(t, "") for t in threads},
+        }
+        if update_open_payload(card.id, changed, expected_json=fresh.proposed_payload_json):
+            joined = changed
+            break
+    if joined is None:
+        _retry_later(person.id, message.id, "card_gone", count=False)
+        return False
+    _set_outcome(person.id, message.id, DRAFTED, decision_id=card.id)
+    _note_mail(person.id, message, relation=str(joined.get("relation") or ""), card_id=card.id)
+    _audit("delegation_reply_joined", f"Put a newer email on person {person.id}'s reply card", {
+        "person_id": person.id, "decision_id": card.id, "thread_id": thread.id,
+    })
     try:
-        joined: dict[str, Any] | None = None
-        for _ in range(3):
-            fresh = get_decision_instance(card.id)
-            if fresh is None or fresh.status != STATUS_PROPOSED:
-                break
-            payload = card_payload(fresh)
-            threads = [t for t in card_work.threads(payload)[1:] if t != thread.id] + [thread.id]
-            since = payload.get(card_work.JOINED_AT_KEY)
-            since = {**since} if isinstance(since, dict) else {}
-            since[thread.id] = str(message.received_at or "")
-            changed = {
-                **payload, card_work.JOINED_KEY: threads,
-                card_work.JOINED_AT_KEY: {t: since.get(t, "") for t in threads},
-            }
-            if update_open_payload(card.id, changed, expected_json=fresh.proposed_payload_json):
-                joined = changed
-                break
-        if joined is None:
-            _retry_later(person.id, message.id, "card_gone", count=False)
-            return False
-        _set_outcome(person.id, message.id, DRAFTED, decision_id=card.id)
-        _note_mail(person.id, message, relation=str(joined.get("relation") or ""), card_id=card.id)
-        _audit("delegation_reply_joined", f"Put a newer email on person {person.id}'s reply card", {
-            "person_id": person.id, "decision_id": card.id, "thread_id": thread.id,
-        })
         working = card_work.running(card.id) or joined.get(card_work.WORK_KEY) == card_work.DONE
         if working or card_work.wanted(joined):
             # The work reads every email of the card: it starts again with

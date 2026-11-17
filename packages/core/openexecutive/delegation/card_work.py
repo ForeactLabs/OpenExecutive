@@ -45,7 +45,6 @@ them. Files of cards that closed are dropped on the next run (``_prune``).
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 import sqlite3
 from datetime import UTC, datetime
@@ -100,6 +99,9 @@ _ENDING: dict[int, str] = {}
 # Runs that already handed their result back (apply): what is left of them
 # (settling, a send on its own) is never cut off by Stop or new words.
 _HANDED: set[int] = set()
+# Cards whose run is ending for a new one (``redirect``): what the run
+# ending wrote never goes on its own, since the new run decides.
+_NEXT: set[int] = set()
 CHANGED = "changed"
 NEWER = "newer"  # a run ended because a newer email joined the card
 
@@ -371,23 +373,25 @@ async def redirect(person: Any, card_id: int, ask: str, *, gmail: Any = None) ->
     """Do the work on ``card_id`` the way ``ask`` says: a run going now
     ends (shown as stopped, with what it did), and a new one starts with
     their words. False when the card isn't waiting."""
-    take_back(card_id)
     task = _TASK.get(card_id)
     if task is not None and not task.done() and card_id in _RUNNING:
-        if card_id not in _HANDED:
-            # Their words, or (no words) a newer email that joined the card.
-            _ENDING[card_id] = CHANGED if ask.strip() else NEWER
-            task.cancel()
-        # A run that handed back already finishes settling first.
-        await ended(card_id)
+        _NEXT.add(card_id)
+        try:
+            if card_id not in _HANDED:
+                # Their words, or (no words) a newer email that joined the card.
+                _ENDING[card_id] = CHANGED if ask.strip() else NEWER
+                task.cancel()
+            # A run that handed back already finishes settling first, sending
+            # nothing on its own: the new run decides.
+            await ended(card_id)
+        finally:
+            _NEXT.discard(card_id)
     return start(person, card_id, gmail=gmail, ask=ask)
 
 
 def take_back(card_id: int) -> None:
     """A reply set to go on its own whose work is still running waits on its
-    card for the person instead: whatever comes next (their words, a newer
-    email that joined) changes the work, so what it wrote before never goes
-    out on its own, even from a run that already handed back."""
+    card for the person instead (their words for the work: they are on it)."""
     if card_id in _RUNNING:
         _hand_back_unfinished(card_id)
 
@@ -397,8 +401,7 @@ async def ended(card_id: int, *, timeout: float = 10) -> None:
     task = _TASK.get(card_id)
     if task is None or task.done():
         return
-    with contextlib.suppress(asyncio.CancelledError, TimeoutError):
-        await asyncio.wait({task}, timeout=timeout)
+    await asyncio.wait({task}, timeout=timeout)
 
 
 def start(person: Any, card_id: int, *, gmail: Any = None, ask: str = "") -> bool:
@@ -585,7 +588,9 @@ def _close(card_id: int) -> None:
             **_end_turn(p, state=STUCK, text="I stopped before finishing.", choices=[TRY_AGAIN]),
             WORK_KEY: "",
         })
-    if ended is not None:
+    if ended is not None and ending != NEWER:
+        # A run ended for a newer email leaves the card as it was: the new
+        # run's own ending decides whether the reply goes on its own.
         _hand_back_unfinished(card_id)
 
 async def apply(
@@ -727,6 +732,8 @@ async def _after(person: Any, card_id: int, *, gmail: Any) -> None:
         card = get_decision_instance(card_id)
         if card is None or card.status != STATUS_PROPOSED or getattr(card, "gate_mode", "") != "auto_execute":
             return
+        if card_id in _NEXT:
+            return  # a new run is about to start on it
         payload = card_payload(card)
         if payload.get(WORK_KEY) == DONE and payload.get("relation") not in handle_it.KNOWN_RELATIONS:
             # What the work made from their data goes on its own only to
