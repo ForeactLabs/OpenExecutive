@@ -1,4 +1,4 @@
-"""Act as me: the daily limit on drafts written as one person, from chat
+"""Act as me: the most drafts a day written as one person, from chat
 (``ghostwrite_email``), follow-ups and workflow sends.
 
 ``DELEGATION_MAX_DRAFTS_PER_DAY`` a UTC day, counted from ``delegation_drafts``
