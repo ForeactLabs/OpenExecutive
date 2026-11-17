@@ -106,7 +106,7 @@ def test_the_speaker_ends_with_the_approved_step_and_stays_in_it(team: SimpleNam
         await asyncio.sleep(0.005)
         return people_tools.approved_speaker()
 
-    async def both() -> tuple[int | None, object]:
-        return await asyncio.gather(card(), other_turn())
+    async def both() -> list[object]:
+        return list(await asyncio.gather(card(), other_turn()))
 
-    assert asyncio.run(both()) == (team.sara, None)
+    assert list(asyncio.run(both())) == [team.sara, None]
