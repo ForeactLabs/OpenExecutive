@@ -668,7 +668,8 @@ async def delete_workspace_and_reset_client(workspace_id: str | None = None) -> 
 
 # Outcomes where no call to Honcho was made: it is turned off, or the turn
 # has no person or department to key it on. Logging them wrote a row on every
-# turn that said nothing happened, so they are not logged.
+# turn that said nothing happened, so they are not logged. A workspace reset
+# is rare and run by an operator, so a skipped one still logs.
 _NOOP_OUTCOMES = frozenset({"disabled", "no_person", "no_department"})
 
 
@@ -694,7 +695,7 @@ def _emit_peer_memory(
     ``set_turn`` ContextVar so the row groups with the rest of the turn
     in the flow chart.
     """
-    if outcome in _NOOP_OUTCOMES:
+    if outcome in _NOOP_OUTCOMES and op != "workspace_reset":
         return
     payload: dict[str, Any] = {
         "op": op,

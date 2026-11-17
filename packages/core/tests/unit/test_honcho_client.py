@@ -640,7 +640,9 @@ def test_delete_workspace_disabled_noop(monkeypatch: pytest.MonkeyPatch) -> None
 
     assert sdk_calls == [], "SDK delete_workspace must not be called when disabled"
     peer_rows = [r for r in captured if r["event_type"] == "peer_memory"]
-    assert peer_rows == []  # a no-op writes no row
+    assert len(peer_rows) == 1  # a skipped reset still logs
+    assert peer_rows[0]["details"]["op"] == "workspace_reset"
+    assert peer_rows[0]["details"]["outcome"] == "disabled"
 
 
 def test_delete_workspace_calls_sdk_and_clears_cache(
