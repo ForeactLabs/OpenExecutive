@@ -666,6 +666,12 @@ async def delete_workspace_and_reset_client(workspace_id: str | None = None) -> 
         _drop_cached_clients()
 
 
+# Outcomes where no call to Honcho was made: it is turned off, or the turn
+# has no person or department to key it on. Logging them wrote a row on every
+# turn that said nothing happened, so they are not logged.
+_NOOP_OUTCOMES = frozenset({"disabled", "no_person", "no_department"})
+
+
 def _emit_peer_memory(
     *,
     op: str,
@@ -681,12 +687,15 @@ def _emit_peer_memory(
     call site (prefetch, sync_turn, directional_chat, and the
     department-keyed analogs). ``op`` distinguishes the call type;
     ``outcome`` is one of
-    ``ok|timeout|error|disabled|no_person|no_department|no_loop|empty``.
+    ``ok|timeout|error|no_loop|empty``; the no-op outcomes in
+    ``_NOOP_OUTCOMES`` (``disabled|no_person|no_department``) write no row.
     Department-keyed ops pass ``department_slug``; person-only ops leave
     it None. session_id / turn_id come from the orchestrator's
     ``set_turn`` ContextVar so the row groups with the rest of the turn
     in the flow chart.
     """
+    if outcome in _NOOP_OUTCOMES:
+        return
     payload: dict[str, Any] = {
         "op": op,
         "person_id": person_id,
