@@ -316,3 +316,37 @@ def test_names_are_not_kept_from_a_turn_private_to_the_principal() -> None:
     private = Session(session_id="s2", caller_person_id=1)
     private.private_to_principal = True
     assert drive_reads.may_remember_names(private) is False
+
+
+_INFO = 'Spreadsheet: "Launch tracker" (ID: 1mOCHqPWC2OZT9I0QBsk)\nSheets (1):\n  - "Sheet1" (ID: 0) | Size: 13x6'
+
+
+def _read_info_through_gateway() -> None:
+    asyncio.run(_gateway(_INFO).call_tool(
+        {"name": "google_workspace__get_spreadsheet_info", "arguments": {"spreadsheet_id": "1mOCHqPWC2OZT9I0QBsk"}}
+    ))
+
+
+def test_gateway_keeps_a_file_name_from_drive(db: Path, bound_session: Session) -> None:
+    _read_info_through_gateway()
+    assert drive_reads.name_of("1mOCHqPWC2OZT9I0QBsk") == "Launch tracker"
+
+
+def test_gateway_keeps_no_file_name_from_a_private_turn(db: Path) -> None:
+    session = Session(session_id="s-private", caller_person_id=7)
+    session.private_to_principal = True
+    token = current_session.set(session)
+    try:
+        _read_info_through_gateway()
+    finally:
+        current_session.reset(token)
+    assert drive_reads.name_of("1mOCHqPWC2OZT9I0QBsk") == ""
+
+
+def test_gateway_keeps_no_name_of_a_hidden_saved_file(db: Path, bound_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.orchestrator import mcp_gateway
+
+    view = mcp_gateway._SavedView(frozenset({"1mOCHqPWC2OZT9I0QBsk"}), frozenset())
+    monkeypatch.setattr(mcp_gateway, "_saved_files_hidden", lambda _name: view)
+    _read_info_through_gateway()
+    assert drive_reads.name_of("1mOCHqPWC2OZT9I0QBsk") == ""

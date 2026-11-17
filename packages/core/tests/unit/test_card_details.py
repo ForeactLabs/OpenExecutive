@@ -321,3 +321,8 @@ def test_a_cell_with_a_bar_or_line_break_stays_one_cell() -> None:
 
 def test_a_true_cell_shows_as_the_sheet_will_hold_it() -> None:
     assert card_details._grid([[True, False, "x"]]) == [["TRUE", "FALSE", "x"]]
+
+
+def test_a_doc_edit_with_only_an_end_does_not_claim_the_whole_doc() -> None:
+    change = card_details.doc_change("google_workspace__modify_doc_text", {"end_index": 24, "text": "hello"})
+    assert change == "Replace up to character 24 with the text below"

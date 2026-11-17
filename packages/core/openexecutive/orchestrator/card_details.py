@@ -63,7 +63,7 @@ _LABELS: dict[str, str] = {
 _GOOGLE_LABELS: dict[str, str] = {
     "range_name": "Cells", "range": "Cells", "a1_range": "Cells", "values": "Values",
     "find_text": "Find", "replace_text": "Replace with",
-    "start_index": "From character", "end_index": "To character",
+    "start_index": "From character", "end_index": "To character", "text": "Text",
 }
 
 _FOLDER_KEYS = frozenset({"folder_id", "parent_folder_id", "parent_id", "parents"})
@@ -350,7 +350,8 @@ def doc_change(tool: str, tool_input: dict[str, Any]) -> str:
     start, end = tool_input.get("start_index"), tool_input.get("end_index")
     span = (
         f"characters {start} to {end}" if start is not None and end is not None
-        else f"character {start}" if start is not None else "the doc"
+        else f"character {start}" if start is not None
+        else f"up to character {end}" if end is not None else "the doc"
     )
     text = tool_input.get("text")
     if isinstance(text, str) and text:
