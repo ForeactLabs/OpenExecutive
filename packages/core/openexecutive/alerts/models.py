@@ -165,6 +165,12 @@ class AlertEvent(BaseModel):
     # turn asked, and never goes out as a company-wide broadcast — a person
     # or department only (alerts/pipeline.py).
     raised_by: str = ""
+    # Set only by the create_alert tool: the Executive itself chose to raise
+    # this card. When review makes no decision on it (the call failed, or its
+    # answer was cut off), the card is kept as raised instead of dropped
+    # (agents.triage). Other events (chat lines, polled mail, monitors) keep
+    # the quiet fallback.
+    from_executive: bool = False
     # A message passed on to one person (``message_person`` with no chat
     # app to reach them): the card shows the subject and body as written,
     # with no triage rewrite, so nothing from other cards is added to what
