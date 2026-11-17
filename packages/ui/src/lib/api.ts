@@ -4699,8 +4699,8 @@ export async function unloadFixture(): Promise<UnloadResult> {
 export interface ResetResult {
   reset: boolean;
   departments_seeded: number;
-  episodic_cleared: Record<string, number>;
-  people_cleared: Record<string, number>;
+  /** Rows deleted per table. */
+  cleared: Record<string, number>;
 }
 
 export async function resetAllState(): Promise<ResetResult> {

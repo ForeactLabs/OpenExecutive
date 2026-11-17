@@ -886,8 +886,12 @@ def _check_attachment_urls(tool: str, arguments: dict[str, Any]) -> str | None:
     )
 
 
-def _roster_allow_set() -> RosterAllow:
+def _roster_allow_set(*, goes: bool = False) -> RosterAllow:
     """The set of lowercased addresses the Executive may reach outbound.
+
+    ``goes``: for a send or an invite, who a company Goes rule lets go
+    counts too (``_goes_rules_apply``). Never for a share: a share always
+    waits, whatever a Goes rule says (``take_the_lead._GOES_KINDS``).
 
     Derived from the People roster plus the Executive's own address — the single
     egress allow-list shared by the Gmail, Calendar, and Drive gates so they
@@ -916,10 +920,37 @@ def _roster_allow_set() -> RosterAllow:
     # Nobody added (or given a new address) this turn until the next one: a
     # contact planted and used in one turn would pass every check below.
     everyone = [p for p in everyone if not outside_content.added_this_turn(p.id)]
+    extra, any_at = [settings.exec_email_address], frozenset[str]()
+    if goes and not private_turn_holds() and _goes_rules_apply():
+        # Who a Goes rule lets go is not someone new (take_the_lead.goes_reach).
+        from openexecutive.orchestrator import take_the_lead
+
+        addresses, any_at = take_the_lead.goes_reach()
+        extra = [*extra, *sorted(addresses)]
     # Primary addresses and aliases exactly; for a teammate, also their
     # local part on the company's own domains (people.identity) — the same
     # rule inbound mail is matched by.
-    return RosterAllow(everyone, extra=[settings.exec_email_address])
+    return RosterAllow(everyone, extra=extra, any_at=any_at)
+
+
+def _goes_rules_apply() -> bool:
+    """Whether the Goes rules count for the step in progress: on Balanced,
+    on a turn someone on People is in whose words are their own. Never on a
+    turn whose words may be someone else's (``outside_mode._someone_else``)
+    or that read anything from outside (``outside_content``), nor with no
+    turn in progress. Never raises: an error is no."""
+    try:
+        from openexecutive.orchestrator import levels, outside_content, outside_mode
+        from openexecutive.orchestrator.schedule_tools import current_session
+
+        session = current_session.get()
+        state = outside_content.current()
+        if session is None or state is None or state.read or outside_mode._someone_else(session):
+            return False
+        return levels.turn_level(session) == outside_mode.OUTSIDERS
+    except Exception:
+        logger.warning("mcp_gateway: couldn't tell whether the Goes rules count", exc_info=True)
+        return False
 
 
 # The one send that may reach an address off the roster: the fixed
@@ -1699,7 +1730,7 @@ def _check_gmail_recipients(tool: str, arguments: dict[str, Any]) -> str | None:
     # People roster or to its own exec address. Used to be a static env
     # allowlist; now derived from the People table so it stays in sync
     # with channel access. Contacts only on the principal's own turns.
-    allow = _roster_allow_set()
+    allow = _roster_allow_set(goes=True)
 
     for field in _GMAIL_RECIPIENT_FIELDS:
         value = arguments.get(field)
@@ -1761,7 +1792,7 @@ def _check_calendar_attendees(tool: str, arguments: dict[str, Any]) -> str | Non
     if all(isinstance(v, list) and len(v) == 0 for v in supplied):
         return None
 
-    allow = _roster_allow_set()
+    allow = _roster_allow_set(goes=True)
 
     # attendees may be a list of strings (emails) or dicts with an "email" key.
     items: list[Any] = []
@@ -2088,7 +2119,7 @@ def _check_m365_recipients(tool: str, arguments: dict[str, Any]) -> str | None:
     Returns None to allow, else the JSON error string from `_block` (which also
     writes the `integration_outbound_blocked` audit row).
     """
-    allow = _roster_allow_set()
+    allow = _roster_allow_set(goes=True)
     for s in _iter_arg_strings_skipping(arguments, _M365_FREE_TEXT_KEYS):
         if _ODATA_ANNOTATION_KEY_RE.fullmatch(s):
             continue
@@ -2249,7 +2280,7 @@ async def _check_m365_referenced_event(
             "eventId", event_id, tool,
             reason=f"event {event_id!r} names no recipient for {tool} to notify — refusing.",
         )
-    allow = _roster_allow_set()
+    allow = _roster_allow_set(goes=True)
     for addr in implied:
         blocked = _block_unless_rostered(addr, tool, allow)
         if blocked is not None:
@@ -2284,7 +2315,7 @@ async def _check_m365_event_delete(
             "eventId", event_id, tool,
             reason=f"could not read event {event_id!r} to roster-check who {tool} would notify — refusing.",
         )
-    allow = _roster_allow_set()
+    allow = _roster_allow_set(goes=True)
     for addr in _m365_recipient_addresses(_ci_get(event, "attendees")):
         blocked = _block_unless_rostered(addr, tool, allow)
         if blocked is not None:
@@ -3091,7 +3122,7 @@ async def _check_m365_referenced_message(
             "messageId", message_id, tool,
             reason=f"message {message_id!r} names no recipient for {tool} to address — refusing.",
         )
-    allow = _roster_allow_set()
+    allow = _roster_allow_set(goes=True)
     for addr in implied:
         blocked = _block_unless_rostered(addr, tool, allow)
         if blocked is not None:

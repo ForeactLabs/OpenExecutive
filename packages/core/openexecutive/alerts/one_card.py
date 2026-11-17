@@ -57,6 +57,16 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _OPEN = ("unread", "read")
+
+
+def _open(alias: str = "a", *, shown: bool = False) -> str:
+    """SQL for an open card: unread or read. ``shown``: and not put away
+    (``archived_at``), so its reader still sees it. Only a card they see is
+    one to join; one put away is still replaced, so its step never waits on."""
+    col = f"{alias}." if alias else ""
+    statuses = ",".join(f"'{s}'" for s in _OPEN)
+    hidden = f" AND {col}archived_at IS NULL" if shown else ""
+    return f"{col}status IN ({statuses}){hidden}"
 # Where a held step's Approve card comes from (``decision_ledger``).
 _APPROVE_SOURCE = "decision_scheduling"
 _THEN = "\n\nThen: "
@@ -436,9 +446,8 @@ def _replace(older: _Card, newer: _Card, path: Path) -> None:
     with contextlib.closing(_conn(path)) as conn, conn:
         # Opened already or not, its Approve would point at a closed decision.
         conn.execute(
-            f"UPDATE alerts SET superseded_by_alert_id = ?, status = 'dismissed' "
-            f"WHERE id = ? AND status IN ({','.join('?' * len(_OPEN))})",
-            (newer.id, older.id, *_OPEN),
+            f"UPDATE alerts SET superseded_by_alert_id = ?, status = 'dismissed' WHERE id = ? AND {_open('')}",
+            (newer.id, older.id),
         )
         # What had joined the older card moves to the newer one with it.
         old = conn.execute("SELECT body, severity FROM alerts WHERE id = ?", (older.id,)).fetchone()
@@ -535,20 +544,26 @@ def _place(alert_id: int, db_path: Path | None) -> int:
             return alert_id
         own_action = {
             int(r["id"]) for r in conn.execute(
-                f"SELECT id FROM alerts WHERE needs = ? AND status IN ({','.join('?' * len(_OPEN))})",
-                (_OWN_ACTION, *_OPEN),
+                f"SELECT id FROM alerts WHERE needs = ? AND {_open('')}",
+                (_OWN_ACTION,),
             ).fetchall()
         }
         others = [
             other for other in (
                 _card(r) for r in conn.execute(
-                    _SELECT + f"WHERE t.reader = ? AND a.id != ? AND a.status IN ({','.join('?' * len(_OPEN))}) "
-                    "ORDER BY t.created_at, a.id",
-                    (card.reader, alert_id, *_OPEN),
+                    _SELECT + f"WHERE t.reader = ? AND a.id != ? AND {_open()} ORDER BY t.created_at, a.id",
+                    (card.reader, alert_id),
                 ).fetchall()
             )
             if other.id not in own_action
         ]
+        ids = [o.id for o in others]
+        put_away = {
+            int(r["id"]) for r in conn.execute(
+                f"SELECT id FROM alerts WHERE archived_at IS NOT NULL AND id IN ({','.join('?' * len(ids))})",
+                ids,
+            ).fetchall()
+        } if ids else set()
         if card.approve and card.thread:
             # A newer send to the same people on the same thread, asked on a
             # turn with the same person, replaces the one waiting.
@@ -556,7 +571,7 @@ def _place(alert_id: int, db_path: Path | None) -> int:
                 o for o in others
                 if o.approve and (o.thread, o.step, o.person) == (card.thread, card.step, card.person)
             ]
-        same = [o for o in others if o not in replaced and _same_topic(card, o, joins)]
+        same = [o for o in others if o not in replaced and o.id not in put_away and _same_topic(card, o, joins)]
         into = card
         if card.approve:
             for other in same:
@@ -587,8 +602,8 @@ def approve_waiting(thread: str, *, reader: str, step: str, db_path: Path | None
         with contextlib.closing(_conn(path)) as conn:
             row = conn.execute(
                 _SELECT + f"WHERE t.reader = ? AND t.thread = ? AND t.step = ? AND t.decision_id IS NOT NULL "
-                f"AND a.status IN ({','.join('?' * len(_OPEN))}) LIMIT 1",
-                (reader, _conversation(conn, thread), step, *_OPEN),
+                f"AND {_open()} LIMIT 1",
+                (reader, _conversation(conn, thread), step),
             ).fetchone()
         return row is not None
     except Exception:  # noqa: BLE001
@@ -618,8 +633,8 @@ def open_cards_from(
                 f"WHERE t.person = ? AND t.reader = ? AND t.turn != ? AND a.needs != ? "
                 # A teammate's own message joins nothing the Executive wrote.
                 f"AND t.thread NOT LIKE '{_OWN_MESSAGE}%' "
-                f"AND a.status IN ({','.join('?' * len(_OPEN))}) ORDER BY t.created_at, a.id LIMIT 10",
-                (person, reader, turn, _OWN_ACTION, *_OPEN),
+                f"AND {_open(shown=True)} ORDER BY t.created_at, a.id LIMIT 10",
+                (person, reader, turn, _OWN_ACTION),
             ).fetchall()
         return [(int(r["id"]), str(r["headline"] or ""), str(r["question"] or "")) for r in rows]
     except Exception:  # noqa: BLE001

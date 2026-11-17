@@ -32,6 +32,17 @@ class FeatureSpec:
     # natively and OpenRouter parses one for any model; a self-hosted
     # OpenAI-compatible server usually cannot (LOCAL_PDF_INPUT says it can).
     supports_pdf_input: bool = True
+    # The most output a request may ask for (``max_tokens``); None = no cap.
+    # A self-hosted server can refuse a request whose prompt plus
+    # ``max_tokens`` exceeds its context (LOCAL_MAX_OUTPUT_TOKENS).
+    max_output_tokens: int | None = None
+
+
+# What a non-Claude model is asked to write at most. Hosted models cap their
+# output at different limits (gpt-4o at 16,384) and refuse a larger request.
+# 16,000 is what the PDF reader and the fixture generator already ask of them,
+# so the cap never lowers a request those callers made before.
+NON_CLAUDE_MAX_OUTPUT_TOKENS = 16_000
 
 
 # Claude models that reject a forced ``tool_choice`` (``any`` or a named
@@ -128,6 +139,7 @@ def apply_feature_gates(spec: FeatureSpec, kwargs: dict[str, Any]) -> dict[str, 
         and spec.supports_web_search
         and spec.supports_tool_use
         and spec.supports_pdf_input
+        and _fits_output_cap(spec, kwargs)
     ):
         # Fast path: nothing to strip.
         return kwargs
@@ -151,7 +163,15 @@ def apply_feature_gates(spec: FeatureSpec, kwargs: dict[str, Any]) -> dict[str, 
     if not spec.supports_pdf_input:
         _replace_documents(out)
 
+    if not _fits_output_cap(spec, out):
+        out["max_tokens"] = spec.max_output_tokens
+
     return out
+
+
+def _fits_output_cap(spec: FeatureSpec, kwargs: dict[str, Any]) -> bool:
+    asked = kwargs.get("max_tokens")
+    return spec.max_output_tokens is None or not isinstance(asked, int) or asked <= spec.max_output_tokens
 
 
 def _strip_cache_control(kwargs: dict[str, Any]) -> None:

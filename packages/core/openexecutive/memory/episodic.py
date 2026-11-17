@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import sqlite3
@@ -1652,6 +1653,57 @@ def requeue_orphaned_running(db_path: Path | None = None) -> int:
             "UPDATE scheduled_actions SET status = 'pending' WHERE status = 'running'"
         )
         return int(cursor.rowcount)
+
+
+# How late a restored job may still run. A copy back after a short time
+# away (the overnight client rotation puts the active client back within the
+# hour, its queue paused meanwhile) keeps its jobs and they run a little
+# late; one that sat for longer would fire them long past their point (a
+# days-old follow-up, a morning brief in the afternoon).
+RESTORED_LATE_GRACE = timedelta(hours=6)
+
+
+def settle_restored_queue(
+    db_path: Path | None = None, *, in_flight: Collection[tuple[int, str, str]] = ()
+) -> int:
+    """Settle the job queue of a database copy that was just made live.
+
+    A row that was 'running' when the copy was saved ran in this process
+    against the database it replaced, so running it again would do the work
+    twice (a rotation, a send). One whose handler is still going
+    (``in_flight``, matched on id, kind and run_at, since another company's
+    copy can hold the same id) stays 'running': the handler finishes it and
+    chains its next run, and a seed would otherwise chain a second. A 'pending' row more than
+    ``RESTORED_LATE_GRACE`` past its time would fire long late, all of them
+    on the next tick. Both are marked 'cancelled' with the reason; a row
+    still to come, or only a little late, is left to run. The caller seeds
+    the recurring jobs again. Returns the count closed.
+    """
+    resolved = _resolve_db_path(db_path)
+    if not resolved.exists():
+        return 0
+    cutoff = (datetime.now(UTC) - RESTORED_LATE_GRACE).isoformat()
+    live = set(in_flight)
+    with _get_conn(resolved) as conn:
+        stale = [
+            int(row[0]) for row in conn.execute(
+                "SELECT id, kind, run_at FROM scheduled_actions WHERE status = 'running'"
+            ).fetchall()
+            if (int(row[0]), str(row[1]), str(row[2])) not in live
+        ]
+        running = conn.execute(
+            "UPDATE scheduled_actions SET status = 'cancelled', "
+            "last_error = 'was running when this copy was saved' "
+            "WHERE id IN (SELECT value FROM json_each(?))",
+            (json.dumps(stale),),
+        ).rowcount
+        overdue = conn.execute(
+            "UPDATE scheduled_actions SET status = 'cancelled', "
+            "last_error = 'its time passed long before this copy came back' "
+            "WHERE status = 'pending' AND run_at <= ?",
+            (cutoff,),
+        ).rowcount
+        return int(running) + int(overdue)
 
 
 def claim_due_actions(

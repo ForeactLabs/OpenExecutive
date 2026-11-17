@@ -3895,7 +3895,7 @@ attunement:
     reset: |
       Loops live in scheduled_actions and attribution in chat_messages (both
       already wiped by client-slot switches and reset_all_state);
-      `attunement_usage` added to `_BLANK_WIPE_TABLES` and reset_all_state.
+      `attunement_usage` added to the blank-slot sweep and reset_all_state.
     tests: |
       tests/conftest.py no-ops `schedule_open_loop_pass` for every test so
       Executive turns don't call a provider or write default-DB rows; tests
@@ -4279,7 +4279,7 @@ departments:
     optional in the PUT body like timezone, null/blank clears one). GET
     stays open, but returns the role only to a caller the PUT would accept
     (_caller_is_principal_or_unclaimed) and nulls to anyone else. Per company: blank
-    client slots wipe it (clients.slots._BLANK_WIPE_TABLES), saved slots
+    client slots wipe it (the blank-slot sweep (clients.slots._wipe_per_client_tables)), saved slots
     carry it in state.db, and the factory reset returns it to the defaults
     before re-bootstrapping. Fixtures: `_apply_state_from_source` reads and
     validates the source's optional workspace.yaml before swapping anything
@@ -4291,8 +4291,8 @@ departments:
     it becomes the `workspace` key of the POST /fixtures/{name}/load and
     /fixtures/unload responses, which do not check the caller); the user snapshot
     writes one (every field, so the role round-trips), and a load while the live state is the user's own (no fixture, no
-    client active) rewrites `_user_backup/workspace.yaml` even when an
-    older backup is reused — unload keeps `_user_backup`; an unload from a
+    client active) takes the whole snapshot again, so an older backup is
+    never reused — unload keeps `_user_backup`; an unload from a
     backup with no workspace.yaml (one that predates it) leaves the current
     settings as they are instead of resetting them. The
     lifespan skips check_org_completeness in solo (it only warns about
@@ -4840,7 +4840,7 @@ people:
     - Caps: ROSTER_ACK_WINDOW_DAYS=7, ROSTER_ACK_DAILY_CAP=20,
       ROSTER_REQUEST_DAILY_CAP=30, ROSTER_REQUEST_TTL_DAYS=14 (config.py),
       MAX_HELD_MESSAGES=10, DECLINE_QUIET_DAYS=30.
-    - Wiped on a company swap: `clients.slots._BLANK_WIPE_TABLES`,
+    - Wiped on a company swap: `the blank-slot sweep (clients.slots._wipe_per_client_tables)`,
       `fixture_loader.reset_all_state` and `_seed_people` (with
       `person_emails`, children first).
   registry: openexecutive.people.registry — in-memory cache + lookup
@@ -5399,6 +5399,28 @@ today:
     Read-side only — no writes happen here.
 
 chat:
+  round_cut_off: |
+    Each Executive round (and the committee revision) may write
+    MAX_OUTPUT_TOKENS (32,000; was 8192) in orchestrator/executive.py. A
+    round that reaches it (stop_reason max_tokens) no longer ends the turn:
+    the tool call it was still writing (the last one) is answered with
+    CUT_OFF_RESULT and never runs, since its input is unfinished; with no
+    call left (cut reply text, or a call the provider dropped whole) the
+    loop adds CUT_OFF_NOTE and carries on. The round's activity label is
+    CUT_OFF_LABEL ("Writing it in shorter parts…"), so a card's step list
+    names the real stop. Why: a reply card writing a long spreadsheet as one
+    draft_artifact call was cut at 8192 twice and showed "couldn't finish"
+    with the mark on the read before it. After MAX_CUT_ROUNDS (3) cut
+    rounds in a row the turn ends as written. The last round (no tools) keeps
+    what it wrote. A call whose block closed before the cut (cut in the
+    text after it) is whole and runs as usual. Only Claude is asked for
+    32,000: every non-Claude FeatureSpec (OpenRouter, OpenAI, unknown slugs)
+    carries NON_CLAUDE_MAX_OUTPUT_TOKENS (16,000, what the PDF reader already asked), since hosted models cap
+    output differently (gpt-4o at 16,384) and refuse more. A self-hosted
+    model gets at most LOCAL_MAX_OUTPUT_TOKENS (default 8192, 0 = no cap): the local
+    FeatureSpec's max_output_tokens, which providers.feature_gate applies
+    by lowering max_tokens, since vLLM-style servers refuse prompt +
+    max_tokens over the model's context.
   chats_preview: |
     GET /sessions (no q) gives each chat a preview: the last message as
     one plain line (Markdown marks stripped, cut at a word near 120
@@ -8571,7 +8593,7 @@ integrations:
       • A department's Slack/Discord pickers pre-select the room named most
         like the department (lib/chatDirectory.closestOption in the UI);
         saved only when the person presses Save.
-      • telegram_chats is per company: clients.slots._BLANK_WIPE_TABLES.
+      • telegram_chats is per company: the blank-slot sweep (clients.slots._wipe_per_client_tables).
   chat_app_conversations: |
     A Telegram chat, a Slack or Discord DM and a person's @mentions in
     one channel are each one endless stream with a fixed base id
@@ -10472,7 +10494,7 @@ company_onboarding:
     evicts it; a store failure is a warning, never a failed turn. Every
     store call also sweeps expired and over-cap rows, PRAGMA secure_delete
     zeroes deleted pages, and a blank client slot wipes the table
-    (clients/slots._BLANK_WIPE_TABLES). A session belongs to whoever
+    (the blank-slot sweep). A session belongs to whoever
     started it (InterviewSession.owner_key = api_caller.identity_key):
     every read or turn by another caller is the same 404 an unknown id
     gets, since the id alone is no longer a capability once sessions
@@ -10839,7 +10861,7 @@ clients:
     THREE paths swap live company state and each kept its own hand-written
     table list, which is why fixing one left the leak live in the other two.
     They now all consume `cli.fixture_loader.PER_CLIENT_CACHE_TABLES`:
-    `clients.slots._BLANK_WIPE_TABLES` (switch into a blank/seed slot),
+    `the blank-slot sweep (clients.slots._wipe_per_client_tables)` (switch into a blank/seed slot),
     `reset_all_state` (factory reset), and `_apply_state_from_source` (fixture
     load AND unload — the worst surface, since a demo is what gets
     screen-shared). The fixture-path wipe sits in `_apply_state_from_source`
@@ -10850,20 +10872,12 @@ clients:
     Client→client switching into a slot that HAS state.db was already safe:
     the sqlite backup API truncates the destination to an exact copy.
     Add any new per-company cache table to that constant, once.
-    Graded as NOT wiped: generated_fixtures (operator-level, see
-    _GLOBAL_TABLES) and architecture_sections (repo-derived, keyed by a hash of
-    the facts file). Still UNGRADED, deliberately deferred: dynamic_workflows
-    and eval_scenarios. These ARE client-scoped — the non-blank path already
-    swaps them with the whole DB — and on the blank path the outgoing client's
-    workflow definitions stay registered AND active (`list_definitions(
-    active_only=True)`), runnable against the incoming client's data, with full
-    bodies exposed via /workflows. They are not in the wipe list because they
-    are authored, not derived, and `snapshot_user_state` (the first-activation
-    branch, when no client is active) captures only profile/docs/memory.json/
-    people/departments — so wiping them there would irrecoverably delete the
-    operator's own work. The fix is to capture them in that snapshot FIRST,
-    then wipe. Both tables were observed empty on all known installs as of
-    2026-09 — an observation at a point in time, not an invariant to rely on.
+    Graded as NOT wiped: generated_fixtures, executive_control and
+    eval_scenarios (operator-level, see _GLOBAL_TABLES: carried across every
+    switch and unload, kept by a reset) and architecture_sections
+    (repo-derived, keyed by a hash of the facts file). dynamic_workflows is
+    client-scoped: the snapshot now holds the whole database (state.db), so a
+    blank switch sweeps it with every other table and unload brings it back.
   invariants:
     - At most one slot is active; the .active_client sentinel records it
       (allowlist-validated on read, same defence as the fixture sentinel).
@@ -10890,20 +10904,21 @@ clients:
     - workspace_settings (solo/team mode + the user's time zone,
       memory.workspace_settings) is per company, NOT operator-level - a
       saved slot carries its row in state.db and a blank slot's wipe
-      (_BLANK_WIPE_TABLES) returns it to the defaults before the briefs and
+      (the blank-slot sweep) returns it to the defaults before the briefs and
       cadences are re-seeded.
     - Act as me's tables (delegation.schema.TABLES - delegation_settings,
       delegation_voice, delegation_voice_history, delegation_drafts,
       delegation_inbox_watch, delegation_inbox_messages) are per company
-      too - in _BLANK_WIPE_TABLES and reset_all_state - so a blank client
+      too - in the blank-slot sweep and reset_all_state - so a blank client
       starts with it off, no writing profile and no inbox watcher. The
       watcher never scans while a slot is active. The per-person Gmail
       credential is a file outside the slot, re-checked against the live
       roster on every use, and no verbatim exemplars are learned while a
       slot is active.
-    - First activation with no active client auto-snapshots the user's
-      original company to _user_backup (same restore point the fixture
-      switcher uses; POST /fixtures/unload brings it back).
+    - First activation, or a create from current, with no active client
+      snapshots the user's company to _user_backup every time (same restore
+      point the fixture switcher uses; POST /fixtures/unload brings it back).
+      A failed snapshot stops the switch or create.
   honcho: |
     Each client gets a STABLE Honcho workspace override
     (openexec-client-<slug>, no uuid) so per-person peer memory persists
@@ -12426,7 +12441,7 @@ delegation:
     delegation_mail_read, delegation_training, delegation_saved_files and
     delegation_saved_folder (delegation.schema.TABLES) in the episodic DB (created by
     memory.episodic.initialize_db via delegation.schema.ensure_schema); per
-    company — in clients.slots._BLANK_WIPE_TABLES and
+    company — in the blank-slot sweep (clients.slots._wipe_per_client_tables) and
     cli.fixture_loader.reset_all_state. A reply card is a decision_instances
     row (see trust_ledger).
   later_phases: |

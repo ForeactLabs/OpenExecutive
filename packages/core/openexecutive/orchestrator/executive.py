@@ -1239,6 +1239,41 @@ LAST_ROUND_NOTE = (
 )
 
 
+# The most one round of the Executive may write. Claude takes it; every other
+# model gets at most NON_CLAUDE_MAX_OUTPUT_TOKENS, and a self-hosted one
+# LOCAL_MAX_OUTPUT_TOKENS (providers.feature_gate). A round that reaches it is
+# cut off mid-answer (stop_reason "max_tokens"): a long file (a spreadsheet,
+# a document) written as one tool call stopped the whole turn before this was
+# raised from 8192. Every Executive round and the committee revision use it.
+MAX_OUTPUT_TOKENS = 32_000
+
+# Answers a tool call the model was still writing when its round was cut off
+# at MAX_OUTPUT_TOKENS: the call never ran (its input is unfinished), and the
+# turn carries on so it can make it again in a shorter form.
+CUT_OFF_RESULT = (
+    "That call was cut off at the length limit before you finished writing "
+    "it, so it did not run. Make it again in a shorter form, or in smaller "
+    "steps (for example, fewer rows or columns first, then the rest)."
+)
+
+# Said after a round cut off at MAX_OUTPUT_TOKENS with no tool call left to
+# answer (cut in its reply text, or a cut call the provider dropped whole).
+CUT_OFF_NOTE = (
+    "Your last answer was cut off at the length limit before it finished. If "
+    "you were writing a tool call, it did not run: make it again in a shorter "
+    "form, or in smaller steps. If you were writing your reply, carry on from "
+    "where it stopped, without repeating what you already wrote."
+)
+
+# What the person sees for a round that was cut off: the step it was on was
+# writing something long, not the read before it.
+CUT_OFF_LABEL = "Writing it in shorter parts…"
+# Cut rounds in a row a turn carries on through. One more cut than this ends
+# the turn as written: three tries at a shorter form all ran out of room, and
+# each further try would cost another full round.
+MAX_CUT_ROUNDS = 3
+
+
 # Said in place of a round's results when nothing came back to put there (a
 # round the model ended on a tool call the loop had no call for). The API
 # refuses a user message with no content, which would end the whole turn
@@ -2313,7 +2348,7 @@ class Executive:
         revision_final_msg: Any = None
         async with get_provider(effective_model).messages_stream(
             model=effective_model,
-            max_tokens=8192,
+            max_tokens=MAX_OUTPUT_TOKENS,
             system=system_blocks,  # type: ignore[arg-type]
             messages=revision_messages,  # type: ignore[arg-type]
         ) as stream:
@@ -2708,6 +2743,10 @@ class Executive:
         # tool call, then its answer) starts a new paragraph, so the two
         # never run together ("...stock.Yes. ITEM-1...").
         streamed_tail = ""
+        # Set by a round cut off mid-text: the next round's text carries it
+        # on, so that round alone gets no paragraph break before its text.
+        run_on = False
+        cut_rounds = 0
         specialists_consulted: list[str] = []
         # What this turn's tool results have put in the prompt so far: every
         # one is re-sent on each later call.
@@ -2725,6 +2764,9 @@ class Executive:
         # What the after-reply check reads (claim_check): each call with what
         # it was asked to do, since a result's first line rarely says it all.
         claim_calls: list[tuple[str, str]] = []
+        # Reply text of cut rounds the next round carries on: the claim
+        # check reads it with the round that finishes the reply.
+        cut_text = ""
         claim_checked = False
         # Set once the person asks to finish the work themselves: the next
         # round writes up what the turn has, and runs no tool.
@@ -2742,6 +2784,7 @@ class Executive:
             full_text = ""
             # The separator streamed before this round's text (_round_separator).
             round_sep = 0
+            carries_on, run_on = run_on, False
             tool_uses: list[dict[str, Any]] = []
             response_content: list[dict[str, Any]] = []
 
@@ -2789,7 +2832,7 @@ class Executive:
             stream_model = model or self._settings.default_model
             async with get_provider(stream_model).messages_stream(
                 model=stream_model,
-                max_tokens=8192,
+                max_tokens=MAX_OUTPUT_TOKENS,
                 system=system_blocks,  # type: ignore[arg-type]
                 tools=tools_with_cache,  # type: ignore[arg-type,list-item]
                 messages=current_messages,  # type: ignore[arg-type]
@@ -2808,7 +2851,7 @@ class Executive:
                         and hasattr(event.delta, "type")
                         and event.delta.type == "text_delta"
                     ):
-                        if not full_text and streamed_tail and event.delta.text:
+                        if not full_text and streamed_tail and event.delta.text and not carries_on:
                             separator = _round_separator(streamed_tail, event.delta.text)
                             if separator:
                                 yield separator
@@ -2891,7 +2934,45 @@ class Executive:
                         },
                     )
 
-            if final_msg.stop_reason != "tool_use":
+            # Cut off at MAX_OUTPUT_TOKENS mid-answer: carry on rather than
+            # end the turn on half a step. A cut tool call is answered with
+            # CUT_OFF_RESULT below and never runs; cut text gets CUT_OFF_NOTE.
+            # The last round runs no tool, so its reply stands as written,
+            # as does a cut after MAX_CUT_ROUNDS cut rounds in a row.
+            cut_rounds = cut_rounds + 1 if final_msg.stop_reason == "max_tokens" else 0
+            cut_off = (
+                final_msg.stop_reason == "max_tokens"
+                and iteration < max_iterations
+                and cut_rounds <= MAX_CUT_ROUNDS
+            )
+            if cut_off:
+                logger.warning(
+                    "round %d cut off at max_tokens=%d; carrying on", iteration, MAX_OUTPUT_TOKENS,
+                )
+                if not tool_uses:
+                    if not any(b.get("type") == "text" and str(b.get("text", "")).strip() for b in response_content):
+                        # Nothing was said: the step was writing something
+                        # long (a call the provider dropped whole).
+                        yield {"type": "activity", "label": CUT_OFF_LABEL, "tool": "", "iteration": iteration}
+                    if response_content:
+                        current_messages.append({"role": "assistant", "content": response_content})
+                    cut_text += "".join(
+                        str(b.get("text", "")) for b in response_content if b.get("type") == "text"
+                    )
+                    note: list[dict[str, Any]] = [{"type": "text", "text": CUT_OFF_NOTE}]
+                    # The next round is the last and runs no tool: say so, as
+                    # after any other round.
+                    if iteration == max_iterations - 1:
+                        note.append({"type": "text", "text": LAST_ROUND_NOTE})
+                    current_messages.append({"role": "user", "content": note})
+                    # The next round carries on the cut text where it
+                    # stopped: no paragraph break between them
+                    # (_round_separator). A cut that streamed nothing keeps
+                    # the break after earlier rounds' text, and any round
+                    # after the next gets the break as usual.
+                    run_on = bool(full_text)
+                    continue
+            if final_msg.stop_reason != "tool_use" and not cut_off:
                 # A reply with no tool call still gets the queued files and
                 # synced excerpts checked, so what they tried is flagged to
                 # the person (outside_content.settle).
@@ -2915,7 +2996,7 @@ class Executive:
                 if claim_checked or handing_over or iteration >= max_iterations:
                     return
                 claim_checked = True
-                reply_text = "\n".join(
+                reply_text = cut_text + "\n".join(
                     str(b.get("text", "")) for b in response_content if b.get("type") == "text"
                 )
                 claim = await claim_check.unbacked_claim(
@@ -2962,12 +3043,41 @@ class Executive:
                     yield HAND_OVER_EMPTY_REPLY
                 return
 
+            cut_text = ""
             # open_tools is answered here; a use_tool call becomes the call it
             # stands for (same id), so every guard, handler, chip and audit
             # row below sees the tool's own name, as for a direct call.
             # show_progress is answered here too: nothing runs, and the chat
             # gets it before this round's activity label.
             group_results: dict[str, str] = {}
+            # The call the round was still writing when it was cut off is the
+            # last one; its input is unfinished, so nothing reads or runs it.
+            # Only text and calls count as written: a reasoning block that a
+            # translated provider (OpenRouter, OpenAI) puts last is skipped.
+            # A call followed by text or by a call the provider dropped closed
+            # before the cut and runs. A translated provider lists text first,
+            # so its last call always counts as cut and is asked for again.
+            last_written = next(
+                (b for b in reversed(response_content) if b.get("type") in ("text", "tool_use")),
+                None,
+            )
+            cut_id = (
+                tool_uses[-1]["id"]
+                if cut_off and tool_uses and last_written is not None
+                and last_written.get("type") == "tool_use"
+                and last_written.get("id") == tool_uses[-1]["id"]
+                else None
+            )
+            # The cut call's half-written input is never read: drop it from
+            # the history, which every later round sends again.
+            if cut_id is not None and last_written is not None:
+                last_written["input"] = {}
+            # Nothing below sees the cut call (no hand-over ask, no count of
+            # calls made): it only gets CUT_OFF_RESULT, after the others.
+            cut_results: list[dict[str, Any]] = []
+            if cut_id is not None:
+                tool_uses = [tu for tu in tool_uses if tu["id"] != cut_id]
+                cut_results.append({"type": "tool_result", "tool_use_id": cut_id, "content": CUT_OFF_RESULT})
             for i, tu in enumerate(tool_uses):
                 if tu["name"] == turn_progress.SHOW_PROGRESS:
                     result, progress_event, shown_progress = turn_progress.apply(
@@ -3216,7 +3326,8 @@ class Executive:
             try:
                 # The progress call is not what the round is doing.
                 round_work = [
-                    tu for tu in tool_uses if tu["name"] != turn_progress.SHOW_PROGRESS
+                    tu for tu in tool_uses
+                    if tu["name"] != turn_progress.SHOW_PROGRESS
                 ]
                 activity = summarize_activity(round_work, iteration=iteration)
                 # What the round read, by kind, for the card when the turn
@@ -3224,6 +3335,10 @@ class Executive:
                 reads = turn_reads.add(round_work)
                 if activity is not None and reads:
                     activity["reads"] = reads
+                if cut_id is not None:
+                    # The step was writing something long, not the call's own
+                    # kind of work (which never ran).
+                    activity = {**(activity or fallback_activity(iteration=iteration)), "label": CUT_OFF_LABEL}
             except Exception:
                 logger.warning(
                     "activity_label_failed iteration=%d", iteration, exc_info=True
@@ -4068,6 +4183,17 @@ class Executive:
                 )
                 content = tool_images.content(content, images_by_id.get(tu["id"]), sees=sees)
                 tool_results.append({"type": "tool_result", "tool_use_id": tu["id"], "content": content})
+            tool_results.extend(cut_results)
+            # Cut in text written after a call that closed: the call ran, and the
+            # next round carries the text on where it stopped.
+            if cut_off and last_written is not None and last_written.get("type") == "text":
+                tool_results.append({"type": "text", "text": CUT_OFF_NOTE})
+                run_on = True
+                # The claim check reads the cut text with the round that ends it.
+                last_call = max(n for n, blk in enumerate(response_content) if blk.get("type") == "tool_use")
+                cut_text = "".join(
+                    str(blk.get("text", "")) for blk in response_content[last_call + 1:] if blk.get("type") == "text"
+                )
             # Messages the person sent since the last round ride in this
             # round's user message, after the tool results (which must come
             # first). Only this loop's own, newest message changes, so the

@@ -289,6 +289,45 @@ def test_a_scheduled_workflow_run_moves_with_the_zone(monkeypatch: pytest.Monkey
     assert times["on"].endswith(("14:00:00+00:00", "13:00:00+00:00"))  # 9 AM New York
 
 
+def test_a_workflow_whose_run_never_finished_gets_its_next_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A cadence chains its next run when one finishes; a run closed without
+    finishing (a restored copy saved mid-run) must not stop it for good."""
+    from openexecutive.workflows import dynamic_cadence, dynamic_store
+    from openexecutive.workflows.dynamic_models import DynamicWorkflowDef
+
+    def make(name: str, cadence: str = "daily@09:00") -> DynamicWorkflowDef:
+        return DynamicWorkflowDef.model_construct(
+            name=name, title=name, cadence=cadence, cadence_person_id=1, is_active=True
+        )
+
+    defs = [make("closed"), make("pending"), make("running"), make("no_cadence", cadence="")]
+    monkeypatch.setattr(dynamic_store, "list_definitions", lambda **_: defs)
+    for name, status in (("closed", "cancelled"), ("pending", "pending"), ("running", "running")):
+        action_id = episodic.insert_scheduled_action(
+            run_at="2026-11-16T09:00:00+00:00", channel="__internal__", channel_ref=name,
+            intent_text="x", kind="dynamic_workflow",
+        )
+        with episodic._get_conn(episodic.DB_PATH) as conn:
+            conn.execute("UPDATE scheduled_actions SET status = ? WHERE id = ?", (status, action_id))
+    # A queued Run again never chains, so it isn't the cadence's next run.
+    defs.append(make("rerun_only"))
+    rerun_id = episodic.insert_scheduled_action(
+        run_at="2026-11-16T09:00:00+00:00", channel="__internal__", channel_ref="rerun_only",
+        intent_text="x", kind="dynamic_workflow",
+    )
+    with episodic._get_conn(episodic.DB_PATH) as conn:
+        conn.execute("UPDATE scheduled_actions SET scope_key = 'rerun:7' WHERE id = ?", (rerun_id,))
+
+    assert dynamic_cadence.seed_workflow_cadences() == 2
+    with episodic._get_conn(episodic.DB_PATH) as conn:
+        rows = conn.execute(
+            "SELECT channel_ref FROM scheduled_actions WHERE kind = 'dynamic_workflow' "
+            "AND status = 'pending' ORDER BY channel_ref"
+        ).fetchall()
+    assert [r[0] for r in rows] == ["closed", "pending", "rerun_only", "rerun_only"]
+    assert dynamic_cadence.seed_workflow_cadences() == 0  # idempotent
+
+
 def test_check_ins_move_with_the_zone_all_or_nothing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from openexecutive.departments import cadence
     from openexecutive.departments import store as dept_store

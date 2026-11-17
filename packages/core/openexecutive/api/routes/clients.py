@@ -54,8 +54,11 @@ def _raise_for(exc: Exception) -> None:
     from openexecutive.clients.slots import (
         ClientSlotConflictError,
         ClientSlotNotFoundError,
+        ClientSnapshotError,
     )
 
+    if isinstance(exc, ClientSnapshotError):
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
     if isinstance(exc, ClientSlotNotFoundError):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if isinstance(exc, ClientSlotConflictError):
