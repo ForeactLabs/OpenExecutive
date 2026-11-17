@@ -830,3 +830,36 @@ def test_stop_never_cuts_off_a_run_that_already_handed_back(db: Path, owner: Any
     finally:
         card_work._RUNNING.discard(card.id)
     assert card.id not in card_work._HANDED
+
+
+def test_stop_never_cuts_off_the_save_of_a_hand_back(
+    db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mailbox, card = _card(owner)
+    real_save = card_work._save
+
+    async def go() -> bool:
+        saving = asyncio.Event()
+        go_on = asyncio.Event()
+
+        async def slow_save(*a: Any, **k: Any) -> None:
+            await real_save(*a, **k)
+            saving.set()
+            await go_on.wait()  # still tidying the mailbox
+
+        monkeypatch.setattr(card_work, "_save", slow_save)
+        card_work._RUNNING.add(card.id)
+        assert card_work._set_work(card.id, card_work.WORKING)
+        work = asyncio.create_task(card_work.apply(card.id, owner, body="", note="Done.", files=[], gmail=mailbox))
+        card_work._TASK[card.id] = work  # type: ignore[assignment]
+        await saving.wait()
+        stopped = card_work.stop(card.id)
+        go_on.set()
+        await work
+        return stopped
+
+    try:
+        assert asyncio.run(go()) is False
+    finally:
+        card_work._RUNNING.discard(card.id)
+        card_work._TASK.pop(card.id, None)

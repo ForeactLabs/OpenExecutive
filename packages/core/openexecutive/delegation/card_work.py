@@ -629,15 +629,20 @@ async def apply(
     # put back as they were when the reply isn't changed after all.
     before = files_for(card_id)
     _store(card_id, files)
+    # Handed back from here on: Stop and new words can't cut the save (it
+    # writes the card, then tidies the mailbox) or what follows it.
+    handing = card_id in _RUNNING and card_id not in _HANDED
+    if handing:
+        _HANDED.add(card_id)
     try:
         await _save(card, payload, changed, person, files, gmail, rewrote=bool(words) or new_files)
     except BaseException:
         _store(card_id, before)
+        if handing:
+            _HANDED.discard(card_id)
         raise
     from openexecutive.delegation.inbox import _audit
 
-    if card_id in _RUNNING:
-        _HANDED.add(card_id)
     _audit("delegation_reply_work", f"Did what an email asked on person {person.id}'s reply card", {
         "person_id": person.id, "decision_id": card_id, "rewrote": bool(words), "files": len(files),
     })
