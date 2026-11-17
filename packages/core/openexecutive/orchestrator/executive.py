@@ -2756,6 +2756,9 @@ class Executive:
         # What the after-reply check reads (claim_check): each call with what
         # it was asked to do, since a result's first line rarely says it all.
         claim_calls: list[tuple[str, str]] = []
+        # Reply text of cut rounds the next round carries on: the claim
+        # check reads it with the round that finishes the reply.
+        cut_text = ""
         claim_checked = False
         # Set once the person asks to finish the work themselves: the next
         # round writes up what the turn has, and runs no tool.
@@ -2938,6 +2941,9 @@ class Executive:
                         yield {"type": "activity", "label": CUT_OFF_LABEL, "tool": "", "iteration": iteration}
                     if response_content:
                         current_messages.append({"role": "assistant", "content": response_content})
+                    cut_text += "".join(
+                        str(b.get("text", "")) for b in response_content if b.get("type") == "text"
+                    )
                     note: list[dict[str, Any]] = [{"type": "text", "text": CUT_OFF_NOTE}]
                     # The next round is the last and runs no tool: say so, as
                     # after any other round.
@@ -2975,7 +2981,7 @@ class Executive:
                 if claim_checked or handing_over or iteration >= max_iterations:
                     return
                 claim_checked = True
-                reply_text = "\n".join(
+                reply_text = cut_text + "\n".join(
                     str(b.get("text", "")) for b in response_content if b.get("type") == "text"
                 )
                 claim = await claim_check.unbacked_claim(
@@ -3022,6 +3028,7 @@ class Executive:
                     yield HAND_OVER_EMPTY_REPLY
                 return
 
+            cut_text = ""
             # open_tools is answered here; a use_tool call becomes the call it
             # stands for (same id), so every guard, handler, chip and audit
             # row below sees the tool's own name, as for a direct call.

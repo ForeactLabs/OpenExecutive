@@ -209,3 +209,24 @@ def test_a_cut_call_before_a_trailing_reasoning_block_never_runs() -> None:
     results = provider.calls[1]["messages"][-1]["content"]
     answered = {b["tool_use_id"]: b["content"] for b in results if b.get("type") == "tool_result"}
     assert answered["cut"] == CUT_OFF_RESULT
+
+
+def test_the_claim_check_reads_the_cut_text_with_the_rest_of_the_reply(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    read: list[str] = []
+
+    async def _claim(_asked: str, reply: str, _calls: Any) -> None:
+        read.append(reply)
+        return None
+
+    monkeypatch.setattr("openexecutive.orchestrator.executive.claim_check.unbacked_claim", _claim)
+    provider = _ScriptedProvider(
+        [
+            _FinalMsg([_TextBlock("I've added the meeting to your calendar and")], "max_tokens"),
+            _FinalMsg([_TextBlock(" sent the invite.")], "end_turn"),
+        ]
+    )
+    asyncio.run(_run(provider))
+
+    assert read == ["I've added the meeting to your calendar and sent the invite."]
