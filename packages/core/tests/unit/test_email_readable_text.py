@@ -205,3 +205,16 @@ def test_the_principals_quoted_apple_forward_counts_as_forwarded() -> None:
     # A plain reply with quoted history is not a forward.
     reply = "Message ID: 2\nSubject: Re: x\nFrom: owner@example.com\n\n--- BODY ---\nOK\n\nOn Mon, A <a@example.com> wrote:\n> hi"
     assert not _forwarded(reply)
+
+
+def test_a_forward_quoted_under_a_reply_in_another_language_is_history() -> None:
+    from openexecutive.integrations.email_poller import _new_text_lines, split_forward
+
+    body = (
+        "D'accord.\n\nLe lun. 3 nov. 2026 \u00e0 10:00, Dana <d@x> a \u00e9crit :\n"
+        "> Voici\n> Begin forwarded message:\n> From: Bank\n> secret old"
+    )
+    assert split_forward(body, "Re: x") == ("D'accord.", "")
+    assert _new_text_lines(body.splitlines())[1] is False
+    assert sender_new_text("Ja.\n\nAm 03.11.2026 schrieb Dana:\n> alt") == "Ja."
+

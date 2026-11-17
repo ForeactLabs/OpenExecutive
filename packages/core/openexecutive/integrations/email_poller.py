@@ -439,6 +439,14 @@ def _scan_new_text(body: list[str]) -> tuple[list[str], int | None, bool]:
             for b in body[i + 1:i + 1 + _OUTLOOK_HEADER_SPAN]
         ):
             return stop(i, False)
+        if not text.startswith(">") and _ATTRIBUTION_ANY_RE.match(text) and any(
+            b.strip().startswith(">") for b in body[i + 1:i + 3] if b.strip()
+        ):
+            # A reply attribution in another language ("Dana a écrit :"):
+            # the quote below it is history, not the sender's words.
+            replied = True
+            i += 1
+            continue
         attribution = _attribution_end(body, i)
         if attribution is not None:
             end, quoted = attribution
