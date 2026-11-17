@@ -47,7 +47,16 @@ UPDATE_REPLY_CARD_TOOL: dict[str, Any] = {
             "files": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Files from the email's own thread to attach, by handle (mail:<message_id>#<n>).",
+                "description": "Files from the email's own threads to attach, by handle (mail:<message_id>#<n>).",
+            },
+            "choices": {
+                "type": "array",
+                "items": {"type": "string"},
+                "maxItems": 3,
+                "description": (
+                    "Only when you couldn't finish: up to 3 short next steps the person can tap "
+                    "on the card (\"Try again\", \"Make it with what I read\")."
+                ),
             },
         },
         "required": ["note"],
@@ -106,10 +115,13 @@ async def _artifact_files(ids: list[str], since: datetime | None) -> list[tuple[
     return out
 
 
-async def _outside_the_thread(handles: list[str], mailbox: Any, thread_id: str) -> str:
+async def _outside_the_thread(handles: list[str], mailbox: Any, starts: dict[str, str]) -> str:
     """Why a mailbox file can't go with this reply, or "". Only the files of
-    the email's own thread can: a reply never carries other mail of theirs."""
+    the card's own threads can (``card_work.thread_starts``: its email's,
+    and on a thread that joined it, the joining email and after): a reply
+    never carries other mail of theirs."""
     from openexecutive.delegation.gmail import GmailError
+    from openexecutive.delegation.inbox import _parse
     from openexecutive.orchestrator import file_refs
 
     for handle in handles:
@@ -123,8 +135,13 @@ async def _outside_the_thread(handles: list[str], mailbox: Any, thread_id: str) 
             message = await mailbox.get_message(ref.value)
         except GmailError:
             return f"{ref}: couldn't read it from their mailbox"
-        if not thread_id or getattr(message, "thread_id", None) != thread_id:
+        thread = getattr(message, "thread_id", None)
+        if not thread or thread not in starts:
             return f"{ref}: only files from the email's own thread can go with this reply"
+        if starts[thread]:
+            came, since = _parse(str(getattr(message, "received_at", "") or "")), _parse(starts[thread])
+            if came is None or since is None or came < since:
+                return f"{ref}: only files from the email's own thread can go with this reply"
     return ""
 
 
@@ -215,7 +232,7 @@ async def handle_update_reply_card(tool_input: dict[str, Any]) -> str:
         files += rendered
     handles = _strings(tool_input.get("files"))
     if handles:
-        refused = await _outside_the_thread(handles, writer.mailbox, card_work.thread_of(card_id))
+        refused = await _outside_the_thread(handles, writer.mailbox, card_work.thread_starts(card_id))
         if refused:
             return _error(f"Nothing was changed: {refused}.")
         try:
@@ -228,6 +245,7 @@ async def handle_update_reply_card(tool_input: dict[str, Any]) -> str:
         await card_work.apply(
             card_id, writer.person, body=body if isinstance(body, str) else "",
             note=str(tool_input.get("note") or ""), files=files, gmail=writer.mailbox,
+            choices=card_work.clean_choices(tool_input.get("choices")),
         )
     except SendRefused as refused:
         return _error(f"Nothing was changed: {refused.message}")

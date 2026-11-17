@@ -93,10 +93,13 @@ def test_collect_samples_skips_a_sent_draft_but_keeps_its_thread() -> None:
 
 def test_the_daily_limit_is_shared_and_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     today = datetime.now(UTC)
-    _record(1, drafts.SOURCE_INBOX, "t1", "d1", when=today)
+    _record(1, drafts.SOURCE_CHAT, "t1", "d1", when=today)
+    # The inbox watcher's replies never use up chat's limit.
+    for i in range(5):
+        _record(1, drafts.SOURCE_INBOX, f"i{i}", f"di{i}", when=today)
     assert caps.drafts_today(1) == 1
     assert caps.reserve(1, daily_cap=2) is None
-    # One saved from the inbox and one in flight: the limit of two is used.
+    # One saved from chat and one in flight: the limit of two is used.
     assert caps.reserve(1, daily_cap=2) == caps.REACHED
     caps.release(1, saved=False)
     assert caps.reserve(1, daily_cap=2) is None

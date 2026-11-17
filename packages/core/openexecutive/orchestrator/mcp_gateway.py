@@ -204,7 +204,7 @@ _M365_REPLY_ALL_TOOLS = frozenset({
 })
 _M365_SEND_DRAFT_TOOL = "microsoft_365__send_draft_message"
 _M365_MESSAGE_LOOKUP_TOOL = "microsoft_365__get-mail-message"
-_M365_MESSAGE_LOOKUP_SELECT = "id,from,replyTo,toRecipients,ccRecipients,bccRecipients"
+_M365_MESSAGE_LOOKUP_SELECT = "id,subject,from,replyTo,toRecipients,ccRecipients,bccRecipients"
 
 # Calendar actions whose free-text `comment` Exchange EMAILS to people the
 # arguments never name: an RSVP (accept / decline / tentatively-accept with
@@ -3051,8 +3051,12 @@ def _check_m365_move_destination(tool: str, arguments: dict[str, Any]) -> str | 
     return None
 
 
+_NOT_READ: Any = object()
+
+
 async def _check_m365_referenced_message(
     session: Any, tool: str, normalized: str, arguments: dict[str, Any], discover: _Discover | None = None,
+    *, message: Any = _NOT_READ,
 ) -> str | None:
     """Roster gate for M365 tools that address recipients via ``messageId``.
 
@@ -3068,10 +3072,11 @@ async def _check_m365_referenced_message(
             "messageId", "<missing>", tool,
             reason=f"{tool} needs a messageId so its recipients can be roster-checked — refusing.",
         )
-    message = await _fetch_m365_json(
-        session, _M365_MESSAGE_LOOKUP_TOOL,
-        {"messageId": message_id, "select": _M365_MESSAGE_LOOKUP_SELECT}, discover,
-    )
+    if message is _NOT_READ:
+        message = await _fetch_m365_json(
+            session, _M365_MESSAGE_LOOKUP_TOOL,
+            {"messageId": message_id, "select": _M365_MESSAGE_LOOKUP_SELECT}, discover,
+        )
     if message is None:
         return _block(
             "messageId", message_id, tool,
@@ -3477,6 +3482,71 @@ def _note_mail_sent(tool_name: str, normalized: str, arguments: dict[str, Any]) 
                 session.mail_replied_ids.add(message_id)
     except Exception:
         logger.exception("note_mail_sent: could not record the send (non-fatal)")
+
+
+_M365_FORWARD_TOOL = "microsoft_365__forward_mail_message"
+_M365_SENT_BY_ID_TOOLS = _M365_SENT_REPLY_TOOLS | {_M365_SEND_DRAFT_TOOL, _M365_FORWARD_TOOL}
+
+
+async def _m365_sent_by_id(
+    session: Any, arguments: dict[str, Any], discover: _Discover | None = None,
+) -> dict[str, Any] | None:
+    """The message an Outlook reply answers or a forward carries, or the
+    draft a draft send sends:
+    its subject and parties, for ``_note_sent_for``. ``None`` when it can't
+    be read; the send goes ahead either way."""
+    message_id = _ci_get(arguments, "messageId")
+    if not isinstance(message_id, str) or not message_id.strip():
+        return None
+    return await _fetch_m365_json(
+        session, _M365_MESSAGE_LOOKUP_TOOL, {"messageId": message_id, "select": _M365_MESSAGE_LOOKUP_SELECT}, discover,
+    )
+
+
+def _note_sent_for(
+    tool_name: str, normalized: str, arguments: dict[str, Any], result_text: str,
+    sent_by_id: dict[str, Any] | None = None,
+) -> None:
+    """Keep whom a Gmail or Outlook send the mailbox accepted was for, so it
+    stays that person's mail (``teammate_mail.note_sent``). An Outlook
+    reply, forward or draft send takes its subject from ``sent_by_id`` (the
+    message it answers or forwards, or the draft); a reply keeps only itself,
+    as a reply into a Gmail thread does, and a forward goes to the addresses
+    its arguments name. Never raises."""
+    from openexecutive.orchestrator import teammate_mail
+
+    try:
+        recipients = _sent_to(tool_name, normalized, arguments)
+        if tool_name == "google_workspace__send_gmail_message":
+            subject, thread_id = arguments.get("subject"), arguments.get("thread_id")
+        elif normalized == _M365_RECORD_SEND_TOOL:
+            subject, thread_id = _ci_get(_ci_get(_ci_get(arguments, "body"), "message"), "subject"), ""
+        elif normalized in _M365_SENT_BY_ID_TOOLS and not sent_by_id:
+            # The read before the send failed: nothing names the message,
+            # so it can't be kept, and it shows to everyone. Say so.
+            logger.warning("note_sent_for: %s went out unread, so it is not kept as anyone's", normalized)
+            return
+        elif normalized == _M365_FORWARD_TOOL and sent_by_id is not None:
+            recipients = {
+                a.lower() for t in _iter_arg_strings_skipping(arguments, _M365_FREE_TEXT_KEYS)
+                for a in _EMAIL_RE.findall(t)
+            }
+            subject, thread_id = f"Fwd: {_ci_get(sent_by_id, 'subject') or ''}", ""
+        elif normalized in _M365_SENT_BY_ID_TOOLS and sent_by_id is not None:
+            recipients = {a.strip().lower() for a in _m365_implied_recipients(normalized, sent_by_id) if a.strip()}
+            subject = str(_ci_get(sent_by_id, "subject") or "")
+            replying = normalized in _M365_SENT_REPLY_TOOLS or teammate_mail.is_reply_subject(subject)
+            if normalized in _M365_SENT_REPLY_TOOLS:
+                subject = f"Re: {subject}"
+            thread_id = str(_ci_get(arguments, "messageId") or "") if replying else ""
+        else:
+            return
+        teammate_mail.note_sent(
+            subject=subject, recipients=recipients,
+            thread_id=thread_id if isinstance(thread_id, str) else "", result=result_text,
+        )
+    except Exception:
+        logger.exception("note_sent_for: could not keep whom a send was for (non-fatal)")
 
 
 # extensible-mcp's refusal for a tool no search in this session has returned
@@ -4070,9 +4140,17 @@ class MCPGateway:
         # Who an Outlook reply, RSVP, cancel or delete reaches follows the
         # owner's level, as a Gmail send does: Hands-off skips the check, and
         # below it someone not in People is an Approve card.
+        # An Outlook reply, forward or draft send names no subject (and a
+        # reply or draft send no recipient): one read of the message serves
+        # the check below and keeping whom the send was for (``_note_sent_for``).
+        sent_by_id = (
+            await _m365_sent_by_id(session, arguments, self._discover)
+            if normalized in _M365_SENT_BY_ID_TOOLS else None
+        )
         if normalized in _M365_REPLY_BY_ID_TOOLS and not relaxed:
             blocked = await _check_m365_referenced_message(
-                session, tool_name, normalized, arguments, self._discover
+                session, tool_name, normalized, arguments, self._discover,
+                message=sent_by_id if normalized in _M365_SENT_BY_ID_TOOLS else _NOT_READ,
             )
             if blocked is not None:
                 return levels.card_or(blocked, tool_name, arguments, reason=levels.NEW_PERSON)
@@ -4211,6 +4289,7 @@ class MCPGateway:
         # either: marking it would hide the unanswered-email card.
         if not _is_error_payload(result_text) and not result_text.lstrip().lower().startswith("error"):
             _note_mail_sent(tool_name, normalized, arguments)
+            _note_sent_for(tool_name, normalized, arguments, result_text, sent_by_id)
             # Kept per person, so the next email from them knows what was
             # sent (integrations.email_replies).
             _keep_sent_mail(tool_name, normalized, arguments)

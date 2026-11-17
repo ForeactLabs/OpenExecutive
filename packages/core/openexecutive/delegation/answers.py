@@ -60,7 +60,9 @@ ANSWERS_PER_HOUR = 30
 # The card's conversation (CONVERSATION_KEY): what came in after the draft,
 # what the person asked to change, and what the Executive said it did. Each
 # is a dict with "kind" ("news", "asked" or "note") and "text"; news also
-# has its sender, time and message id.
+# has its sender, time, message id and its files' names ("files"); a note
+# that ends a run of the work (delegation.card_work) also has how it ended
+# ("state": done, stopped or stuck), its "steps" and the "choices" to tap.
 CONVERSATION_KEY = "conversation"
 CONVERSATION_MAX = 20
 # Newer mail in the conversation the draft was brought up to date with: the
@@ -445,6 +447,7 @@ def _render_turn(
     newer = "\n\n".join(
         f"From: {one_line(str(n.get('from_name') or n.get('from_email') or ''), 120)} — "
         f"{one_line(str(n.get('at') or ''), 60)}\n{plain(str(n.get('text') or ''))}"
+        + (f"\nFiles: {', '.join(one_line(str(f), 120) for f in n['files'])}" if n.get("files") else "")
         for n in news or []
     )
     return "\n\n".join([
@@ -589,15 +592,24 @@ async def rewrite(
     return new_body, extra, changed_sentences(main, new_main)
 
 
-def conversation(payload: dict[str, Any]) -> list[dict[str, str]]:
-    """The card's conversation as stored (``CONVERSATION_KEY``), each turn's
-    fields as strings; anything malformed is left out."""
+_TURN_LISTS = ("files", "steps", "choices")
+
+
+def conversation(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """The card's conversation as stored (``CONVERSATION_KEY``): each turn's
+    fields as strings, and its lists (``_TURN_LISTS``) as lists of strings;
+    anything malformed is left out."""
     raw = payload.get(CONVERSATION_KEY)
-    out: list[dict[str, str]] = []
+    out: list[dict[str, Any]] = []
     for turn in raw if isinstance(raw, list) else []:
         if not isinstance(turn, dict) or turn.get("kind") not in {"news", "asked", "note"}:
             continue
-        out.append({k: str(v) for k, v in turn.items() if isinstance(v, str)})
+        kept: dict[str, Any] = {k: str(v) for k, v in turn.items() if isinstance(v, str)}
+        for key in _TURN_LISTS:
+            value = turn.get(key)
+            if isinstance(value, list):
+                kept[key] = [str(v) for v in value if isinstance(v, str)]
+        out.append(kept)
     return out
 
 
@@ -620,8 +632,11 @@ def _turns(
     return {CONVERSATION_KEY: turns[-CONVERSATION_MAX:]}
 
 
-def _clean(text: str) -> bool:
-    """Whether ``text`` has no link or email address in it."""
+def no_link(text: str) -> bool:
+    """Whether ``text`` has no link or email address in it. Every choice
+    to tap that was written after reading someone else's email passes this
+    (a catch-up's new questions, the card work's next steps), so the email
+    can't put an address in the person's mouth."""
     from openexecutive.delegation.ghostwriter import lint, one_line
 
     line = one_line(text, 300)
@@ -644,14 +659,14 @@ def _new_questions(payload: dict[str, Any], raw: Any) -> dict[str, Any]:
         if added >= MAX_NEW_QUESTIONS or len(questions) >= MAX_QUESTIONS or not isinstance(item, dict):
             break
         text = one_line(str(item.get("text") or ""), 300)
-        if not text or text in questions or not _clean(text):
+        if not text or text in questions or not no_link(text):
             continue
         choices = item.get("choices")
         # Written after reading other people's email: a choice with a link or
         # address in it never becomes something the person can tap into the
         # reply (a tapped answer counts as theirs for the lint).
         picked = [
-            one_line(c, 120) for c in choices if isinstance(c, str) and c.strip() and _clean(c)
+            one_line(c, 120) for c in choices if isinstance(c, str) and c.strip() and no_link(c)
         ][:4] if isinstance(choices, list) else []
         questions.append(text)
         shaped.append({"choices": picked, "about": "", "source": ""})
@@ -700,6 +715,84 @@ async def change(
     return saved, changed
 
 
+async def to_work(
+    instance: Any, *, caller: Any, resolver: int | None, text: str, now: datetime | None = None,
+) -> bool:
+    """Give the person's words straight to the card's work: a next step
+    they tapped, or new words while it works ("no, do it this way"). The
+    same checks as a change by hand (``card_drafts.check``) and the same
+    hourly limit, then ``card_work.redirect``. False when the card isn't
+    waiting any more. Raises ``SendRefused``."""
+    from openexecutive.delegation import card_drafts, card_work
+
+    card_drafts.owner(instance, caller=caller, resolver=resolver)
+    taking = getattr(instance, "gate_mode", "") == "auto_execute" and card_work.running(instance.id)
+    # A reply set to go on its own whose work is still running: checked as
+    # it will be once their words take it back to wait for them, and taken
+    # back only once every check has passed.
+    person = card_drafts.check(
+        instance.model_copy(update={"gate_mode": "propose"}) if taking else instance,
+        caller=caller, resolver=resolver,
+    )
+    _check_rate(person.id, now or datetime.now(UTC))
+    if taking:
+        card_work.take_back(instance.id)
+    return await card_work.redirect(person, instance.id, text)
+
+
+def news_of(messages: list[Any]) -> list[dict[str, Any]]:
+    """Newer email as turns of a card's conversation ("news"): who, when,
+    their new words and their files' names."""
+    from openexecutive.delegation.ghostwriter import one_line
+    from openexecutive.integrations.email_poller import sender_new_text
+
+    return [
+        {
+            "id": str(m.id),
+            "from_name": one_line(m.from_name or "", 120),
+            "from_email": str(m.from_addr or ""),
+            "at": str(m.received_at or ""),
+            "text": sender_new_text(m.text or "")[:NEWS_CHARS],
+            "subject": one_line(getattr(m, "subject", "") or "", 200),
+            "files": [
+                one_line(a.name, 120) for a in getattr(m, "attachments", None) or [] if getattr(a, "name", "")
+            ][:10],
+        }
+        for m in messages
+    ]
+
+
+def add_news(card_id: int, messages: list[Any]) -> bool:
+    """Show ``messages`` on the card's conversation as newer mail, without
+    rewriting the reply (the Executive's work, which reads them, does). The
+    ones it already shows are left out. Never raises."""
+    from openexecutive.delegation.inbox import card_payload
+    from openexecutive.memory.decision_ledger import (
+        STATUS_PROPOSED,
+        get_decision_instance,
+        update_open_payload,
+    )
+
+    try:
+        for _ in range(3):
+            card = get_decision_instance(card_id)
+            if card is None or card.status != STATUS_PROPOSED:
+                return False
+            payload = card_payload(card)
+            turns = payload.get(CONVERSATION_KEY)
+            turns = list(turns) if isinstance(turns, list) else []
+            shown = {t.get("id") for t in turns if isinstance(t, dict) and t.get("kind") == "news"}
+            news = [{**n, "kind": "news"} for n in news_of([m for m in messages if str(m.id) not in shown])]
+            if not news:
+                return True
+            changed = {**payload, CONVERSATION_KEY: [*turns, *news][-CONVERSATION_MAX:]}
+            if update_open_payload(card_id, changed, expected_json=card.proposed_payload_json):
+                return True
+    except Exception:
+        logger.warning("delegation.answers: couldn't show newer mail on card %s", card_id, exc_info=True)
+    return False
+
+
 async def catch_up(
     person: Any, card: Any, payload: dict[str, Any], newer: list[Any], *, gmail: Any, now: datetime | None = None,
 ) -> bool:
@@ -713,8 +806,6 @@ async def catch_up(
     a busy card, a failed rewrite): the card then only warns, as before.
     Never raises; sends nothing."""
     from openexecutive.delegation import card_drafts
-    from openexecutive.delegation.ghostwriter import one_line
-    from openexecutive.integrations.email_poller import sender_new_text
 
     shown = {t.get("id") for t in conversation(payload) if t.get("kind") == "news"}
     fresh = [m for m in newer if getattr(m, "id", "") not in shown]
@@ -727,16 +818,7 @@ async def catch_up(
     tried = _CATCH_UP_FAILED.setdefault(card.id, set())
     if all(str(m.id) in tried for m in fresh):
         return False
-    news = [
-        {
-            "id": str(m.id),
-            "from_name": one_line(m.from_name or "", 120),
-            "from_email": str(m.from_addr or ""),
-            "at": str(m.received_at or ""),
-            "text": sender_new_text(m.text or "")[:NEWS_CHARS],
-        }
-        for m in fresh
-    ]
+    news = news_of(fresh)
     # By the instant, not the string: mailboxes write times in more than one
     # form, and inbox.later_messages compares them parsed.
     times = [t for t in (_moment(n["at"]) for n in news if n["at"]) if t is not None]

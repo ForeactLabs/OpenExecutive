@@ -362,6 +362,15 @@ class ReplyTurnOut(BaseModel):
     from_name: str = ""
     from_email: str = ""
     at: str = ""
+    # News: its subject and its files' names.
+    subject: str = ""
+    files: list[str] = Field(default_factory=list)
+    # A note that ends a run of the work: "done", "stopped" or "stuck", the
+    # steps it took, and up to three next steps to tap (POST .../change
+    # with work true).
+    state: str = ""
+    steps: list[str] = Field(default_factory=list)
+    choices: list[str] = Field(default_factory=list)
 
 
 class ReplyCardOut(BaseModel):
@@ -415,6 +424,10 @@ class ReplyCardOut(BaseModel):
     caught_up_at: str = ""
     # The Executive is doing what the email asks right now: poll until false.
     working: bool = False
+    # While working: the steps done so far, and what it is doing now (POST
+    # .../stop ends it).
+    work_steps: list[str] = Field(default_factory=list)
+    work_now: str = ""
     # The files the reply carries, by name; attached when it is sent.
     files: list[str] = Field(default_factory=list)
 
@@ -458,6 +471,11 @@ class ReplyChangeIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     text: str = Field(min_length=1, max_length=500)
+
+
+class ReplyCardChangeIn(ReplyChangeIn):
+    # A next step tapped on the work's turn: it goes to the work as said.
+    work: bool = False
 
 
 class ReplyAnswersIn(BaseModel):
@@ -1030,7 +1048,7 @@ async def get_delegation_mail(request: Request, thread_id: str, message_id: str)
     mailbox only: the client is theirs, so another person's ids find
     nothing. Reads; changes nothing."""
     from openexecutive.delegation.gmail import GmailNotFound, mailbox_link
-    from openexecutive.delegation.inbox import card_payload, open_cards
+    from openexecutive.delegation.inbox import card_on_thread, open_cards
     from openexecutive.delegation.inbox_classifier import their_last_words
     from openexecutive.integrations.email_poller import sender_new_text
 
@@ -1052,9 +1070,7 @@ async def get_delegation_mail(request: Request, thread_id: str, message_id: str)
     message = next((m for m in thread.messages if m.id == message_id), None)
     if message is None:
         raise _refuse(404, "not_found", "That email isn't in your mailbox any more.")
-    card = next(
-        (c for c in open_cards(person_id) if card_payload(c).get("thread_id") == thread.id), None
-    )
+    card = card_on_thread(open_cards(person_id), thread.id)
     return MailViewOut(
         thread_id=thread.id,
         message_id=message.id,
@@ -1297,13 +1313,13 @@ async def answer_delegation_reply(request: Request, decision_id: int, body: Repl
 
 
 @router.post("/delegation/replies/{decision_id}/change", response_model=ReplyCardOut)
-async def change_delegation_reply(request: Request, decision_id: int, body: ReplyChangeIn) -> ReplyCardOut:
+async def change_delegation_reply(request: Request, decision_id: int, body: ReplyCardChangeIn) -> ReplyCardOut:
     """Change one of the caller's reply cards the way they said, in their
     own words: the draft is rewritten in their voice and saved like an
     answer (``delegation.answers.change`` through ``card_drafts.edit``: the
     same checks, the same update in their Drafts, the same hourly limit).
     Their own cards only; sends nothing."""
-    from openexecutive.delegation import answers
+    from openexecutive.delegation import answers, card_work
     from openexecutive.delegation.inbox import DECISION_CLASS
     from openexecutive.delegation.replies import cards
     from openexecutive.delegation.reply_send import SendRefused
@@ -1315,28 +1331,65 @@ async def change_delegation_reply(request: Request, decision_id: int, body: Repl
     if instance is None or instance.decision_class != DECISION_CLASS or instance.approver_person_id != person_id:
         raise _refuse(404, "not_found", "That reply isn't waiting for you any more.")
     changed: list[str] = []
+    caller = api_caller.caller(request)
+    started = True
     try:
-        _, changed = await answers.change(
-            instance, caller=api_caller.caller(request), resolver=person_id, text=body.text,
-        )
+        if body.work or card_work.running(decision_id):
+            # A next step they tapped, or new words while it works ("no, do
+            # it this way"): the work takes them, and the run going now stops.
+            started = await answers.to_work(instance, caller=caller, resolver=person_id, text=body.text)
+        else:
+            _, changed = await answers.change(instance, caller=caller, resolver=person_id, text=body.text)
     except answers.NeedsWork:
         # Work for the Executive's tools (reading her files, making a
         # spreadsheet): it does it on the card, as when the email came in.
-        from openexecutive.delegation import card_work
-
-        if not card_work.start(person, decision_id, ask=body.text):
-            if card_work.running(decision_id):
-                raise _refuse(409, "busy", "I'm already working on this one.") from None
-            raise _refuse(404, "not_found", "That reply isn't waiting for you any more.") from None
+        # The change already passed the card's checks and hourly limit.
+        started = await card_work.redirect(person, decision_id, body.text)
     except SendRefused as refused:
         raise HTTPException(
             status_code=refused.status, detail={"code": refused.code, "message": refused.message, **refused.extra},
         ) from None
+    if not started and card_work.running(decision_id):
+        # The run going now hasn't let go yet: their words weren't taken.
+        raise _refuse(409, "busy", "I'm still finishing the last step. Try again in a moment.")
+    if not started:
+        raise _refuse(404, "not_found", "That reply isn't waiting for you any more.")
     card = next((c for c in cards(person) if c.decision_id == decision_id), None)
     if card is None:
         raise _refuse(404, "not_found", "That reply isn't waiting for you any more.")
     out = ReplyCardOut(**{k: v for k, v in asdict(card).items() if k in ReplyCardOut.model_fields})
     return out.model_copy(update={"changed_sentences": changed})
+
+
+@router.post("/delegation/replies/{decision_id}/stop", response_model=ReplyCardOut)
+async def stop_delegation_reply_work(request: Request, decision_id: int) -> ReplyCardOut:
+    """Stop what the Executive is doing on one of the caller's reply cards:
+    the card keeps the run as stopped, with its steps. Their own cards
+    only, with the same caller check as a change (``card_drafts.owner``); a
+    card with nothing running answers as it is."""
+    from openexecutive.delegation import card_drafts, card_work
+    from openexecutive.delegation.inbox import DECISION_CLASS
+    from openexecutive.delegation.replies import cards
+    from openexecutive.delegation.reply_send import SendRefused
+    from openexecutive.memory.decision_ledger import get_decision_instance
+
+    person = _caller(request)
+    person_id = _person_id(person)
+    instance = get_decision_instance(decision_id)
+    if instance is None or instance.decision_class != DECISION_CLASS or instance.approver_person_id != person_id:
+        raise _refuse(404, "not_found", "That reply isn't waiting for you any more.")
+    try:
+        card_drafts.owner(instance, caller=api_caller.caller(request), resolver=person_id)
+    except SendRefused as refused:
+        raise HTTPException(
+            status_code=refused.status, detail={"code": refused.code, "message": refused.message, **refused.extra},
+        ) from None
+    if card_work.stop(decision_id):
+        await card_work.ended(decision_id)
+    card = next((c for c in cards(person) if c.decision_id == decision_id), None)
+    if card is None:
+        raise _refuse(404, "not_found", "That reply isn't waiting for you any more.")
+    return ReplyCardOut(**{k: v for k, v in asdict(card).items() if k in ReplyCardOut.model_fields})
 
 
 @router.get("/delegation/actions", response_model=ActionCardsOut)

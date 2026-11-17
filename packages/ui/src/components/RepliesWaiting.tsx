@@ -12,8 +12,11 @@ import {
   getReplyCards,
   ReplySendError,
   sendReplyCard,
+  stopReplyWork,
   type ReplyCard,
+  type ReplyTurn,
 } from "@/lib/api";
+import { Spinner } from "@/components/ui/Spinner";
 import { formatRelativeTime } from "@/lib/relativeTime";
 import {
   cardGist,
@@ -58,8 +61,12 @@ import NextTimeTick from "@/components/NextTimeTick";
 // While a send Gmail hasn't confirmed is being settled (the card is
 // "executing"), how often the cards are read again.
 const SETTLE_POLL_MS = 20_000;
+// While the Executive works on a card, how often it is read again, so its
+// steps show as they happen.
+const WORK_POLL_MS = 3_000;
 // What shows while "Reply to" is being changed.
 const RECIPIENTS_RUNNING = "Changing who it goes to…";
+const STOPPING = "Stopping…";
 
 // The cards and their refresh, for the Home "Needs you" list, which shows
 // each one as a card among the proposals. `cards` stays null for anyone but
@@ -86,11 +93,12 @@ export function useReplyCards() {
   }, []);
 
   const settling = (cards ?? []).some((c) => c.status === "executing" || c.working);
+  const working = (cards ?? []).some((c) => c.working);
   useEffect(() => {
     if (!settling) return;
-    const timer = setInterval(() => void refresh(), SETTLE_POLL_MS);
+    const timer = setInterval(() => void refresh(), working ? WORK_POLL_MS : SETTLE_POLL_MS);
     return () => clearInterval(timer);
-  }, [settling, refresh]);
+  }, [settling, working, refresh]);
 
   const gone = useCallback((decisionId: number, note?: string) => {
     setCards((prev) => (prev ?? []).filter((c) => c.decision_id !== decisionId));
@@ -123,13 +131,81 @@ type Step =
   | { kind: "confirm"; message: string; recipients: string[]; threadMovedOn: boolean; allow: boolean }
   | { kind: "busy"; label: string };
 
-// The Executive's turn in a card's conversation.
-function ExecBubble({ children }: { children: ReactNode }) {
+// The Executive's turn in a card's conversation; `status` says how its
+// work stands ("working", "done", "stopped", "stuck").
+function ExecBubble({ children, status = "", dim = false }: { children: ReactNode; status?: string; dim?: boolean }) {
   return (
-    <div className="max-w-[92%] self-start rounded-2xl rounded-tl-md bg-accent/10 px-3 py-2 text-sm text-fg break-words">
-      <div className="text-xs font-semibold text-accent">Executive</div>
+    <div
+      className={`max-w-[92%] self-start rounded-2xl rounded-tl-md bg-accent/10 px-3 py-2 text-sm text-fg break-words ${
+        dim ? "opacity-70" : ""
+      }`}
+    >
+      <div className="text-xs font-semibold text-accent">
+        Executive{status ? ` · ${status}` : ""}
+      </div>
       <div className="mt-0.5">{children}</div>
     </div>
+  );
+}
+
+// What a run of the work did, one line each: done steps ticked, the one it
+// is on now with the spinner, a stopped or stuck end marked.
+function WorkSteps({ steps, now = "", end = "" }: { steps: string[]; now?: string; end?: string }) {
+  if (steps.length === 0 && !now) return null;
+  return (
+    <ul className="mt-1.5 space-y-0.5 text-[13.5px]" aria-label="Steps">
+      {steps.map((text, i) => {
+        const last = i === steps.length - 1 && !now;
+        const mark = last && end === "stopped" ? "■" : last && end === "stuck" ? "!" : "✓";
+        return (
+          <li key={i} className="flex items-start gap-2">
+            <span
+              aria-hidden="true"
+              className={`w-3.5 flex-shrink-0 font-bold ${
+                mark === "✓" ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"
+              }`}
+            >
+              {mark}
+            </span>
+            <span>{text}</span>
+          </li>
+        );
+      })}
+      {now && (
+        <li className="flex items-start gap-2" aria-live="polite">
+          <span className="mt-0.5 w-3.5 flex-shrink-0">
+            <Spinner label="Working" />
+          </span>
+          <span>{now}</span>
+        </li>
+      )}
+    </ul>
+  );
+}
+
+// How a run of the work ended, as the bubble's header says it.
+const WORK_STATUS: Record<string, string> = { done: "done", stopped: "stopped", stuck: "couldn't finish" };
+
+// What a newer email in the conversation carried: its subject when it is
+// its own, and its files.
+function NewsExtras({ turn, subject }: { turn: ReplyTurn; subject: string }) {
+  const own = (turn.subject ?? "").trim();
+  const files = turn.files ?? [];
+  return (
+    <>
+      {own && own.replace(/^(re|fwd?):\s*/i, "") !== subject.replace(/^(re|fwd?):\s*/i, "") && (
+        <span> · &ldquo;{own}&rdquo;</span>
+      )}
+      {files.length > 0 && (
+        <ul className="mt-1 flex flex-wrap gap-1.5" aria-label="Files">
+          {files.map((name, i) => (
+            <li key={`${i}-${name}`} className="rounded-lg border border-line-strong bg-surface px-2 py-0.5 text-[13px] text-fg">
+              {name}
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
   );
 }
 
@@ -242,16 +318,29 @@ export function ReplyCardItem({
     }
   };
 
-  const askChange = async () => {
-    const words = ask.trim();
+  const askChange = async (text = ask, work = false) => {
+    const words = text.trim();
     if (!words) return;
     setStep({ kind: "busy", label: "Changing it…" });
     setError(null);
     try {
-      onChanged?.(await changeReply(card.decision_id, words));
-      setAsk("");
+      onChanged?.(await changeReply(card.decision_id, words, { work }));
+      if (!work) setAsk("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't change your reply.");
+    } finally {
+      setStep({ kind: "idle" });
+    }
+  };
+
+  // Stop what it is doing: the card keeps what it did so far.
+  const stopWork = async () => {
+    setStep({ kind: "busy", label: STOPPING });
+    setError(null);
+    try {
+      onChanged?.(await stopReplyWork(card.decision_id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't stop it.");
     } finally {
       setStep({ kind: "idle" });
     }
@@ -573,32 +662,66 @@ export function ReplyCardItem({
                 <span className="mr-1.5 font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">New</span>
                 {(t.from_name || t.from_email || "").trim()}
                 {t.at && formatRelativeTime(t.at) ? ` · ${formatRelativeTime(t.at)}` : ""}
+                <NewsExtras turn={t} subject={card.subject} />
               </div>
-              <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-fg">{t.text}</p>
+              {t.text && <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-fg">{t.text}</p>}
             </div>
           ) : t.kind === "asked" ? (
             <div key={i} className="max-w-[85%] self-end rounded-2xl rounded-tr-md bg-accent/20 px-3 py-2 text-sm text-fg break-words">
               {t.text}
             </div>
           ) : (
-            <ExecBubble key={i}>
+            <ExecBubble
+              key={i}
+              status={WORK_STATUS[t.state ?? ""] ?? ""}
+              dim={t.state === "stopped" && (i < turns.length - 1 || card.working)}
+            >
               <p>{t.text}</p>
+              <WorkSteps steps={t.steps ?? []} end={t.state ?? ""} />
+              {(t.choices ?? []).length > 0 && i === turns.length - 1 && !card.working && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {(t.choices ?? []).map((choiceText) => (
+                    <button
+                      key={choiceText}
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void askChange(choiceText, true)}
+                      className="min-h-9 cursor-pointer rounded-full border border-accent/40 bg-surface px-3 text-[13px] font-semibold text-accent hover:bg-accent/10 disabled:opacity-50"
+                    >
+                      {choiceText}
+                    </button>
+                  ))}
+                </div>
+              )}
               {i === lastNote && hasOpen && decideBlock}
             </ExecBubble>
           ),
         )}
         {card.working && (
-          <ExecBubble>
-            <p aria-live="polite">Working on what {followUp ? "you" : card.from_name.split(" ")[0] || "they"} asked…</p>
+          <ExecBubble status="working">
+            <p>Working on it. You can tell me to do it differently below.</p>
+            <WorkSteps steps={card.work_steps ?? []} now={card.work_now || "Starting…"} />
+            <div className="mt-1.5 flex justify-end">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void stopWork()}
+                className="min-h-8 cursor-pointer px-1 text-[13px] font-semibold text-accent disabled:opacity-50"
+              >
+                {running(STOPPING) ? STOPPING : "Stop"}
+              </button>
+            </div>
           </ExecBubble>
         )}
         {busy && (step.label === "Writing it in…" || step.label === "Changing it…") && (
           <p className="text-xs text-fg-subtle" aria-live="polite">Writing it into your reply…</p>
         )}
       </div>
-      <div className="mt-3 rounded-xl border border-line-strong bg-surface px-3 py-2.5">
+      <div
+        className={`mt-3 rounded-xl border border-line-strong bg-surface px-3 py-2.5 ${card.working ? "opacity-60" : ""}`}
+      >
         <div className="flex flex-wrap items-center gap-2">
-          <span className={label}>Your reply</span>
+          <span className={label}>{card.working ? "Your reply · being rewritten" : "Your reply"}</span>
           {choice && !unconfirmed && (
             <div
               role="radiogroup"
@@ -672,9 +795,9 @@ export function ReplyCardItem({
             </p>
             {(card.files ?? []).length > 0 && (
               <ul className="mt-2 flex flex-wrap gap-2" aria-label="Attached">
-                {(card.files ?? []).map((name) => (
+                {(card.files ?? []).map((name, i) => (
                   <li
-                    key={name}
+                    key={`${i}-${name}`}
                     className="max-w-full truncate rounded-lg border border-line-strong bg-surface-overlay px-2.5 py-1 text-[13px] text-fg"
                   >
                     {name}
@@ -708,8 +831,8 @@ export function ReplyCardItem({
         >
           <input
             type="text"
-            aria-label="Ask me something, or tell me what to change"
-            placeholder="Ask me something, or tell me what to change…"
+            aria-label={card.working ? "Tell me to do it differently" : "Ask me something, or tell me what to change"}
+            placeholder={card.working ? "Tell me to do it differently…" : "Ask me something, or tell me what to change…"}
             value={ask}
             maxLength={500}
             disabled={busy}
@@ -793,7 +916,7 @@ export function ReplyCardItem({
           <Button
             variant="primary"
             onClick={askToSend}
-            disabled={busy || left > 0}
+            disabled={busy || left > 0 || card.working}
           >
             {running("Sending…") ? "Sending…" : "Send"}
           </Button>
