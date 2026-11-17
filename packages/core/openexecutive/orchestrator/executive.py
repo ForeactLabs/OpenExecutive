@@ -3030,13 +3030,20 @@ class Executive:
             group_results: dict[str, str] = {}
             # The call the round was still writing when it was cut off is the
             # last one; its input is unfinished, so nothing reads or runs it.
-            # A call whose block closed before the cut (trailing text, or a
-            # next call the provider dropped) is whole and runs as usual.
+            # Only text and calls count as written: a reasoning block that a
+            # translated provider (OpenRouter, OpenAI) puts last is skipped.
+            # A call followed by text or by a call the provider dropped closed
+            # before the cut and runs. A translated provider lists text first,
+            # so its last call always counts as cut and is asked for again.
+            last_written = next(
+                (b for b in reversed(response_content) if b.get("type") in ("text", "tool_use")),
+                None,
+            )
             cut_id = (
                 tool_uses[-1]["id"]
-                if cut_off and tool_uses and response_content
-                and response_content[-1].get("type") == "tool_use"
-                and response_content[-1].get("id") == tool_uses[-1]["id"]
+                if cut_off and tool_uses and last_written is not None
+                and last_written.get("type") == "tool_use"
+                and last_written.get("id") == tool_uses[-1]["id"]
                 else None
             )
             for i, tu in enumerate(tool_uses):

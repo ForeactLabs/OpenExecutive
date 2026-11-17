@@ -183,3 +183,29 @@ def test_a_cut_before_the_last_round_says_no_tools_are_left() -> None:
     asyncio.run(_go())
     texts = [b["text"] for b in provider.calls[1]["messages"][-1]["content"]]
     assert texts == [CUT_OFF_NOTE, LAST_ROUND_NOTE]
+
+
+def test_a_cut_call_before_a_trailing_reasoning_block_never_runs() -> None:
+    from types import SimpleNamespace
+
+    ran: list[dict[str, Any]] = []
+
+    async def _draft(tool_input: dict[str, Any], *_a: Any, **_k: Any) -> str:
+        ran.append(tool_input)
+        return "published"
+
+    # A translated provider (OpenRouter) puts its reasoning block last.
+    reasoning = SimpleNamespace(type="openrouter_reasoning", reasoning_details=[{"type": "reasoning.text", "text": "…"}])
+    provider = _ScriptedProvider(
+        [
+            _FinalMsg([_TextBlock("Building it."), _ToolUseBlock("cut", "draft_artifact", {}), reasoning],
+                      "max_tokens"),
+            _FinalMsg([_TextBlock("Done.")], "end_turn"),
+        ]
+    )
+    asyncio.run(_run(provider, {"draft_artifact": _draft}))
+
+    assert ran == []
+    results = provider.calls[1]["messages"][-1]["content"]
+    answered = {b["tool_use_id"]: b["content"] for b in results if b.get("type") == "tool_result"}
+    assert answered["cut"] == CUT_OFF_RESULT
