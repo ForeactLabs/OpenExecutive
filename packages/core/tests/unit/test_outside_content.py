@@ -835,3 +835,37 @@ def test_a_search_of_the_company_drive_is_not_outside() -> None:
     assert oc.source_of("call_tool", {"name": "microsoft_365__search-onedrive-files", "arguments": {}}) is None
 
 
+
+
+def test_who_a_goes_rule_lets_go_is_not_someone_new_on_balanced(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.orchestrator import levels, outside_mode
+    from openexecutive.orchestrator import mcp_gateway as gw
+    from openexecutive.orchestrator import take_the_lead as ttl
+
+    level = {"now": outside_mode.OUTSIDERS}
+    monkeypatch.setattr(levels, "turn_level", lambda session=None: level["now"])
+    ttl.add_rule(ttl.SCOPE_COMPANY, ttl.RULE_PERSON, "pat.lane@vendor.example", created_by="t", effect=ttl.EFFECT_GO)
+    ttl.add_rule(ttl.SCOPE_COMPANY, ttl.RULE_DOMAIN, "partner.example", created_by="t", effect=ttl.EFFECT_GO)
+    ttl.add_rule(ttl.SCOPE_COMPANY, ttl.RULE_PERSON, "dana@vendor.example", created_by="t")
+
+    def send(to: str) -> str | None:
+        return gw._check_gmail_recipients(
+            "google_workspace__send_gmail_message", {"to": to, "subject": "Hello", "body": "Hi"},
+        )
+
+    async def go() -> None:
+        state = oc.begin_turn(Session())
+        assert send("Pat.Lane@vendor.example") is None
+        assert send("ann@partner.example") is None
+        # Someone no rule lets go, a Waits rule and a look-alike domain still wait.
+        for to in ("leo@vendor.example", "dana@vendor.example", "ann@notpartner.example", "ann@partner.example.evil"):
+            assert send(to) is not None
+        # Careful, and mail from someone not in People: no Goes rule counts.
+        level["now"] = outside_mode.ASK
+        assert send("pat.lane@vendor.example") is not None
+        level["now"] = outside_mode.OUTSIDERS
+        oc.mark(oc.SENDER)
+        assert send("pat.lane@vendor.example") is not None
+        oc.end_turn(state)
+
+    asyncio.run(go())

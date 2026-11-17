@@ -173,9 +173,12 @@ class RosterAllow:
         people: Iterable[Person],
         extra: Iterable[str] = (),
         domains: frozenset[str] | None = None,
+        any_at: Iterable[str] = (),
     ) -> None:
         self.domains = company_domains() if domains is None else domains
         self.exact: set[str] = {normalize_address(a) for a in extra if a}
+        # Domains every address on is allowed (a Goes rule for a company).
+        self.any_at: frozenset[str] = frozenset(d.lower() for d in any_at if d)
         self.company_locals: set[str] = set()
         for person in people:
             for addr in addresses_of(person):
@@ -190,6 +193,8 @@ class RosterAllow:
             return False
         norm = normalize_address(addr)
         if norm in self.exact:
+            return True
+        if "@" in norm and norm.rsplit("@", 1)[1] in self.any_at:
             return True
         local = company_local(norm, self.domains) if self.domains else None
         return local is not None and local in self.company_locals

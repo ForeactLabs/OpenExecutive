@@ -916,10 +916,30 @@ def _roster_allow_set() -> RosterAllow:
     # Nobody added (or given a new address) this turn until the next one: a
     # contact planted and used in one turn would pass every check below.
     everyone = [p for p in everyone if not outside_content.added_this_turn(p.id)]
+    extra, any_at = [settings.exec_email_address], frozenset[str]()
+    if not private_turn_holds() and _goes_rules_apply():
+        # Who a Goes rule lets go is not someone new (take_the_lead.goes_reach).
+        from openexecutive.orchestrator import take_the_lead
+
+        addresses, any_at = take_the_lead.goes_reach()
+        extra = [*extra, *sorted(addresses)]
     # Primary addresses and aliases exactly; for a teammate, also their
     # local part on the company's own domains (people.identity) — the same
     # rule inbound mail is matched by.
-    return RosterAllow(everyone, extra=[settings.exec_email_address])
+    return RosterAllow(everyone, extra=extra, any_at=any_at)
+
+
+def _goes_rules_apply() -> bool:
+    """Whether the Goes rules count for the step in progress: on Balanced,
+    and never on a turn answering mail from someone not in People (whose
+    words could steer a send). Never raises: an error is no."""
+    try:
+        from openexecutive.orchestrator import levels, outside_content, outside_mode
+
+        return not outside_content.answers_off_team_mail() and levels.turn_level() == outside_mode.OUTSIDERS
+    except Exception:
+        logger.warning("mcp_gateway: couldn't tell whether the Goes rules count", exc_info=True)
+        return False
 
 
 # The one send that may reach an address off the roster: the fixed
