@@ -179,3 +179,13 @@ def test_a_lead_in_with_a_date_or_address_keeps_the_forward() -> None:
     ):
         text = readable_text(f"{lead}\n\n{quote}", "Fwd: Rates")
         assert text == f"{lead}\n\nForwarded message:\nFrom: Bank\nRate is 5%"
+
+
+def test_a_lead_in_above_a_forward_in_another_language_keeps_it() -> None:
+    from openexecutive.integrations.email_poller import split_forward
+
+    quote = "> Anfang der weitergeleiteten Nachricht:\n>\n> Von: Bank\n> Rate is 5%"
+    for lead in ("Please review by 11/20/2026:", "Bitte bis 10:30 ansehen:", "Von Dana <d@x.com>:"):
+        own, forwarded = split_forward(f"{lead}\n\n{quote}", "WG: Rates")
+        assert own == lead
+        assert forwarded.endswith("Von: Bank\nRate is 5%")

@@ -493,12 +493,13 @@ def _first_unattributed_quote(lines: list[str]) -> int | None:
 
 
 # What a reply attribution in any language looks like: a line ending in ":"
-# that names someone as ``name <address>``, or a numeric date or a time
-# ("Le lun. 3 nov. 2026 à 10:00, Dana <d@x> a écrit :", "Am 03.11.2026
-# schrieb Dana:"). A lead-in such as "Forwarding from dana@x.com:" or
-# "before the Nov 3 meeting:" names neither.
+# that says someone wrote ("Le lun. 3 nov. 2026 à 10:00, Dana <d@x> a écrit :",
+# "Am 03.11.2026 schrieb Dana:"). A lead-in such as "Please review by
+# 11/20/2026:" or "Forwarding this from Dana <d@x.com>:" says nobody wrote.
 _ATTRIBUTION_ANY_RE = re.compile(
-    r"^(?=.*(<[^<>@\s]+@[^<>\s]+>|\b\d{1,4}[./-]\d{1,2}[./-]\d{1,4}\b|\b\d{1,2}:\d{2}\b)).{8,300}:\s*$"
+    r"^.{0,300}\b(wrote|writes|schrieb|a écrit|escribió|escreveu|ha scritto|schreef|skrev|"
+    r"kirjoitti|napisał|napsal|írta|написал|написала|yazdı|έγραψε|寫道|写道)\b.{0,100}:\s*$",
+    re.IGNORECASE,
 )
 
 
