@@ -205,8 +205,8 @@ class _Sides:
     # the reader, whose own sends win.
     sent: list[_Sent] = field(default_factory=list)
     own: list[_Sent] = field(default_factory=list)
-    # Their message ids and started threads, looked up per message; only
-    # the subject rows are scanned.
+    # Their message ids and started threads, as sets each message is
+    # checked against; only recent or id-less sends are scanned by subject.
     sent_ids: set[str] = field(default_factory=set)
     own_ids: set[str] = field(default_factory=set)
     sent_threads: set[str] = field(default_factory=set)
@@ -385,10 +385,14 @@ def _sent_rows() -> list[_Sent]:
     """Every kept send. Its subject finds replies only for
     ``SUBJECT_MATCH_DAYS``, so a later unrelated "Invoice" from the same
     vendor is not taken for one; it finds the sent message itself (dated
-    with the send) for good, which an Outlook send, with no id, needs."""
+    with the send) for good, which an Outlook send, with no id, needs. An
+    older send with an id needs only its id: its subject is not read, so
+    the per-message scan covers recent and id-less sends only."""
     with _open() as conn:
         rows = conn.execute(
-            f"SELECT person_id, message_id, thread_id, subject, recipients, started, at, "  # noqa: S608
+            f"SELECT person_id, message_id, thread_id, recipients, started, at, "  # noqa: S608
+            f"CASE WHEN message_id != '' AND at < datetime('now', '-{SUBJECT_MATCH_DAYS} days') "
+            f"THEN '' ELSE subject END AS subject, "
             f"at >= datetime('now', '-{SUBJECT_MATCH_DAYS} days') AS recent FROM {SENT_TABLE}"
         ).fetchall()
     return [
