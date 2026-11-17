@@ -242,7 +242,9 @@ def test_the_one_who_asked_never_approves_their_own_held_step(
     assert card is not None and card.headline.startswith("Bob Mate asked: ")
     assert json.loads(chat_row.proposed_payload_json)["requested_by"] == "Bob Mate"
     other = alerts_store.get_alert_by_external("decision_scheduling", decision_alert_external_id(unattended))
-    assert other is not None and other.headline.startswith("The Executive wants to")
+    # Work nobody asked for says what it does, once, and the button names it.
+    assert other is not None and other.headline == "Message Bob Mate"
+    assert other.action_label == other.headline
 
 
 def test_an_asked_send_that_went_on_its_own_is_logged_with_why(owner: Any) -> None:
