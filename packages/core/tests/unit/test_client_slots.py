@@ -850,17 +850,19 @@ async def test_blank_switch_then_unload_brings_every_table_back(
 async def test_eval_scenarios_stay_across_every_switch(env: SimpleNamespace) -> None:
     """The scenarios people wrote belong to the instance: switching into a
     saved client keeps the live ones, as a blank switch and unload do."""
+    from openexecutive.evals.persistence import create_user_scenario
+
     _seed_live_company(env)
-    with sqlite3.connect(str(env.db_path)) as conn:
-        conn.execute("CREATE TABLE IF NOT EXISTS eval_scenarios (note TEXT)")
     await create_client_slot(env.settings, display_name="Acme", source="current")
     await create_client_slot(env.settings, display_name="Beta", source="blank")
     await activate_client_slot(env.settings, "beta")
-    with sqlite3.connect(str(env.db_path)) as conn:
-        conn.execute("INSERT INTO eval_scenarios VALUES ('written in Beta')")
+    create_user_scenario("written-in-beta", "chat", "name: x\n", db_path=env.db_path)
+    # A copy saved before the table existed must still take the live rows.
+    with sqlite3.connect(str(env.company / "_client_slots" / "acme" / "state.db")) as conn:
+        conn.execute("DROP TABLE IF EXISTS eval_scenarios")
     await activate_client_slot(env.settings, "acme")  # a saved slot
     with sqlite3.connect(str(env.db_path)) as conn:
-        assert conn.execute("SELECT note FROM eval_scenarios").fetchall() == [("written in Beta",)]
+        assert conn.execute("SELECT id FROM eval_scenarios").fetchall() == [("written-in-beta",)]
 
 
 async def test_every_first_activation_saves_your_company_again(

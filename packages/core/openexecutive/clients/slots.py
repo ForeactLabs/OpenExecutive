@@ -498,6 +498,7 @@ def _ensure_schemas() -> None:
     from openexecutive.agents.overrides import initialize_overrides_db
     from openexecutive.alerts.store import initialize_db as init_alerts
     from openexecutive.departments.store import initialize_db as init_departments
+    from openexecutive.evals.persistence import initialize_user_scenarios_db
     from openexecutive.fixtures.store import initialize_db as init_fixtures
     from openexecutive.knowledge.review_store import ReviewStore
     from openexecutive.memory.episodic import cancel_orphaned_talent_reminders
@@ -535,9 +536,11 @@ def _ensure_schemas() -> None:
     # A slot saved before workspace settings existed has no table; create it
     # so the slot reads as the defaults.
     init_workspace_settings_db(db_path)
-    # Before _restore_global_tables: a slot saved before the pause switch
-    # existed lacks the table, and the restore skips tables it can't find.
+    # Before _restore_global_tables: a slot saved before the pause switch or
+    # the eval scenarios existed lacks the table, and the restore skips
+    # tables it can't find.
     initialize_pause_db(db_path)
+    initialize_user_scenarios_db(db_path)
     ReviewStore.initialize_db(db_path)
     # Register shipped knowledge as trusted defaults too — without this a
     # freshly activated slot has an empty review_items table until the next
