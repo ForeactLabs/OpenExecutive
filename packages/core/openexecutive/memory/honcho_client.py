@@ -2410,7 +2410,8 @@ async def people_overview(*, recent: int) -> PeopleMemory:
     prefetch budget, at most ``_OVERVIEW_CONCURRENCY`` at a time, and one
     person's failure or timeout yields an entry with ``error`` set and
     leaves the others intact. Principal first, then by person id. One
-    ``peer_memory`` audit row per call, ``op=overview``.
+    ``peer_memory`` audit row per call that reaches Honcho, ``op=overview``
+    (none while Honcho is off).
     """
     from openexecutive.people import registry
 

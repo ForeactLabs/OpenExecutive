@@ -685,7 +685,8 @@ def _mirror_to_dept_honcho(
     those rows have no dept peer to land in. SQL is the system of record;
     a Honcho failure (no loop, disabled, network error) never affects
     the episodic INSERT that just committed. The wrapper itself audits
-    every outcome via the peer_memory event type.
+    every call that reaches Honcho via the peer_memory event type (a
+    disabled call writes no row).
 
     Type ``kind`` must be one of the literals accepted by
     ``honcho_client.NoteKind`` — typing at the boundary keeps mypy
