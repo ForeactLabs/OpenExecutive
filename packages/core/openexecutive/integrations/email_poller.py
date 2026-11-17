@@ -484,9 +484,20 @@ def split_forward(
     if cut_at is None or not (forwarded or _FORWARD_SUBJECT_RE.match(subject or "")):
         return own, ""
     rest = lines[cut_at:]
-    if all(not ln.strip() or ln.lstrip().startswith(">") for ln in rest):
-        # Quoted as a whole (Apple Mail): one level of ">" off every line.
-        rest = [re.sub(r"^(\s*)>\s?", r"\1", ln) for ln in rest]
+    if rest and rest[0].lstrip().startswith(">"):
+        # Quoted (Apple Mail): the forward is the run of ">" lines, one level
+        # of ">" off each; what the sender wrote below it is theirs.
+        end = len(rest)
+        for k, ln in enumerate(rest):
+            if ln.strip() and not ln.lstrip().startswith(">"):
+                end = k
+                break
+        below = "\n".join(ln.rstrip() for ln in rest[end:]).strip()
+        rest = [re.sub(r"^(\s*)>\s?", r"\1", ln) for ln in rest[:end]]
+        if below:
+            own = f"{own}\n\n{below}".strip()
+            if max_chars is not None:
+                own = own[:max_chars]
     if rest and (
         _BEGIN_FORWARDED_RE.match(rest[0].strip())
         or _FORWARDED_RE.match(rest[0].strip())

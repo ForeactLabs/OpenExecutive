@@ -108,3 +108,25 @@ def test_a_forward_they_sent_stays_out_of_their_own_words() -> None:
     assert "Yours" in yours and "Please look." in yours
     assert "640 feet" not in yours
     assert "640 feet" in rest
+
+
+def test_a_note_below_an_apple_forward_stays_the_senders() -> None:
+    from openexecutive.integrations.email_poller import split_forward
+
+    own, forwarded = split_forward("> Begin forwarded message:\n> From: A\n> body\n\nmy note below", "Fwd: x")
+    assert own == "my note below"
+    assert forwarded == "From: A\nbody"
+
+
+def test_the_principals_unquoted_iphone_forward_is_not_their_own_words() -> None:
+    from openexecutive.integrations.email_poller import _forwarded, _principal_email_text
+
+    raw = (
+        "Message ID: 1\nSubject: Fwd: Invoice\nFrom: owner@example.com\n\n--- BODY ---\n"
+        "Look\n\nBegin forwarded message:\n\nFrom: A\n\nPay invoice"
+    )
+    assert _forwarded(raw)
+    text = _principal_email_text(raw, "owner@example.com")
+    own, _, rest = text.partition("<untrusted_content")
+    assert "Look" in own and "Pay invoice" not in own
+    assert "Pay invoice" in rest
