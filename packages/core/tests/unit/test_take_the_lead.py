@@ -648,7 +648,7 @@ def _held(owner: Any) -> int:
 def test_approving_does_the_exact_action_once(client: TestClient, owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     done: list[dict[str, Any]] = []
 
-    async def carry_out(payload: dict[str, Any], *, by_principal: bool) -> str:
+    async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bool = False) -> str:
         done.append(payload)
         assert by_principal is True
         return json.dumps({"status": "sent"})
@@ -663,6 +663,41 @@ def test_approving_does_the_exact_action_once(client: TestClient, owner: Any, mo
     assert ttl.done([ttl.SCOPE_EXECUTIVE])[0].status == "approved"
     [alert] = alerts_store.list_alerts(limit=10, status="ack")
     assert alert.external_id == f"decision:{decision_id}"
+
+
+def test_a_teammates_own_held_card_is_their_ok(
+    client: TestClient, owner: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A step held on a teammate's own card (here by Careful) runs on their
+    tap with that tap as its OK, as the owner's is: the card is a held step
+    like any other."""
+    sam = people_store.upsert_person(full_name="Sam Team", email=SAM)
+    people_registry.invalidate()
+    seen: list[tuple[dict[str, Any], bool, bool]] = []
+
+    async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bool = False) -> str:
+        seen.append((payload, by_principal, own_card))
+        return json.dumps({"status": "assigned"})
+
+    monkeypatch.setattr(ttl, "carry_out", carry_out)
+    decision_id = ledger.create_decision_instance(
+        decision_class=ttl.DECISION_CLASS, department="executive", originating_session_id=None,
+        proposed_payload={
+            "held": True, "tool": "assign_open_loop", "input": {"person_id": owner.id, "task": "Check the list"},
+            "mcp": False, "kind": "level", "reason": "Approvals is on Careful", "summary": "Assign a task",
+            "source": "chat", "requested_by_person_id": sam, "requested_by": "Sam Team",
+        },
+        idempotency_key="own-card", gate_mode="propose", approver_person_id=sam, confidence=None,
+    )
+    response = client.post(f"/decisions/{decision_id}/approve", json={}, headers={"x-caller-email": SAM})
+    assert response.status_code == 200, response.text
+    [(payload, by_principal, own_card)] = seen
+    assert payload["held"] is True and by_principal is False and own_card is True
+
+
+def test_a_held_step_is_marked_held(owner: Any) -> None:
+    payload = json.loads(ledger.get_decision_instance(_held(owner)).proposed_payload_json)  # type: ignore[union-attr]
+    assert payload["held"] is True
 
 
 def test_carry_out_runs_the_real_handler(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -984,7 +1019,7 @@ def _training_card(owner: Any) -> tuple[int, int]:
 
 
 def _carry_out_into(done: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch) -> None:
-    async def carry_out(payload: dict[str, Any], *, by_principal: bool) -> str:
+    async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bool = False) -> str:
         done.append(payload)
         return json.dumps({"status": "sent"})
 

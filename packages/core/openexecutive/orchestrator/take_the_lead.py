@@ -2154,6 +2154,9 @@ def hold(
     # rest through the decision, which only they and the principal can open.
     shown = summary if private else summarize(tool, tool_input, mcp=mcp, quote=False)
     payload = {
+        # A step a gate held: the tap that approves it is the OK for this
+        # one call (``carry_out``), as on any held card.
+        "held": True,
         "tool": tool, "input": tool_input, "mcp": mcp, "kind": hit.kind, "rule_id": hit.rule_id,
         "reason": hit.reason, "summary": summary, "source": source,
         # The card's title says who and what in a few words; the full

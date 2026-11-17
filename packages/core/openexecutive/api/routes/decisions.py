@@ -675,6 +675,20 @@ async def _carry_out_lead(
     )
 
 
+def _own_card(instance: DecisionInstance, resolver: int | None, *, by_principal: bool) -> bool:
+    """Whether the person who asked is approving a step held on their own
+    card: their tap is that step's OK, as the owner's is, for the tools
+    ``take_the_lead.carry_out`` lets them (one that only ever runs on their
+    own device). One check for every held card, whichever gate held it."""
+    payload = _parse_payload(instance)
+    return (
+        not by_principal
+        and resolver is not None
+        and resolver == instance.approver_person_id
+        and resolver == payload.get("requested_by_person_id")
+    )
+
+
 async def _run_lead(
     instance: DecisionInstance, payload: dict[str, Any], resolver: int | None, *, by_principal: bool,
     changed: dict[str, str] | None = None, grant: dict[str, Any] | None = None,
@@ -688,7 +702,9 @@ async def _run_lead(
     if not claim_for_execution(instance.id, resolver_person_id=resolver):
         raise HTTPException(status_code=409, detail="Someone else resolved this decision first.")
     try:
-        result = await take_the_lead.carry_out(payload, by_principal=by_principal)
+        result = await take_the_lead.carry_out(
+            payload, by_principal=by_principal, own_card=_own_card(instance, resolver, by_principal=by_principal),
+        )
     except Exception as exc:
         logger.exception("decisions/approve: As me action %d failed", instance.id)
         finish_execution(instance.id, STATUS_FAILED, final_payload={**payload, "error": type(exc).__name__})
@@ -903,17 +919,10 @@ async def _run_department_action(
     payload = payload if payload is not None else _parse_payload(instance)
     if not claim_for_execution(instance.id, resolver_person_id=resolver):
         raise HTTPException(status_code=409, detail="Someone else resolved this decision first.")
-    # The person who asked approving a step held on their own card, when it
-    # only ever runs on their own device (take_the_lead.carry_out decides
-    # which tools): their tap is that step's OK, as the owner's is.
-    own_card = (
-        not by_principal
-        and resolver is not None
-        and resolver == instance.approver_person_id
-        and resolver == payload.get("requested_by_person_id")
-    )
     try:
-        result = await take_the_lead.carry_out(payload, by_principal=by_principal, own_card=own_card)
+        result = await take_the_lead.carry_out(
+            payload, by_principal=by_principal, own_card=_own_card(instance, resolver, by_principal=by_principal),
+        )
     except Exception as exc:
         logger.exception("decisions/approve: department action %d failed", instance.id)
         finish_execution(instance.id, STATUS_FAILED, final_payload={**payload, "error": type(exc).__name__})

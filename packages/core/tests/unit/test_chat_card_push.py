@@ -166,7 +166,7 @@ def test_accept_answers_the_invite(owner: int, monkeypatch: pytest.MonkeyPatch) 
 def test_a_take_the_lead_card_is_done_as_it_stands(owner: int, monkeypatch: pytest.MonkeyPatch) -> None:
     done: list[tuple[dict[str, Any], bool]] = []
 
-    async def carry_out(payload: dict[str, Any], *, by_principal: bool) -> str:
+    async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bool = False) -> str:
         done.append((payload, by_principal))
         return json.dumps({"status": "sent"})
 
