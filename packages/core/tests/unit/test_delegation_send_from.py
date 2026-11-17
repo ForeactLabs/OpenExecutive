@@ -377,3 +377,20 @@ def test_an_unreadable_mailbox_stops_it(
         ))
     assert err.value.code == "gmail_error" and sends == []
     assert _fresh(card).status == "proposed"
+
+
+def test_new_words_stay_when_the_switch_asked_with_them_fails(
+    db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake(model: str, system: str, turn: str) -> dict[str, Any]:
+        if system == send_from.AS_EXECUTIVE_PROMPT:
+            return {}  # the rewrite as the Executive fails
+        return {"body": "Hi Dana,\n\nShorter.", "send_from": "executive", "note": "Shorter."}
+
+    monkeypatch.setattr(answers, "_call_model", fake)
+    mailbox, card = _card(owner)
+    saved, _ = asyncio.run(answers.change(
+        _fresh(card), caller=LOCAL, resolver=owner.id, text="shorten it and send it from you", gmail=mailbox,
+    ))
+    assert "Shorter." in saved["draft_body"] and saved.get(send_from.FROM_EXECUTIVE) is not True
+    assert saved["conversation"][-1]["text"] == send_from.NOTE_NOT_SWITCHED

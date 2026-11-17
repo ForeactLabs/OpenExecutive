@@ -60,6 +60,8 @@ NOTE_TO_YOU_WITHOUT_CHANGE = (
     "It goes from you again, with your own words. The change made to mine isn't in them: make it again here."
 )
 
+NOTE_NOT_SWITCHED = "I changed the words. Who it goes from didn't change: try that again."
+
 AS_EXECUTIVE_PROMPT = """<draft> is an email written AS the person named in \
 <writer>, to <recipients>. It will now be sent by their assistant instead, \
 named in <assistant>, from the assistant's own mailbox, with the writer on \
@@ -106,6 +108,19 @@ def showed_executive(payload: dict[str, Any], at: str) -> bool:
     to = str(payload.get(SWITCHED_AT) or "")
     back = str(payload.get(SWITCHED_BACK_AT) or "")
     return bool(to) and to <= at and not (back > to and back <= at)
+
+
+def say(instance: Any, text: str) -> dict[str, Any] | None:
+    """Add the Executive's ``text`` to the card's conversation. The card's
+    payload as it now is, or None when it changed or went meanwhile."""
+    from openexecutive.delegation.answers import CONVERSATION_KEY, CONVERSATION_MAX, conversation
+    from openexecutive.delegation.inbox import card_payload
+    from openexecutive.memory.decision_ledger import update_open_payload
+
+    payload = card_payload(instance)
+    turns = [*conversation(payload), {"kind": "note", "text": text, "at": datetime.now(UTC).isoformat()}]
+    changed = {**payload, CONVERSATION_KEY: turns[-CONVERSATION_MAX:]}
+    return changed if update_open_payload(instance.id, changed, expected_json=instance.proposed_payload_json) else None
 
 
 def executive_name() -> str:

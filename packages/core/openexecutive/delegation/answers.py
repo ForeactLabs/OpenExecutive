@@ -735,6 +735,7 @@ async def change(
     words and the Executive's line on what it changed join the card's
     conversation. Raises ``SendRefused``. Sends nothing."""
     from openexecutive.delegation import card_drafts, send_from
+    from openexecutive.delegation.reply_send import SendRefused
     from openexecutive.memory.decision_ledger import get_decision_instance
 
     changed: list[str] = []
@@ -758,9 +759,13 @@ async def change(
         return saved, []
     if asked:
         current = get_decision_instance(instance.id) or instance
-        saved = await send_from.switch(
-            current, caller=caller, resolver=resolver, executive=asked[0] == "executive", gmail=gmail,
-        )
+        try:
+            saved = await send_from.switch(
+                current, caller=caller, resolver=resolver, executive=asked[0] == "executive", gmail=gmail,
+            )
+        except SendRefused:
+            # The words changed and were saved; only who it goes from didn't.
+            saved = send_from.say(get_decision_instance(instance.id) or current, send_from.NOTE_NOT_SWITCHED) or saved
     return saved, changed
 
 
