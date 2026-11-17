@@ -2739,6 +2739,9 @@ class Executive:
         # tool call, then its answer) starts a new paragraph, so the two
         # never run together ("...stock.Yes. ITEM-1...").
         streamed_tail = ""
+        # Set by a round cut off mid-text: the next round's text carries it
+        # on, so that round alone gets no paragraph break before its text.
+        run_on = False
         specialists_consulted: list[str] = []
         # What this turn's tool results have put in the prompt so far: every
         # one is re-sent on each later call.
@@ -2776,6 +2779,7 @@ class Executive:
             full_text = ""
             # The separator streamed before this round's text (_round_separator).
             round_sep = 0
+            carries_on, run_on = run_on, False
             tool_uses: list[dict[str, Any]] = []
             response_content: list[dict[str, Any]] = []
 
@@ -2842,7 +2846,7 @@ class Executive:
                         and hasattr(event.delta, "type")
                         and event.delta.type == "text_delta"
                     ):
-                        if not full_text and streamed_tail and event.delta.text:
+                        if not full_text and streamed_tail and event.delta.text and not carries_on:
                             separator = _round_separator(streamed_tail, event.delta.text)
                             if separator:
                                 yield separator
@@ -2953,9 +2957,9 @@ class Executive:
                     # The next round carries on the cut text where it
                     # stopped: no paragraph break between them
                     # (_round_separator). A cut that streamed nothing keeps
-                    # the break after earlier rounds' text.
-                    if full_text:
-                        streamed_tail = ""
+                    # the break after earlier rounds' text, and any round
+                    # after the next gets the break as usual.
+                    run_on = bool(full_text)
                     continue
             if final_msg.stop_reason != "tool_use" and not cut_off:
                 # A reply with no tool call still gets the queued files and

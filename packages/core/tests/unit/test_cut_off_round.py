@@ -247,3 +247,15 @@ def test_the_cut_call_input_is_not_sent_again() -> None:
         for b in m["content"] if b.get("type") == "tool_use" and b.get("id") == "big"
     ]
     assert sent and sent[0]["input"] == {}
+
+
+def test_only_the_round_right_after_a_cut_runs_on() -> None:
+    from tests.unit._agent_loop_fakes import FinalMsg, TextBlock, ToolUseBlock
+    from tests.unit.test_reply_rounds import _reply
+
+    text = _reply([
+        FinalMsg([TextBlock("Here is the first half.")], "max_tokens"),
+        FinalMsg([ToolUseBlock("t1", "nothing_here", {})], "tool_use"),
+        FinalMsg([TextBlock("Final answer.")], "end_turn"),
+    ])
+    assert text == "Here is the first half.\n\nFinal answer."
