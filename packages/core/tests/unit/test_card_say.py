@@ -218,6 +218,11 @@ def test_the_card_alone_cant_make_its_plan_run(
     assert card is not None and card.status == "unread"
 
 
+def test_the_plan_they_saw_is_cut_to_a_plans_length() -> None:
+    turn = replan.build_go_turn(NEW, "yes", "x" * (replan.PLAN_MAX_CHARS * 10))
+    assert "x" * replan.PLAN_MAX_CHARS in turn and "x" * (replan.PLAN_MAX_CHARS + 1) not in turn
+
+
 async def test_said_go_reads_only_the_plan_and_their_words(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: dict[str, Any] = {}
 

@@ -442,9 +442,11 @@ def _go_tool() -> dict[str, Any]:
 
 def build_go_turn(plan: str, text: str, before: str | None = None) -> str:
     blocks = [_block("plan", plan), _block("person_said", text)]
-    if before is not None and before.strip() != plan.strip():
+    # The plan they saw comes from the page, so it is cut to a plan's length.
+    seen = (before or "").strip()[:PLAN_MAX_CHARS]
+    if before is not None and seen != plan.strip():
         # A card that had no plan: every step must come from their words.
-        blocks.insert(0, _block("plan_before", before.strip() or "(none)"))
+        blocks.insert(0, _block("plan_before", seen or "(none)"))
     return "\n\n".join(blocks)
 
 
