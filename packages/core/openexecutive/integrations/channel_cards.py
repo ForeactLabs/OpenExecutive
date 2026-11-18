@@ -157,16 +157,30 @@ def card_here(session: Any) -> bool:
     return bool(getattr(session, "from_web_chat", False)) or shows_cards(session)
 
 
-def version(text: str) -> str:
-    """What a card said, in short: a tap carries the version of the card it
-    was on, so it does only what that card showed (``tap``)."""
-    return hashlib.sha256(text.encode()).hexdigest()[:8]
+# What a card shows only in part (``card_text`` lists the first ten): all
+# of it goes into its version, so a change there reads as a change.
+_SHOWN_IN_PART = ("draft_to", "attendee_emails")
+
+
+def version(decision_id: int, text: str) -> str:
+    """What card ``decision_id`` says as ``text``, in short, with everyone
+    it goes to: a tap carries the version of the card it was on, so it does
+    only what that card showed (``tap``)."""
+    from openexecutive.memory.decision_ledger import get_decision_instance
+
+    instance = get_decision_instance(decision_id)
+    try:
+        payload = json.loads(instance.proposed_payload_json or "{}") if instance is not None else {}
+    except ValueError:
+        payload = {}
+    whole = {k: payload.get(k) for k in _SHOWN_IN_PART} if isinstance(payload, dict) else {}
+    return hashlib.sha256(json.dumps([text, whole], sort_keys=True, default=str).encode()).hexdigest()[:8]
 
 
 def callback_data(decision_id: int, choice: str, shown: str) -> str:
     """A button's data: the card, the choice, and the version of ``shown``,
     the card's words as the button's message shows them."""
-    return f"{_PREFIX}:{decision_id}:{choice}:{version(shown)}"
+    return f"{_PREFIX}:{decision_id}:{choice}:{version(decision_id, shown)}"
 
 
 @dataclass(frozen=True)
@@ -427,16 +441,18 @@ async def tap(tapped: Choice, person: Any) -> Tapped:
     does nothing but show the card as it is now, so what is done is always
     what the tapped card showed. Skip is a skip, whatever it showed."""
     decision_id, choice = tapped.decision_id, tapped.choice
-    if choice != SKIP:
-        current = card_text(decision_id)
-        if current is not None and version(current) != tapped.version:
-            return Tapped(CHANGED, current, card_options(decision_id, current))
+    # Taken before the card is read: a change saved after it isn't shown.
+    read_at = datetime.now(UTC).isoformat()
+    current = card_text(decision_id) if choice != SKIP else None
+    if current is not None and version(decision_id, current) != tapped.version:
+        return Tapped(CHANGED, current, card_options(decision_id, current))
     if choice == SWITCH:
         return await _switch(decision_id, person)
     line = await resolve(
         decision_id, person, approve=choice != SKIP, allow=choice == ALLOW,
-        # It showed the card as it is now.
-        shown_at=datetime.now(UTC).isoformat(),
+        # It showed the card as it was read; a card no chat shows whole now
+        # is checked against when it was posted.
+        shown_at=read_at if current is not None else None,
     )
     return Tapped(line)
 

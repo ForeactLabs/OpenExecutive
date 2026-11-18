@@ -365,7 +365,7 @@ def test_a_chat_tap_switches_the_sender_and_shows_the_new_card(
     monkeypatch.setattr(send_from, "switch_for_work", in_this_mailbox)
     shown = channel_cards.card_text(card.id) or ""
     tapped = asyncio.run(channel_cards.tap(
-        channel_cards.Choice(card.id, channel_cards.SWITCH, channel_cards.version(shown)), owner,
+        channel_cards.Choice(card.id, channel_cards.SWITCH, channel_cards.version(card.id, shown)), owner,
     ))
     assert tapped.line == "Changed who it goes from. Check it, then send it."
     assert "this reply from Open Executive, with you on cc." in tapped.text
@@ -373,7 +373,7 @@ def test_a_chat_tap_switches_the_sender_and_shows_the_new_card(
         "Send from Open Executive, cc me", channel_cards.callback_data(card.id, "a", tapped.text),
     )
     # The old card's Send from me now only shows the card as it is.
-    stale = channel_cards.Choice(card.id, channel_cards.APPROVE, channel_cards.version(shown))
+    stale = channel_cards.Choice(card.id, channel_cards.APPROVE, channel_cards.version(card.id, shown))
     assert asyncio.run(channel_cards.tap(stale, owner)).line == channel_cards.CHANGED
     # A switch sends nothing.
     assert sends == [] and _fresh(card).status == "proposed"

@@ -100,7 +100,7 @@ def _options(card: int) -> tuple[tuple[str, str], ...]:
     """A card's buttons as (label, choice), each carrying its card's words."""
     text = channel_cards.card_text(card) or ""
     options = channel_cards.card_options(card, text)
-    assert {data.rsplit(":", 1)[1] for _, data in options} == {channel_cards.version(text)}
+    assert {data.rsplit(":", 1)[1] for _, data in options} == {channel_cards.version(card, text)}
     return tuple((label, channel_cards.choice_of(data)) for label, data in options)
 
 

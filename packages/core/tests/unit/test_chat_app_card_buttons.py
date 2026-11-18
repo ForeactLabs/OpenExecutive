@@ -131,7 +131,7 @@ def test_slack_cards_go_out_as_plain_text_with_buttons(monkeypatch: pytest.Monke
     asyncio.run(slack_bot._send_cards(client, "D1", [3]))
     blocks = client.posts[0]["blocks"]
     assert blocks[0]["text"]["type"] == "plain_text"
-    shown = channel_cards.version("*card* 3")
+    shown = channel_cards.version(3, "*card* 3")
     assert [e["value"] for e in blocks[1]["elements"]] == [f"card:3:a:{shown}", f"card:3:s:{shown}"]
 
 

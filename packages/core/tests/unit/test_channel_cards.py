@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
@@ -52,7 +53,7 @@ def _tg_session(chat: str = "4242", person_id: int | None = 1) -> Session:
 
 
 def test_buttons_round_trip_and_junk_is_ignored() -> None:
-    shown = channel_cards.version("Meeting to book")
+    shown = channel_cards.version(7, "Meeting to book")
     for choice in (channel_cards.APPROVE, channel_cards.SKIP, channel_cards.ALLOW, channel_cards.SWITCH):
         data = channel_cards.callback_data(7, choice, "Meeting to book")
         assert channel_cards.parse_choice(data) == channel_cards.Choice(7, choice, shown)
@@ -372,7 +373,7 @@ def test_a_tap_on_on_its_own_approves_and_allows(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr(channel_cards, "resolve", resolve)
     monkeypatch.setattr(channel_cards, "card_text", lambda i: "Message Sam")
-    shown = channel_cards.version("Message Sam")
+    shown = channel_cards.version(7, "Message Sam")
     for choice in ("a", "n", "s"):
         tapped = channel_cards.Choice(7, choice, shown)
         assert asyncio.run(channel_cards.tap(tapped, SimpleNamespace(id=3))) == channel_cards.Tapped("Approved.")
@@ -392,7 +393,7 @@ def test_a_tap_on_a_card_that_says_something_else_now_shows_it_again(monkeypatch
     monkeypatch.setattr(channel_cards, "resolve", resolve)
     monkeypatch.setattr(channel_cards, "card_text", lambda i: "Reply ready to send\nfrom Ada now")
     monkeypatch.setattr(channel_cards, "card_options", lambda i, shown: (("Send from Ada, cc me", "new"),))
-    old = channel_cards.version("Reply ready to send\nfrom you")
+    old = channel_cards.version(7, "Reply ready to send\nfrom you")
     for choice in ("a", "n", "x"):
         assert asyncio.run(channel_cards.tap(channel_cards.Choice(7, choice, old), SimpleNamespace(id=3))) == (
             channel_cards.Tapped(channel_cards.CHANGED, "Reply ready to send\nfrom Ada now", (("Send from Ada, cc me", "new"),))
@@ -426,3 +427,39 @@ def test_switching_who_a_reply_goes_from_shows_the_card_again(
     assert [row[0]["callback_data"] for row in edited["reply_markup"]["inline_keyboard"]] == [
         "card:7:a:1234abcd", "card:7:x:1234abcd", "card:7:s:1234abcd",
     ]
+
+
+def test_a_card_shown_only_in_part_changes_its_version_where_it_isnt_shown(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A card lists the first ten it goes to; an eleventh added after it
+    was posted makes it another card, though its words read the same."""
+    card = SimpleNamespace(proposed_payload_json=json.dumps({"draft_to": [f"p{i}@x.example" for i in range(10)]}))
+    monkeypatch.setattr("openexecutive.memory.decision_ledger.get_decision_instance", lambda i, **k: card)
+    before = channel_cards.version(7, "Reply ready to send")
+    card.proposed_payload_json = json.dumps({"draft_to": [f"p{i}@x.example" for i in range(11)]})
+    assert channel_cards.version(7, "Reply ready to send") != before
+
+
+def test_a_tap_is_checked_against_when_its_card_was_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A matching tap counts its card as shown when the card was read, so a
+    change saved after it isn't; a card no chat shows whole any more is
+    checked against when it was posted (``shown_at`` None)."""
+    seen: list[str | None] = []
+
+    async def resolve(decision_id: int, who: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None) -> str:
+        seen.append(shown_at)
+        return "Sent."
+
+    reads: list[str] = []
+
+    def card_text(decision_id: int) -> str | None:
+        reads.append(datetime.now(UTC).isoformat())
+        return texts.pop(0)
+
+    texts: list[str | None] = ["Reply ready to send", None]
+    monkeypatch.setattr(channel_cards, "resolve", resolve)
+    monkeypatch.setattr(channel_cards, "card_text", card_text)
+    shown = channel_cards.version(7, "Reply ready to send")
+    asyncio.run(channel_cards.tap(channel_cards.Choice(7, "a", shown), SimpleNamespace(id=3)))
+    assert seen[0] is not None and seen[0] <= reads[0]
+    asyncio.run(channel_cards.tap(channel_cards.Choice(7, "a", shown), SimpleNamespace(id=3)))
+    assert seen[1] is None
