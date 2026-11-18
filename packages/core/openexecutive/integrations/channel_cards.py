@@ -521,11 +521,12 @@ async def _switch(decision_id: int, person: Any, *, executive: bool) -> Tapped:
 
     if decision_id in _resolving:
         return Tapped(BUSY)
-    instance = await asyncio.to_thread(get_decision_instance, decision_id)
-    if instance is None or instance.decision_class != "delegation_reply":
-        return Tapped("Not done: this card is no longer there.")
+    # Held before anything waits, as ``resolve`` holds it.
     _resolving.add(decision_id)
     try:
+        instance = await asyncio.to_thread(get_decision_instance, decision_id)
+        if instance is None or instance.decision_class != "delegation_reply":
+            return Tapped("Not done: this card is no longer there.")
         # As a tap on the web card: its checks, and its rows kept to the person.
         await send_from.switch(
             instance, caller=ChatTap(normalize_email(person.email or "")), resolver=person.id,

@@ -528,3 +528,15 @@ def test_a_card_never_says_two_outcomes() -> None:
     assert channel_cards.with_line(shown_again, "Sent.") == "Reply to Sam\nHi Sam\n\nSent."
     assert channel_cards.with_line(channel_cards.CHANGED, "Sent.") == "Sent."
     assert channel_cards.with_line("", "Sent.") == "Sent."
+
+
+def test_a_switch_holds_its_card_before_it_reads_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    held: list[bool] = []
+
+    def read(decision_id: int, **k: Any) -> None:
+        held.append(decision_id in channel_cards._resolving)
+
+    monkeypatch.setattr("openexecutive.memory.decision_ledger.get_decision_instance", read)
+    tapped = asyncio.run(channel_cards._switch(7, SimpleNamespace(id=3, email=""), executive=True))
+    assert held == [True] and tapped.line == "Not done: this card is no longer there."
+    assert 7 not in channel_cards._resolving
