@@ -481,6 +481,9 @@ def test_a_watch_card_names_its_watch(db: Path) -> None:
     watch = ms.get_watchlist_item_by_slug(SLUG, db_path=db)
     assert watch is not None
     assert item.watch_title == watch_title(watch) == watch.target
+    # The board looks each watch up once and hands the cards its map.
+    assert proposal_item(alert, watches={SLUG: watch}).watch_title == watch.target
+    assert proposal_item(alert, watches={}).watch_title is None
     # Not from a watch: no name, nothing looked up.
     other = alert_store.get_alert(
         _card(db, "Renew the lease", source="triage", tags=[], dedup_key=""), db_path=db,

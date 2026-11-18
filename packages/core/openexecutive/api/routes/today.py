@@ -293,6 +293,7 @@ def proposal_item(
     alert: Alert,
     *,
     trust_by_slug: dict[str, float] | None = None,
+    watches: dict[str, Any] | None = None,
     superseded: int = 0,
     now: datetime | None = None,
 ) -> ProposalItem:
@@ -320,7 +321,7 @@ def proposal_item(
         category=item_category,
         surfaced_reason=item_reason,
         watch_slug=(slug := watch_slug_of(alert)),
-        watch_title=_watch_title_of(slug),
+        watch_title=_watch_title_of(slug, watches),
         plan_editable=plan_refusal(alert) is None,
         decision_instance_id=_parse_decision_instance_id(alert.topic_tags or []),
         failed_run_id=(
@@ -470,16 +471,21 @@ def _handled_overnight(now: datetime, *, include_private: bool = False) -> list[
         return []
 
 
-def _watch_title_of(slug: str | None) -> str | None:
+def _watch_title_of(slug: str | None, watches: dict[str, Any] | None = None) -> str | None:
     """The name of the watch ``slug`` as a person says it, or None when
-    there is no such watch (or the store can't be read)."""
+    there is no such watch (or the store can't be read). ``watches`` is the
+    board's own lookup (``_watches_by_slug``); a single card looks it up."""
     if not slug:
         return None
     try:
-        from openexecutive.monitoring import store as monitoring_store
         from openexecutive.monitoring.describe import watch_title
 
-        item = monitoring_store.get_watchlist_item_by_slug(slug)
+        if watches is not None:
+            item = watches.get(slug)
+        else:
+            from openexecutive.monitoring import store as monitoring_store
+
+            item = monitoring_store.get_watchlist_item_by_slug(slug)
         return watch_title(item) if item is not None else None
     except Exception:
         logger.debug("today: watch title lookup failed", exc_info=True)
@@ -487,11 +493,19 @@ def _watch_title_of(slug: str | None) -> str | None:
 
 
 def _watch_trust_by_slug(alerts: list[Any]) -> dict[str, float]:
-    """``{watch slug: trust_score}`` for every watch referenced by ``alerts``.
+    """``{watch slug: trust_score}`` for every watch referenced by ``alerts``,
+    so ranking can discount watches the principal keeps dismissing."""
+    return {
+        slug: float(getattr(item, "trust_score", 1.0))
+        for slug, item in _watches_by_slug(alerts).items()
+    }
 
-    One lookup per distinct slug so ranking can discount watches the
-    principal keeps dismissing. Never raises — a missing monitoring store
-    just yields an empty map (no discount).
+
+def _watches_by_slug(alerts: list[Any]) -> dict[str, Any]:
+    """``{watch slug: watch}`` for every watch referenced by ``alerts``.
+
+    One lookup per distinct slug, for the board's trust and names. Never
+    raises — a missing monitoring store just yields an empty map.
     """
     from openexecutive.briefing.ranking import watch_slug_from_tags
 
@@ -504,11 +518,11 @@ def _watch_trust_by_slug(alerts: list[Any]) -> dict[str, float]:
     try:
         from openexecutive.monitoring import store as monitoring_store
 
-        out: dict[str, float] = {}
+        out: dict[str, Any] = {}
         for slug in slugs:
             item = monitoring_store.get_watchlist_item_by_slug(slug)
             if item is not None:
-                out[slug] = float(getattr(item, "trust_score", 1.0))
+                out[slug] = item
         return out
     except Exception:
         logger.debug("today: watch trust lookup failed", exc_info=True)
@@ -1389,7 +1403,8 @@ def _build_today(
 
         raw_alerts = [a for a in raw_alerts if not is_private_alert(a)]
     superseded_counts = count_superseded_by()
-    trust_by_slug = _watch_trust_by_slug(raw_alerts)
+    watches = _watches_by_slug(raw_alerts)
+    trust_by_slug = {slug: float(getattr(w, "trust_score", 1.0)) for slug, w in watches.items()}
     proposal_items = []
     for alert in raw_alerts:
         # Surface every unread alert as a briefing action item, including
@@ -1405,6 +1420,7 @@ def _build_today(
         proposal_items.append(proposal_item(
             alert,
             trust_by_slug=trust_by_slug,
+            watches=watches,
             superseded=superseded_counts.get(alert.id or -1, 0),
             now=now,
         ))
