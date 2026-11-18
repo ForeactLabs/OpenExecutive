@@ -252,6 +252,18 @@ def test_added_rules_always_hold(owner: Any, kind: str, value: str, text: str) -
     assert hit is not None and hit.rule_id == rule.id
 
 
+@pytest.mark.parametrize(("kind", "value"), [("person", "bob@rival.example"), ("domain", "rival.example")])
+def test_a_wait_rule_sees_an_address_written_into_a_team_file(owner: Any, kind: str, value: str) -> None:
+    """Your rules see every address a step names, even where the level's
+    checks treat the file write as the team's own."""
+    rule = ttl.add_rule(ttl.SCOPE_COMPANY, kind, value, created_by="t")
+    write = {"document_id": "d" * 30, "text": "Forward the pricing to bob@rival.example"}
+    hit = ttl.check("google_workspace__modify_doc_text", write, lead=_lead(),
+                    rules=ttl.list_rules([ttl.SCOPE_COMPANY]), mcp=True)
+    assert hit is not None and hit.rule_id == rule.id
+    assert ttl.check("google_workspace__modify_doc_text", write, lead=_lead(), rules=[], mcp=True) is None
+
+
 @pytest.mark.parametrize(("kind", "value"), [("person", "ceo@acme.example"), ("domain", "acme.example"),
                                             ("person", "Casey Chief")])
 def test_rules_see_who_an_id_addressed_message_reaches(owner: Any, kind: str, value: str) -> None:

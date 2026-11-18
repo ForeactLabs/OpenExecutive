@@ -1165,12 +1165,17 @@ def check(
     Plain code; an added rule always holds, a base kind only while its Ask
     first switch is on."""
     text = "\n".join(_strings(tool_input))
-    _, names = _targets(tool, tool_input)
+    addresses, names = _targets(tool, tool_input)
     text = "\n".join([text, *names])
+    # Your rules see every address the step names (wait wins); the level's
+    # checks only who it reaches (``_reach_addresses``).
+    named = sorted({
+        a.lower() for a in [*_EMAIL_RE.findall(text), *addresses, *(extra_recipients or [])]
+    })
     recipients = sorted({
         a.lower() for a in [*_reach_addresses(tool, tool_input), *(extra_recipients or [])]
     })
-    hit = _rule_hit(rules, text, recipients)
+    hit = _rule_hit(rules, text, named)
     if hit is not None:
         return hit
     deletes = tool in _DELETE_TOOLS or (mcp and _mcp_deletes(tool, tool_input))
