@@ -93,7 +93,7 @@ def test_the_inbox_drafter_sees_a_forwarded_email() -> None:
         from_addr="ann@example.com", sender_authenticated=True, to=["me@example.com"], cc=[],
         attachments=[], has_attachments=False,
     )
-    assert "640 feet along Mill Road" in render_email(message, relation="teammate")
+    assert "640 feet along Mill Road" in render_email(message, relation="teammate", model="claude-haiku-5-5")
 
 
 def test_a_forward_they_sent_stays_out_of_their_own_words() -> None:

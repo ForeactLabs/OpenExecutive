@@ -41,11 +41,6 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-MAX_BODY_CHARS = 3000
-# Of the person's own last email in the thread: enough for what they asked.
-MAX_EARLIER_CHARS = 1500
-# Of the sender's email still waiting on the person (``open_email``).
-MAX_OPEN_CHARS = 1500
 _MAX_TOKENS = 200
 # Attachment names shown in the email's header lines.
 _MAX_ATTACHMENT_NAMES = 5
@@ -235,25 +230,31 @@ def their_last_words(thread: Any, message: Any, own: set[str]) -> str:
     before = messages[: ids.index(message.id)] if message.id in ids else messages
     for m in reversed(before):
         if any(mine(m, address) for address in own):
-            return sender_new_text(getattr(m, "text", "") or "")[:MAX_EARLIER_CHARS].strip()
+            return sender_new_text(getattr(m, "text", "") or "").strip()
     return ""
 
 
 def render_email(
-    message: Any, *, relation: str, addressed: Addressing | None = None, earlier: str = "",
-    max_body_chars: int = MAX_BODY_CHARS, open_email: str = "",
+    message: Any, *, relation: str, model: str, addressed: Addressing | None = None, earlier: str = "",
+    open_email: str = "",
 ) -> str:
     """The user turn: a few header lines and the sender's own new words (and
     any email they forwarded, ``readable_text``), as
     data in one ``<email>`` block, after the person's own ``earlier`` words
     in a ``<their_last_email>`` block when they wrote any, and the sender's
-    email still waiting on them (``open_email``) in ``<their_open_email>``."""
+    email still waiting on them (``open_email``) in ``<their_open_email>``.
+
+    Each is read whole, up to what ``model`` reads at once
+    (``providers.registry.reading_limits_for``): the email itself up to one
+    read, and each of the other two up to a quarter of one."""
     from openexecutive.delegation.ghostwriter import one_line
     from openexecutive.integrations.email_poller import readable_text
+    from openexecutive.providers.registry import reading_limits_for
     from openexecutive.utils.prompt_blocks import no_tags, scrub_block_line
 
+    most = reading_limits_for(model).per_read
     body = readable_text(
-        getattr(message, "text", "") or "", getattr(message, "subject", "") or "", max_chars=max_body_chars,
+        getattr(message, "text", "") or "", getattr(message, "subject", "") or "", max_chars=most,
     )
     others = len({*getattr(message, "to", []), *getattr(message, "cc", [])})
     header = [
@@ -284,11 +285,13 @@ def render_email(
     text = no_tags("\n".join(lines)).strip()
     turn = f"<email>\n{text}\n</email>"
     if earlier.strip():
-        theirs = no_tags("\n".join(scrub_block_line(line, "</their_last_email>") for line in earlier.splitlines()))
+        theirs = no_tags("\n".join(
+            scrub_block_line(line, "</their_last_email>") for line in earlier[:most // 4].splitlines()
+        ))
         turn = f"<their_last_email>\n{theirs.strip()}\n</their_last_email>\n\n{turn}"
     if open_email.strip():
         waiting = no_tags("\n".join(
-            scrub_block_line(line, "</their_open_email>") for line in open_email[:MAX_OPEN_CHARS].splitlines()
+            scrub_block_line(line, "</their_open_email>") for line in open_email[:most // 4].splitlines()
         ))
         turn = f"<their_open_email>\n{waiting.strip()}\n</their_open_email>\n\n{turn}"
     return turn
@@ -301,7 +304,7 @@ def open_email_text(payload: dict[str, Any]) -> str:
 
     lines = [f"Subject: {one_line(str(payload.get('subject') or ''), 200)}"]
     words = str(payload.get("they_wrote") or "").strip()
-    return "\n".join([*lines, "", words[:MAX_OPEN_CHARS]]) if words else lines[0]
+    return "\n".join([*lines, "", words]) if words else lines[0]
 
 
 async def _call_model(model: str, turn: str) -> dict[str, Any]:
@@ -339,10 +342,13 @@ async def classify(
     person's own last email in the thread (``their_last_words``);
     ``open_email`` the sender's email still waiting on them
     (``open_email_text``). Never raises."""
+    chosen = model or classifier_model()
     try:
         payload = await _call_model(
-            model or classifier_model(),
-            render_email(message, relation=relation, addressed=addressed, earlier=earlier, open_email=open_email),
+            chosen,
+            render_email(
+                message, relation=relation, model=chosen, addressed=addressed, earlier=earlier, open_email=open_email,
+            ),
         )
     except Exception:
         logger.warning("delegation.inbox: classifying an email failed", exc_info=True)

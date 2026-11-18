@@ -10,12 +10,14 @@ from __future__ import annotations
 from datetime import datetime
 
 from openexecutive.delegation.gmail import (
+    THREADS_PER_PAGE,
     CreatedDraft,
     DraftSpec,
     GmailError,
     MailAttachment,
     MailMessage,
     MailThread,
+    ThreadPage,
     ThreadSummary,
 )
 
@@ -38,9 +40,11 @@ class ScenarioMailbox:
     async def profile_email(self) -> str:
         return self.email
 
-    async def search_threads(self, query: str, *, max_results: int = 5) -> list[ThreadSummary]:
+    async def search_threads(self, query: str, *, max_results: int = THREADS_PER_PAGE, page: str = "") -> ThreadPage:
+        skip = int(page) if page.isdigit() else 0
+        threads = list(self.threads.values())
         out = []
-        for thread in list(self.threads.values())[:max_results]:
+        for thread in threads[skip:skip + max_results]:
             last = thread.messages[-1] if thread.messages else None
             out.append(ThreadSummary(
                 id=thread.id,
@@ -48,7 +52,8 @@ class ScenarioMailbox:
                 sender=(f"{last.from_name} <{last.from_addr}>" if last else ""),
                 date=last.date if last else "",
             ))
-        return out
+        more = len(threads) > skip + max_results
+        return ThreadPage(out, str(skip + max_results) if more else "")
 
     async def get_thread(self, thread_id: str) -> MailThread:
         if thread_id not in self.threads:

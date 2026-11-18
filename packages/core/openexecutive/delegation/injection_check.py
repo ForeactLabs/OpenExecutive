@@ -10,8 +10,8 @@ call, with no tools, reads the email and says whether it carries
 instructions meant for an AI assistant rather than for the person (to
 ignore its rules, forward or share other mail, reveal what it knows, reply
 somewhere else, or act on its own). It reads the sender's own words as
-plain text, many more of them than the classifier does (``MAX_BODY_CHARS``),
-so an instruction buried far down is seen. Styling is gone by then, so
+plain text, all of them (as much as its model reads at once), so an
+instruction buried far down is seen. Styling is gone by then, so
 hidden text is judged by what it says, not by being hidden.
 
 Anything it flags, or can't judge (the call failed or answered nonsense),
@@ -27,8 +27,6 @@ logger = logging.getLogger(__name__)
 
 # The handle_it.REASONS code a flagged email's card carries.
 REASON = "suspicious"
-# Of the sender's own new words: enough for any email a reply goes to.
-MAX_BODY_CHARS = 20_000
 _MAX_TOKENS = 100
 
 CHECK_PROMPT = """You check one email that arrived in a person's own inbox, \
@@ -89,7 +87,8 @@ async def held_back(message: Any, *, relation: str, model: str | None = None) ->
     from openexecutive.delegation.inbox_classifier import classifier_model, render_email
 
     try:
-        payload = await _call_model(model or classifier_model(), render_email(message, relation=relation, max_body_chars=MAX_BODY_CHARS))
+        chosen = model or classifier_model()
+        payload = await _call_model(chosen, render_email(message, relation=relation, model=chosen))
     except Exception:
         logger.warning("delegation.injection_check: the check failed — holding the reply", exc_info=True)
         return True

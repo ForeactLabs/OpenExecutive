@@ -25,6 +25,7 @@ from openexecutive.delegation.gmail import (
     GmailError,
     MailMessage,
     MailThread,
+    ThreadPage,
     ThreadSummary,
 )
 from openexecutive.delegation.settings import (
@@ -107,8 +108,8 @@ class FakeMailbox:
     async def profile_email(self) -> str:
         return self.opened
 
-    async def search_threads(self, query: str, *, max_results: int = 5) -> list[ThreadSummary]:
-        return self.search
+    async def search_threads(self, query: str, *, max_results: int = 5, page: str = "") -> ThreadPage:
+        return ThreadPage(self.search)
 
     async def get_thread(self, thread_id: str) -> MailThread:
         return self.threads[thread_id]

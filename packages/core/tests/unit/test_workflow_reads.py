@@ -16,7 +16,7 @@ from openexecutive.audit import logger as audit_logger
 from openexecutive.audit.logger import AuditLogger
 from openexecutive.delegation import settings as dsettings
 from openexecutive.delegation import workflow_email, workflow_reads
-from openexecutive.delegation.gmail import ThreadSummary
+from openexecutive.delegation.gmail import ThreadPage, ThreadSummary
 from openexecutive.memory import episodic
 from openexecutive.orchestrator.artifact_records import pinned_viewer, turn_owner, viewer_for_person
 from openexecutive.orchestrator.schedule_tools import current_session
@@ -82,9 +82,9 @@ class FakeMailbox:
     async def profile_email(self) -> str:
         return OWNER
 
-    async def search_threads(self, query: str, *, max_results: int = 5) -> list[ThreadSummary]:
+    async def search_threads(self, query: str, *, max_results: int = 5, page: str = "") -> ThreadPage:
         self.searched.append(query)
-        return [ThreadSummary(id="t1", subject="Pilot", sender="Dana <dana@x.example>", date="today")]
+        return ThreadPage([ThreadSummary(id="t1", subject="Pilot", sender="Dana <dana@x.example>", date="today")])
 
 
 def _search(

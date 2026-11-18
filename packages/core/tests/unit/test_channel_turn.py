@@ -91,15 +91,12 @@ def test_the_turn_gets_the_session_knowledge_and_the_persons_board(turn_env: dic
     assert result.response == "the answer" and result.person_id == 5
 
 
-def test_knowledge_is_searched_with_the_persons_own_words_and_capped(turn_env: dict) -> None:
-    from openexecutive.config import get_settings
-
+def test_knowledge_is_searched_with_the_persons_own_words(turn_env: dict) -> None:
     asyncio.run(channel_turn.run(_turn(turn_text="[Ann]: what changed?", store="WARM")))
 
     [call] = turn_env["retrieve"]
     assert call == {
         "query": "what changed?",
-        "max_chars": get_settings().knowledge_chat_max_chars,
         "n_builtin": 4,
         "store": "WARM",
     }

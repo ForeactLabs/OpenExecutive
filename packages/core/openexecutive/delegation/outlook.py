@@ -68,6 +68,7 @@ from openexecutive.delegation.gmail import (
     _BULK_PRECEDENCE,
     _REPORT_SENDERS,
     MAX_EVENTS,
+    THREADS_PER_PAGE,
     CalendarEvent,
     CalendarNotGranted,
     CalendarWriteNotGranted,
@@ -84,6 +85,7 @@ from openexecutive.delegation.gmail import (
     MailMessage,
     MailThread,
     SentMessage,
+    ThreadPage,
     ThreadSummary,
     _hide_tokens,
     clean_header,
@@ -134,7 +136,10 @@ _DMARC_NO_RECORD = re.compile(r"dmarc=(?:none|bestguesspass)(?: action=[a-z]+)? 
 # Exchange's DKIM resinfo once its comment is stripped: "dkim=pass header.d=example.com".
 _EXCHANGE_DKIM_PASS = re.compile(r"dkim=pass header\.d=([a-z0-9.-]+)")
 _TOKEN_SLACK_SECONDS = 60
-_THREAD_LIMIT = 50
+# Graph's largest page of messages: a conversation's messages, and what one
+# search or inbox listing reads (the most Graph returns at once).
+_THREAD_LIMIT = 1000
+_SEARCH_TOP = 1000
 
 # Access tokens by (address, refresh token) — never written anywhere.
 _TOKENS: dict[str, tuple[str, float]] = {}
@@ -838,16 +843,24 @@ class DelegateOutlook:
         """Always empty: Graph does not expose Outlook's signature setting."""
         return ""
 
-    async def search_threads(self, query: str, *, max_results: int = 5) -> list[ThreadSummary]:
-        """Conversations matching a search, best match first: subject, sender
-        and date only (no body text)."""
+    async def search_threads(self, query: str, *, max_results: int = THREADS_PER_PAGE, page: str = "") -> ThreadPage:
+        """One page of the conversations matching a search, best match
+        first: subject, sender and date only (no body text). ``page`` is the
+        ``next_page`` of the page before it: how many conversations came
+        before (Graph's search has no page of its own to hand back)."""
+        if page and not page.isdigit():
+            raise GmailError("invalid page")
         text = _search_text(query)
         if not text:
-            return []
+            return ThreadPage([])
+        skip = int(page or 0)
+        size = max(1, min(max_results, THREADS_PER_PAGE))
         async with self._client() as client:
             data = await self._get(client, "/messages", {
                 "$search": f'"{text}"',
-                "$top": 25,
+                # A conversation's messages each match: enough messages for
+                # the conversations up to this page's end, and one more.
+                "$top": min((skip + size) * 3 + 1, _SEARCH_TOP),
                 "$select": "id,conversationId,subject,from,receivedDateTime,isDraft,internetMessageHeaders",
             })
         summaries: dict[str, ThreadSummary] = {}
@@ -866,9 +879,9 @@ class DelegateOutlook:
                 sender_authenticated=raw.get("isDraft") is not True
                 and exchange_authenticated(_header_message(_header_list(raw)), addr),
             )
-            if len(summaries) >= max(1, min(max_results, 10)):
-                break
-        return list(summaries.values())
+        found = list(summaries.values())
+        more = len(found) > skip + size
+        return ThreadPage(found[skip:skip + size], str(skip + size) if more else "")
 
     async def _conversation(self, client: httpx.AsyncClient, thread_id: str, select: str) -> list[dict[str, Any]]:
         if not valid_id(thread_id):
@@ -916,7 +929,7 @@ class DelegateOutlook:
             data = await self._get(client, "/mailFolders/inbox/messages", {
                 "$filter": f"receivedDateTime ge {since} and inferenceClassification eq 'focused'",
                 "$orderby": "receivedDateTime desc",
-                "$top": max(1, min(max_results, 100)),
+                "$top": max(1, min(max_results, _SEARCH_TOP)),
                 "$select": "id,conversationId,from",
             })
         out: list[tuple[str, str]] = []

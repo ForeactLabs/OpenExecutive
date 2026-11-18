@@ -1418,7 +1418,6 @@ async def _run_chat_turn(
                     specialist_name=None,
                     store=request.app.state.store if hasattr(request.app.state, "store") else None,
                     record_source=turn_sources.add,
-                    max_chars=get_settings().knowledge_chat_max_chars,
                     n_builtin=chat_builtin_results(),
                 ),
                 _do_episodic(),

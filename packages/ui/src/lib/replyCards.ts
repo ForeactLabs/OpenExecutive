@@ -28,7 +28,6 @@ const FLAG_TEXT: Record<string, string> = {
   removed_link: "A link was taken out of the draft.",
   removed_address: "An email address was taken out of the draft.",
   names_the_executive: "The draft mentions the Executive by name.",
-  shortened: "The draft was cut to length.",
 };
 
 // The order the warnings show in: the ones to act on first.

@@ -43,7 +43,6 @@ def _reset_settings_cache() -> None:
     # enabled explicitly set ENABLE_WEB_SEARCH=true after reset).
     for k in (
         "ENABLE_WEB_SEARCH",
-        "WEB_SEARCH_MAX_USES",
         "WEB_SEARCH_ALLOWED_DOMAINS",
         "WEB_SEARCH_BLOCKED_DOMAINS",
     ):
@@ -65,14 +64,14 @@ def test_build_returns_none_when_disabled() -> None:
 def test_build_returns_anthropic_server_tool_dict_when_enabled() -> None:
     _reset_settings_cache()
     os.environ["ENABLE_WEB_SEARCH"] = "true"
-    os.environ["WEB_SEARCH_MAX_USES"] = "3"
     try:
         from openexecutive.orchestrator.web_search_tool import build_web_search_tool
         tool = build_web_search_tool()
         assert tool is not None
         assert tool["type"] == "web_search_20250305"
         assert tool["name"] == "web_search"
-        assert tool["max_uses"] == 3
+        # No cap on searches: the model searches as often as the work needs.
+        assert "max_uses" not in tool
         # No allowed/blocked domains set — keys must be absent.
         assert "allowed_domains" not in tool
         assert "blocked_domains" not in tool
@@ -102,21 +101,6 @@ def test_config_rejects_both_allow_and_block_lists() -> None:
             get_settings()
     finally:
         _reset_settings_cache()
-
-
-def test_config_rejects_zero_max_uses() -> None:
-    _reset_settings_cache()
-    os.environ["WEB_SEARCH_MAX_USES"] = "0"
-    try:
-        with pytest.raises(ValueError):
-            get_settings()
-    finally:
-        _reset_settings_cache()
-
-
-# ---------------------------------------------------------------------------
-# Persona addendum is added only when feature is enabled
-# ---------------------------------------------------------------------------
 
 
 def test_persona_includes_web_search_addendum_when_enabled() -> None:

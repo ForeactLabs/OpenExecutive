@@ -204,17 +204,16 @@ async def test_long_scan_is_sent_in_slices_and_joined_in_order(monkeypatch):
     assert sorted(_pages_in(c) for c in provider.calls) == [5, 20, 20]
 
 
-async def test_pages_past_the_cap_are_skipped_with_a_note(monkeypatch):
-    monkeypatch.setenv("PDF_VISION_MAX_PAGES", "10")
+async def test_every_page_of_a_long_scan_is_read(monkeypatch):
     provider = _FakeProvider()
     _use_provider(monkeypatch, provider)
 
-    result = await read_pdf_text(_blank_pdf(25), filename="scan.pdf")
+    result = await read_pdf_text(_blank_pdf(250), filename="scan.pdf")
 
     assert result.method == "model"
-    assert result.pages == 25
-    assert result.note == "only the first 10 of 25 pages were read"
-    assert sum(_pages_in(c) for c in provider.calls) == 10
+    assert result.pages == 250
+    assert result.note == ""
+    assert sum(_pages_in(c) for c in provider.calls) == 250
 
 
 # ── Non-Claude deployments and failures fall back to OCR ─────────────────────

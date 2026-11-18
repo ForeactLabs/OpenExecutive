@@ -74,7 +74,7 @@ cd packages/core && uv run openexecutive sync-drive
 - **PDF, Word (`.docx`) and Excel (`.xlsx`)** files have their text
   extracted. A scanned PDF with no text layer is read the way an uploaded
   one is: by local OCR on this server (or by the deployment's own model when
-  `PDF_PROVIDER_READING=true`), up to `PDF_VISION_MAX_PAGES` pages.
+  `PDF_PROVIDER_READING=true`), every page of it.
   `PDF_OCR_ENABLED=false` turns that off for Drive as it does for uploads.
 - A file with no readable text (a scan OCR could not read, a scan while OCR
   is off, a file over the size cap) is listed on the knowledge page as

@@ -1,7 +1,7 @@
-"""retrieve(max_chars=...): the chat's cap on knowledge excerpts.
+"""retrieve(max_chars=...): a caller's cap on knowledge excerpts.
 
-Every excerpt is re-sent on each model call of a turn, so the chat keeps the
-closest matches, across every collection, up to KNOWLEDGE_CHAT_MAX_CHARS.
+A caller that passes one (the meeting voice) keeps the closest matches,
+across every collection, up to it; the chat passes none and keeps them all.
 """
 from __future__ import annotations
 
@@ -102,12 +102,6 @@ def test_retrieve_without_a_cap_keeps_every_chunk(max_chars: int | None) -> None
         max_chars=max_chars,
     )
     assert "[near.md]" in out and "[doc.md]" in out and "[far.md]" in out
-
-
-def test_chat_cap_setting_defaults_to_six_thousand() -> None:
-    from openexecutive.config import get_settings
-
-    assert get_settings().knowledge_chat_max_chars == 6000
 
 
 def test_chat_turns_skip_builtin_playbooks_unless_turned_on(monkeypatch: pytest.MonkeyPatch) -> None:

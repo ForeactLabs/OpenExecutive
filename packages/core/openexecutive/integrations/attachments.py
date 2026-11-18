@@ -289,7 +289,7 @@ def format_attached_text(
     *,
     converted: bool = False,
     note: str = "",
-    max_chars: int = _MAX_EXTRACTED_CHARS,
+    max_chars: int | None = _MAX_EXTRACTED_CHARS,
 ) -> str:
     """A document's text as the Executive sees it inlined in a message:
     ``[Attached: <name>]`` (the label other passes key on — see
@@ -298,7 +298,7 @@ def format_attached_text(
     ``<untrusted_content>`` block (``orchestrator.content_trust``). A file's
     words are never the speaker's, whoever shared it: the block says so to
     the model, and the extractor reads only what lies outside it."""
-    truncated = len(text) > max_chars
+    truncated = max_chars is not None and len(text) > max_chars
     if truncated:
         text = text[:max_chars]
 

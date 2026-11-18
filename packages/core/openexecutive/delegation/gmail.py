@@ -366,6 +366,23 @@ class ThreadSummary:
     sender_authenticated: bool = False
 
 
+@dataclass
+class ThreadPage:
+    """One page of a mailbox search: its threads, and the ``next_page`` that
+    brings the ones after them ("" when there are no more). ``next_page`` is
+    the mail service's own token, or an offset where it has none."""
+
+    threads: list[ThreadSummary]
+    next_page: str = ""
+
+
+# A page token the model hands back to search_threads: the mail service's
+# own (Gmail's are digits; the IMAP bridge's an offset) or an offset.
+PAGE_TOKEN_RE = re.compile(r"[A-Za-z0-9_\-]{1,256}")
+# Threads on one page of a search.
+THREADS_PER_PAGE = 25
+
+
 # The headers a search reads of each thread's newest message: what it lists,
 # and what proving its sender takes (``headers_authenticated``, which a list's
 # own headers make fail).
@@ -1129,15 +1146,19 @@ class DelegateGmail:
             data = await self._get(client, "/profile")
         return normalize_email(str(data.get("emailAddress") or ""))
 
-    async def search_threads(self, query: str, *, max_results: int = 5) -> list[ThreadSummary]:
-        """Threads matching a Gmail search, newest first: subject, sender and
-        date only (no body text)."""
+    async def search_threads(self, query: str, *, max_results: int = THREADS_PER_PAGE, page: str = "") -> ThreadPage:
+        """One page of the threads matching a Gmail search, newest first:
+        subject, sender and date only (no body text). ``page`` is the
+        ``next_page`` of the page before it."""
         from openexecutive.integrations.fact_confirmation import headers_authenticated
 
+        params: dict[str, Any] = {"q": query[:300], "maxResults": max(1, min(max_results, THREADS_PER_PAGE))}
+        if page:
+            if not PAGE_TOKEN_RE.fullmatch(page):
+                raise GmailError("invalid page")
+            params["pageToken"] = page
         async with self._client() as client:
-            data = await self._get(
-                client, "/threads", {"q": query[:300], "maxResults": max(1, min(max_results, 10))}
-            )
+            data = await self._get(client, "/threads", params)
             ids = [str(t.get("id")) for t in data.get("threads") or [] if valid_id(t.get("id"))]
             summaries: list[ThreadSummary] = []
             for thread_id in ids:
@@ -1161,7 +1182,7 @@ class DelegateGmail:
                         _header_message(payload), normalize_email(from_addr)
                     ),
                 ))
-        return summaries
+        return ThreadPage(summaries, str(data.get("nextPageToken") or ""))
 
     async def get_thread(self, thread_id: str) -> MailThread:
         if not valid_id(thread_id):
@@ -1238,16 +1259,26 @@ class DelegateGmail:
 
     async def list_message_ids(self, query: str, *, max_results: int = 25) -> list[tuple[str, str]]:
         """``(message id, thread id)`` for mail matching a Gmail search,
-        newest first (at most ``max_results``, capped at 100)."""
+        newest first: the first ``max_results``, read a page (at most 100,
+        Gmail's own page) at a time."""
+        want = max(1, max_results)
+        found: list[tuple[str, str]] = []
+        page = ""
         async with self._client() as client:
-            data = await self._get(
-                client, "/messages", {"q": query[:500], "maxResults": max(1, min(max_results, 100))}
-            )
-        return [
-            (str(m["id"]), str(m.get("threadId") or ""))
-            for m in data.get("messages") or []
-            if isinstance(m, dict) and valid_id(m.get("id"))
-        ]
+            while len(found) < want:
+                params: dict[str, Any] = {"q": query[:500], "maxResults": min(want - len(found), 100)}
+                if page:
+                    params["pageToken"] = page
+                data = await self._get(client, "/messages", params)
+                found += [
+                    (str(m["id"]), str(m.get("threadId") or ""))
+                    for m in data.get("messages") or []
+                    if isinstance(m, dict) and valid_id(m.get("id"))
+                ]
+                page = str(data.get("nextPageToken") or "")
+                if not page:
+                    break
+        return found[:want]
 
     async def inbox_message_ids(self, *, after: datetime, max_results: int = 25) -> list[tuple[str, str]]:
         """``(message id, thread id)`` for mail that reached the Primary inbox

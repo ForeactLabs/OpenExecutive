@@ -708,7 +708,7 @@ def test_a_search_proves_each_threads_sender() -> None:
         return httpx.Response(200, json={"messages": [_message(headers, plain="")]})
 
     client = DelegateGmail(EMAIL, credential=_cred(), transport=httpx.MockTransport(handler))
-    found = asyncio.run(client.search_threads("pilot"))
+    found = asyncio.run(client.search_threads("pilot")).threads
     assert [(t.id, t.sender_authenticated) for t in found] == [("t1", True), ("t2", False), ("t3", False)]
     asked = seen[-1].url.params.get_list("metadataHeaders")
     assert {"Authentication-Results", "List-Id", "X-Google-Group-Id", "Mailing-List"} <= set(asked)
@@ -1019,3 +1019,44 @@ def test_the_script_saves_the_mailbox_they_signed_in_to(tmp_path: Path) -> None:
     assert script.mailbox_field(EMAIL, "x@y.example") == gm.mailbox_field(EMAIL, "x@y.example")
     script.write_credential(tmp_path, EMAIL, payload)
     assert gm.mailbox_of(EMAIL, directory=tmp_path) == "olivia.home@gmail.com"
+
+
+def test_a_search_comes_back_a_page_at_a_time() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.host == "oauth2.googleapis.com":
+            return httpx.Response(200, json={"access_token": "at", "expires_in": 3600, "scope": " ".join(gm.SCOPES)})
+        if request.url.path.endswith("/threads"):
+            if request.url.params.get("pageToken") == "17":
+                return httpx.Response(200, json={"threads": [{"id": "t2"}]})
+            return httpx.Response(200, json={"threads": [{"id": "t1"}], "nextPageToken": "17"})
+        return httpx.Response(200, json={"messages": [_message({"From": "d@x.example", "Subject": "S"}, plain="")]})
+
+    client = DelegateGmail(EMAIL, credential=_cred(), transport=httpx.MockTransport(handler))
+    first = asyncio.run(client.search_threads("pilot", max_results=99))
+    assert [t.id for t in first.threads] == ["t1"] and first.next_page == "17"
+    listed = next(r for r in seen if r.url.path.endswith("/threads"))
+    assert listed.url.params["maxResults"] == str(gm.THREADS_PER_PAGE)
+    second = asyncio.run(client.search_threads("pilot", page=first.next_page))
+    assert [t.id for t in second.threads] == ["t2"] and second.next_page == ""
+    with pytest.raises(GmailError):
+        asyncio.run(client.search_threads("pilot", page="../x"))
+
+
+def test_message_ids_are_read_past_one_page() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "oauth2.googleapis.com":
+            return httpx.Response(200, json={"access_token": "at", "expires_in": 3600, "scope": " ".join(gm.SCOPES)})
+        start = int(request.url.params.get("pageToken") or 0)
+        size = int(request.url.params["maxResults"])
+        ids = [{"id": f"m{i}", "threadId": f"t{i}"} for i in range(start, min(start + size, 250))]
+        body: dict[str, Any] = {"messages": ids}
+        if start + size < 250:
+            body["nextPageToken"] = str(start + size)
+        return httpx.Response(200, json=body)
+
+    client = DelegateGmail(EMAIL, credential=_cred(), transport=httpx.MockTransport(handler))
+    assert len(asyncio.run(client.list_message_ids("in:inbox", max_results=500))) == 250
+    assert len(asyncio.run(client.list_message_ids("in:inbox", max_results=130))) == 130

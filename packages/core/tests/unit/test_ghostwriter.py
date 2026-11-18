@@ -38,11 +38,12 @@ def test_an_address_nobody_gave_is_removed() -> None:
     assert flags == ["removed_address"]
 
 
-def test_the_executive_signing_is_flagged_and_long_drafts_are_cut() -> None:
+def test_the_executive_signing_is_flagged_and_a_long_draft_is_kept_whole() -> None:
     _, flags = lint("Thanks!\n\nOpen Executive", allowed_text="", exec_name="Open Executive")
     assert "names_the_executive" in flags
-    body, flags = lint("word " * 2000 + "\n" + "x" * 100, allowed_text="", exec_name="Open Executive")
-    assert len(body) <= gw.MAX_BODY_CHARS and "shortened" in flags
+    long = ("word " * 4000).strip() + "\n" + "x" * 100
+    body, flags = lint(long, allowed_text="", exec_name="Open Executive")
+    assert body == long and flags == []
 
 
 @pytest.mark.parametrize(("text", "asks"), [
@@ -222,22 +223,10 @@ def test_the_prompt_is_a_constant() -> None:
     assert "Never mention an assistant" in gw.GHOSTWRITER_PROMPT
 
 
-def test_a_long_draft_is_cut_near_the_limit_not_at_its_first_line() -> None:
-    body = "Hi Dana,\n" + "word " * 2000
-    text, flags = gw.lint(body, allowed_text="", exec_name="")
-    assert "shortened" in flags
-    assert gw.MAX_BODY_CHARS * 4 // 5 <= len(text) <= gw.MAX_BODY_CHARS
-
-
 def test_a_draft_that_was_only_a_planted_link_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     _model(monkeypatch, {"subject": "Re: x", "body": "https://pay.example/deposit"})
     with pytest.raises(ComposeError):
         _compose()
-
-
-def test_a_cut_that_lands_on_a_break_keeps_the_last_word() -> None:
-    text = "x" * 95 + " abcd more"
-    assert gw._shorten(text, 100) == "x" * 95 + " abcd"
 
 
 def test_the_writers_notes_get_their_own_block_after_the_thread(monkeypatch: pytest.MonkeyPatch) -> None:

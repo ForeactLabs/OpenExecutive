@@ -669,12 +669,13 @@ def list_notes(
     *,
     query: str | None = None,
     limit: int = 50,
+    offset: int = 0,
     db_path: Path | None = None,
     now: datetime | None = None,
 ) -> list[Note]:
-    """A person's own notes that haven't expired, newest first. ``query``
-    narrows them to notes whose summary, counterpart, subject or quote
-    mention it. Empty on any read error."""
+    """A person's own notes that haven't expired, newest first, from the
+    ``offset``-th on. ``query`` narrows them to notes whose summary,
+    counterpart, subject or quote mention it. Empty on any read error."""
     if person_id is None or not _db_path(db_path).exists():
         return []
     sql = (
@@ -694,8 +695,8 @@ def list_notes(
             " OR lower(quote) LIKE ? OR lower(coalesce(correction, '')) LIKE ?)"
         )
         params.extend([like] * 5)
-    sql += " ORDER BY occurred_at DESC, id DESC LIMIT ?"
-    params.append(max(1, min(int(limit), MAX_LIST)))
+    sql += " ORDER BY occurred_at DESC, id DESC LIMIT ? OFFSET ?"
+    params += [max(1, min(int(limit), MAX_LIST)), max(0, int(offset))]
     try:
         conn = _connect(db_path)
         try:

@@ -409,7 +409,7 @@ def test_the_inbox_listing_is_focused_mail_from_others() -> None:
     listed = graph.graph_calls()[-1]
     assert listed.url.path == "/v1.0/me/mailFolders/inbox/messages"
     assert listed.url.params["$filter"] == "receivedDateTime ge 2026-10-01T09:30:00Z and inferenceClassification eq 'focused'"
-    assert listed.url.params["$top"] == "100"
+    assert listed.url.params["$top"] == "500"
 
 
 def test_has_written_to_searches_sent_items() -> None:
@@ -444,9 +444,25 @@ def test_search_threads_lists_each_conversation_once() -> None:
         {"id": "m3", "conversationId": "c2", "subject": "Other", "from": None},
     ]
     found = asyncio.run(graph.client().search_threads("from:d@x.example pilot"))
-    assert [(t.id, t.sender) for t in found] == [("c1", "Dana <d@x.example>"), ("c2", "")]
+    assert [(t.id, t.sender) for t in found.threads] == [("c1", "Dana <d@x.example>"), ("c2", "")]
+    assert found.next_page == ""
     assert graph.graph_calls()[-1].url.params["$search"] == '"from:d@x.example pilot"'
-    assert asyncio.run(graph.client().search_threads("in:inbox")) == []
+    assert asyncio.run(graph.client().search_threads("in:inbox")).threads == []
+
+
+def test_search_threads_comes_back_a_page_at_a_time() -> None:
+    graph = FakeGraph()
+    graph.listing = [
+        {"id": f"m{i}", "conversationId": f"c{i // 2}", "subject": f"Pilot {i // 2}"} for i in range(80)
+    ]
+    first = asyncio.run(graph.client().search_threads("pilot", max_results=99))
+    assert [t.id for t in first.threads] == [f"c{i}" for i in range(ol.THREADS_PER_PAGE)]
+    assert first.next_page == str(ol.THREADS_PER_PAGE)
+    rest = asyncio.run(graph.client().search_threads("pilot", page=first.next_page))
+    assert [t.id for t in rest.threads] == [f"c{i}" for i in range(ol.THREADS_PER_PAGE, 40)]
+    assert rest.next_page == ""
+    with pytest.raises(GmailError):
+        asyncio.run(graph.client().search_threads("pilot", page="x"))
 
 
 def test_search_threads_proves_each_sender() -> None:
@@ -463,7 +479,7 @@ def test_search_threads_proves_each_sender() -> None:
     graph.listing.append(found("dana@northpeak.example"))
     graph.listing.append(found("dana@elsewhere.example"))  # a verdict for another domain
     graph.listing.append(found("dana@northpeak.example", isDraft=True))
-    proven = asyncio.run(graph.client().search_threads("pilot"))
+    proven = asyncio.run(graph.client().search_threads("pilot")).threads
     assert [t.sender_authenticated for t in proven] == [True, False, False]
     assert "internetMessageHeaders" in graph.graph_calls()[-1].url.params["$select"]
 

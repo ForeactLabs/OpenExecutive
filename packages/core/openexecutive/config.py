@@ -178,11 +178,6 @@ class Settings(BaseSettings):
     # domain's playbooks.
     knowledge_chat_builtin: bool = Field(False, alias="KNOWLEDGE_CHAT_BUILTIN")
     knowledge_company_n_results: int = Field(3, alias="KNOWLEDGE_COMPANY_N_RESULTS")
-    # Total characters of knowledge excerpts a chat turn carries (web chat,
-    # Telegram, Discord, Google Chat). The closest matches are kept first.
-    # Every excerpt is re-sent on each model call of the turn, so a long tail
-    # of weak matches costs on every call. 0 = no cap.
-    knowledge_chat_max_chars: int = Field(6000, ge=0, alias="KNOWLEDGE_CHAT_MAX_CHARS")
     # A specialist's own retrieval (router._retrieve_for_call) takes fewer
     # chunks than the Executive's: it answers one narrow question. The company
     # count also caps each synced source (Notion, Drive, OneDrive, Confluence).
@@ -864,8 +859,6 @@ class Settings(BaseSettings):
     pdf_openrouter_engine: Literal["mistral-ocr", "cloudflare-ai", "native"] = Field(
         "mistral-ocr", alias="PDF_OPENROUTER_ENGINE"
     )
-    # Pages read per converted PDF; the rest are skipped with a note.
-    pdf_vision_max_pages: int = Field(100, alias="PDF_VISION_MAX_PAGES", ge=1, le=600)
     # Pages sent to the model per request (each request transcribes a slice).
     pdf_vision_pages_per_call: int = Field(
         20, alias="PDF_VISION_PAGES_PER_CALL", ge=1, le=100
@@ -960,19 +953,6 @@ class Settings(BaseSettings):
     # for research (e.g. "skim Ford IR", "check Lucid news"). Set
     # ENABLE_WEB_SEARCH=false to opt out and avoid per-search charges.
     enable_web_search: bool = Field(True, alias="ENABLE_WEB_SEARCH")
-    # Cap on web searches per specialist/Executive turn. Each search is billed,
-    # so the fan-out cost scales with this (7 specialists x N searches). Most
-    # findings come from the first one or two searches; default 2 keeps the
-    # bulk of the value at a fraction of the search spend. Raise via
-    # WEB_SEARCH_MAX_USES for deeper digs.
-    web_search_max_uses: int = Field(2, alias="WEB_SEARCH_MAX_USES")
-    # Searches per specialist in the executive_research fan-out. Separate
-    # from the chat knob above because every specialist in the fan-out
-    # (seven by default) gets this many, and every search adds results that
-    # each later pass re-reads.
-    research_web_search_max_uses: int = Field(
-        3, alias="RESEARCH_WEB_SEARCH_MAX_USES"
-    )
     # Which specialists the research fan-out runs (comma-separated slugs
     # from cso, cfo, cmo, coo, chro, cpo, gc). Empty = all seven. Unknown
     # slugs are logged and skipped.
@@ -1004,10 +984,6 @@ class Settings(BaseSettings):
             raise ValueError(
                 "Set WEB_SEARCH_ALLOWED_DOMAINS or WEB_SEARCH_BLOCKED_DOMAINS, not both"
             )
-        if self.web_search_max_uses < 1:
-            raise ValueError("WEB_SEARCH_MAX_USES must be >= 1")
-        if self.research_web_search_max_uses < 1:
-            raise ValueError("RESEARCH_WEB_SEARCH_MAX_USES must be >= 1")
         return self
 
     # Base URL of the UI, used when the Executive composes deep links

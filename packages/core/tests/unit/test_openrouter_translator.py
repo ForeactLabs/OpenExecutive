@@ -266,8 +266,7 @@ def test_request_replaces_anthropic_web_search_with_openrouter_server_tool() -> 
 
 
 def test_request_web_search_translates_cap_and_domain_lists() -> None:
-    # max_uses is a search count on both sides: it passes through unchanged,
-    # so RESEARCH_WEB_SEARCH_MAX_USES caps searches via OpenRouter too.
+    # max_uses is a search count on both sides: it passes through unchanged.
     body = to_openai_request(
         "google/gemini-2.5-flash",
         {
