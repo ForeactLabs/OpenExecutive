@@ -42,6 +42,9 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _MAX_TOKENS = 200
+# How far each part of a long email runs into the next, so words split at a
+# part's end are read whole in one of them.
+PART_OVERLAP = 2000
 # Attachment names shown in the email's header lines.
 _MAX_ATTACHMENT_NAMES = 5
 
@@ -256,7 +259,7 @@ def render_email(
     most = reading_limits_for(model).per_read
     body = readable_text(
         getattr(message, "text", "") or "", getattr(message, "subject", "") or "",
-    )[part * most:(part + 1) * most]
+    )[part * most:(part + 1) * most + PART_OVERLAP]
     others = len({*getattr(message, "to", []), *getattr(message, "cc", [])})
     header = [
         f"From: {one_line(getattr(message, 'from_name', '') or '', 80)} "

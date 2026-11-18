@@ -226,7 +226,13 @@ class FakeGraph:
             match = re.fullmatch(r"conversationId eq '([^']+)'", flt)
             if match:
                 return httpx.Response(200, json={"value": [m for m in self.messages.values() if m["conversationId"] == match.group(1)]})
-            return httpx.Response(200, json={"value": self.listing})
+            # Graph's own paging: $top a page, @odata.nextLink to the next.
+            skip = int(url.params.get("$skiptoken", "0"))
+            top = int(url.params.get("$top", str(len(self.listing) or 1)))
+            body: dict[str, Any] = {"value": self.listing[skip:skip + top]}
+            if skip + top < len(self.listing):
+                body["@odata.nextLink"] = str(url.copy_set_param("$skiptoken", str(skip + top)))
+            return httpx.Response(200, json=body)
         match = re.fullmatch(r"/messages/([^/]+)(/send|/createReply)?", path)
         if match is None:
             return httpx.Response(400)
@@ -463,6 +469,30 @@ def test_search_threads_comes_back_a_page_at_a_time() -> None:
     assert rest.next_page == ""
     with pytest.raises(GmailError):
         asyncio.run(graph.client().search_threads("pilot", page="x"))
+
+
+def test_search_threads_reads_past_long_conversations() -> None:
+    graph = FakeGraph()
+    # 15 long conversations, 8 matching messages each, then 40 short ones.
+    graph.listing = [{"id": f"l{i}-{k}", "conversationId": f"cl{i}"} for i in range(15) for k in range(8)]
+    graph.listing += [{"id": f"s{i}", "conversationId": f"cs{i}"} for i in range(40)]
+    seen: list[str] = []
+    page = ""
+    while True:
+        found = asyncio.run(graph.client().search_threads("q3 budget", page=page))
+        seen += [t.id for t in found.threads]
+        if not found.next_page:
+            break
+        page = found.next_page
+    assert len(seen) == 55 == len(set(seen))
+
+
+def test_the_inbox_listing_follows_graphs_pages() -> None:
+    graph = FakeGraph()
+    graph.listing = [{"id": f"m{i}", "conversationId": f"c{i}"} for i in range(ol._SEARCH_TOP + 10)]
+    after = datetime(2026, 10, 1, 9, 30, tzinfo=UTC)
+    listed = asyncio.run(graph.client().inbox_message_ids(after=after, max_results=ol._SEARCH_TOP + 5))
+    assert len(listed) == ol._SEARCH_TOP + 5
 
 
 def test_search_threads_proves_each_sender() -> None:

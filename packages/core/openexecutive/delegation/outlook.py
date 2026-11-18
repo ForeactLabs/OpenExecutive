@@ -52,6 +52,7 @@ import os
 import re
 import tempfile
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta, tzinfo
 from email.message import Message
@@ -699,6 +700,20 @@ class DelegateOutlook:
     async def _get(self, client: httpx.AsyncClient, path: str, params: Any = None) -> dict[str, Any]:
         return await self._request(client, "GET", path, params=params)
 
+    async def _listing(self, client: httpx.AsyncClient, path: str, params: dict[str, Any]) -> AsyncIterator[dict[str, Any]]:
+        """Every item of a Graph listing, newest page first, following
+        ``@odata.nextLink`` (only back to the same mailbox) until the caller
+        has enough or Graph has no more."""
+        data = await self._get(client, path, params)
+        while True:
+            for raw in data.get("value") or []:
+                if isinstance(raw, dict):
+                    yield raw
+            link = str(data.get("@odata.nextLink") or "")
+            if not link.startswith(GRAPH_ME + "/"):
+                return
+            data = await self._get(client, link[len(GRAPH_ME):])
+
     async def _sent_folder_id(self, client: httpx.AsyncClient) -> str:
         """The id of their Sent Items (what makes a message ``SENT``)."""
         if not self._sent_folder:
@@ -855,30 +870,31 @@ class DelegateOutlook:
             return ThreadPage([])
         skip = int(page or 0)
         size = max(1, min(max_results, THREADS_PER_PAGE))
+        summaries: dict[str, ThreadSummary] = {}
         async with self._client() as client:
-            data = await self._get(client, "/messages", {
+            # A conversation's messages each match, so Graph's pages are read
+            # until one conversation past this page shows up or none are left.
+            async for raw in self._listing(client, "/messages", {
                 "$search": f'"{text}"',
-                # A conversation's messages each match: enough messages for
-                # the conversations up to this page's end, and one more.
                 "$top": min((skip + size) * 3 + 1, _SEARCH_TOP),
                 "$select": "id,conversationId,subject,from,receivedDateTime,isDraft,internetMessageHeaders",
-            })
-        summaries: dict[str, ThreadSummary] = {}
-        for raw in data.get("value") or []:
-            if not isinstance(raw, dict) or not valid_id(raw.get("conversationId")):
-                continue
-            thread_id = str(raw["conversationId"])
-            if thread_id in summaries:
-                continue
-            name, addr = _address(raw.get("from"))
-            summaries[thread_id] = ThreadSummary(
-                id=thread_id,
-                subject=_hide_tokens(str(raw.get("subject") or "")),
-                sender=f"{name} <{addr}>" if name else addr,
-                date=_iso(raw.get("receivedDateTime")),
-                sender_authenticated=raw.get("isDraft") is not True
-                and exchange_authenticated(_header_message(_header_list(raw)), addr),
-            )
+            }):
+                if not valid_id(raw.get("conversationId")):
+                    continue
+                thread_id = str(raw["conversationId"])
+                if thread_id in summaries:
+                    continue
+                name, addr = _address(raw.get("from"))
+                summaries[thread_id] = ThreadSummary(
+                    id=thread_id,
+                    subject=_hide_tokens(str(raw.get("subject") or "")),
+                    sender=f"{name} <{addr}>" if name else addr,
+                    date=_iso(raw.get("receivedDateTime")),
+                    sender_authenticated=raw.get("isDraft") is not True
+                    and exchange_authenticated(_header_message(_header_list(raw)), addr),
+                )
+                if len(summaries) > skip + size:
+                    break
         found = list(summaries.values())
         more = len(found) > skip + size
         return ThreadPage(found[skip:skip + size], str(skip + size) if more else "")
@@ -925,20 +941,20 @@ class DelegateOutlook:
         """``(message id, thread id)`` for mail that reached the Focused inbox
         since ``after``, newest first, leaving out the person's own."""
         since = after.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        want = max(1, max_results)
+        out: list[tuple[str, str]] = []
         async with self._client() as client:
-            data = await self._get(client, "/mailFolders/inbox/messages", {
+            async for raw in self._listing(client, "/mailFolders/inbox/messages", {
                 "$filter": f"receivedDateTime ge {since} and inferenceClassification eq 'focused'",
                 "$orderby": "receivedDateTime desc",
-                "$top": max(1, min(max_results, _SEARCH_TOP)),
+                "$top": min(want, _SEARCH_TOP),
                 "$select": "id,conversationId,from",
-            })
-        out: list[tuple[str, str]] = []
-        for raw in data.get("value") or []:
-            if not isinstance(raw, dict) or not valid_id(raw.get("id")):
-                continue
-            if _address(raw.get("from"))[1] == self.mailbox:
-                continue
-            out.append((str(raw["id"]), str(raw.get("conversationId") or "")))
+            }):
+                if not valid_id(raw.get("id")) or _address(raw.get("from"))[1] == self.mailbox:
+                    continue
+                out.append((str(raw["id"]), str(raw.get("conversationId") or "")))
+                if len(out) >= want:
+                    break
         return out
 
     async def has_written_to(self, address: str) -> bool:
