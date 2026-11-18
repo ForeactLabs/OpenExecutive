@@ -108,7 +108,7 @@ def test_a_nudge_leads_with_nudge() -> None:
 
 def test_a_suggested_workflow_leads() -> None:
     v = view(recommended_move="suggest_workflow", suggested_workflow="vendor_review")
-    assert (v.buttons[0].label, v.buttons[0].href) == ("Run vendor review", "/jobs/vendor_review")
+    assert (v.buttons[0].label, v.buttons[0].href) == ("Run Vendor review", "/jobs/vendor_review")
     # A name from the alert's data stays one path segment.
     odd = view(recommended_move="suggest_workflow", suggested_workflow="x/../people")
     assert odd.buttons[0].href == "/jobs/x%2F..%2Fpeople"

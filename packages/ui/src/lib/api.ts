@@ -3562,6 +3562,8 @@ export interface ResumeProgress {
 }
 
 export interface WorkflowRunDetail extends WorkflowRunSummary {
+  /** The workflow's name as people read it (never its key). */
+  workflow_title: string;
   inputs: Record<string, unknown>;
   artifact: string | null;
   error: string | null;

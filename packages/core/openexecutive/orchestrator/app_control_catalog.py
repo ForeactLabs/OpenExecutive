@@ -428,10 +428,9 @@ async def _find_workflows(request: Any) -> list[Item]:
 
 
 async def _workflow_title(name: str) -> str:
-    from openexecutive.api.routes import workflows
+    from openexecutive.workflows import workflow_label
 
-    found = await workflows.get_custom_workflow(name)
-    return str(found.get("title") or name)
+    return workflow_label(name)
 
 
 async def _turn_workflow(request: Any, name: str, on: bool) -> str:

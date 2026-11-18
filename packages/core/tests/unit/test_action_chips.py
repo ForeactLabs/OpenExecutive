@@ -175,7 +175,7 @@ def test_run_workflow_chip_with_link() -> None:
         tool_result=json.dumps({"ok": True, "run_id": "run123", "artifact": "# Deck"}),
     )
     assert chip is not None
-    assert chip["summary"] == "Ran board prep workflow"
+    assert chip["summary"] == "Ran Board Prep Deck"
     assert chip["link"] == "/jobs/runs/run123"
 
 
@@ -186,7 +186,7 @@ def test_run_workflow_chip_awaiting_human() -> None:
         tool_result=json.dumps({"status": "awaiting_human", "run_id": "r9", "person_id": 3}),
     )
     assert chip is not None
-    assert chip["summary"] == "Started comp refresh — awaiting sign-off"
+    assert chip["summary"] == "Started Compensation Refresh — awaiting sign-off"
 
 
 def test_run_workflow_chip_suppressed_on_error() -> None:

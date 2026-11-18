@@ -456,6 +456,8 @@ def test_run_detail_strips_the_resume_payload(
     assert "resume_state_json" not in detail
     assert detail["resume_progress"]["gate_step_id"] == "gate"
     assert detail["resume_progress"]["completed_step_ids"] == []
+    # The run page names its workflow in words, never by its key.
+    assert detail["workflow_title"] == "Gate route"
 
 
 def test_run_detail_resume_progress_is_null_for_a_pause_only_run(

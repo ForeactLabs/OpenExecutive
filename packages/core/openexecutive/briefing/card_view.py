@@ -381,8 +381,10 @@ def card_view(
         if item.recommended_move == "nudge" and not artifact and not monitoring
         else None
     )
+    from openexecutive.workflows import workflow_label
+
     workflow = (
-        button("open", f"Run {item.suggested_workflow.replace('_', ' ')}", href=f"/jobs/{quote(item.suggested_workflow, safe='')}")
+        button("open", f"Run {workflow_label(item.suggested_workflow)}", href=f"/jobs/{quote(item.suggested_workflow, safe='')}")
         if item.recommended_move == "suggest_workflow" and item.suggested_workflow
         and not artifact and not monitoring
         else None

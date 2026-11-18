@@ -1231,7 +1231,9 @@ def allowance(tool: str, tool_input: dict[str, Any], *, mcp: bool = False) -> tu
         return f"{FEATURE}|book|people:{','.join(str(i) for i in ids)}", f"Book meetings{who}"[:200]
     if tool == "run_workflow" and isinstance(tool_input.get("workflow_id"), str) and tool_input["workflow_id"]:
         workflow = str(tool_input["workflow_id"])
-        return f"{FEATURE}|workflow|{workflow}", f"Start the {workflow} workflow"[:200]
+        from openexecutive.workflows import workflow_label
+
+        return f"{FEATURE}|workflow|{workflow}", f"Start {workflow_label(workflow)}"[:200]
     if tool == "send_department_message" and isinstance(tool_input.get("department_slug"), str):
         slug = str(tool_input["department_slug"])
         return f"{FEATURE}|department|{slug}", f"Message the {slug} department"[:200]
@@ -1734,7 +1736,9 @@ def summarize(tool: str, tool_input: dict[str, Any], *, mcp: bool = False, quote
     elif tool == "create_calendar_event" and tool_input.get("title"):
         label = f"Book {tool_input.get('title')}"
     elif tool == "run_workflow" and (tool_input.get("workflow") or tool_input.get("workflow_id")):
-        label = f"Start the {tool_input.get('workflow') or tool_input.get('workflow_id')} workflow"
+        from openexecutive.workflows import workflow_label
+
+        label = f"Start {workflow_label(str(tool_input.get('workflow') or tool_input.get('workflow_id')))}"
     elif tool in _BROWSER_LABELS:
         # A step in the person's own browser names the site (browser.tools).
         from urllib.parse import urlsplit

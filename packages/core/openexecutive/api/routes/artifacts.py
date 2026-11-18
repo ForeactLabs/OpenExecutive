@@ -52,7 +52,6 @@ and the text, nothing else, and not found for anything but a live link.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 from collections.abc import Callable
 from typing import Annotated, Literal
@@ -376,23 +375,6 @@ def _mutate(action: Callable[[], ArtifactRecord]) -> ArtifactRecord:
 
 
 
-def workflow_label(name: str) -> str:
-    """A workflow's plain name, also for one switched off or deleted since
-    its runs were written: its title where one is known, else its key in
-    words ("weekly_laptop_restock" -> "Weekly laptop restock")."""
-    from openexecutive.workflows import get_workflow
-    from openexecutive.workflows.dynamic_store import get_definition
-
-    with contextlib.suppress(Exception):
-        return get_workflow(name).title
-    with contextlib.suppress(Exception):
-        defn = get_definition(name)
-        if defn is not None and defn.title.strip():
-            return defn.title.strip()
-    words = name.removeprefix("quick_").replace("_", " ").strip()
-    return words[:1].upper() + words[1:] if words else "Workflow"
-
-
 def _group(rec: ArtifactRecord, collection_label: str | None, labels: dict[str, str]) -> tuple[str, str]:
     """The Documents page group a record files under, and its name.
     `labels` caches workflow names across one list."""
@@ -403,6 +385,8 @@ def _group(rec: ArtifactRecord, collection_label: str | None, labels: dict[str, 
     if rec.source_label in _BRIEFS:
         return "briefs", _BRIEFS_LABEL
     if rec.source_label not in labels:
+        from openexecutive.workflows import workflow_label
+
         labels[rec.source_label] = workflow_label(rec.source_label)
     return f"wf:{rec.source_label}", labels[rec.source_label]
 

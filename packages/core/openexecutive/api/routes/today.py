@@ -404,7 +404,7 @@ _HANDLED_TARGET_KEY: dict[str, str] = {
     "escalated": "new_severity",
     "drafted": "draft_title",
     "merged": "superseded_by_headline",
-    "suggested_workflow": "workflow_name",
+    "suggested_workflow": "workflow_title",
 }
 _HANDLED_DETAIL_KEYS: dict[str, tuple[str, ...]] = {
     "closed": ("evidence",),

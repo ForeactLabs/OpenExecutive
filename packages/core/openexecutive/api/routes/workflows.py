@@ -113,10 +113,12 @@ async def get_workflow_run(run_id: str, request: Request) -> dict[str, Any]:
     returning it would re-send the whole run body every few seconds to render
     a progress list that only needs the step ids.
     """
+    from openexecutive.workflows import workflow_label
     from openexecutive.workflows.run_outcome import shown_title
 
     run = _visible_run(run_id, request)
     run["title"] = shown_title(str(run.get("title") or ""))
+    run["workflow_title"] = workflow_label(str(run.get("workflow_name") or ""))
     run["resume_progress"] = _resume_progress(run.pop("resume_state_json", None))
     run["rerunnable"] = _rerunnable(run)
     return run

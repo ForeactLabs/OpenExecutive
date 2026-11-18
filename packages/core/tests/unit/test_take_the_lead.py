@@ -1013,7 +1013,23 @@ def test_what_one_allow_covers(owner: Any) -> None:
     assert ttl.allowance("message_person", {"person_id": 9999}) is None
     assert ttl.allowance("create_calendar_event", {"attendee_person_ids": [9999]}) is None
     assert ttl.allowance("run_workflow", {"workflow_id": "weekly_review"}) == (
-        "take_the_lead|workflow|weekly_review", "Start the weekly_review workflow")
+        "take_the_lead|workflow|weekly_review", "Start Weekly Review")
+
+
+def test_a_workflow_step_reads_by_its_name_never_its_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from openexecutive.workflows import dynamic_store
+
+    monkeypatch.setattr(dynamic_store, "get_definition", lambda name, db_path=None: (
+        SimpleNamespace(title="Spaghetti night groceries", is_active=False) if name == "spaghetti_night" else None))
+    # A saved workflow reads by its title, on cards, Done for you and Home.
+    assert ttl.summarize("run_workflow", {"workflow": "spaghetti_night"}) == "Start Spaghetti night groceries"
+    assert ttl.allowance("run_workflow", {"workflow_id": "spaghetti_night"}) == (
+        "take_the_lead|workflow|spaghetti_night", "Start Spaghetti night groceries")
+    # One with no title known any more reads as words.
+    assert ttl.summarize("run_workflow", {"workflow_id": "spaghetti_night_grocery_list"}) == (
+        "Start Spaghetti night grocery list")
 
 
 def test_edits_change_only_editable_fields() -> None:

@@ -1008,8 +1008,11 @@ def _apply_suggest_workflow(ctx: _MoveContext) -> None:
         return
     ctx.summary.suggested += 1
     ctx.move_taken = "suggest_workflow"
-    _audit(EVENT_SUGGESTED, f"Suggested workflow {v.workflow_name} for '{alert.headline[:80]}'",
-           {**ctx.base_details, "workflow_name": v.workflow_name})
+    from openexecutive.workflows import workflow_label
+
+    title = workflow_label(v.workflow_name)
+    _audit(EVENT_SUGGESTED, f"Suggested {title} for '{alert.headline[:80]}'",
+           {**ctx.base_details, "workflow_name": v.workflow_name, "workflow_title": title})
 
 
 async def apply_verdict(

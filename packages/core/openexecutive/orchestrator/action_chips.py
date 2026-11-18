@@ -687,7 +687,10 @@ def summarize_action(
         payload["link"] = link
     elif tool_name == "save_workflow":
         status = (parsed or {}).get("status")
-        name = str((parsed or {}).get("name") or "").replace("_", " ")
+        from openexecutive.workflows import workflow_label
+
+        key = str((parsed or {}).get("name") or "")
+        name = workflow_label(key) if key else ""
         if status == "waiting_for_approval":
             payload["summary"] = "Waiting for your OK: a change to a workflow"
             # The chat shows the card itself under its message, by this id.
@@ -704,13 +707,16 @@ def summarize_action(
         if isinstance(link, str) and link and status != "waiting_for_approval":
             payload["link"] = f"/jobs/{link}"
     elif tool_name == "run_workflow":
-        wf = str(tool_input.get("workflow", "")).replace("_", " ")
+        from openexecutive.workflows import workflow_label
+
+        key = str(tool_input.get("workflow") or "")
+        wf = workflow_label(key) if key else ""
         run_id = (parsed or {}).get("run_id")
         awaiting = (parsed or {}).get("status") == "awaiting_human"
         if wf and awaiting:
             payload["summary"] = f"Started {wf} — awaiting sign-off"
         elif wf:
-            payload["summary"] = f"Ran {wf} workflow"
+            payload["summary"] = f"Ran {wf}"
         else:
             payload["summary"] = "Ran a workflow"
         payload["target"] = tool_input.get("workflow") or None

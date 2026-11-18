@@ -460,7 +460,9 @@ def test_suggest_workflow_only_from_offered_list_and_never_runs(db: Path, audit_
     assert label == "relevant"
     row = alert_store.get_alert(aid, db_path=db)
     assert row is not None and row.suggested_workflow == "pricing_review" and row.recommended_move == "suggest_workflow"
-    assert any(e[0] == review.EVENT_SUGGESTED for e in audit_events)
+    suggested = [e for e in audit_events if e[0] == review.EVENT_SUGGESTED]
+    assert suggested and "pricing_review" not in suggested[0][1]
+    assert suggested[0][1].startswith("Suggested Pricing & Packaging Review for")
     # A name that was not offered is ignored.
     aid2 = _insert(db, "other")
     _apply(db, aid2, _verdict(aid2, recommended_move="suggest_workflow", workflow_name="board_prep"), evidence=ev)
