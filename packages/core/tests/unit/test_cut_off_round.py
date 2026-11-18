@@ -470,6 +470,28 @@ def test_a_status_read_whose_progress_moves_is_not_a_repeat() -> None:
     assert all(REPEATING_NOTE not in str(c["messages"][-1]["content"]) for c in provider.calls)
 
 
+def test_a_large_count_that_moves_is_not_a_repeat() -> None:
+    """Long plain numbers (bytes done) are progress, not ids: they stay in
+    the call key, so a moving upload is getting somewhere."""
+    from openexecutive.orchestrator.executive import REPEAT_LIMIT, REPEATING_NOTE
+
+    reads: list[int] = []
+
+    async def _status(*_a: Any, **_k: Any) -> str:
+        reads.append(1)
+        return f'{{"bytes_done": {10485760 * len(reads)}, "total": 524288000}}'
+
+    rounds = REPEAT_LIMIT + 1
+    provider = _ScriptedProvider(
+        [_FinalMsg([_ToolUseBlock(f"g{i}", "get_upload_status", {"id": "x"})], "tool_use") for i in range(rounds)]
+        + [_FinalMsg([_TextBlock("Done.")], "end_turn")]
+    )
+    asyncio.run(_run(provider, {"get_upload_status": _status}))
+
+    assert len(reads) == rounds
+    assert all(REPEATING_NOTE not in str(c["messages"][-1]["content"]) for c in provider.calls)
+
+
 def test_a_status_read_whose_only_change_is_time_elapsed_is_a_repeat() -> None:
     """A job polled with the same call, whose result only counts the time
     passing ("42s elapsed", "00:47"), is not getting anywhere."""

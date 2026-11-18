@@ -607,3 +607,19 @@ def test_a_long_answer_cut_with_the_window_full_ends_plainly(monkeypatch: pytest
 
     assert len(provider.calls) == 4  # 81,000 of 100,000 after the fourth round
     assert any(isinstance(i, str) and FULL_EMPTY_REPLY in i for i in items)
+
+
+def test_a_part_fits_the_room_the_prompt_leaves() -> None:
+    """Parts are sized to what is left of the window once the prompt is
+    counted, not only to what the turn has read: a long history leaves
+    less room, and a part that would push the prompt past it is smaller."""
+    budget = TurnReadingBudget(ReadingLimits(per_read=60_000, per_turn=120_000, window_tokens=100_000))
+    budget.prompt_was(70_000)  # 10,000 tokens (30,000 characters) left before 80%
+
+    first = budget.cap("search_files", {"q": "a"}, "x" * 100_000, "t1")
+    assert 25_000 < len(first) <= 30_000
+    assert not budget.full
+
+    spent = budget.cap("search_files", {"q": "b"}, "y" * 100_000, "t2")
+    assert len(spent) <= 3_000  # no room left: a short head and the "read all it can hold" notice
+    assert "read all it can hold" in spent

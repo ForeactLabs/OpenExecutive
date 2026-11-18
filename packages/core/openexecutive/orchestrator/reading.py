@@ -17,7 +17,7 @@ from contextvars import ContextVar
 from typing import Any, TypeVar
 
 from openexecutive.orchestrator import tool_groups, turn_progress
-from openexecutive.providers.feature_gate import ReadingLimits
+from openexecutive.providers.feature_gate import _CHARS_PER_TOKEN, ReadingLimits
 from openexecutive.workflows import step_script, tool_catalog
 
 logger = logging.getLogger(__name__)
@@ -223,6 +223,9 @@ class TurnReadingBudget:
     def __init__(self, limits: ReadingLimits) -> None:
         self.limits = limits
         self._prompt_tokens = 0
+        # ``used`` when the prompt was last counted: reads since then are
+        # not in that count yet.
+        self._used_at_prompt = 0
         self.per_result = limits.per_read
         self.turn_budget = limits.per_turn
         self.used = 0
@@ -236,7 +239,20 @@ class TurnReadingBudget:
     def prompt_was(self, tokens: int) -> None:
         """Note how big the turn's last prompt was, as the model counted it:
         everything in it (the calls the turn wrote, its text, its reads)."""
-        self._prompt_tokens = max(self._prompt_tokens, tokens)
+        if tokens >= self._prompt_tokens:
+            self._prompt_tokens = tokens
+            self._used_at_prompt = self.used
+
+    def _used(self) -> int:
+        """What counts as read for sizing the next part: the turn's reads, or
+        more when the prompt (system, history, attachments, what the turn
+        wrote) leaves less room before most of the window than that."""
+        window = self.limits.window_tokens
+        if not window or not self._prompt_tokens:
+            return self.used
+        room = int(window * _PROMPT_FULL_SHARE - self._prompt_tokens) * _CHARS_PER_TOKEN
+        room -= self.used - self._used_at_prompt
+        return max(self.used, self.turn_budget - room)
 
     @property
     def full(self) -> bool:
@@ -265,7 +281,7 @@ class TurnReadingBudget:
         text, start, notice, reads = held
         name = _safe_tool_name(tool_use["name"])
         limit, budget_spent = _turn_result_limit(
-            tool_use["name"], per_result=self.per_result, turn_budget=self.turn_budget, used=self.used
+            tool_use["name"], per_result=self.per_result, turn_budget=self.turn_budget, used=self._used()
         )
         weight = text_weight(text[start:])
         limit = max(_MIN_USEFUL_CAP, int(limit / weight) - len(notice))
@@ -320,7 +336,7 @@ class TurnReadingBudget:
             return text  # sized and counted by ``replay``
         weight = text_weight(text) if isinstance(text, str) else 1.0
         limit, budget_spent = _turn_result_limit(
-            name, per_result=self.per_result, turn_budget=self.turn_budget, used=self.used
+            name, per_result=self.per_result, turn_budget=self.turn_budget, used=self._used()
         )
         limit = max(_MIN_USEFUL_CAP, int(limit / weight)) if not budget_spent else limit
         content = _cap_tool_result(text, tool_name=name, limit=limit, budget_spent=budget_spent)
