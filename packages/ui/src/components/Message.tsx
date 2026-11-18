@@ -56,7 +56,7 @@ interface MessageProps {
   memory?: ReactNode;
   // Approve a card under this reply from the chat itself: the chat carries
   // on from there (ChatHeldActionCard). Off while a turn runs.
-  onApproveCard?: (id: number, input?: Record<string, string>) => void;
+  onApproveCard?: (id: number, input?: Record<string, string>) => Promise<void> | void;
   approveDisabled?: boolean;
 }
 

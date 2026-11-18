@@ -57,7 +57,8 @@ export default function ChatHeldActionCard({
   approveDisabled = false,
 }: {
   id: number;
-  onApprove?: (id: number, input?: Record<string, string>) => void;
+  // Resolves once the chat's turn has ended (or nothing was sent).
+  onApprove?: (id: number, input?: Record<string, string>) => Promise<void> | void;
   approveDisabled?: boolean;
 }) {
   const [instance, setInstance] = useState<DecisionInstance | null>(null);
@@ -79,6 +80,24 @@ export default function ChatHeldActionCard({
   const payload = readPayload(instance);
   if (!payload) return null;
   const done = DONE.has(instance.status) || handed;
+  // Approve through the chat: "Approved" while its turn runs, then the
+  // card as the server has it now (done, or still waiting when it was
+  // refused or nothing was sent), so it never stays "Approved" on a guess.
+  const viaChat = async (input?: Record<string, string>) => {
+    if (!onApprove || approveDisabled) return;
+    setHanded(true);
+    setEditing(false);
+    try {
+      await onApprove(instance.id, input);
+    } finally {
+      try {
+        setInstance(await getDecision(instance.id));
+      } catch {
+        /* gone or not this person's: what the reply says stands */
+      }
+      setHanded(false);
+    }
+  };
   const waiting = instance.status === "proposed";
   if (!done && !waiting) return null;
 
@@ -107,13 +126,12 @@ export default function ChatHeldActionCard({
         <HeldFieldsEdit
           id={instance.id}
           fields={payload.fields}
-          busy={busy !== null}
+          busy={busy !== null || (onApprove !== undefined && approveDisabled)}
           onCancel={() => setEditing(false)}
           onApprove={(changed) => {
             const input = Object.keys(changed).length > 0 ? changed : undefined;
             if (onApprove) {
-              setHanded(true);
-              onApprove(instance.id, input);
+              void viaChat(input);
               return;
             }
             void act("Doing it…", () =>
@@ -141,8 +159,7 @@ export default function ChatHeldActionCard({
             variant="primary"
             onClick={() => {
               if (onApprove) {
-                setHanded(true);
-                onApprove(instance.id);
+                void viaChat();
                 return;
               }
               void act("Doing it…", () => approveDecision(instance.id));

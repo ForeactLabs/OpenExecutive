@@ -1395,7 +1395,7 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
                   // Sent on its own (`queuedFollowup`): no files from the composer,
                   // which would take the upload route that approves nothing.
                   onApproveCard={
-                    member ? undefined : (id, input) => void handleSend(APPROVED_MESSAGE, undefined, true, { id, input })
+                    member ? undefined : (id, input) => handleSend(APPROVED_MESSAGE, undefined, true, { id, input })
                   }
                   approveDisabled={isLoading}
                   onRetry={canRedo && i === turn.replyIndex ? () => void handleRetry() : undefined}

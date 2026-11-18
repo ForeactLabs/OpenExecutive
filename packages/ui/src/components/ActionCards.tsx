@@ -231,7 +231,7 @@ export function ChatActionCards({
 }: {
   ids: number[];
   // A held step's Approve, sent through the chat so it carries on.
-  onApprove?: (id: number, input?: Record<string, string>) => void;
+  onApprove?: (id: number, input?: Record<string, string>) => Promise<void> | void;
   approveDisabled?: boolean;
 }) {
   const { cards, loaded, gone } = useActionCards();
