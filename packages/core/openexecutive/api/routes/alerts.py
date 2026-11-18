@@ -978,7 +978,33 @@ async def say_on_card(alert_id: int, body: SayBody, request: Request) -> SayResp
         card_talk.add_turn(alert_id, "me", reply, person_id=person)
         return SayResponse(reply=reply, card=_card(), approval=answered)
 
+    # The plan they saw, as the card draws it: one only for them to know, or
+    # a signal from outside, shows none.
+    drawn = one_card(existing, viewer)
+    hidden = not (drawn is not None and drawn.view is not None and drawn.view.plan_title)
+    seen = "" if hidden else body.seen_plan.strip()
+
+    async def _start(plan: str, said: str) -> tuple[str, approvals.AlertApproval | None]:
+        """Run ``plan`` through the same Approve as a tap. The card says it
+        started only once it has; when it couldn't, the card says so and
+        comes back as it reads now, so the page never keeps offering a plan
+        that moved on."""
+        try:
+            return said, await _approve(alert_id, ApproveBody(plan=plan), request)
+        except HTTPException:
+            return COULD_NOT_START, None
+
     if kind == "watch":
+        # A go on a watch's card that shows its step runs it, as a tap does;
+        # anything else corrects the watch.
+        shown = (existing.suggested_action or "").strip()
+        if shown and not hidden and _may_approve(existing, request) and await replan.said_go(
+            shown, line, before=seen,
+        ):
+            card_talk.add_turn(alert_id, "you", line, person_id=person)
+            reply, approval = await _start(shown, "On it.")
+            card_talk.add_turn(alert_id, "me", reply, person_id=person)
+            return SayResponse(reply=reply, card=_card(), approval=approval)
         steered = await _steer(alert_id, line, request)
         card_talk.add_turn(alert_id, "you", line, person_id=person)
         card_talk.add_turn(alert_id, "me", steered.reply, person_id=person)
@@ -1006,17 +1032,13 @@ async def say_on_card(alert_id: int, body: SayBody, request: Request) -> SayResp
     # A go runs the plan through the same Approve as a tap. Whether they
     # said go is read from their words and the plans alone, never from the
     # card, so text from outside on the card can't make its plan run.
-    # The plan they saw, as the card draws it: one only for them to know, or
-    # a signal from outside, shows none.
-    drawn = one_card(existing, viewer)
-    hidden = not (drawn is not None and drawn.view is not None and drawn.view.plan_title)
-    seen = "" if hidden else body.seen_plan.strip()
     # A go names a step: words that ask for none never run anything.
     go = new.go and bool(new.plan.strip()) and await replan.said_go(plan, line, before=seen)
     # A card that showed no plan takes a step once they ask for one: from
     # then on it shows the plan and waits for their OK like any other. When
-    # the step they asked for is the one it had, nobody changed the plan.
-    asked_same = hidden and not changed and bool(new.plan.strip())
+    # the step they asked for is the one it had, nobody changed the plan,
+    # and only a go asks for it: a question that echoes the plan doesn't.
+    asked_same = hidden and not changed and new.go and bool(new.plan.strip())
     if asked_same and not replan.wait_for_ok(alert_id, expected=existing.suggested_action or ""):
         raise HTTPException(status_code=409, detail="This card just changed. Try again.")
     if changed:
@@ -1041,13 +1063,7 @@ async def say_on_card(alert_id: int, body: SayBody, request: Request) -> SayResp
     card_talk.add_turn(alert_id, "you", line, person_id=person)
     approval = None
     if go:
-        # The card says it started only once it has. When it couldn't, the
-        # card says so and comes back as it reads now (the plan may have
-        # changed above), so the page never keeps offering the old plan.
-        try:
-            approval = await _approve(alert_id, ApproveBody(plan=plan), request)
-        except HTTPException:
-            reply = COULD_NOT_START
+        reply, approval = await _start(plan, reply)
     card_talk.add_turn(alert_id, "me", reply, person_id=person)
     return SayResponse(reply=reply, card=_card(), approval=approval)
 

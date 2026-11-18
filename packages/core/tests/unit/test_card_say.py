@@ -771,6 +771,34 @@ def test_a_watch_correction_names_the_other_cards_it_closed(
     assert body["closed_alert_ids"] == [99]
 
 
+def test_a_go_on_a_watch_card_runs_its_step(
+    client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch, turns: _Turns,
+) -> None:
+    watch = dict(source="query", topic_tags=["external:news-acme"], dedup_key="watch:news-acme", needs="ok")
+    aid = _card(db, **watch)  # type: ignore[arg-type]
+
+    async def no_steer(*a: object, **k: object) -> None:
+        raise AssertionError("a go is not a correction")
+
+    monkeypatch.setattr(alerts_route, "_steer", no_steer)
+    asked = _go(monkeypatch, True)
+    res = _say(client, aid, "yes, go ahead")
+    assert res.status_code == 200, res.text
+    assert asked == [(OLD, "yes, go ahead", OLD)]
+    assert res.json()["approval"] is not None and len(turns.calls) == 1
+
+
+def test_a_question_echoing_the_plan_leaves_a_for_you_to_know_card_as_it_is(
+    client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    aid = _card(db, needs="fyi")
+    _model(monkeypatch, {"plan": OLD, "go": False, "reply": "Alex sent it."})
+    _go(monkeypatch, False)
+    assert _say(client, aid, "who sent this?").status_code == 200
+    card = alert_store.get_alert(aid)
+    assert card is not None and card.needs == "fyi"
+
+
 def test_a_watch_card_keeps_its_own_plan(client: TestClient, db: Path, turns: _Turns) -> None:
     """A card whose plan can't change gets no other ways to go, and a pick of
     another plan never swaps it in."""
