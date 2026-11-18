@@ -1336,13 +1336,34 @@ class _ChatTapRequest:
         self.client = None
 
 
+def chat_card_is_theirs(instance: DecisionInstance, person: Any) -> bool:
+    """Whether ``person``, proven in a chat app, may see and answer card
+    ``instance`` there: the web chat's rule (``_resolver``). A card of
+    actions is its person's alone; a meeting is the principal's, or its
+    approver's unless it is the principal's private booking."""
+    from openexecutive.people.store import find_principal_person
+
+    if not shown_in_chat(instance) or person.id is None:
+        return False
+    principal = find_principal_person()
+    is_principal = principal is not None and principal.id == person.id
+    if _approver_only(instance):
+        allowed = person.id == instance.approver_person_id
+    else:
+        allowed = is_principal or (person.id == instance.approver_person_id and not _is_private(instance))
+    if allowed:
+        # A step held from someone else's own chat isn't theirs either.
+        from openexecutive.alerts import own_chat
+
+        allowed = own_chat.decision_shown_to(instance, person.id)
+    return allowed
+
+
 async def resolve_in_chat(
     instance_id: int, person: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None,
 ) -> DecisionInstance:
     """Approve or skip a card tapped in a chat app, for ``person``: the one the
-    adapter proved tapped it. The rule is the web chat's (``_resolver``): a
-    card of actions is its person's alone; a meeting is the principal's, or
-    its approver's unless it is the principal's private booking. ``allow``
+    adapter proved tapped it, when it is theirs (``chat_card_is_theirs``). ``allow``
     is the "on its own next time" button (In training): the same as the web
     card's tick. ``shown_at``: when the tapped card showed the card as it is
     (a chat app's tap, ``channel_cards.tap``); else when it was posted to
@@ -1355,7 +1376,8 @@ async def resolve_in_chat(
     from openexecutive.people.store import find_principal_person
 
     instance = get_decision_instance(instance_id)
-    if instance is None or not shown_in_chat(instance) or person.id is None:
+    if instance is None or not chat_card_is_theirs(instance, person):
+        # As the routes: a card that isn't theirs is not there.
         raise HTTPException(status_code=404, detail="This card is no longer there.")
     if instance.status == STATUS_PROPOSED and approve and card_text(instance.id) is None:
         # Not one a chat can show whole (``channel_cards.CARD_MAX``): what a
@@ -1364,18 +1386,6 @@ async def resolve_in_chat(
     spec = _spec_for(instance)
     principal = find_principal_person()
     is_principal = principal is not None and principal.id == person.id
-    if _approver_only(instance):
-        allowed = person.id == instance.approver_person_id
-    else:
-        allowed = is_principal or (person.id == instance.approver_person_id and not _is_private(instance))
-    if allowed:
-        # A step held from someone else's own chat isn't theirs either.
-        from openexecutive.alerts import own_chat
-
-        allowed = own_chat.decision_shown_to(instance, person.id)
-    if not allowed:
-        # As the routes: a card that isn't theirs is not there.
-        raise HTTPException(status_code=404, detail="This card is no longer there.")
     if not approve:
         return await _reject(instance, spec, person.id)
     if instance.status != STATUS_PROPOSED:

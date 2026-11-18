@@ -446,21 +446,46 @@ async def tap(tapped: Choice, person: Any) -> Tapped:
     decision_id, choice = tapped.decision_id, tapped.choice
     # Taken before the card is read: a change saved after it isn't shown.
     read_at = datetime.now(UTC).isoformat()
-    current = card_text(decision_id) if choice != SKIP else None
-    if choice != SKIP and current is None and _waits(decision_id):
-        # Its words no longer fit a chat: nothing to check the tap against.
-        # (One that waits no more is answered as handled, below.)
-        return Tapped(f"Not done: this card changed. Open it in the app: {_app_link(decision_id)}")
-    if current is not None and version(decision_id, current) != tapped.version:
-        return Tapped(CHANGED, current, card_options(decision_id, current))
+    answer, shown = await asyncio.to_thread(_look, tapped, person)
+    if answer is not None:
+        return answer
     if choice == SWITCH:
         return await _switch(decision_id, person)
     line = await resolve(
         decision_id, person, approve=choice != SKIP, allow=choice == ALLOW,
         # It showed the card as it was read.
-        shown_at=read_at if current is not None else None,
+        shown_at=read_at if shown else None,
     )
     return Tapped(line)
+
+
+def _look(tapped: Choice, person: Any) -> tuple[Tapped | None, bool]:
+    """The card ``tapped`` is on, read once (off the chat app's loop): an
+    answer when the tap is to do nothing, and whether it showed the card as
+    it is now. Skip is a skip, whatever it showed."""
+    decision_id = tapped.decision_id
+    if tapped.choice == SKIP:
+        return None, False
+    current = card_text(decision_id)
+    if current is None:
+        if _waits(decision_id):
+            # Its words no longer fit a chat: nothing to check the tap against.
+            return Tapped(f"Not done: this card changed. Open it in the app: {_app_link(decision_id)}"), False
+        return None, False  # waits no more: answered as handled
+    if version(decision_id, current) == tapped.version:
+        return None, True
+    if not _theirs(decision_id, person):
+        # As anywhere else: a card that isn't theirs is not there.
+        return Tapped("Not done: this card is no longer there."), False
+    return Tapped(CHANGED, current, card_options(decision_id, current)), False
+
+
+def _theirs(decision_id: int, person: Any) -> bool:
+    from openexecutive.api.routes.decisions import chat_card_is_theirs
+    from openexecutive.memory.decision_ledger import get_decision_instance
+
+    instance = get_decision_instance(decision_id)
+    return instance is not None and chat_card_is_theirs(instance, person)
 
 
 async def _switch(decision_id: int, person: Any) -> Tapped:

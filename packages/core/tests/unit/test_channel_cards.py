@@ -400,12 +400,17 @@ def test_a_tap_on_a_card_that_says_something_else_now_shows_it_again(monkeypatch
     monkeypatch.setattr(channel_cards, "resolve", resolve)
     monkeypatch.setattr(channel_cards, "card_text", lambda i: "Reply ready to send\nfrom Ada now")
     monkeypatch.setattr(channel_cards, "card_options", lambda i, shown: (("Send from Ada, cc me", "new"),))
+    monkeypatch.setattr(channel_cards, "_theirs", lambda i, who: who.id == 3)
     old = channel_cards.version(7, "Reply ready to send\nfrom you")
     for choice in ("a", "n", "x"):
         assert asyncio.run(channel_cards.tap(channel_cards.Choice(7, choice, old), SimpleNamespace(id=3))) == (
             channel_cards.Tapped(channel_cards.CHANGED, "Reply ready to send\nfrom Ada now", (("Send from Ada, cc me", "new"),))
         )
     assert calls == []
+    # Someone else tapping an older copy isn't shown what it says now.
+    assert asyncio.run(channel_cards.tap(channel_cards.Choice(7, "a", old), SimpleNamespace(id=4))) == (
+        channel_cards.Tapped("Not done: this card is no longer there.")
+    )
     assert asyncio.run(channel_cards.tap(channel_cards.Choice(7, "s", old), SimpleNamespace(id=3))).line == "Skipped."
     assert calls == [False]
 
