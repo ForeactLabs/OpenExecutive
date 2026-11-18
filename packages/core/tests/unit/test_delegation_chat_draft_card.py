@@ -559,6 +559,16 @@ def test_a_forward_switched_keeps_the_forwarded_message_as_it_was(
     assert mailbox.drafts["d1"].message.text == saved["body"]
 
 
+def test_an_outlook_forward_switched_keeps_the_forwarded_message_as_it_was(
+    db: Path, owner: Any, as_sender: list[str],
+) -> None:
+    outlook = "From: Dana <dana@example.com>\nSent: Monday\nTo: me\nSubject: Quote\n\n| a | b |\n|---|---|"
+    mailbox, row = _draft_of(owner, "FW: Quote", f"See below.\n\n{outlook}")
+    saved = _switch(owner, row, mailbox, True)
+    assert saved["body"].startswith("Hi Dana,\n\nOlivia asked me")
+    assert saved["body"].endswith(outlook) and saved["body"].count(outlook) == 1
+
+
 def test_a_rewrite_that_changes_nothing_leaves_the_draft_alone(
     db: Path, owner: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
