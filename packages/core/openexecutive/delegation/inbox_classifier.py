@@ -236,7 +236,7 @@ def their_last_words(thread: Any, message: Any, own: set[str]) -> str:
 
 def render_email(
     message: Any, *, relation: str, model: str, addressed: Addressing | None = None, earlier: str = "",
-    open_email: str = "",
+    open_email: str = "", part: int = 0,
 ) -> str:
     """The user turn: a few header lines and the sender's own new words (and
     any email they forwarded, ``readable_text``), as
@@ -246,7 +246,8 @@ def render_email(
 
     Each is read whole, up to what ``model`` reads at once
     (``providers.registry.reading_limits_for``): the email itself up to one
-    read, and each of the other two up to a quarter of one."""
+    read, and each of the other two up to a quarter of one. A longer email
+    is read in parts (``email_parts``): ``part`` picks which one."""
     from openexecutive.delegation.ghostwriter import one_line
     from openexecutive.integrations.email_poller import readable_text
     from openexecutive.providers.registry import reading_limits_for
@@ -254,8 +255,8 @@ def render_email(
 
     most = reading_limits_for(model).per_read
     body = readable_text(
-        getattr(message, "text", "") or "", getattr(message, "subject", "") or "", max_chars=most,
-    )
+        getattr(message, "text", "") or "", getattr(message, "subject", "") or "",
+    )[part * most:(part + 1) * most]
     others = len({*getattr(message, "to", []), *getattr(message, "cc", [])})
     header = [
         f"From: {one_line(getattr(message, 'from_name', '') or '', 80)} "
@@ -295,6 +296,17 @@ def render_email(
         ))
         turn = f"<their_open_email>\n{waiting.strip()}\n</their_open_email>\n\n{turn}"
     return turn
+
+
+def email_parts(message: Any, *, model: str) -> int:
+    """How many parts ``render_email`` reads ``message`` in for ``model``:
+    one read each (``providers.registry.reading_limits_for``), at least one."""
+    from openexecutive.integrations.email_poller import readable_text
+    from openexecutive.providers.registry import reading_limits_for
+
+    most = reading_limits_for(model).per_read
+    size = len(readable_text(getattr(message, "text", "") or "", getattr(message, "subject", "") or ""))
+    return max(1, -(-size // most))
 
 
 def open_email_text(payload: dict[str, Any]) -> str:

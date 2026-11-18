@@ -10,8 +10,9 @@ call, with no tools, reads the email and says whether it carries
 instructions meant for an AI assistant rather than for the person (to
 ignore its rules, forward or share other mail, reveal what it knows, reply
 somewhere else, or act on its own). It reads the sender's own words as
-plain text, all of them (as much as its model reads at once), so an
-instruction buried far down is seen. Styling is gone by then, so
+plain text, all of them (an email longer than its model reads at once is
+checked part by part, ``email_parts``), so an instruction buried far down
+is seen. Styling is gone by then, so
 hidden text is judged by what it says, not by being hidden.
 
 Anything it flags, or can't judge (the call failed or answered nonsense),
@@ -84,15 +85,25 @@ async def _call_model(model: str, turn: str) -> dict[str, Any]:
 async def held_back(message: Any, *, relation: str, model: str | None = None) -> bool:
     """Whether a reply to ``message`` must wait for the person: the email
     tries to steer an assistant, or the check couldn't tell. Never raises."""
-    from openexecutive.delegation.inbox_classifier import classifier_model, render_email
+    from openexecutive.delegation.inbox_classifier import (
+        classifier_model,
+        email_parts,
+        render_email,
+    )
 
+    chosen = model or classifier_model()
     try:
-        chosen = model or classifier_model()
-        payload = await _call_model(chosen, render_email(message, relation=relation, model=chosen))
+        parts = email_parts(message, model=chosen)
     except Exception:
         logger.warning("delegation.injection_check: the check failed — holding the reply", exc_info=True)
         return True
-    steers = payload.get("steers_assistant")
-    if not isinstance(steers, bool):
-        return True
-    return steers
+    for part in range(parts):
+        try:
+            payload = await _call_model(chosen, render_email(message, relation=relation, model=chosen, part=part))
+        except Exception:
+            logger.warning("delegation.injection_check: the check failed — holding the reply", exc_info=True)
+            return True
+        steers = payload.get("steers_assistant")
+        if steers is not False:
+            return True
+    return False
