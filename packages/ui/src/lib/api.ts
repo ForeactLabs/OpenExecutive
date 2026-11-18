@@ -6851,11 +6851,13 @@ export interface SayResult {
 
 // "Or tell me…" on any card: an answer, "ask Dan instead", "yes, send it
 // from you", "that's our own repo". The card takes it its own way.
-export async function sayOnCard(alertId: number, text: string): Promise<SayResult> {
+// `seenPlan` is the plan the card shows as they speak: a go is judged
+// against it, so it never runs a plan someone changed since.
+export async function sayOnCard(alertId: number, text: string, seenPlan = ""): Promise<SayResult> {
   const res = await fetch(`${API_BASE}/alerts/${alertId}/say`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, seen_plan: seenPlan }),
   });
   if (!res.ok) {
     const body = await res.text().catch(() => "");

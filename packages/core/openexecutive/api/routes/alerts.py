@@ -909,6 +909,10 @@ class SayBody(BaseModel):
     # Bounded below, not with max_length, so a 422 never echoes what the
     # person wrote.
     text: str = ""
+    # The plan the card showed them as they spoke ("" when it showed none).
+    # A go is judged against this, never the plan as it may have changed
+    # since, so it never runs a plan they didn't see.
+    seen_plan: str = ""
 
 
 class SayResponse(BaseModel):
@@ -1006,7 +1010,7 @@ async def say_on_card(alert_id: int, body: SayBody, request: Request) -> SayResp
     # a signal from outside, shows none.
     drawn = one_card(existing, viewer)
     hidden = not (drawn is not None and drawn.view is not None and drawn.view.plan_title)
-    seen = "" if hidden else existing.suggested_action or ""
+    seen = "" if hidden else body.seen_plan.strip()
     # A go names a step: words that ask for none never run anything.
     go = new.go and bool(new.plan.strip()) and await replan.said_go(plan, line, before=seen)
     # A card that showed no plan takes a step once they ask for one: from

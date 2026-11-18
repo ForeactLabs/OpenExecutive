@@ -112,8 +112,13 @@ def _card(db: Path, headline: str = "Alex can't open the shared Drive", **kw: ob
     return aid
 
 
-def _say(client: TestClient, aid: int, text: str) -> Any:
-    return client.post(f"/alerts/{aid}/say", json={"text": text})
+def _say(client: TestClient, aid: int, text: str, seen: str | None = None) -> Any:
+    """Say ``text`` on the card, as a page showing ``seen`` (by default the
+    card's plan as it stands)."""
+    if seen is None:
+        card = alert_store.get_alert(aid)
+        seen = (card.suggested_action or "") if card is not None else ""
+    return client.post(f"/alerts/{aid}/say", json={"text": text, "seen_plan": seen})
 
 
 def _model(monkeypatch: pytest.MonkeyPatch, data: dict[str, Any]) -> dict[str, Any]:
@@ -286,6 +291,21 @@ def test_a_signal_card_judges_a_go_against_no_plan(
     assert card is not None and card.needs == "ok" and card.suggested_action == OLD
     view = res.json()["card"]["view"]
     assert view["plan"] == OLD and [o["plan"] for o in view["options"]][:1] == [OLD]
+
+
+def test_a_go_is_judged_against_the_plan_they_saw(
+    client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch, turns: _Turns,
+) -> None:
+    """Someone else changed the plan while their page still showed the old
+    one: their go is judged against what they saw, so it doesn't run."""
+    aid = _card(db)
+    replan.apply_change(aid, expected=OLD, plan=NEW, person_id=2, label="Share it")
+    _model(monkeypatch, {"plan": NEW, "go": True, "reply": "On it."})
+    asked = _go(monkeypatch, False)
+    res = _say(client, aid, "yes, do it", seen=OLD)
+    assert res.status_code == 200, res.text
+    assert asked == [(NEW, "yes, do it", OLD)]
+    assert res.json()["approval"] is None and turns.calls == []
 
 
 def test_a_go_that_cant_start_says_so_on_the_card(

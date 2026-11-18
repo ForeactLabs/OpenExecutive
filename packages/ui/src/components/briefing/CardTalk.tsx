@@ -33,6 +33,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 // "Correct it" (AwarenessPanels).
 export function TellMe({
   alertId,
+  seenPlan = "",
   disabled = false,
   autoFocus = false,
   onSending,
@@ -40,6 +41,8 @@ export function TellMe({
   onFailed,
 }: {
   alertId: number;
+  // The plan the card shows as they speak.
+  seenPlan?: string;
   disabled?: boolean;
   autoFocus?: boolean;
   onSending?: (text: string) => void;
@@ -58,7 +61,7 @@ export function TellMe({
     setError(null);
     onSending?.(value);
     try {
-      const r = await sayOnCard(alertId, value);
+      const r = await sayOnCard(alertId, value, seenPlan);
       setText("");
       onSaid(r, value);
     } catch (e) {
@@ -236,6 +239,7 @@ export default function CardTalk({
       {view.tell_me && !going && (
         <TellMe
           alertId={proposal.alert_id}
+          seenPlan={view.plan_title && view.plan ? view.plan : ""}
           disabled={disabled}
           onSending={setSending}
           onFailed={() => setSending(null)}
