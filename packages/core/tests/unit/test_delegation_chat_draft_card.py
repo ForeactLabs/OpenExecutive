@@ -675,6 +675,21 @@ def test_a_card_shown_before_a_switch_sends_nothing(
     assert len(exec_sends) == 1
 
 
+def test_the_card_a_change_returns_sends_as_it_is(
+    db: Path, owner: Any, as_sender: list[str], exec_sends: list[dict[str, Any]],
+) -> None:
+    # The card keeps what a switch or an edit hands back, and sends that.
+    mailbox, row = _chat_draft(owner)
+    shown = _switch(owner, row, mailbox, True)
+    assert shown["version"] == _state(owner, row, mailbox)["version"]
+    shown = asyncio.run(chat_draft_card.set_text(owner, row, "Mine", caller=LOCAL, gmail=mailbox, now=LATER))
+    assert shown["version"] == _state(owner, row, mailbox)["version"]
+    asyncio.run(send_chat_draft(owner, row, caller=LOCAL, confirm={
+        "seen_version": shown["version"], "seen_from_executive": shown["from_executive"],
+    }, gmail=mailbox, now=LATER))
+    assert len(exec_sends) == 1
+
+
 def test_home_names_who_a_switched_draft_goes_from(db: Path, owner: Any, as_sender: list[str]) -> None:
     mailbox, row = _chat_draft(owner)
     _switch(owner, row, mailbox, True)

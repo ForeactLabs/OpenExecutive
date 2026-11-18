@@ -239,7 +239,7 @@ async def _save(
                 **({"from_executive": executive} if executive is not None else {}),
             })
             going = current.get("from_executive") if executive is None else executive
-            return {**current, "body": words, "from_executive": going}, note
+            return {**current, "body": words, "from_executive": going, "version": version}, note
         finally:
             _CHANGING.discard(row.id)
 
