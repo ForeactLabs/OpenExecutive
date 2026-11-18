@@ -304,6 +304,48 @@ def test_an_unpinned_tool_is_never_searched_for_the_model() -> None:
     assert forwarded.await_count == 1
 
 
+def test_an_approved_held_steps_tool_is_found_again_and_retried_once() -> None:
+    """A card held before an update runs on a gateway that never found its
+    tool: Approve looks it up again rather than fail."""
+    from openexecutive.orchestrator.mcp_gateway import approved_step_call
+
+    name = "notion__create_page"
+    gateway, forwarded = _gateway([_undiscovered(name), _search_hit(name), "Created."])
+    call = {"name": name, "arguments": {"title": "Plan"}}
+    with approved_step_call(call):
+        out = asyncio.run(gateway.call_tool(call))
+    assert out == "Created."
+    assert [c.args[0] for c in forwarded.await_args_list] == ["call_tool", "search_tools", "call_tool"]
+
+
+def test_only_the_approved_call_itself_is_retried() -> None:
+    from openexecutive.orchestrator.mcp_gateway import approved_step_call
+
+    name = "google_workspace__modify_doc_text"
+    gateway, forwarded = _gateway([_undiscovered(name)])
+    with approved_step_call({"name": name, "arguments": {}}):
+        out = asyncio.run(gateway.call_tool({"name": name, "arguments": {}}))
+    assert out == _undiscovered(name)
+    assert forwarded.await_count == 1
+
+
+def test_carry_out_runs_its_call_as_an_approved_step(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.orchestrator import mcp_gateway, take_the_lead
+
+    seen: list[bool] = []
+
+    class _Gw:
+        async def call_tool(self, tool_input: dict[str, Any]) -> str:
+            seen.append(mcp_gateway._approved_step_admits(tool_input))
+            return "Inserted text."
+
+    monkeypatch.setattr(mcp_gateway, "get_active_gateway", lambda: _Gw())
+    payload = {"held": True, "mcp": True, "tool": "google_workspace__modify_doc_text",
+               "input": {"document_id": "d1", "text": "x"}}
+    assert asyncio.run(take_the_lead.carry_out(payload, by_principal=True)) == "Inserted text."
+    assert seen == [True]
+
+
 def test_other_errors_are_not_retried() -> None:
     gateway, forwarded = _gateway(["Error: Tool 'x' is denied by access control."])
     asyncio.run(gateway.call_tool({"name": GMAIL_SEARCH, "arguments": {}}))

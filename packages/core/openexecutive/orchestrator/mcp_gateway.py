@@ -1055,6 +1055,31 @@ _code_built: contextvars.ContextVar[dict[str, Any] | None] = contextvars.Context
 )
 
 
+# A held step someone approved (``take_the_lead.carry_out``) runs as the very
+# ``tool_input`` built from its card. The model found that tool when it asked,
+# but a later gateway (after an update) has not, so the call is refused as
+# undiscovered. Such a call is looked up again and retried once, as a pinned
+# tool is (``_is_undiscovered_refusal``). Every gate still runs.
+_approved_step: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "approved_step_call", default=None
+)
+
+
+@contextlib.contextmanager
+def approved_step_call(tool_input: dict[str, Any]) -> Iterator[None]:
+    """Mark this exact ``tool_input`` as an approved held step's call."""
+    token = _approved_step.set(tool_input)
+    try:
+        yield
+    finally:
+        _approved_step.reset(token)
+
+
+def _approved_step_admits(tool_input: Any) -> bool:
+    granted = _approved_step.get()
+    return granted is not None and granted is tool_input
+
+
 @contextlib.contextmanager
 def code_built_call(tool_input: dict[str, Any]) -> Iterator[None]:
     """Let ``call_tool`` run this exact ``tool_input`` on a turn that read the
@@ -3624,15 +3649,15 @@ def _drop_blocked_tools(text: object) -> Any:
     return filter_search_results(text, lambda name: not _is_blocked_m365_auth_tool(name))
 
 
-def _is_undiscovered_refusal(tool_name: object, result_text: object) -> bool:
-    """Whether the gateway refused a pinned Google tool only because this
-    session had not discovered it yet. Pinned names only: any other tool
-    still needs the model's own search, as before."""
+def _is_undiscovered_refusal(tool_name: object, result_text: object, *, approved: bool = False) -> bool:
+    """Whether the gateway refused a pinned Google tool, or an approved held
+    step's tool (``approved_step_call``), only because this session had not
+    discovered it yet. Any other tool still needs the model's own search."""
     from openexecutive.prompts.connected_systems import PINNED_GOOGLE_TOOLS
 
     return (
         isinstance(tool_name, str)
-        and tool_name in PINNED_GOOGLE_TOOLS
+        and (approved or tool_name in PINNED_GOOGLE_TOOLS)
         and isinstance(result_text, str)
         and result_text.startswith(f"Error: Tool '{tool_name}' ")
         and _UNDISCOVERED_MARKER in result_text
@@ -4247,11 +4272,14 @@ class MCPGateway:
         try:
             result = await _session_call(session, "call_tool", wire_input, self._call_timeout())
             result_text = result.content[0].text if result.content else json.dumps({"result": None})
-            # A pinned tool called before startup priming reached it: the prompt
-            # told the model to call it directly, so discover it and retry once.
+            # A pinned tool called before startup priming reached it (the prompt
+            # told the model to call it directly), or an approved held step
+            # whose tool this session never found: discover it and retry once.
             # The refused call ran nothing, and every gate above has already
             # passed these same arguments.
-            if _is_undiscovered_refusal(tool_name, result_text) and await self._discover(tool_name):
+            if _is_undiscovered_refusal(
+                tool_name, result_text, approved=_approved_step_admits(tool_input),
+            ) and await self._discover(tool_name):
                 result = await _session_call(session, "call_tool", wire_input, self._call_timeout())
                 result_text = result.content[0].text if result.content else json.dumps({"result": None})
         except GatewayCallTimeout:

@@ -2919,14 +2919,21 @@ async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bo
             else nullcontext(),
         ):
             if payload.get("mcp"):
-                from openexecutive.orchestrator.mcp_gateway import get_active_gateway
+                from openexecutive.orchestrator.mcp_gateway import (
+                    approved_step_call,
+                    get_active_gateway,
+                )
 
                 gateway = get_active_gateway()
                 if gateway is None:
                     raise RuntimeError("The connection to the mail and calendar tools isn't running.")
 
                 async def run(step: dict[str, Any]) -> Any:
-                    return await gateway.call_tool({"name": tool, "arguments": step})
+                    # Approved: the gateway finds the tool again if this
+                    # session hasn't (an update since the card was held).
+                    call = {"name": tool, "arguments": step}
+                    with approved_step_call(call):
+                        return await gateway.call_tool(call)
             else:
                 from openexecutive.orchestrator.executive import _ALL_SKILL_HANDLERS
 
