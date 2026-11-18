@@ -21,7 +21,6 @@ import { Spinner } from "@/components/ui/Spinner";
 import { formatRelativeTime } from "@/lib/relativeTime";
 import {
   cardGist,
-  toDecideLabel,
   highlightPieces,
   questionsLeft,
   replyFlagLines,
@@ -35,14 +34,18 @@ import {
   recipientNames,
 } from "@/lib/replyCards";
 import FeatureName from "@/components/FeatureName";
+import { SayBox, Section } from "@/components/briefing/CardTalk";
 import GoOnItsOwnOffer from "@/components/briefing/GoOnItsOwnOffer";
 import NextTimeTick from "@/components/NextTimeTick";
 
 // Home: the replies the Executive wrote as you for mail that needs you
 // (Delegate → Act as me → Draft replies to my inbox), shown as cards in
-// "Needs you". Each card starts closed: who wrote, the Executive's line or
-// two on what they asked and what the draft says, what's left to decide and
-// one main button. Open, everything shows at once as a conversation: what
+// "Needs you". Each card starts closed, the way every Needs you card reads:
+// what happened (the Executive's line on what they asked), what I'll do
+// with "See the reply", the options (Send from me, or from the Executive
+// with you on cc; with something left to decide, its answers to tap), "Or
+// tell me…" and Skip. A go said in the box ("send it") brings up the same
+// confirm a tap on Send does. Open, everything shows at once as a conversation: what
 // they wrote; the Executive's word on the reply with what's left to decide
 // (short answers to tap, or "Something else…" to type one) and what was
 // decided (Change to pick again); any newer email in the conversation, which
@@ -56,7 +59,7 @@ import NextTimeTick from "@/components/NextTimeTick";
 // you chose to keep replies in your Drafts too. Send waits until each
 // question with answers to tap is answered, or you changed the words
 // yourself, and sends it from your own mailbox after you confirm who it goes
-// to; Open in Gmail (when it's in your Drafts) and Don't send sit beside it.
+// to; Open in Gmail (when it's in your Drafts) and Skip sit beside it.
 // GET /delegation/replies answers only the owner, so nothing shows for
 // everyone else, on a backend without it, and when nothing is waiting.
 
@@ -122,7 +125,7 @@ export const REPLIES_WAITING_TIP =
   "Mail that needs you, with a first reply the Executive wrote in your voice. Tap an answer " +
   "under Decide before sending to write it in, or tap Edit to change it yourself. Nothing is " +
   "sent until you tap Send. If you keep replies " +
-  "in your Drafts too, Don't send deletes that draft unless you changed it in your mailbox. " +
+  "in your Drafts too, Skip deletes that draft unless you changed it in your mailbox. " +
   "Only you see these.";
 
 // What the row is doing: idle, asking before sending (first or second
@@ -335,18 +338,33 @@ export function ReplyCardItem({
     }
   };
 
+  // Words said on the card ("make it shorter", "send it"): the card as it
+  // reads now. A go brings up the send's confirm, as a tap on Send does.
+  // Throws with a message to show when it couldn't.
+  const say = async (words: string, work = false) => {
+    setStep({ kind: "busy", label: "Changing it…" });
+    setError(null);
+    let next: Step = { kind: "idle" };
+    try {
+      const updated = await changeReply(card.decision_id, words, { work });
+      onChanged?.(updated);
+      if (updated.send_now) {
+        setOpen(true);
+        next = { kind: "ask", recipients: updated.draft_to, allow: Boolean(updated.can_allow) && nextTime };
+      }
+    } finally {
+      setStep(next);
+    }
+  };
+
   const askChange = async (text = ask, work = false) => {
     const words = text.trim();
     if (!words) return;
-    setStep({ kind: "busy", label: "Changing it…" });
-    setError(null);
     try {
-      onChanged?.(await changeReply(card.decision_id, words, { work }));
+      await say(words, work);
       if (!work) setAsk("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't change your reply.");
-    } finally {
-      setStep({ kind: "idle" });
     }
   };
 
@@ -415,7 +433,7 @@ export function ReplyCardItem({
   };
 
   const busy = step.kind === "busy";
-  // Each button shows only its own running words, so Don't send or Save never
+  // Each button shows only its own running words, so Skip or Save never
   // reads as "Sending…" on the Send button.
   const running = (label: string) => step.kind === "busy" && step.label === label;
   const confirming = step.kind === "ask" || step.kind === "confirm";
@@ -427,7 +445,6 @@ export function ReplyCardItem({
   // Who the reply goes to, by name; a follow-up says nobody answered yet.
   const toNames = recipientNames(card.draft_to?.length ? card.draft_to : [who]);
   const toLine = followUp ? `Nobody answered your email to ${toNames}` : `To ${toNames}`;
-  const toDecide = toDecideLabel(left);
   const tappable = questions.some((q) => q.choices.length > 0);
   // Open, everything shows at once, as a conversation: what they wrote, the
   // Executive's word on the reply with what's left to decide, anything that
@@ -461,12 +478,57 @@ export function ReplyCardItem({
   // comes straight here), so what it says is read as it is now.
   const allowNow = step.kind === "ask" ? Boolean(card.can_allow) && nextTime : confirming && step.allow;
   const dismissButton = (
-    // Don't send is its own button, set apart on the right, so it's never
-    // hunted for in a menu next to Send.
+    // Skip is its own button, set apart on the right, so it's never hunted
+    // for in a menu next to Send.
     <Button variant="ghost" className="ml-auto" onClick={() => void dismiss()} disabled={busy}>
-      {running("Removing…") ? "Removing…" : "Don't send"}
+      {running("Removing…") ? "Removing…" : "Skip"}
     </Button>
   );
+  // Send from me, or from the Executive with you on cc: who it goes from
+  // switches first (the Executive rewrites it), then the send's confirm.
+  const sendFrom = async (executive: boolean) => {
+    if (executive !== Boolean(card.from_executive)) {
+      setStep({ kind: "busy", label: FROM_RUNNING });
+      setError(null);
+      try {
+        const updated = await setReplyFrom(card.decision_id, executive);
+        onChanged?.(updated);
+        setOpen(true);
+        setStep({ kind: "ask", recipients: updated.draft_to, allow: Boolean(updated.can_allow) && nextTime });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Couldn't change who it's from.");
+        setStep({ kind: "idle" });
+      }
+      return;
+    }
+    askToSend();
+  };
+  const sendBase = "Send";
+  // The options on the closed card. The first is the Executive's pick: as
+  // the reply is set to go now.
+  const firstOpen = openQuestions[0];
+  const fromMe = { label: `${sendBase} from me`, run: () => void sendFrom(false) };
+  const fromExecutive = { label: `${sendBase} from ${executiveName}, cc me`, run: () => void sendFrom(true) };
+  const options: { label: string; run: () => void }[] = unconfirmed || card.working
+    ? []
+    : left > 0
+      ? firstOpen && firstOpen.q.choices.length > 0
+        ? firstOpen.q.choices.map((c) => ({ label: c, run: () => void answer(firstOpen.i, c) }))
+        : [{ label: "Answer it", run: () => setOpen(true) }]
+      : followUp
+        ? [fromMe]
+        : card.from_executive
+          ? [fromExecutive, fromMe]
+          : [fromMe, fromExecutive];
+  const willDo = left > 0
+    ? firstOpen
+      ? `${followUp ? "Send your follow-up" : `Send ${toNames} your reply`} once you answer: ${firstOpen.q.text}`
+      : `${followUp ? "Send your follow-up" : `Send ${toNames} your reply`} once you decide.`
+    : card.working
+      ? "Finish what you asked, then show you the reply."
+      : followUp
+        ? `Send ${toNames} your follow-up.`
+        : `Send ${toNames} your reply.`;
 
   const renderQuestion = ({ q, i }: { q: (typeof questions)[number]; i: number }) => (
     <li key={i} className="text-sm text-fg">
@@ -598,24 +660,17 @@ export function ReplyCardItem({
             {toLine}
             {card.sender_verified ? "" : " · Address not verified"}
           </span>
-          {/* Plain text: the summary is written from a stranger's email too. */}
-          {gist && !expanded && <span className="mt-2 block text-[15px] leading-snug text-fg break-words">{gist}</span>}
         </span>
         {expanded && <span className="shrink-0 pt-0.5 text-sm font-medium text-accent">Close</span>}
       </button>
 
       {!expanded ? (
         <>
-          {(toDecide || warnings.length > 0) && !unconfirmed && (
+          {warnings.length > 0 && !unconfirmed && (
             <div className="mt-2.5 flex flex-wrap gap-2">
-              {toDecide && (
-                <span className="rounded-full border border-accent/60 px-2.5 py-0.5 text-[13px] text-accent">{toDecide}</span>
-              )}
-              {warnings.length > 0 && (
-                <span className="rounded-full border border-amber-500/50 px-2.5 py-0.5 text-[13px] text-amber-700 dark:text-amber-300">
-                  ⚠ Check before sending
-                </span>
-              )}
+              <span className="rounded-full border border-amber-500/50 px-2.5 py-0.5 text-[13px] text-amber-700 dark:text-amber-300">
+                ⚠ Check before sending
+              </span>
             </div>
           )}
           {unconfirmed ? (
@@ -625,20 +680,54 @@ export function ReplyCardItem({
             </p>
           ) : (
             <>
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                {/* The same three buttons on every email card. With something
-                    left to decide, Send opens the card on it first. */}
-                <Button
-                  variant="primary"
-                  onClick={left > 0 ? () => setOpen(true) : askToSend}
-                  disabled={busy || card.working}
+              {/* Plain text: the summary is written from a stranger's email too. */}
+              {gist && <Section title="What happened">{gist}</Section>}
+              <Section title="What I'll do">
+                {willDo}{" "}
+                <button
+                  type="button"
+                  onClick={() => setOpen(true)}
+                  disabled={busy}
+                  className="cursor-pointer text-accent underline underline-offset-2 disabled:opacity-50"
                 >
-                  {sendLabel}
-                </Button>
-                <Button variant="secondary" onClick={() => setOpen(true)} disabled={busy}>
-                  Open
-                </Button>
-                {dismissButton}
+                  See the reply
+                </button>
+              </Section>
+              {options.length > 0 && (
+                <div className="mt-3 flex flex-col gap-2" role="group" aria-label="Options">
+                  {options.map((o, i) => (
+                    <button
+                      key={o.label}
+                      type="button"
+                      disabled={busy}
+                      onClick={o.run}
+                      className={`${buttonClass(i === 0 ? "primary" : "secondary", "md")} h-auto w-full justify-start py-2 text-left`}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {step.kind === "busy" && (
+                <p className="mt-2 text-sm text-fg-muted" aria-live="polite">{step.label}</p>
+              )}
+              <SayBox
+                id={`reply-${card.decision_id}`}
+                disabled={busy}
+                say={async (text) => {
+                  await say(text);
+                  setOpen(true);
+                }}
+              />
+              <div className="mt-2 flex justify-end">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void dismiss()}
+                  className="text-sm text-fg-muted hover:text-fg disabled:opacity-50"
+                >
+                  {running("Removing…") ? "Removing…" : "Skip"}
+                </button>
               </div>
             </>
           )}
@@ -885,8 +974,8 @@ export function ReplyCardItem({
         >
           <input
             type="text"
-            aria-label={card.working ? "Tell me to do it differently" : "Ask me something, or tell me what to change"}
-            placeholder={card.working ? "Tell me to do it differently…" : "Ask me something, or tell me what to change…"}
+            aria-label={card.working ? "Tell me to do it differently" : "Or tell me"}
+            placeholder={card.working ? "Tell me to do it differently…" : "Or tell me…"}
             value={ask}
             maxLength={500}
             disabled={busy}

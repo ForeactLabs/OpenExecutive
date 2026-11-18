@@ -36,3 +36,13 @@ test("an option or Or tell me shows only when this page can carry it out", () =>
   assert.ok(src.includes('(o.action === "approve" ? onApprove : onAnswer) !== undefined'), "options show without a handler");
   assert.ok(src.includes("tell_me: view.tell_me && (onApprove !== undefined || onAnswer !== undefined)"), "Or tell me shows without a handler");
 });
+
+test("an email reply card reads like every other card", () => {
+  const src = readFileSync(new URL("../src/components/RepliesWaiting.tsx", import.meta.url), "utf8");
+  for (const part of ['title="What happened"', 'title="What I\'ll do"', "See the reply", "<SayBox", '"Skip"', ", cc me`"]) {
+    assert.ok(src.includes(part), `the reply card has no ${part}`);
+  }
+  // A go said in Or tell me brings up the same confirm a tap on Send does.
+  assert.ok(src.includes("if (updated.send_now) {"), "a go on a reply card does nothing");
+  assert.ok(!src.includes("Don't send"), "the reply card still says Don't send");
+});

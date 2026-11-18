@@ -2266,6 +2266,9 @@ export interface ReplyCard {
   questions_settled?: boolean;
   // Only from answering: the sentences the rewrite added or changed.
   changed_sentences?: string[];
+  // Answering words said on the card: they said to send it, so the card
+  // asks to confirm the send, as a tap on Send does.
+  send_now?: boolean;
   // Everyone else the email went to: Reply to: Everyone adds them. Empty or
   // absent when there is no choice to make.
   reply_others?: string[];

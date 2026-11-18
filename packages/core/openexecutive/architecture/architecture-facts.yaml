@@ -12306,7 +12306,11 @@ delegation:
     /delegation/replies/{id}/change {text} (answers.change) rewrites it the
     way the person said, through the same rewrite as <change>, and adds
     their words and the Executive's note to the card's conversation (shown
-    by ReplyCardOut.conversation). POST
+    by ReplyCardOut.conversation). When the words only say to send it
+    (the rewrite's send_now, then replan.said_go on the draft and their
+    words, the same go check as every card), nothing is rewritten: it
+    answers send_now true and the card brings up the send's confirm, as a
+    tap on Send does; unsure, the card says to tap Send. POST
     /delegation/replies/{id}/answer {answers: [{question_index,
     answer_text}]} (delegation.answers) answers what the reply left open:
     one composer-model call (REWRITE_PROMPT + the person's voice block, no

@@ -155,7 +155,7 @@ def test_saying_it_on_the_card_switches_the_same_card(
 
     monkeypatch.setattr(answers, "_call_model", fake)
     mailbox, card = _card(owner)
-    saved, changed = asyncio.run(answers.change(
+    saved, changed, _ = asyncio.run(answers.change(
         _fresh(card), caller=LOCAL, resolver=owner.id, text="send it from you and cc me", gmail=mailbox,
     ))
     assert changed == []
@@ -389,7 +389,7 @@ def test_new_words_stay_when_the_switch_asked_with_them_fails(
 
     monkeypatch.setattr(answers, "_call_model", fake)
     mailbox, card = _card(owner)
-    saved, _ = asyncio.run(answers.change(
+    saved, _, _ = asyncio.run(answers.change(
         _fresh(card), caller=LOCAL, resolver=owner.id, text="shorten it and send it from you", gmail=mailbox,
     ))
     assert "Shorter." in saved["draft_body"] and saved.get(send_from.FROM_EXECUTIVE) is not True

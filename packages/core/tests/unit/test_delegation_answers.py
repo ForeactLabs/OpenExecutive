@@ -578,3 +578,96 @@ def test_a_question_that_needs_looking_up_goes_to_the_executive_as_a_question(
     with pytest.raises(answers.NeedsWork) as raised:
         asyncio.run(answers.rewrite(person, {"draft_body": "Hi"}, [], change="Who signed the LOI?"))
     assert raised.value.question is True
+
+
+def _go_said(monkeypatch: pytest.MonkeyPatch, go: bool | None) -> list[str]:
+    """The go check's answer (None: it can't be read), and what it was given."""
+    from openexecutive.alerts import replan
+
+    given: list[str] = []
+
+    async def call(system: str, tool: dict[str, Any], turn: str, **kw: Any) -> dict[str, Any]:
+        assert kw.get("actor") == "card_go"
+        given.append(turn)
+        if go is None:
+            raise replan.ReplanError("unavailable", "Couldn't reach me.")
+        return {"go": go}
+
+    monkeypatch.setattr(replan, "_call_tool", call)
+    return given
+
+
+def test_saying_send_it_on_the_card_asks_to_confirm_the_send(
+    client: TestClient, ids: dict[str, int], monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+) -> None:
+    answers._ANSWERED.clear()
+
+    async def fake(model: str, system: str, turn: str) -> dict[str, Any]:
+        main = turn.split("<draft>\n", 1)[1].split("\n</draft>", 1)[0]
+        return {"body": main, "send_now": True}
+
+    monkeypatch.setattr(answers, "_call_model", fake)
+    given = _go_said(monkeypatch, True)
+    mailbox, card_id = _card(ids["principal"], monkeypatch)
+    monkeypatch.setattr("openexecutive.delegation.gmail.gmail_for", lambda email: mailbox)
+    monkeypatch.setenv("OE_LOCAL_LOGIN", "1")
+    before = mailbox.drafts["d1"].message.text
+    resp = client.post(f"/delegation/replies/{card_id}/change", json={"text": "looks good, send it"}, headers=OWNER)
+    assert resp.status_code == 200, resp.text
+    card = resp.json()
+    # A go: nothing is sent and nothing rewritten; the card asks to confirm.
+    assert card["send_now"] is True and card["status"] == "proposed"
+    assert card["draft_body"] == before and mailbox.drafts["d1"].message.text == before
+    assert mailbox.sent == []
+    assert [(t["kind"], t["text"]) for t in card["conversation"]] == [
+        ("asked", "looks good, send it"),
+        ("note", answers.NOTE_CONFIRM_SEND),
+    ]
+    # Judged from their words and the reply alone.
+    assert "<person_said>\nlooks good, send it\n</person_said>" in given[0]
+
+
+@pytest.mark.parametrize("go", [False, None])
+def test_a_send_it_that_isnt_sure_leaves_the_send_to_a_tap(
+    client: TestClient, ids: dict[str, int], monkeypatch: pytest.MonkeyPatch, go: bool | None,  # noqa: F811
+) -> None:
+    answers._ANSWERED.clear()
+
+    async def fake(model: str, system: str, turn: str) -> dict[str, Any]:
+        main = turn.split("<draft>\n", 1)[1].split("\n</draft>", 1)[0]
+        return {"body": main, "send_now": True}
+
+    monkeypatch.setattr(answers, "_call_model", fake)
+    _go_said(monkeypatch, go)
+    mailbox, card_id = _card(ids["principal"], monkeypatch)
+    monkeypatch.setattr("openexecutive.delegation.gmail.gmail_for", lambda email: mailbox)
+    monkeypatch.setenv("OE_LOCAL_LOGIN", "1")
+    resp = client.post(f"/delegation/replies/{card_id}/change", json={"text": "send it?"}, headers=OWNER)
+    assert resp.status_code == 200, resp.text
+    card = resp.json()
+    assert card["send_now"] is False
+    assert card["conversation"][-1]["text"] == answers.NOTE_TAP_SEND
+    assert "send_now" in answers.REWRITE_PROMPT
+
+
+def test_a_change_with_send_it_is_a_change(
+    client: TestClient, ids: dict[str, int], monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+) -> None:
+    answers._ANSWERED.clear()
+
+    async def fake(model: str, system: str, turn: str) -> dict[str, Any]:
+        return {"body": "Hi Dana,\n\nFriday works.", "send_now": True, "note": "I offered Friday."}
+
+    monkeypatch.setattr(answers, "_call_model", fake)
+    given = _go_said(monkeypatch, True)
+    mailbox, card_id = _card(ids["principal"], monkeypatch)
+    monkeypatch.setattr("openexecutive.delegation.gmail.gmail_for", lambda email: mailbox)
+    monkeypatch.setenv("OE_LOCAL_LOGIN", "1")
+    resp = client.post(
+        f"/delegation/replies/{card_id}/change", json={"text": "say Friday instead and send it"}, headers=OWNER,
+    )
+    assert resp.status_code == 200, resp.text
+    card = resp.json()
+    # The new words are theirs to see first: no go check, no confirm.
+    assert card["send_now"] is False and "Friday works." in card["draft_body"]
+    assert given == []
