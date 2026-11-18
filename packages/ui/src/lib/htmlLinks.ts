@@ -4,9 +4,19 @@
  * label: anything else stays as written. */
 const ANCHOR = /<a\s+[^>]*?href\s*=\s*["'](https?:\/\/[^"'\s<>]+)["'][^>]*>([^<>]*)<\/a>/gi;
 
+// Code (fenced blocks and `inline` spans) stays exactly as written.
+const CODE = /(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`)/g;
+
 export function htmlLinks(text: string): string {
-  return text.replace(ANCHOR, (_all, url: string, label: string) => {
-    const words = label.replace(/[[\]]/g, "").trim() || url;
-    return `[${words}](${url.replace(/[()]/g, (c) => encodeURIComponent(c))})`;
-  });
+  return text
+    .split(CODE)
+    .map((part, i) =>
+      i % 2 === 1
+        ? part
+        : part.replace(ANCHOR, (_all, url: string, label: string) => {
+            const words = label.replace(/[[\]]/g, "").trim() || url;
+            return `[${words}](${url.replace(/[()]/g, (c) => encodeURIComponent(c))})`;
+          }),
+    )
+    .join("");
 }

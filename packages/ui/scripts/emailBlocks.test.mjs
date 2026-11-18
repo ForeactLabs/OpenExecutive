@@ -37,4 +37,7 @@ test("a reply's HTML link shows as a link, anything else as written", () => {
   );
   assert.equal(htmlLinks('<a href="javascript:alert(1)">x</a>'), '<a href="javascript:alert(1)">x</a>');
   assert.equal(htmlLinks('<a href="https://x.example/a">[b]</a>'), "[b](https://x.example/a)");
+  // Code stays exactly as written.
+  const code = 'Use:\n```html\n<a href="https://x.example/c">Book</a>\n```\nor `<a href="https://x.example/c">Book</a>`';
+  assert.equal(htmlLinks(code), code);
 });
