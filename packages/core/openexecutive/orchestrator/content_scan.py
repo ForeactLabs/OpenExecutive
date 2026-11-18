@@ -485,10 +485,23 @@ async def _scan(content: Any, *, model: str | None, entries: int) -> Verdict:
     return _remember(key, verdict)
 
 
+def _most_a_turn_reads() -> int:
+    """The most text one turn can read, on the largest window this
+    deployment runs (a Claude model, or a local one that holds more): parts
+    come from the start, so nothing past this reaches the model in a turn."""
+    from openexecutive.config import get_settings
+    from openexecutive.providers.feature_gate import CLAUDE_CONTEXT_TOKENS, reading_limits
+
+    local = int(getattr(get_settings(), "local_context_tokens", 0) or 0)
+    return reading_limits(max(CLAUDE_CONTEXT_TOKENS, local)).per_turn
+
+
 async def _scan_in_pieces(text: str, *, model: str | None, entries: int) -> Verdict:
-    """Check long text a piece at a time, all of it. A flag in any piece flags
-    the whole (its categories and entries together); otherwise a piece that
-    holds (``TOO_BIG``) or couldn't be checked makes the whole so; else clean."""
+    """Check long text a piece at a time, as much of it as a turn can read
+    (``_most_a_turn_reads``). A flag in any piece flags the whole (its
+    categories and entries together); otherwise a piece that holds
+    (``TOO_BIG``) or couldn't be checked makes the whole so; else clean."""
+    text = text[: _most_a_turn_reads()]
     step = MAX_CHARS - _PIECE_OVERLAP
     pieces = [text[i : i + MAX_CHARS] for i in range(0, len(text) - _PIECE_OVERLAP, step)]
     at_once = asyncio.Semaphore(_PIECES_AT_ONCE)
