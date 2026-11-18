@@ -755,13 +755,13 @@ async def test_fill_writes_options_once_and_never_for_a_stale_plan(
     options_model["data"] = {"happened": "Alex asked.", "label": "Ask Alex", "others": []}
     made = await card_talk.fill(card)
     assert made is not None and made.options[0].plan == OLD
-    # Nothing came of a call on a card with no step: kept as written, so it
-    # isn't asked again on every read.
+    # Nothing came of a call: not written yet, so it is tried again, after
+    # RETRY_AFTER_S (fill_soon), until the card has its line.
     other = alert_store.get_alert(_card(db, "Empty", suggested_action=""))
     assert other is not None
     options_model["data"] = {}
     assert await card_talk.fill(other) is None
-    assert card_talk.read([other])[other.id].written  # type: ignore[index]
+    assert not card_talk.read([other])[other.id].written  # type: ignore[index]
     assert "<current_plan>" in options_model["turn"]
     # The plan changed while the call ran: nothing is kept for the old one.
     async def racing(turn: str) -> dict[str, Any]:
@@ -803,3 +803,21 @@ async def test_only_a_few_fills_run_at_once(db: Path, monkeypatch: pytest.Monkey
     card_talk.fill_soon([c for c in cards if c is not None], {})
     await asyncio.gather(*card_talk._TASKS)
     assert len(started) == card_talk.FILL_AT_ONCE
+
+
+def test_a_card_spoken_on_before_its_line_is_written_still_gets_it(db: Path) -> None:
+    aid = _card(db)
+    card_talk.keep_options(aid, OLD, "Alex asked for the Drive.", [card_talk.CardOption(label="Do it", plan=OLD)])
+    # Said on the card: a new plan with options but no line of its own.
+    card_talk.keep_options(aid, NEW, "", [card_talk.CardOption(label="Share", plan=NEW)])
+    card = alert_store.get_alert(aid)
+    assert card is not None
+    card.suggested_action = NEW
+    talk = card_talk.read([card])[aid]
+    assert talk.happened == "Alex asked for the Drive." and talk.written
+    # A card that never got its line is still filled later.
+    other = _card(db, "second card")
+    card_talk.keep_options(other, OLD, "", [card_talk.CardOption(label="Do it", plan=OLD)])
+    second = alert_store.get_alert(other)
+    assert second is not None and not card_talk.read([second])[other].written
+

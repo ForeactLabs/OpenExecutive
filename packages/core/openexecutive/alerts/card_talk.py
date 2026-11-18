@@ -180,7 +180,10 @@ def keep_options(
         conn.execute(
             "INSERT INTO alert_card_options (alert_id, plan, happened, options, made_at) "
             "VALUES (?, ?, ?, ?, ?) ON CONFLICT(alert_id) DO UPDATE SET plan = excluded.plan, "
-            "happened = excluded.happened, options = excluded.options, made_at = excluded.made_at",
+            # What happened doesn't change with the plan: a new plan with no
+            # line of its own keeps the one already written.
+            "happened = CASE WHEN excluded.happened = '' THEN alert_card_options.happened "
+            "ELSE excluded.happened END, options = excluded.options, made_at = excluded.made_at",
             (alert_id, plan, happened, json.dumps([o.model_dump() for o in options]), _now()),
         )
 
@@ -224,7 +227,9 @@ def read(alerts: list[Alert], *, db_path: Path | None = None) -> dict[int, CardT
         ):
             aid = int(row["alert_id"])
             if row["plan"] == plans.get(aid, ""):
-                out[aid].written = True
+                # Written once it has its line too; until then a later fill
+                # still writes it.
+                out[aid].written = bool(row["happened"])
                 out[aid].happened = row["happened"]
                 out[aid].options = _options_of(row["options"])
         for row in conn.execute(
@@ -382,7 +387,8 @@ async def fill(card: Alert, *, db_path: Path | None = None) -> CardTalk | None:
     # Kept even when nothing came of it, so the card isn't asked again for
     # this plan on every read.
     keep_options(card.id, (card.suggested_action or "").strip(), happened, options, db_path=db_path)
-    if not happened and not options:
+    if not happened:
+        # Tried again later (after RETRY_AFTER_S), so the card gets its line.
         return None
     return CardTalk(happened=happened, options=options, written=True)
 
