@@ -104,6 +104,8 @@ def test_a_slack_tap_in_its_own_dm_decides_the_card(
     chat_apps: list[Any], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("openexecutive.people.store.find_person_by_slack_id", lambda uid: PERSON)
+    # No card in this test's ledger: the tap goes ahead.
+    monkeypatch.setattr(channel_cards, "card_text", lambda decision_id: None)
     client = FakeSlack()
     asyncio.run(slack_bot.handle_card_tap(_slack_tap(), client))
     assert chat_apps == [(7, PERSON, True)]
@@ -127,12 +129,13 @@ def test_a_slack_tap_anywhere_else_is_ignored(chat_apps: list[Any], monkeypatch:
 
 def test_slack_cards_go_out_as_plain_text_with_buttons(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(channel_cards, "card_text", lambda decision_id: f"*card* {decision_id}")
+    # The ledger isn't set up in this module; the labels have their own tests.
+    monkeypatch.setattr(channel_cards, "card_options", lambda decision_id, shown: (("Approve", f"card:{decision_id}:a:0000beef"), ("Skip", f"card:{decision_id}:s:0000beef")))
     client = FakeSlack()
     asyncio.run(slack_bot._send_cards(client, "D1", [3]))
     blocks = client.posts[0]["blocks"]
     assert blocks[0]["text"]["type"] == "plain_text"
-    shown = channel_cards.version(3, "*card* 3")
-    assert [e["value"] for e in blocks[1]["elements"]] == [f"card:3:a:{shown}", f"card:3:s:{shown}"]
+    assert [e["value"] for e in blocks[1]["elements"]] == ["card:3:a:0000beef", "card:3:s:0000beef"]
 
 
 class FakeResponse:

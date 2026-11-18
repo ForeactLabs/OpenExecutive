@@ -412,9 +412,12 @@ def outcome_text(approved: bool, error: str | None, decision_class: str = "") ->
 
 
 def outcome_of(line: str) -> str:
-    """``done``, ``busy`` or ``refused``, for the audit row of a tap."""
+    """``done``, ``busy``, ``changed`` (shown again, nothing done) or
+    ``refused``, for the audit row of a tap."""
     if line == BUSY:
         return "busy"
+    if line == CHANGED:
+        return "changed"
     return "refused" if line.startswith("Not done") else "done"
 
 

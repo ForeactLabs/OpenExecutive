@@ -346,6 +346,7 @@ def test_a_taps_outcome_is_recorded_apart_from_its_choice() -> None:
     assert channel_cards.outcome_of("Skipped.") == "done"
     assert channel_cards.outcome_of("Not done: This card was already handled.") == "refused"
     assert channel_cards.outcome_of(channel_cards.BUSY) == "busy"
+    assert channel_cards.outcome_of(channel_cards.CHANGED) == "changed"
 
 
 def test_a_card_that_can_teach_offers_on_its_own_next_time(monkeypatch: pytest.MonkeyPatch) -> None:
