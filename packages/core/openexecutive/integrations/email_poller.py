@@ -219,8 +219,8 @@ _FORWARDED_RE = re.compile(r"^-{2,}\s*Forwarded message\s*-{2,}", re.IGNORECASE)
 # with ">" below it ("> Begin forwarded message:"), or unquoted.
 _BEGIN_FORWARDED_RE = re.compile(r"^(>\s?)?Begin forwarded message:\s*$", re.IGNORECASE)
 _FORWARD_SUBJECT_RE = re.compile(r"^\s*(\[[^\]]{0,40}\]\s*)*(fwd?|fw|wg|tr|rv)(\[\d{1,3}\])?\s*:", re.IGNORECASE)
-# A reply's subject prefix, in the common mail languages.
-_REPLY_SUBJECT_RE = re.compile(
+# A reply's subject prefix (not a forward's), in the common mail languages.
+_REPLY_ONLY_SUBJECT_RE = re.compile(
     r"^\s*(\[[^\]]{0,40}\]\s*)*(re|aw|sv|vs|antw|antwort|rif|res|odp|ynt|vá|отв|回复|答复)(\[\d{1,3}\])?\s*[:：]",
     re.IGNORECASE,
 )
@@ -424,7 +424,7 @@ def _scan_new_text(body: list[str], subject: str = "") -> tuple[list[str], int |
     i = 0
     # A ">"-quoted forward marker in a reply (Re:, AW:, SV: ...) is quoted
     # history, whatever language the reply's attribution line is in.
-    quoted_forwards = _REPLY_SUBJECT_RE.match(subject or "") is None
+    quoted_forwards = _REPLY_ONLY_SUBJECT_RE.match(subject or "") is None
     replied = False
     quoted_forward: int | None = None
 
