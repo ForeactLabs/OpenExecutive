@@ -117,8 +117,11 @@ async def test_a_long_result_comes_in_parts_without_running_the_tool_again(
         return _calls(_use("read_doc", {"id": "d"}, f"t{n}"))
 
     model = _Model(reply)
-    done = await _run(model, run_call)
+    seen: list[str] = []
+    done = await _run(model, run_call, on_result=lambda _use, sent: seen.append(str(sent)))
     assert ran == [1] and done.text == "Read it all."
+    # What the pass is told it read is each part as it was sent.
+    assert "line 003999" not in seen[0] and "line 003999" in seen[-1]
     shown = "".join(str(r["messages"][-1]["content"][0]["content"]) for r in model.requests[1:])
     assert "line 000000" in shown and "line 003999" in shown
 

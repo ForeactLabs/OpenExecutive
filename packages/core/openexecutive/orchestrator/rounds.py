@@ -95,6 +95,7 @@ async def run_rounds(
     on_response: Callable[[Any, int], Any] | None = None,
     enough: Callable[[], str | None] | None = None,
     sent: Callable[[list[dict[str, Any]]], list[dict[str, Any]]] | None = None,
+    on_result: Callable[[dict[str, Any], Any], Any] | None = None,
 ) -> Rounds:
     """Run the model on ``messages`` until it answers without a call.
 
@@ -104,7 +105,9 @@ async def run_rounds(
     (audit.usage), and ``on_response`` sees it with its round number. ``enough``, asked after each round, returns a note when
     the pass wants the model to write up now ("" to stop at once, with no
     write-up). ``sent`` picks what of ``messages`` each request sends (a chat
-    that keeps only its newest turns). ``messages`` grows with each round. A
+    that keeps only its newest turns). ``on_result`` sees each call's result
+    as the model was sent it: a part of a long one, never what it has not
+    read. ``messages`` grows with each round. A
     provider error is raised to the caller.
     """
     from openexecutive.audit.usage import log_model_usage
@@ -181,6 +184,8 @@ async def run_rounds(
                 out = await run_call(use)
                 reading.came_back(str(use["name"]), use["input"], out)
                 content = reading.cap(str(use["name"]), use["input"], str(out), str(use["id"]))
+            if on_result is not None:
+                on_result(use, content)
             results.append({"type": "tool_result", "tool_use_id": use["id"], "content": content})
         if cut is not None:
             logger.warning("%s: round %d cut off while writing a call; asking for it again", model, rounds)

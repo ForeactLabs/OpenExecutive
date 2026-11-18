@@ -8039,7 +8039,10 @@ workflows:
       source per line, labelled by its ALL-CAPS section header (a header
       also carries its bullet count); plus the company profile's prompt
       block lines and the department titles. Tool results join a reflection's
-      sources as they arrive (`GroundingScope.guard`).
+      sources as the model is sent them (`GroundingScope.read`, run_rounds'
+      on_result): a long result counts part by part, so a figure only in a
+      part it never asked for grounds nothing, and the scope's own refusals,
+      which quote the draft back, never count.
     - Names: a run of 2+ capitalised words (after trimming a STOP set —
       section headers, weekdays, months, imperative openers, product and
       org nouns), or one capitalised word in a person slot ("ask Marcus",

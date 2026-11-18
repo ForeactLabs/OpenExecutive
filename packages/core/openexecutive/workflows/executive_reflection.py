@@ -980,6 +980,7 @@ class ExecutiveReflectionWorkflow(Workflow):
                     messages=messages,
                     run_call=_run,
                     actor=self.name,
+                    on_result=grounding.read,
                 )
             except Exception as exc:
                 logger.exception("reflection: provider call failed")

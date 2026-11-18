@@ -263,6 +263,18 @@ def test_a_fact_is_saved_once_a_review(db: Path, roster: SimpleNamespace, provid
     assert second["status"] == "noop" and "already saved" in second["detail"]
 
 
+def test_the_review_ends_once_it_has_made_its_changes(db: Path, roster: SimpleNamespace,
+                                                     provider: _Provider) -> None:
+    _record(roster.principal)
+    fact = {"statement": "The vendor email was sent already.", "source_quote": "I sent the vendor email already"}
+    provider.script = [
+        [("remember_fact", {**fact, "subject": f"Vendor email {i}"}) for i in range(cr.MAX_CHANGES)],
+        [("remember_fact", {**fact, "subject": "One more"})],
+    ]
+    _review(db)
+    assert len(provider.calls) == 1
+
+
 def test_a_change_without_their_words_is_refused(db: Path, roster: SimpleNamespace,
                                                  provider: _Provider) -> None:
     loop_id = open_loop(owner_person_id=roster.principal.id, description="Send the vendor email",

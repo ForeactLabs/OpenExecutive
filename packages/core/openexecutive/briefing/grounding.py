@@ -884,6 +884,9 @@ class GroundingScope:
         self.mode = grounding_mode()
         self._results = 0
         self._index: _Index | None = None
+        # This scope's own refusals: they quote the model's draft back to
+        # it, which is no evidence for anything (read skips them).
+        self._refusals: set[str] = set()
 
     def _idx(self) -> _Index:
         if self._index is None:
@@ -893,7 +896,7 @@ class GroundingScope:
     def add_text(self, label: str, text: str) -> None:
         self._results += 1
         self.sources.extend(
-            # All of it: a name or figure the pass read anywhere in a result
+            # All of it: a name or figure anywhere in what the pass was sent
             # is what it read.
             sources_from_text(text, label, f"r{self._results}.")
         )
@@ -947,17 +950,25 @@ class GroundingScope:
     def guard(self, handlers: dict[str, Handler]) -> dict[str, Handler]:
         return {name: self._wrap(name, fn) for name, fn in handlers.items()}
 
+    def read(self, use: dict[str, Any], sent: Any) -> None:
+        """Record a tool result as the model was sent it (run_rounds'
+        ``on_result``): a long one comes in parts, and a figure only in a
+        part it never asked for is not something it read."""
+        if str(sent) in self._refusals:
+            return
+        try:
+            self.add_text(f"Tool result — {use.get('name', '')}", str(sent))
+        except Exception:
+            logger.debug("grounding: could not record %s result", use.get("name"), exc_info=True)
+
     def _wrap(self, name: str, fn: Handler) -> Handler:
         async def guarded(tool_input: dict[str, Any]) -> Any:
             reason = self.refusal(name, tool_input or {})
             if reason:
-                return json.dumps({"error": reason})
-            result = await fn(tool_input)
-            try:
-                self.add_text(f"Tool result — {name}", str(result))
-            except Exception:
-                logger.debug("grounding: could not record %s result", name, exc_info=True)
-            return result
+                refused = json.dumps({"error": reason})
+                self._refusals.add(refused)
+                return refused
+            return await fn(tool_input)
 
         return guarded
 

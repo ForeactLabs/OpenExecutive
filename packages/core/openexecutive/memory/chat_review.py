@@ -1545,10 +1545,11 @@ async def _run_loop(
         return out
 
     # No count of rounds (orchestrator.rounds): the review ends when the
-    # model has nothing more to call.
+    # model has nothing more to call, or once it has made MAX_CHANGES.
     await run_rounds(
         get_provider(model), model=model, max_tokens=_MAX_TOKENS, system=_SYSTEM,
         tools=tools, messages=messages, run_call=_run, actor="chat_review",
+        enough=lambda: "" if changes >= MAX_CHANGES else None,
     )
     return done
 
