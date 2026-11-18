@@ -984,9 +984,13 @@ async def say_on_card(alert_id: int, body: SayBody, request: Request) -> SayResp
     fyi = existing.needs == NEEDS_FYI
     seen = "" if fyi else existing.suggested_action or ""
     go = new.go and bool(plan.strip()) and await replan.said_go(plan, line, before=seen)
-    # A card only for them to know takes a step once they say anything on
-    # it: from then on it shows the plan and waits for their OK like any other.
-    if changed or (fyi and plan.strip()):
+    # A card only for them to know takes a step once they ask for one: from
+    # then on it shows the plan and waits for their OK like any other. When
+    # the step they asked for is the one it had, nobody changed the plan.
+    asked_same = fyi and not changed and bool(new.plan.strip())
+    if asked_same and not replan.wait_for_ok(alert_id, expected=existing.suggested_action or ""):
+        raise HTTPException(status_code=409, detail="This card just changed. Try again.")
+    if changed:
         # The model call takes seconds: only an open card still showing the
         # plan the model read takes the new one.
         change = replan.apply_change(

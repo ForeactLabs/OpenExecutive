@@ -205,6 +205,21 @@ def apply_change(
         return PlanChange(**dict(row))
 
 
+def wait_for_ok(alert_id: int, *, expected: str, db_path: Path | None = None) -> bool:
+    """Make a card that was only for them to know wait for their OK on the
+    plan it already has (they asked for that very step), while it is still
+    open and showing ``expected``. Nobody changed the plan, so no change is
+    kept. False when the card moved on meanwhile."""
+    with _get_conn(db_path) as conn:
+        ensure_schema(conn)
+        cursor = conn.execute(
+            "UPDATE alerts SET needs = 'ok' WHERE id = ? AND needs = 'fyi' "
+            "AND status IN ('unread', 'read') AND COALESCE(suggested_action, '') = ?",
+            (alert_id, expected),
+        )
+        return cursor.rowcount > 0
+
+
 def last_change(alert_id: int, *, db_path: Path | None = None) -> PlanChange | None:
     with _get_conn(db_path) as conn:
         ensure_schema(conn)

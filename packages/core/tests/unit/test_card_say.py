@@ -334,6 +334,17 @@ def test_words_with_no_step_leave_a_plan_less_card_as_it_is(
     assert card is not None and (card.needs, card.suggested_action) == ("fyi", "")
 
 
+def test_thanks_on_a_for_you_to_know_card_leaves_it_as_it_is(
+    client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    aid = _card(db, needs="fyi")
+    _model(monkeypatch, {"plan": "", "reply": "You're welcome."})
+    assert _say(client, aid, "thanks").status_code == 200
+    card = alert_store.get_alert(aid)
+    assert card is not None and (card.needs, card.suggested_action) == ("fyi", OLD)
+    assert replan.last_change(aid) is None
+
+
 def test_an_asking_card_takes_words_as_the_answer(
     client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch, turns: _Turns,
 ) -> None:
