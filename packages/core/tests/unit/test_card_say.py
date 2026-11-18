@@ -705,6 +705,8 @@ def test_kind_of_says_how_a_card_takes_words(db: Path) -> None:
     assert kind(needs="choice", question="Which?", choices=["A", "B"]) == "ask"
     assert kind(source="query", topic_tags=["external:news-acme"], dedup_key="watch:news-acme") == "watch"
     assert kind(source="roster_request") == "none"
+    # A step in their own browser keeps its Done: no options are written for it.
+    assert kind(source="browser_handover", needs="ok") == "none"
     assert kind(source="meetings", needs="answer", question="Coming?") == "none"
 
 

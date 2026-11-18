@@ -258,6 +258,7 @@ def plan_refusal(alert: Alert) -> str | None:
     answered, carried out exactly as filed, or steered another way."""
     from openexecutive.alerts.models import NEEDS_ANSWER, NEEDS_CHOICE
     from openexecutive.briefing.ranking import watch_slug_of
+    from openexecutive.browser.handover import SOURCE as HANDOVER_SOURCE
     from openexecutive.memory.decision_ledger import DECISION_ALERT_SOURCE
     from openexecutive.workflows.failure_alerts import SOURCE as FAILED_RUN_SOURCE
 
@@ -275,6 +276,9 @@ def plan_refusal(alert: Alert) -> str | None:
         return "This card has no plan to change."
     if watch_slug_of(alert) is not None:
         return "Reply on this card to correct the watch."
+    if alert.source == HANDOVER_SOURCE:
+        # A step in their own browser: Done says they did it, nothing else.
+        return "This card has no plan to change."
     return None
 
 
