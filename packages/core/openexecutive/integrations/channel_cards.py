@@ -508,7 +508,7 @@ async def _switch(decision_id: int, person: Any, *, executive: bool) -> Tapped:
 
     if decision_id in _resolving:
         return Tapped(BUSY)
-    instance = get_decision_instance(decision_id)
+    instance = await asyncio.to_thread(get_decision_instance, decision_id)
     if instance is None or instance.decision_class != "delegation_reply":
         return Tapped("Not done: this card is no longer there.")
     _resolving.add(decision_id)
@@ -526,6 +526,10 @@ async def _switch(decision_id: int, person: Any, *, executive: bool) -> Tapped:
         return Tapped("Not done: something went wrong. Check Today before trying again.")
     finally:
         _resolving.discard(decision_id)
+    return await asyncio.to_thread(_switched, decision_id)
+
+
+def _switched(decision_id: int) -> Tapped:
     text = card_text(decision_id)
     if text is None:
         return Tapped(f"Changed who it goes from. It waits for your OK in the app: {_app_link(decision_id)}")
