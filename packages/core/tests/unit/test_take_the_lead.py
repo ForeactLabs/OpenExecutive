@@ -2214,3 +2214,28 @@ def test_today_is_the_owners_day(monkeypatch: pytest.MonkeyPatch, db: Path) -> N
 ])
 def test_only_an_error_result_counts_as_failed(text: str, failed: bool) -> None:
     assert ttl.result_failed(text) is failed
+
+
+def test_an_approved_email_reads_as_what_went_out_and_when(owner: Any) -> None:
+    """Done for you shows a held email once it's approved at the time it
+    went, with what was sent."""
+    send = "google_workspace__send_gmail_message"
+    held = {"to": DANA, "subject": "Racking repair", "body": "Approved, go ahead."}
+    decision_id = ttl.hold(send, held, ttl.Hit("money", "it's about money"), source="chat", mcp=True)
+    [waiting] = ttl.done([ttl.SCOPE_EXECUTIVE])
+    assert waiting.status == "waiting"
+    conn = ttl._connect(None)
+    try:
+        conn.execute(f"UPDATE {ttl.LOG_TABLE} SET at = '2020-01-01T00:00:00+00:00'")  # noqa: S608
+        conn.commit()
+    finally:
+        conn.close()
+    payload = {"tool": send, "input": {**held, "subject": "Racking repair: approved"}, "mcp": True}
+    ttl.resolved(decision_id, "approved", payload=payload, result="Email sent! Message ID: ab")
+    [row] = ttl.done([ttl.SCOPE_EXECUTIVE])
+    assert row.status == "approved" and row.at > "2026" and row.outcome == "Sent"
+    assert row.mail_to == DANA and row.mail_subject == "Racking repair: approved"
+
+    other = ttl.hold(send, {**held, "subject": "Other"}, ttl.Hit("money", "it's about money"), source="chat", mcp=True)
+    ttl.resolved(other, "declined")
+    assert next(r for r in ttl.done([ttl.SCOPE_EXECUTIVE]) if r.decision_id == other).status == "declined"
