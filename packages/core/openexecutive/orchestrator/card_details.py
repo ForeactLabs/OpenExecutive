@@ -574,7 +574,6 @@ def top(payload: dict[str, Any], *, approver_id: int | None, viewer_id: int | No
       your OK").
     - ``started``: who started it: "You asked", "Alex asked", or "I started
       this" when no one on the team asked (Take the lead's own work).
-    - ``why``: what it was working on, in the Executive's words; may be empty.
     - ``waits``: why it waits, in a sentence.
     - ``title``: the card's title, naming the file it works on (``served``).
     """
@@ -609,11 +608,10 @@ def top(payload: dict[str, Any], *, approver_id: int | None, viewer_id: int | No
         waits = "It waits for an OK."
     if waiting_on:
         waits += f" It's on {waiting_on}'s list."
-    why = " ".join(str(payload.get("purpose") or "").split())
     title = ""
     with contextlib.suppress(Exception):
         title = str(served(payload).get("headline") or "")
-    return {"waiting_on": waiting_on, "started": started, "why": why, "waits": waits, "title": title}
+    return {"waiting_on": waiting_on, "started": started, "waits": waits, "title": title}
 
 
 def held_top(decision_id: int, viewer_id: int | None) -> dict[str, str] | None:

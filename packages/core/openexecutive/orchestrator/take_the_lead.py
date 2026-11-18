@@ -2542,13 +2542,15 @@ def result_failed(text: str) -> bool:
     return isinstance(parsed, dict) and "error" in parsed
 
 
+# A result kept back after its step ran (the gateway's "It did run").
+_DID_RUN_RE = re.compile(r"it did run|was withheld", re.IGNORECASE)
 # What a failed step's card says, by what the app's error is about. Matched
 # against the error's text, first match wins.
 _FAILED_WHY: tuple[tuple[re.Pattern[str], str], ...] = tuple(
     (re.compile(p, re.IGNORECASE), w) for p, w in (
         # The step ran and only its result was kept back (the gateway's "It
         # did run"): never "nothing changed", or a retry does it twice.
-        (r"it did run|was withheld",
+        (_DID_RUN_RE.pattern,
          "{app} did the step, but I couldn't read back how it went. Check it before trying again."),
         (r"invalid_grant|unauthori[sz]ed|\b401\b|expired or revoked|revoked|reconnect|sign in again",
          "{app} needs to be connected again, so nothing changed."),
@@ -2578,6 +2580,11 @@ def failure_words(tool: str, result: str) -> str:
         if isinstance(done, int) and done > 0:
             total = f" of {of}" if isinstance(of, int) and of > done else ""
             rest = ", and the rest didn't run" if isinstance(of, int) and of > done + 1 else ""
+            if _DID_RUN_RE.search(text):
+                # The step it stopped at ran too; only its result was kept back.
+                total = f" of {of}" if isinstance(of, int) and of > done + 1 else ""
+                return (f"{done + 1}{total} ran, but I couldn't read back how the last one went{rest}. "
+                        "Check before trying again.")
             return f"{done}{total} went through, then {app} turned the next one down{rest}. Check before trying again."
     for rx, words in _FAILED_WHY:
         if rx.search(text):

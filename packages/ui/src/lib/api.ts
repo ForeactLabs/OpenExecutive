@@ -7407,11 +7407,10 @@ export interface LeadCardField {
 
 // The lines a held step's card opens with, the same on every app
 // (``orchestrator.card_details.top``): whose OK it waits for when that isn't
-// the reader, who started it, what it was working on, and why it waits.
+// the reader, who started it, and why it waits.
 export interface HeldCardTop {
   waitingOn: string;
   started: string;
-  why: string;
   waits: string;
   // The title, naming the file it works on; "" when not known.
   title: string;
@@ -7423,7 +7422,6 @@ export function heldCardTop(raw: unknown): HeldCardTop | null {
   return {
     waitingOn: String(t.waiting_on ?? ""),
     started: String(t.started ?? ""),
-    why: String(t.why ?? ""),
     waits: String(t.waits ?? ""),
     title: String(t.title ?? ""),
   };

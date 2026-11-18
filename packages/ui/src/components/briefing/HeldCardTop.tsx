@@ -1,7 +1,6 @@
 // How every held step's card opens (Take the lead, a teammate's held step),
 // from the server's one place (``card_details.top``): whose OK it waits for,
-// who started it, its title, what it was working on and why it waits. The
-// phone's card opens the same way.
+// who started it, its title and why it waits.
 
 import type { HeldCardTop as Top } from "@/lib/api";
 
@@ -34,7 +33,6 @@ export default function HeldCardTop({
       <div className="min-w-0 text-base sm:text-[17px] font-semibold leading-snug text-fg break-words">
         {top?.title || title}
       </div>
-      {top?.why && <Section title="Why">{top.why}</Section>}
       <Section title="Why it waits">{top?.waits || fallbackWaits}</Section>
     </>
   );

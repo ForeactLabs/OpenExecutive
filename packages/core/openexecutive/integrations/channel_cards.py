@@ -70,7 +70,6 @@ _VERSION = re.compile(r"^[0-9a-f]{8}$")
 # The card's two parts, as on the app's cards.
 HAPPENED = "What happened"
 WILL_DO = "What I'll do"
-WHY = "Why"
 WHY_IT_WAITS = "Why it waits"
 # A reply leaves at most this many cards (action_cards.CARDS_PER_TURN plus a meeting).
 MAX_CARDS = 4
@@ -297,14 +296,12 @@ def card_text(decision_id: int, instance: Any = None) -> str | None:
             return None
         shown = card_details.served(as_said(payload))
         # It opens as on every app (``card_details.top``), read by the
-        # person it waits on: who started it, why, why it waits.
+        # person it waits on: who started it and why it waits.
         top = card_details.top(
             payload, approver_id=instance.approver_person_id, viewer_id=instance.approver_person_id,
         )
         lines.append(str(top["title"] or shown.get("summary") or payload.get("tool") or "").strip()[:400])
         lines.append(top["started"] + ".")
-        if top["why"]:
-            lines += ["", WHY, top["why"][:300]]
         lines += ["", WHY_IT_WAITS, top["waits"][:300], "", WILL_DO]
         for detail in shown.get("details") or []:
             value = str(detail.get("value") or "")

@@ -343,17 +343,17 @@ def test_rows_written_as_text_outside_a_sheet_show_as_written(monkeypatch) -> No
     assert card_details._grid("[" * 400000) is None
 
 
-def test_a_held_cards_top_says_who_it_waits_on_who_started_it_and_why(monkeypatch) -> None:
+def test_a_held_cards_top_says_who_it_waits_on_who_started_it_and_why_it_waits(monkeypatch) -> None:
     from types import SimpleNamespace
 
     from openexecutive.people import store as people_store
 
     people = {1: "Rufus Owner", 12: "Alex Cohen", 7: "Sam Teammate"}
     monkeypatch.setattr(people_store, "get_person", lambda pid, db_path=None: SimpleNamespace(full_name=people[pid]))
-    lead = {"kind": "money", "reason": "it's about money", "purpose": "Launch push: owners to reach"}
+    lead = {"kind": "money", "reason": "it's about money"}
     # Take the lead's own step on Alex's list, read by the owner.
     assert card_details.top(lead, approver_id=12, viewer_id=1) == {
-        "waiting_on": "Alex", "started": "I started this", "why": "Launch push: owners to reach",
+        "waiting_on": "Alex", "started": "I started this",
         "waits": "It waits because it's about money. It's on Alex's list.", "title": "",
     }
     # Alex reads their own card.
@@ -363,4 +363,3 @@ def test_a_held_cards_top_says_who_it_waits_on_who_started_it_and_why(monkeypatc
     assert card_details.top(asked, approver_id=7, viewer_id=1)["started"] == "Sam asked"
     training = card_details.top({"kind": "training", "reason": "x"}, approver_id=1, viewer_id=1)
     assert training["waits"] == "It's a new kind of step for me, so it waits for an OK once."
-    assert training["why"] == ""
