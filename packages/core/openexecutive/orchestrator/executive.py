@@ -9,7 +9,6 @@ import logging
 import re
 import time
 import uuid
-import zlib
 from collections.abc import AsyncIterator, Callable
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -166,10 +165,15 @@ from openexecutive.orchestrator.people_tools import (
     turn_is_private_to_principal,
 )
 from openexecutive.orchestrator.reading import (
+    CUT_OFF_NOTE,
+    CUT_OFF_RESULT,
     FULL_NOTE,
+    MAX_EMPTY_CUT_ROUNDS,
     REPEAT_LIMIT,
     REPEATING_NOTE,
     TurnReadingBudget,
+    last_written_block,
+    says_something,
     with_turn_limits,
 )
 from openexecutive.orchestrator.research_tools import (
@@ -553,24 +557,6 @@ def _apply_loop_cache_marker(
     if markable:
         markable[-1]["cache_control"] = {"type": "ephemeral"}
     return bool(markable)
-
-
-# A cut round's text that packs this small is a model repeating itself
-# ("... ... ...", one line over and over), no step of the work. Prose and
-# tables pack to a quarter or more of their length.
-_STUCK_TEXT_MIN = 2_000
-_STUCK_TEXT_RATIO = 0.05
-
-
-def _says_something(text: str) -> bool:
-    """Whether cut text is a step of the work: not empty, and not one thing
-    said over and over (it packs to almost nothing)."""
-    if not text.strip():
-        return False
-    if len(text) < _STUCK_TEXT_MIN:
-        return True
-    raw = text.encode()
-    return len(zlib.compress(raw, 6)) / len(raw) >= _STUCK_TEXT_RATIO
 
 
 def _with_notice(result: Any, notice: str) -> Any:
@@ -1047,35 +1033,9 @@ def _emit_cache_event(
     )
 
 
-# Answers a tool call the model was still writing when its round was cut off
-# at MAX_OUTPUT_TOKENS: the call never ran (its input is unfinished), and the
-# turn carries on so it can make it again in a shorter form.
-CUT_OFF_RESULT = (
-    "That call was cut off at the length limit before you finished writing "
-    "it, so it did not run. Make it again in a shorter form, or in smaller "
-    "steps (for example, fewer rows or columns first, then the rest)."
-)
-
-# Said after a round cut off at MAX_OUTPUT_TOKENS with no tool call left to
-# answer (cut in its reply text, or a cut call the provider dropped whole).
-CUT_OFF_NOTE = (
-    "Your last answer was cut off at the length limit before it finished. If "
-    "you were writing a tool call, it did not run: make it again in a shorter "
-    "form, or in smaller steps. If you were writing your reply, carry on from "
-    "where it stopped, without repeating what you already wrote."
-)
-
 # What the person sees for a round that was cut off: the step it was on was
 # writing something long, not the read before it.
 CUT_OFF_LABEL = "Writing it in shorter parts…"
-# Cut rounds in a row that got nowhere after which a turn ends: a round that
-# wrote nothing at all (a model spending its whole answer thinking), or one
-# cut while writing its only call (a document too long for one call, asked
-# for again just as long), which never runs. A round whose cut fell in text,
-# or that closed a call before the cut, is a step of the work, so this never
-# stops a job that is getting written; without it the loop would bill a full
-# answer each round, forever.
-MAX_EMPTY_CUT_ROUNDS = 3
 REPEATING_EMPTY_REPLY = (
     "I stopped because the same step kept coming back the same way, and "
     "nothing was ready to show yet."
@@ -2755,10 +2715,7 @@ class Executive:
             # A call followed by text or by a call the provider dropped closed
             # before the cut and runs. A translated provider lists text first,
             # so its last call always counts as cut and is asked for again.
-            last_written = next(
-                (b for b in reversed(response_content) if b.get("type") in ("text", "tool_use")),
-                None,
-            )
+            last_written = last_written_block(response_content)
             # A cut round got somewhere when its cut fell in text (shown, and
             # carried on) or a call closed before the cut (it runs). A round
             # cut while writing its only call got nowhere, however much it
@@ -2766,7 +2723,7 @@ class Executive:
             cut_in_call = last_written is not None and last_written.get("type") == "tool_use"
             closed_calls = sum(b.get("type") == "tool_use" for b in response_content) - int(cut_in_call)
             got_somewhere = closed_calls > 0 or (
-                last_written is not None and not cut_in_call and _says_something(str(last_written.get("text", "")))
+                last_written is not None and not cut_in_call and says_something(str(last_written.get("text", "")))
             )
             empty_cuts = empty_cuts + 1 if cut_off and not got_somewhere else 0
             if empty_cuts > MAX_EMPTY_CUT_ROUNDS:

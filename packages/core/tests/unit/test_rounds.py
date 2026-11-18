@@ -14,7 +14,14 @@ import pytest
 
 from openexecutive.audit import usage
 from openexecutive.orchestrator import rounds
-from openexecutive.orchestrator.reading import FULL_NOTE, REPEAT_LIMIT, REPEATING_NOTE
+from openexecutive.orchestrator.reading import (
+    CUT_OFF_NOTE,
+    CUT_OFF_RESULT,
+    FULL_NOTE,
+    MAX_EMPTY_CUT_ROUNDS,
+    REPEAT_LIMIT,
+    REPEATING_NOTE,
+)
 from openexecutive.providers import feature_gate, registry
 
 
@@ -177,6 +184,61 @@ async def test_each_response_is_recorded_and_seen_and_only_what_is_sent_goes(
     assert [(u["actor"], u["iteration"], u["session_id"]) for u in _usage] == [("admin_chat", i, "c1") for i in (1, 2, 3)]
     assert all(r["messages"][0]["content"] == "go" for r in model.requests)
     assert messages[0]["content"] == "old" and messages[-1]["role"] == "assistant"
+
+
+def _cut(*blocks: Any) -> Any:
+    return SimpleNamespace(content=list(blocks), stop_reason="max_tokens")
+
+
+@pytest.mark.asyncio
+async def test_a_call_cut_off_at_the_length_limit_never_runs_and_the_pass_carries_on() -> None:
+    ran: list[dict[str, Any]] = []
+
+    async def run_call(use: dict[str, Any]) -> str:
+        ran.append(use)
+        return "ok"
+
+    def reply(n: int, _kw: dict[str, Any]) -> Any:
+        if n == 1:
+            # A finished call, then the one it was still writing when cut.
+            return _cut(_use("note", {"n": 1}, "t1"), _use("send_dm", {"text": "Hi Ana, the half"}, "t2"))
+        if n == 2:
+            return _calls(_use("send_dm", {"text": "Hi Ana."}, "t3"))
+        return _answer("Sent.")
+
+    model = _Model(reply)
+    done = await _run(model, run_call)
+    assert [u["id"] for u in ran] == ["t1", "t3"]
+    assert done.text == "Sent." and done.ended == "done" and done.rounds == 3
+    sent_back = model.requests[1]["messages"]
+    assert sent_back[-2]["content"][-1] == {"type": "tool_use", "id": "t2", "name": "send_dm", "input": {}}
+    assert {"type": "tool_result", "tool_use_id": "t2", "content": CUT_OFF_RESULT} in sent_back[-1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_an_answer_cut_off_mid_text_goes_on_from_where_it_stopped() -> None:
+    async def run_call(_use: dict[str, Any]) -> str:
+        raise AssertionError("no call was made")
+
+    def reply(n: int, _kw: dict[str, Any]) -> Any:
+        if n == 1:
+            return _cut(SimpleNamespace(type="text", text="**Quiet:** Nothing else "))
+        return _answer("worth acting on.")
+
+    model = _Model(reply)
+    done = await _run(model, run_call)
+    assert done.text == "**Quiet:** Nothing else worth acting on." and done.ended == "done"
+    assert model.requests[1]["messages"][-1]["content"] == [{"type": "text", "text": CUT_OFF_NOTE}]
+
+
+@pytest.mark.asyncio
+async def test_cut_rounds_that_get_nowhere_end_the_pass() -> None:
+    async def run_call(_use: dict[str, Any]) -> str:
+        raise AssertionError("a cut call never runs")
+
+    model = _Model(lambda n, _kw: _cut(_use("draft_artifact", {"body": "x" * 50}, f"t{n}")))
+    done = await _run(model, run_call)
+    assert done.ended == "cut" and len(model.requests) == MAX_EMPTY_CUT_ROUNDS + 1
 
 
 def test_a_long_run_of_one_character_is_keyed_in_one_pass() -> None:

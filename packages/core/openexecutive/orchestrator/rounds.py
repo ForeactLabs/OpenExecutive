@@ -14,6 +14,12 @@ call. It writes up from what it has, with one more call that offers no
 tools, when the same call came back the same ``REPEAT_LIMIT`` times, when
 its reads fill what its model holds, or when the pass itself says it has
 had enough (``enough``).
+
+A round cut off at the model's output limit carries on, as a chat turn
+does: the call it was still writing never runs and is answered with
+``CUT_OFF_RESULT``, and cut text is followed by ``CUT_OFF_NOTE`` so the
+model goes on from where it stopped. ``MAX_EMPTY_CUT_ROUNDS`` cut rounds in
+a row that get nowhere end the pass.
 """
 from __future__ import annotations
 
@@ -24,21 +30,27 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from openexecutive.orchestrator.reading import (
+    CUT_OFF_NOTE,
+    CUT_OFF_RESULT,
     FULL_NOTE,
+    MAX_EMPTY_CUT_ROUNDS,
     REPEATING_NOTE,
     TurnReadingBudget,
+    last_written_block,
+    says_something,
 )
 
 logger = logging.getLogger(__name__)
 
-Ended = Literal["done", "repeating", "full", "enough"]
+Ended = Literal["done", "repeating", "full", "enough", "cut"]
 
 
 @dataclass
 class Rounds:
     """How a pass went: the text of its closing answer (what the model wrote
     in the call that ended it; text beside its tool calls is it thinking
-    out loud), how many model calls it made, and why it ended."""
+    out loud; with the text of any rounds it wrote that were cut off at the
+    output limit before it), how many model calls it made, and why it ended."""
 
     text: str
     rounds: int
@@ -101,6 +113,9 @@ async def run_rounds(
     reading = TurnReadingBudget(reading_limits_for(model))
     ending: Ended | None = None
     rounds = 0
+    # Text of rounds cut off at the output limit, which the next carries on.
+    cut_text = ""
+    empty_cuts = 0
     while True:
         rounds += 1
         kwargs: dict[str, Any] = {
@@ -122,10 +137,38 @@ async def run_rounds(
         reading.saw(getattr(response, "usage", None))
         blocks = [b for b in (_block(x) for x in getattr(response, "content", None) or []) if b is not None]
         uses = [b for b in blocks if b.get("type") == "tool_use"]
-        if ending is not None or not uses:
+        cut_off = getattr(response, "stop_reason", None) == "max_tokens"
+        last = last_written_block(blocks) if cut_off else None
+        # The call the round was still writing: its input is unfinished, so
+        # it never runs, and its half-written input is not sent again.
+        cut = last if last is not None and last.get("type") == "tool_use" else None
+        if cut is not None:
+            cut["input"] = {}
+            uses = [u for u in uses if u is not cut]
+        if cut_off:
+            got_somewhere = bool(uses) or (
+                cut is None and last is not None and says_something(str(last.get("text", "")))
+            )
+            empty_cuts = 0 if got_somewhere else empty_cuts + 1
+            if not uses and cut is None:
+                # Cut in its text, or wrote nothing: carry on from there.
+                logger.warning("%s: round %d cut off at max_tokens=%d; carrying on", model, rounds, max_tokens)
+                if blocks:
+                    messages.append({"role": "assistant", "content": blocks})
+                cut_text += "".join(str(b.get("text", "")) for b in blocks if b.get("type") == "text")
+                if empty_cuts > MAX_EMPTY_CUT_ROUNDS:
+                    return Rounds(text=cut_text.strip(), rounds=rounds, ended="cut")
+                if reading.window_full:
+                    return Rounds(text=cut_text.strip(), rounds=rounds, ended="full")
+                messages.append({"role": "user", "content": [{"type": "text", "text": CUT_OFF_NOTE}]})
+                continue
+        else:
+            empty_cuts = 0
+        if cut is None and (ending is not None or not uses):
             if blocks:
                 messages.append({"role": "assistant", "content": blocks})
-            return Rounds(text=text_of(blocks), rounds=rounds, ended=ending or "done")
+            return Rounds(text=(cut_text + text_of(blocks)).strip(), rounds=rounds, ended=ending or "done")
+        cut_text = ""
         messages.append({"role": "assistant", "content": blocks})
         replays = {str(u["id"]): r for u in uses if (r := reading.replay(u)) is not None}
         reading.ran(uses)
@@ -139,7 +182,13 @@ async def run_rounds(
                 reading.came_back(str(use["name"]), use["input"], out)
                 content = reading.cap(str(use["name"]), use["input"], str(out), str(use["id"]))
             results.append({"type": "tool_result", "tool_use_id": use["id"], "content": content})
-        if getattr(response, "stop_reason", None) != "tool_use":
+        if cut is not None:
+            logger.warning("%s: round %d cut off while writing a call; asking for it again", model, rounds)
+            results.append({"type": "tool_result", "tool_use_id": cut["id"], "content": CUT_OFF_RESULT})
+            if empty_cuts > MAX_EMPTY_CUT_ROUNDS:
+                messages.append({"role": "user", "content": results})
+                return Rounds(text="", rounds=rounds, ended="cut")
+        if not cut_off and getattr(response, "stop_reason", None) != "tool_use":
             # Calls beside a finished answer: they ran, and the answer stands.
             messages.append({"role": "user", "content": results})
             return Rounds(text=text_of(blocks), rounds=rounds, ended="done")

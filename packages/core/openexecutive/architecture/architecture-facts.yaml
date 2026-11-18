@@ -467,6 +467,11 @@ caching:
     reads fill what the model holds (FULL_NOTE), or when the pass's own
     enough() says so: research's closing summary after its routing calls,
     the watch pass's stop at its proposals ("" ends with no write-up).
+    A round cut off at its max_tokens carries on as a chat turn does
+    (reading.CUT_OFF_RESULT, CUT_OFF_NOTE, MAX_EMPTY_CUT_ROUNDS, shared with
+    the Executive): the call it was still writing never runs, cut text goes
+    on from where it stopped, and more than three cut rounds in a row that
+    get nowhere end the pass (ended "cut").
     workflows/_synthesis.py execute_tool_call runs one call and returns its
     short summary for the run's log with the whole result for the model.
     Tool results reach the model whole from knowledge_tools.search_knowledge

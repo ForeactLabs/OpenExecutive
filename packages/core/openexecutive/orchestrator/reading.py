@@ -14,6 +14,7 @@ import hashlib
 import json
 import logging
 import re
+import zlib
 from collections.abc import Awaitable
 from contextvars import ContextVar
 from typing import Any, TypeVar
@@ -42,6 +43,60 @@ FULL_NOTE = (
     "more tools. Write your answer now from what you have read, say plainly "
     "what you have not read yet, and offer to carry on with the rest in a new message."
 )
+
+# Answers a tool call the model was still writing when its round was cut off
+# at its output limit: the call never ran (its input is unfinished), and the
+# turn or pass carries on so it can make it again in a shorter form.
+CUT_OFF_RESULT = (
+    "That call was cut off at the length limit before you finished writing "
+    "it, so it did not run. Make it again in a shorter form, or in smaller "
+    "steps (for example, fewer rows or columns first, then the rest)."
+)
+
+# Said after a round cut off at its output limit with no tool call left to
+# answer (cut in its reply text, or a cut call the provider dropped whole).
+CUT_OFF_NOTE = (
+    "Your last answer was cut off at the length limit before it finished. If "
+    "you were writing a tool call, it did not run: make it again in a shorter "
+    "form, or in smaller steps. If you were writing your reply, carry on from "
+    "where it stopped, without repeating what you already wrote."
+)
+
+# Cut rounds in a row that got nowhere after which a turn or pass ends: a round that
+# wrote nothing at all (a model spending its whole answer thinking), or one
+# cut while writing its only call (a document too long for one call, asked
+# for again just as long), which never runs. A round whose cut fell in text,
+# or that closed a call before the cut, is a step of the work, so this never
+# stops a job that is getting written; without it the loop would bill a full
+# answer each round, forever.
+MAX_EMPTY_CUT_ROUNDS = 3
+
+# A cut round's text that packs this small is a model repeating itself
+# ("... ... ...", one line over and over), no step of the work. Prose and
+# tables pack to a quarter or more of their length.
+_STUCK_TEXT_MIN = 2_000
+_STUCK_TEXT_RATIO = 0.05
+
+
+def says_something(text: str) -> bool:
+    """Whether cut text is a step of the work: not empty, and not one thing
+    said over and over (it packs to almost nothing)."""
+    if not text.strip():
+        return False
+    if len(text) < _STUCK_TEXT_MIN:
+        return True
+    raw = text.encode()
+    return len(zlib.compress(raw, 6)) / len(raw) >= _STUCK_TEXT_RATIO
+
+
+def last_written_block(blocks: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The last text or tool call a round wrote. When the round was cut off
+    at its output limit and this is a call, that call is the one it was
+    still writing: its input is unfinished, so it never runs. A reasoning
+    block a translated provider (OpenRouter, OpenAI) puts last is skipped,
+    and a call followed by text closed before the cut."""
+    return next((b for b in reversed(blocks) if b.get("type") in ("text", "tool_use")), None)
+
 
 # Ids and times in a result (a request id, a timestamp, a clock, time
 # elapsed or left) don't make it a different answer: they are left out of
