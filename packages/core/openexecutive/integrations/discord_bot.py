@@ -702,7 +702,7 @@ async def _send_cards(send_card: Callable[[int, str], Awaitable[None]], cards: l
         try:
             text = await asyncio.to_thread(channel_cards.card_text, decision_id)
             if text:
-                await send_card(decision_id, text[:_MAX_CARD_TEXT])
+                await send_card(decision_id, text)
         except Exception:
             logger.exception("Discord: couldn't send card %d", decision_id)
 
@@ -1642,7 +1642,7 @@ def create_discord_bot():
                 from openexecutive.integrations import channel_cards
 
                 options = await asyncio.to_thread(channel_cards.card_options, decision_id, text)
-                await message.channel.send(text, view=_card_view(options), suppress_embeds=True)
+                await message.channel.send(text[:_MAX_CARD_TEXT], view=_card_view(options), suppress_embeds=True)
 
         # Use the channel id as thread_id so WaitForHuman resolution can match
         # replies that arrive in the same DM or thread channel.

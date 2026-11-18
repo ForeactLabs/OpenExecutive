@@ -462,8 +462,10 @@ async def tap(tapped: Choice, person: Any) -> Tapped:
 
 async def _switch(decision_id: int, person: Any) -> Tapped:
     from openexecutive.delegation import send_from
+    from openexecutive.delegation.gmail import normalize_email
     from openexecutive.delegation.inbox import card_payload
     from openexecutive.delegation.reply_send import SendRefused
+    from openexecutive.delegation.verified import ChatTap
     from openexecutive.memory.decision_ledger import get_decision_instance
 
     if decision_id in _resolving:
@@ -473,8 +475,10 @@ async def _switch(decision_id: int, person: Any) -> Tapped:
         return Tapped("Not done: this card is no longer there.")
     _resolving.add(decision_id)
     try:
-        await send_from.switch_for_work(
-            decision_id, person, executive=not send_from.is_from_executive(card_payload(instance)),
+        # As a tap on the web card: its checks, and its rows kept to the person.
+        await send_from.switch(
+            instance, caller=ChatTap(normalize_email(person.email or "")), resolver=person.id,
+            executive=not send_from.is_from_executive(card_payload(instance)),
         )
     except SendRefused as refused:
         return Tapped(f"Not done: {refused.message}")

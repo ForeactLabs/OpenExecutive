@@ -244,3 +244,17 @@ def test_a_discord_card_that_still_waits_is_shown_again_with_its_new_buttons(mon
     assert edit["content"] == f"Reply from Ada\n\n{_AGAIN.line}"
     assert [b.custom_id for b in edit["view"].children] == [data for _, data in _AGAIN.options]
     assert [b.label for b in edit["view"].children] == [label for label, _ in _AGAIN.options]
+
+
+def test_a_long_discord_card_gets_buttons_for_all_of_its_words(monkeypatch: pytest.MonkeyPatch) -> None:
+    long = "x" * (discord_bot._MAX_CARD_TEXT + 50)
+    monkeypatch.setattr(channel_cards, "card_text", lambda decision_id: long)
+    sent: list[str] = []
+
+    async def send_card(decision_id: int, text: str) -> None:
+        sent.append(text)
+
+    asyncio.run(discord_bot._send_cards(send_card, [3]))
+    # The buttons carry the version of the whole card, as a tap checks it;
+    # only the message cuts it short.
+    assert sent == [long]
