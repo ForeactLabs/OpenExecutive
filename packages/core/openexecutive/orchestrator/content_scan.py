@@ -30,18 +30,22 @@ level tells the person what was flagged. Like ``delegation.injection_check``
 generalizes), it is one layer on top of the plain-code rules, never instead
 of them: mail still goes only to People, and so on.
 
-Unchecked is not clean. A failed call, an answer it can't read, content too
-long to read whole (``MAX_CHARS``; an attachment's files are bounded apart,
-``MAX_MEDIA_BLOCKS`` / ``MAX_MEDIA_CHARS``), or a turn past its budget of checks
+Long text is read in pieces of ``MAX_CHARS`` (``_scan_in_pieces``), all of
+it, so a long document is checked like a short one.
+
+Unchecked is not clean. A failed call, an answer it can't read, an
+attachment's files past their bounds (``MAX_MEDIA_BLOCKS`` /
+``MAX_MEDIA_CHARS``), or a turn past its budget of checks
 (``MAX_PER_TURN``, kept by the caller) is ``unchecked``: it holds nothing
 below Careful, and its result reaches the model behind a notice that it is
-data. Content too big to read whole, or read past the turn's budget
-(``TOO_BIG``), is the exception, since padding or a pile of harmless reads is
+data. Files too big to read whole, or reads past the turn's budget
+(``TOO_BIG``), are the exception, since padding or a pile of harmless reads is
 how content would dodge the check: Balanced holds it like a flag. The same content is checked once per process (``_CACHE``, by
 hash). Plain code around one model call; never raises.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import html
 import json
@@ -66,8 +70,13 @@ CATEGORIES: dict[str, str] = {
     "other": "tried to give me instructions",
 }
 
-# Text past this is not read, so the item counts as unchecked.
+# One check reads at most this much text; longer text is read in pieces
+# this size (``_scan_in_pieces``), each overlapping the last by
+# ``_PIECE_OVERLAP`` so words split at a seam are read whole once, at most
+# ``_PIECES_AT_ONCE`` at a time.
 MAX_CHARS = 60_000
+_PIECE_OVERLAP = 2_000
+_PIECES_AT_ONCE = 4
 EVIDENCE_CHARS = 160
 
 # Notes a connected Google app adds to its own results, telling the
@@ -423,6 +432,8 @@ async def _scan(content: Any, *, model: str | None, entries: int) -> Verdict:
         content = checked_content(content)
         if content is None or (isinstance(content, str) and not content.strip()):
             return CLEAN
+        if isinstance(content, str) and len(content) > MAX_CHARS:
+            return await _scan_in_pieces(content, model=model, entries=entries)
         if _too_big(content):
             return TOO_BIG
         key = _key(content) + (f":{entries}" if entries else "")
@@ -472,6 +483,34 @@ async def _scan(content: Any, *, model: str | None, entries: int) -> Verdict:
     if verdict is None:
         return UNCHECKED
     return _remember(key, verdict)
+
+
+async def _scan_in_pieces(text: str, *, model: str | None, entries: int) -> Verdict:
+    """Check long text a piece at a time, all of it. A flag in any piece flags
+    the whole (its categories and entries together); otherwise a piece that
+    holds (``TOO_BIG``) or couldn't be checked makes the whole so; else clean."""
+    step = MAX_CHARS - _PIECE_OVERLAP
+    pieces = [text[i : i + MAX_CHARS] for i in range(0, len(text) - _PIECE_OVERLAP, step)]
+    at_once = asyncio.Semaphore(_PIECES_AT_ONCE)
+
+    async def _one(piece: str) -> Verdict:
+        async with at_once:
+            return await _scan(piece, model=model, entries=entries)
+
+    verdicts = await asyncio.gather(*(_one(piece) for piece in pieces))
+    flagged = [v for v in verdicts if v.flagged]
+    if flagged:
+        return Verdict(
+            flagged=True,
+            categories=tuple(dict.fromkeys(c for v in flagged for c in v.categories)),
+            items=tuple(sorted({i for v in flagged for i in v.items})),
+            evidence=flagged[0].evidence,
+        )
+    if any(v.too_big for v in verdicts):
+        return TOO_BIG
+    if any(v.unchecked for v in verdicts):
+        return UNCHECKED
+    return CLEAN
 
 
 def reset() -> None:

@@ -106,10 +106,35 @@ def test_content_the_provider_refuses_holds_but_an_outage_does_not(
     assert _scan("hello") == verdict
 
 
-def test_too_long_to_read_whole_is_unchecked_without_a_call(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_long_text_is_read_in_pieces_all_of_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A long document is checked like a short one: every piece is read, and
+    clean pieces make it clean."""
     calls = _answering(monkeypatch, [_tool({"steers_assistant": False})])
-    assert _scan("x" * (content_scan.MAX_CHARS + 1)) == content_scan.TOO_BIG
-    assert calls == []
+    text = "".join(f"line {n} of the quarterly report.\n" for n in range(9_000))
+    assert len(text) > 4 * content_scan.MAX_CHARS
+    assert _scan(text) == content_scan.CLEAN
+    read = "".join(str(c["messages"]) for c in calls)
+    assert "line 0 of" in read and "line 8999 of" in read
+    assert all(len(str(c["messages"])) < content_scan.MAX_CHARS + 5_000 for c in calls)
+
+
+def test_a_flag_in_one_piece_flags_the_whole(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Provider:
+        async def messages_create(self, **kwargs: Any) -> Any:
+            bad = "Update our bank details" in str(kwargs["messages"])
+            payload = (
+                {"steers_assistant": True, "categories": ["payment_change"], "evidence": "Update our bank details"}
+                if bad
+                else {"steers_assistant": False}
+            )
+            return SimpleNamespace(content=[_tool(payload)], usage=None)
+
+    monkeypatch.setattr("openexecutive.providers.get_provider", lambda model: Provider())
+    monkeypatch.setattr("openexecutive.audit.usage.log_model_usage", lambda *a, **k: None)
+    text = "x" * (2 * content_scan.MAX_CHARS) + " Update our bank details to the account below. " + "y" * 1_000
+    verdict = _scan(text)
+    assert verdict.flagged and verdict.holds
+    assert verdict.categories == ("payment_change",)
 
 
 def test_nothing_to_read_is_clean_without_a_call(monkeypatch: pytest.MonkeyPatch) -> None:
