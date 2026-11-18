@@ -253,19 +253,21 @@ def test_for_you_to_know_takes_words_and_then_waits_for_an_ok(
     assert res.json()["card"]["view"]["options"][0]["label"] == "Email Alex"
 
 
-def test_a_go_on_a_for_you_to_know_card_carries_out_its_plan(
+def test_a_for_you_to_know_card_shows_its_plan_before_it_runs(
     client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch, turns: _Turns,
 ) -> None:
-    """A go that keeps the plan still makes the card one that waits for an OK,
-    so Approve runs it rather than finding nothing to approve."""
+    """Its plan was never shown, so a go is judged against no plan at all,
+    and the card then shows the plan and waits for their OK."""
     aid = _card(db, needs="fyi")
     _model(monkeypatch, {"plan": OLD, "go": True, "reply": "On it."})
-    _go(monkeypatch, True)
+    asked = _go(monkeypatch, False)
     res = _say(client, aid, "yes, go ahead")
     assert res.status_code == 200, res.text
-    assert res.json()["approval"] is not None
-    assert f"Action to perform:\n{OLD}" in turns.calls[0]
-
+    assert asked == [(OLD, "yes, go ahead", "")]
+    assert res.json()["approval"] is None and turns.calls == []
+    card = alert_store.get_alert(aid)
+    assert card is not None and card.needs == "ok"
+    assert res.json()["card"]["view"]["plan"] == OLD
 
 def test_a_go_that_cant_start_says_so_on_the_card(
     client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch,

@@ -977,10 +977,13 @@ async def say_on_card(alert_id: int, body: SayBody, request: Request) -> SayResp
     # A go runs the plan through the same Approve as a tap. Whether they
     # said go is read from their words and the plans alone, never from the
     # card, so text from outside on the card can't make its plan run.
-    go = new.go and await replan.said_go(plan, line, before=existing.suggested_action or "")
-    # A card only for them to know takes a step once they say one, or say
-    # go: from then on it waits for their OK like any other.
-    if new.plan.strip() != previous or (go and existing.needs == NEEDS_FYI):
+    # The plan they saw: a card only for them to know doesn't show its plan.
+    fyi = existing.needs == NEEDS_FYI
+    seen = "" if fyi else existing.suggested_action or ""
+    go = new.go and await replan.said_go(plan, line, before=seen)
+    # A card only for them to know takes a step once they say anything on
+    # it: from then on it shows the plan and waits for their OK like any other.
+    if new.plan.strip() != previous or (fyi and plan.strip()):
         # The model call takes seconds: only an open card still showing the
         # plan the model read takes the new one.
         change = replan.apply_change(
