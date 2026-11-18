@@ -885,13 +885,19 @@ async def _carry_out_department_action(
     )
 
 
+def may_change_as(instance: DecisionInstance, *, principal: bool, approver: bool) -> bool:
+    """Whether someone may change a held step's fields, as Approve's own
+    ``edits.input`` allows, on the page and in a chat app alike: a Take the
+    lead card's are the principal's, a held step's the principal's or the
+    person it waits on (``approver``)."""
+    return principal or (instance.decision_class == _DEPARTMENT_ACTION.name and approver)
+
+
 def _may_change(instance: DecisionInstance, request: Request, resolver: int | None) -> bool:
-    """Whether the caller may change a held step's fields, as Approve's own
-    ``edits.input`` allows: a Take the lead card's are the principal's, a
-    held step's the principal's or the person it waits on."""
-    if _approver_is_principal(request):
-        return True
-    return instance.decision_class == _DEPARTMENT_ACTION.name and resolver == instance.approver_person_id
+    return may_change_as(
+        instance, principal=_approver_is_principal(request),
+        approver=resolver is not None and resolver == instance.approver_person_id,
+    )
 
 
 def _with_edits(
@@ -1527,8 +1533,10 @@ async def say_in_chat(instance_id: int, person: Any, text: str, *, shown: str) -
         # The step their words would change is the one they read.
         raise HTTPException(status_code=409, detail=_CHANGED_MEANWHILE)
     principal = find_principal_person()
-    # As on the page (``_may_change``): the owner, or the person it waits on.
-    may_change = (principal is not None and principal.id == person.id) or person.id == instance.approver_person_id
+    may_change = may_change_as(
+        instance, principal=principal is not None and principal.id == person.id,
+        approver=person.id == instance.approver_person_id,
+    )
 
     async def approve(fresh: DecisionInstance, edits: dict[str, str]) -> DecisionInstance:
         # The fields the go was judged on, not a newer read of the card.

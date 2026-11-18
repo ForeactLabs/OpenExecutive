@@ -582,6 +582,40 @@ def _waits_on(team: dict[str, Person], decision_id: int) -> Person:
     return next((p for p in team.values() if p.id == card.approver_person_id), team["owner"])
 
 
+def test_who_may_change_a_held_step_is_one_rule_for_page_and_chat() -> None:
+    from types import SimpleNamespace
+
+    lead = SimpleNamespace(decision_class="take_the_lead_action")
+    held = SimpleNamespace(decision_class=decisions_route._DEPARTMENT_ACTION.name)
+    assert decisions_route.may_change_as(lead, principal=True, approver=False)  # type: ignore[arg-type]
+    assert not decisions_route.may_change_as(lead, principal=False, approver=True)  # type: ignore[arg-type]
+    assert decisions_route.may_change_as(held, principal=False, approver=True)  # type: ignore[arg-type]
+    assert not decisions_route.may_change_as(held, principal=False, approver=False)  # type: ignore[arg-type]
+
+
+def test_an_approver_cant_reword_a_take_the_lead_step_from_chat(
+    team: dict[str, Person], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """As on the page: a Take the lead card's fields are the principal's."""
+    from fastapi import HTTPException
+
+    turns = _model(monkeypatch, {"body": "Short text"})
+    mail = ledger.get_decision_instance(_mail_card(team))
+    assert mail is not None
+    lead_id = ledger.create_decision_instance(
+        decision_class="take_the_lead_action", department=mail.department, originating_session_id=None,
+        proposed_payload=json.loads(mail.proposed_payload_json), idempotency_key=None,
+        gate_mode=mail.gate_mode, approver_person_id=team["sam"].id, confidence=None,
+    )
+    monkeypatch.setattr(decisions_route, "chat_card_is_theirs", lambda instance, person: True)
+    monkeypatch.setattr("openexecutive.integrations.channel_cards.shows", lambda instance, shown: True)
+    with pytest.raises(HTTPException) as refused:
+        asyncio.run(decisions_route.say_in_chat(lead_id, team["sam"], "send it to everyone, and go", shown="x"))
+    assert refused.value.detail == "This one can't be changed from its card." and turns == []
+    lead = ledger.get_decision_instance(lead_id)
+    assert lead is not None and "said_input" not in json.loads(lead.proposed_payload_json)
+
+
 def test_words_said_on_a_held_steps_chat_card_rewrite_it_and_its_tap_sends_them(
     team: dict[str, Person], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
