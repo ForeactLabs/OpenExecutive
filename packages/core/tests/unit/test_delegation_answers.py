@@ -217,7 +217,7 @@ def test_a_scan_with_read_my_calendar_on_offers_free_slots(
 
 def _card(
     owner_id: int, monkeypatch: pytest.MonkeyPatch, *, mailbox: FakeInbox | None = None, calendar_on: bool = False,
-    gist: str = "", cc: tuple[str, ...] = (),
+    gist: str = "", cc: tuple[str, ...] = (), questions: bool = True,
 ) -> tuple[FakeInbox, int]:
     from openexecutive.delegation import inbox_classifier as ic
     from openexecutive.delegation.settings import set_enabled
@@ -231,7 +231,7 @@ def _card(
             "body": "Hi Dana,\n\nThanks for the note. I'll get back to you on the time.\n\nOlivia",
             "open_questions": [
                 {"question": "When should we talk?", "choices": ["Friday at 10", "Next week"], "about": "time"},
-            ],
+            ] if questions else [],
             **({"gist": gist} if gist else {}),
         }
 
@@ -608,7 +608,7 @@ def test_saying_send_it_on_the_card_asks_to_confirm_the_send(
 
     monkeypatch.setattr(answers, "_call_model", fake)
     given = _go_said(monkeypatch, True)
-    mailbox, card_id = _card(ids["principal"], monkeypatch)
+    mailbox, card_id = _card(ids["principal"], monkeypatch, questions=False)
     monkeypatch.setattr("openexecutive.delegation.gmail.gmail_for", lambda email: mailbox)
     monkeypatch.setenv("OE_LOCAL_LOGIN", "1")
     before = mailbox.drafts["d1"].message.text
@@ -625,6 +625,28 @@ def test_saying_send_it_on_the_card_asks_to_confirm_the_send(
     ]
     # Judged from their words and the reply alone.
     assert "<person_said>\nlooks good, send it\n</person_said>" in given[0]
+
+
+def test_send_it_with_a_question_open_waits_for_the_answer(
+    client: TestClient, ids: dict[str, int], monkeypatch: pytest.MonkeyPatch,  # noqa: F811
+) -> None:
+    answers._ANSWERED.clear()
+
+    async def fake(model: str, system: str, turn: str) -> dict[str, Any]:
+        main = turn.split("<draft>\n", 1)[1].split("\n</draft>", 1)[0]
+        return {"body": main, "send_now": True}
+
+    monkeypatch.setattr(answers, "_call_model", fake)
+    _go_said(monkeypatch, True)
+    mailbox, card_id = _card(ids["principal"], monkeypatch)
+    monkeypatch.setattr("openexecutive.delegation.gmail.gmail_for", lambda email: mailbox)
+    monkeypatch.setenv("OE_LOCAL_LOGIN", "1")
+    resp = client.post(f"/delegation/replies/{card_id}/change", json={"text": "looks good, send it"}, headers=OWNER)
+    assert resp.status_code == 200, resp.text
+    card = resp.json()
+    # Send waits for the card's open question, whatever was said.
+    assert card["send_now"] is False and mailbox.sent == []
+    assert card["conversation"][-1]["text"] == answers.NOTE_ANSWER_FIRST
 
 
 @pytest.mark.parametrize("go", [False, None])

@@ -47,6 +47,9 @@ export default function StepTalk({
   const [sending, setSending] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A go that was tried and failed: what happened stays on the card until
+  // they've read it.
+  const [tried, setTried] = useState(false);
 
   async function run(action: () => Promise<unknown>) {
     setBusy(true);
@@ -60,7 +63,7 @@ export default function StepTalk({
     }
   }
 
-  const off = disabled || busy || sending !== null;
+  const off = disabled || busy || sending !== null || tried;
 
   return (
     <div>
@@ -81,7 +84,14 @@ export default function StepTalk({
           ))}
         </div>
       )}
-      {canSay && (
+      {tried && (
+        <div className="mt-3">
+          <button type="button" onClick={onResolved} className={buttonClass("secondary", "md")}>
+            Got it
+          </button>
+        </div>
+      )}
+      {canSay && !tried && (
         <SayBox
           id={`step-${decisionId}`}
           disabled={off}
@@ -91,7 +101,8 @@ export default function StepTalk({
             const r: StepSayResult = await sayOnStep(decisionId, text, seen);
             setTurns((t) => [...t, { who: "you", text }, { who: "me", text: r.reply }]);
             setSending(null);
-            if (r.approved) onResolved();
+            if (r.approved?.status === "failed") setTried(true);
+            else if (r.approved) onResolved();
             else onSaid(r.fields);
           }}
         />

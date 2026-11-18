@@ -366,6 +366,17 @@ def _slot_text(at: datetime) -> str:
 # --------------------------------------------------------------------------- #
 
 
+def questions_left(payload: dict[str, Any]) -> int:
+    """How many questions with answers to tap are still open: Send waits for
+    them, unless the words were changed by hand (``QUESTIONS_SETTLED``). A
+    question with no choices never holds Send back."""
+    from openexecutive.delegation.card_drafts import QUESTIONS_SETTLED
+
+    if payload.get(QUESTIONS_SETTLED) is True:
+        return 0
+    return sum(1 for q in questions_for(payload) if q["choices"] and not q["answer"].strip())
+
+
 def questions_for(payload: dict[str, Any]) -> list[dict[str, Any]]:
     """The card's open questions as the person sees them: each one's text,
     choices, where they came from and the answer given (""). A card made
@@ -751,6 +762,7 @@ async def answer(
 
 NOTE_TAP_SEND = "Tap Send when it looks right."
 NOTE_CONFIRM_SEND = "Here it is. Check who it goes to, then send it."
+NOTE_ANSWER_FIRST = "Answer the question above first, then send it."
 
 
 async def change(
@@ -804,10 +816,15 @@ async def change(
             payload = await send_from.switch(
                 instance, caller=caller, resolver=resolver, executive=bool(ask.executive), gmail=gmail, asked=text,
             )
-        if not switched:
+        if go and questions_left(payload):
+            # Send waits for the card's open questions, whatever was said.
+            go, note = False, NOTE_ANSWER_FIRST
+        else:
             # A go opens the send to check; unsure, it stays theirs to tap.
-            note = NOTE_CONFIRM_SEND if go else NOTE_TAP_SEND
-            payload = send_from.say(instance, note, asked=text) or payload
+            note = "" if switched else NOTE_CONFIRM_SEND if go else NOTE_TAP_SEND
+        if note:
+            fresh = (get_decision_instance(instance.id) or instance) if switched else instance
+            payload = send_from.say(fresh, note, asked="" if switched else text) or payload
         return payload, [], go
     if asked:
         current = get_decision_instance(instance.id) or instance
