@@ -258,3 +258,30 @@ def test_a_reply_whose_quote_opens_with_a_forward_marker_is_history() -> None:
     # The same quote in a forward is the forwarded email.
     assert split_forward(body, "Fwd: Rates")[1] == "From: Bank\nold text"
 
+
+def test_an_inline_quote_above_a_forward_is_not_the_forward() -> None:
+    from openexecutive.integrations.email_poller import split_forward
+
+    body = (
+        "Look at what he said:\n> we will ship Friday\nThoughts?\n\n"
+        "> Anfang der weitergeleiteten Nachricht:\n> Von: Bank\n> Rate 5%"
+    )
+    own, forwarded = split_forward(body, "WG: status")
+    assert own == "Look at what he said:\nThoughts?"
+    assert forwarded.endswith("Von: Bank\nRate 5%") and "Friday" not in forwarded
+
+
+def test_the_drafting_thread_shares_one_budget_for_forwards() -> None:
+    from openexecutive.delegation import threads
+
+    def msg(text: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            text=text, subject="Fwd: x", labels=["INBOX"], from_name="Ann", from_addr="a@example.com", date="Tue",
+        )
+
+    old = msg("> Begin forwarded message:\n> " + "o" * 5000)
+    new = msg("> Begin forwarded message:\n> " + "n" * 5000)
+    text = threads.thread_text(SimpleNamespace(messages=[old, new]), "me@example.com")
+    assert text.count("n") >= 5000
+    assert text.count("o") <= threads.THREAD_FORWARDED_CHARS - 5000 + 50
+

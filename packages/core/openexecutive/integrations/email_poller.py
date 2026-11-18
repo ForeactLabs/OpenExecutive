@@ -491,15 +491,22 @@ def readable_text(
     return text[:max_chars] if max_chars is not None and forwarded_chars is None else text
 
 
-def _first_unattributed_quote(lines: list[str]) -> int | None:
-    """The index of the first ">" line, None when there is none or a reply
-    attribution opens before it."""
+def _forward_quote(lines: list[str]) -> int | None:
+    """Where the forwarded email starts in a forward whose marker isn't
+    recognised: the last ">" run that stands as its own block (after a blank
+    line or at the top), so a line the sender quotes inline above it isn't
+    taken for it; else the last ">" run. None when there is none or a reply
+    attribution opens first."""
+    block = run = None
     for i, line in enumerate(lines):
         if _attribution_end(lines, i) is not None:
-            return None
-        if line.lstrip().startswith(">"):
-            return i
-    return None
+            break
+        prev = lines[i - 1].strip() if i else ""
+        if line.lstrip().startswith(">") and not prev.startswith(">"):
+            run = i
+            if not prev:
+                block = i
+    return block if block is not None else run
 
 
 def _inside_quote(lines: list[str], i: int) -> bool:
@@ -527,11 +534,11 @@ def split_forward(
     is_forward = _FORWARD_SUBJECT_RE.match(subject or "") is not None
     if cut_at is None and is_forward:
         # A forward whose marker is in another language ("Anfang der
-        # weitergeleiteten Nachricht:"): its first ">" run, when no reply
+        # weitergeleiteten Nachricht:"): its last ">" block, when no reply
         # attribution comes before it, is the forwarded email.
         # The scan skipped it like any quote, so their words above and below
         # it are already kept.
-        cut_at = _first_unattributed_quote(lines)
+        cut_at = _forward_quote(lines)
     # A skipped quote leaves the blank lines around it: one is enough.
     own = re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
     if max_chars is not None:
