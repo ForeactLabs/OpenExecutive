@@ -3068,7 +3068,9 @@ def resolved(
         finally:
             conn.close()
     except Exception:
+        # Whatever else failed, the step went: it never stays "waiting".
         logger.warning("take_the_lead: couldn't update what it did", exc_info=True)
+        _set_log_status(decision_id, status, db_path=db_path)
 
 
 # --------------------------------------------------------------------------- #

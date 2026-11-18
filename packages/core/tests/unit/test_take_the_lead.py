@@ -2257,3 +2257,19 @@ def test_approving_an_edited_email_logs_what_went_and_when(
     assert response.status_code == 200, response.text
     [row] = ttl.done([ttl.SCOPE_EXECUTIVE])
     assert row.status == "approved" and row.mail_subject == "Racking repair: approved" and row.at > held.at
+
+
+def test_an_approved_step_never_stays_waiting_when_its_row_cant_be_rebuilt(
+    owner: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    send = "google_workspace__send_gmail_message"
+    held = {"to": DANA, "subject": "Racking repair", "body": "Go ahead."}
+    decision_id = ttl.hold(send, held, ttl.Hit("money", "it's about money"), source="chat", mcp=True)
+
+    def broken(*_: Any, **__: Any) -> str:
+        raise ValueError("odd input")
+
+    monkeypatch.setattr(ttl, "summarize", broken)
+    ttl.resolved(decision_id, "approved", payload={"tool": send, "input": held, "mcp": True}, result="Email sent!")
+    [row] = ttl.done([ttl.SCOPE_EXECUTIVE])
+    assert row.status == "approved"
