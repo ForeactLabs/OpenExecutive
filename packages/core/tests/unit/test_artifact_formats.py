@@ -42,9 +42,9 @@ def test_markdown_requires_document() -> None:
         af.build_artifact("markdown", {"document": "   "})
 
 
-def test_document_cap_enforced() -> None:
-    with pytest.raises(af.ArtifactInputError, match="limit"):
-        af.build_artifact("markdown", {"document": "x" * (af.MAX_DOCUMENT_CHARS + 1)})
+def test_a_long_document_is_kept_whole() -> None:
+    built = af.build_artifact("markdown", {"document": "x" * 250_000})
+    assert "x" * 250_000 in str(built)
 
 
 def test_unknown_format_rejected() -> None:

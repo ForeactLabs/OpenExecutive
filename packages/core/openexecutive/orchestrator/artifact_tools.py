@@ -63,8 +63,6 @@ _LIST_DEFAULT = 10
 _LIST_MAX = 25
 _LIST_SCAN = 200
 _LIST_PREVIEW_CHARS = 160
-_GET_DEFAULT_CHARS = 20_000
-_GET_MAX_CHARS = 60_000
 
 
 DRAFT_ARTIFACT_TOOL: dict[str, Any] = {
@@ -236,8 +234,8 @@ GET_ARTIFACT_TOOL: dict[str, Any] = {
             "max_chars": {
                 "type": "integer",
                 "description": (
-                    f"Truncate the content to this many characters (default "
-                    f"{_GET_DEFAULT_CHARS}, max {_GET_MAX_CHARS})."
+                    "Optional: read only the first this many characters. "
+                    "Left out, the whole content comes back (a long one in parts)."
                 ),
             },
         },
@@ -394,13 +392,14 @@ async def handle_list_artifacts(tool_input: dict[str, Any]) -> str:
 
 async def handle_get_artifact(tool_input: dict[str, Any]) -> str:
     composite_id = str(tool_input.get("id") or "").strip()
-    max_chars = _clamp_int(tool_input.get("max_chars"), _GET_DEFAULT_CHARS, 200, _GET_MAX_CHARS)
+    asked = tool_input.get("max_chars")
     try:
         rec = load_artifact(composite_id, viewer=current_viewer())
     except (MalformedArtifactId, ArtifactNotFound) as exc:
         return _err(str(exc))
 
     content = get_format(rec.format).display(rec.stored or "")
+    max_chars = len(content) if asked is None else _clamp_int(asked, len(content), 200, max(200, len(content)))
     truncated = len(content) > max_chars
     result: dict[str, Any] = {
         "id": rec.id,

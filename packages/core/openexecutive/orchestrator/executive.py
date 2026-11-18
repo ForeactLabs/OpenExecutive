@@ -165,7 +165,13 @@ from openexecutive.orchestrator.people_tools import (
     is_principal_on_verified_surface,
     turn_is_private_to_principal,
 )
-from openexecutive.orchestrator.reading import TurnReadingBudget, with_turn_limits
+from openexecutive.orchestrator.reading import (
+    FULL_NOTE,
+    REPEAT_LIMIT,
+    REPEATING_NOTE,
+    TurnReadingBudget,
+    with_turn_limits,
+)
 from openexecutive.orchestrator.research_tools import (
     RESEARCH_TOOL_HANDLERS,
     RESEARCH_TOOLS,
@@ -549,20 +555,6 @@ def _apply_loop_cache_marker(
     return bool(markable)
 
 
-# Ids and times in a result (a request id, a timestamp, a clock, time
-# elapsed or left) don't make it a different answer: they are left out of
-# _call_key. Other numbers stay, so a status read whose progress moves
-# (20, 40, 60) is getting somewhere, and one whose only change is "42s
-# elapsed" is not.
-_VARYING_IN_A_RESULT = re.compile(
-    r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?"
-    r"|(?<![0-9A-Za-z:])\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?![0-9A-Za-z:])"
-    r"|(?<![0-9A-Za-z.])\d+(?:\.\d+)?\s?(?:ms|s|secs?|seconds?|mins?|minutes?|h|hrs?|hours?)(?![0-9A-Za-z])"
-    r"|(?<![0-9A-Za-z])(?=[0-9-]*[a-fA-F])[0-9a-fA-F]{8,}(?:-[0-9a-fA-F]{4,})*(?![0-9A-Za-z])"
-    r"|(?<![0-9A-Za-z])(?=[0-9A-Za-z_-]*\d)(?=[0-9A-Za-z_-]*[A-Za-z])[0-9A-Za-z_-]{12,}(?![0-9A-Za-z])"
-)
-
-
 # A cut round's text that packs this small is a model repeating itself
 # ("... ... ...", one line over and over), no step of the work. Prose and
 # tables pack to a quarter or more of their length.
@@ -579,15 +571,6 @@ def _says_something(text: str) -> bool:
         return True
     raw = text.encode()
     return len(zlib.compress(raw, 6)) / len(raw) >= _STUCK_TEXT_RATIO
-
-
-def _call_key(tool_use: dict[str, Any], result: Any) -> str:
-    """One call with what it returned, for REPEAT_LIMIT: the same error with
-    a new request id or time each try is still the same result."""
-    same = _VARYING_IN_A_RESULT.sub("#", str(result))
-    return hashlib.sha256(
-        json.dumps([tool_use["name"], tool_use["input"], same], sort_keys=True, default=str).encode()
-    ).hexdigest()
 
 
 def _with_notice(result: Any, notice: str) -> Any:
@@ -1093,28 +1076,9 @@ CUT_OFF_LABEL = "Writing it in shorter parts…"
 # stops a job that is getting written; without it the loop would bill a full
 # answer each round, forever.
 MAX_EMPTY_CUT_ROUNDS = 3
-# The same call with the same result this many times in a turn is no step
-# of the work (a write that keeps failing the same way, a retry that finds
-# nothing new): the turn then writes its answer from what it has and runs no
-# more tools. A turn that gets anywhere never meets it; it replaces a count
-# of rounds. Workflow steps follow the same rule (action_step.REPEAT_LIMIT).
-REPEAT_LIMIT = 4
-REPEATING_NOTE = (
-    "You have made the same call several times and it came back the same "
-    "each time. Do not call any more tools. Write your answer now from what "
-    "you have: say what worked, what kept failing and why, and what would fix it."
-)
 REPEATING_EMPTY_REPLY = (
     "I stopped because the same step kept coming back the same way, and "
     "nothing was ready to show yet."
-)
-# Once a turn has read all its model holds (TurnReadingBudget.full), more
-# reads would push the prompt past the window: it writes its answer from
-# what it has read and offers to carry on, the same way a repeat ends.
-FULL_NOTE = (
-    "This question has now read all it can hold at once. Do not call any "
-    "more tools. Write your answer now from what you have read, say plainly "
-    "what you have not read yet, and offer to carry on with the rest in a new message."
 )
 FULL_EMPTY_REPLY = (
     "I've read all I can hold for this one question. Ask me to carry on and "
@@ -2621,7 +2585,6 @@ class Executive:
         repeating = False
         # What a write-up that wrote nothing says: why it was asked for.
         write_up_empty = REPEATING_EMPTY_REPLY
-        repeats: dict[str, int] = {}
         # What the turn last showed the person (show_progress), so each call
         # adds to it, and the reads it made, counted once each for the card.
         shown_progress: turn_progress.Progress | None = None
@@ -2783,14 +2746,7 @@ class Executive:
             # Cut off at MAX_OUTPUT_TOKENS mid-answer: carry on rather than
             # end the turn on half a step. A cut tool call is answered with
             # CUT_OFF_RESULT below and never runs; cut text gets CUT_OFF_NOTE.
-            usage = getattr(final_msg, "usage", None)
-            if usage is not None:
-                reading_budget.prompt_was(
-                    sum(
-                        int(getattr(usage, k, 0) or 0)
-                        for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
-                    )
-                )
+            reading_budget.saw(getattr(final_msg, "usage", None))
             cut_off = final_msg.stop_reason == "max_tokens"
             # The call the round was still writing when it was cut off is the
             # last one; its input is unfinished, so nothing reads or runs it.
@@ -4093,9 +4049,8 @@ class Executive:
                 handing_over = True
                 yield {"type": "handing_over"}
             for tu in tool_uses:
-                key = _call_key(tu, results_by_id.get(tu["id"], ""))
-                repeats[key] = repeats.get(key, 0) + 1
-            if not handing_over and max(repeats.values(), default=0) >= REPEAT_LIMIT:
+                reading_budget.came_back(tu["name"], tu["input"], results_by_id.get(tu["id"], ""))
+            if not handing_over and reading_budget.repeating:
                 logger.warning("round %d: a call came back the same %d times; writing up", iteration, REPEAT_LIMIT)
                 tool_results.append({"type": "text", "text": REPEATING_NOTE})
                 repeating = True

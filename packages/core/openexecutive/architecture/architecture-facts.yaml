@@ -321,7 +321,8 @@ caching:
     240,000 for Haiku 4.5, a share of LOCAL_CONTEXT_TOKENS for a self-hosted
     model), and one part of one read is half that (per_read). So an ordinary
     long document fits whole. orchestrator/reading.py holds it for the
-    Executive's loop and a workflow action step alike (TurnReadingBudget). A
+    Executive's loop, a workflow action step and the background passes alike
+    (TurnReadingBudget; the passes through orchestrator/rounds.py). A
     longer result comes back in parts: the first part ends in a marker naming
     the tool and both character counts and saying to repeat the call with the
     same input; that repeat (same tool, input compared as sorted JSON) is
@@ -451,6 +452,27 @@ caching:
     providers.feature_gate._strip_cache_control walks one level deep only, so
     a marker nested inside tool_result["content"] would survive the gate and
     reach a backend that rejects the field.
+  background_rounds: |
+    The passes that run with nobody watching (executive_reflection and Take
+    the lead, executive_research's routing and watch passes, the chat review)
+    run their tool calls through one loop,
+    orchestrator/rounds.py run_rounds, with no count of rounds: each ended at
+    a fixed number of iterations (3 to 10), so a long job stopped half done.
+    A pass ends when the model answers without a call. Its results go
+    through TurnReadingBudget, sized from the pass's model (whole, or in
+    parts with replay), not a preview of 160 or 4,000 characters. It writes
+    up, with one more call offering no tools (tool_choice none), when a call
+    came back the same REPEAT_LIMIT times (reading.call_key leaves ids and
+    times out, the same rule the Executive and action steps use), when its
+    reads fill what the model holds (FULL_NOTE), or when the pass's own
+    enough() says so: research's closing summary after its routing calls,
+    the watch pass's stop at its proposals ("" ends with no write-up).
+    workflows/_synthesis.py execute_tool_call runs one call and returns its
+    short summary for the run's log with the whole result for the model.
+    Tool results reach the model whole from knowledge_tools.search_knowledge
+    and get_artifact (max_chars only when the model asks for less); grounding takes its
+    sources from all of a result. A document artifact is any length and a
+    sheet holds what Excel holds.
   tool_result_bound: |
     One tool result is sized at the single point every result reaches the
     model (TurnReadingBudget.cap in _stream_agent_loop), not at each producer:
@@ -1656,9 +1678,8 @@ routing:
     gated. The prompt (`_KNOWLEDGE_RULE`, both modes) asks for a search
     before acting on or flagging something that turns on a customer's or
     supplier's terms, a price, a policy, a plan or a past decision. Its
-    passages return up to 4,000 characters (execute_tool_calls
-    wide_results) while other tools keep the short preview; the run's tool
-    log trims every line to 160. The pass runs with no viewer, so no
+    passages come back whole, like every result of the pass
+    (background_rounds); the run's tool log trims every line to 160. The pass runs with no viewer, so no
     published artifact that is someone's own comes back.
 
     Audit trail: every tool the reflection model invokes flows through
@@ -6904,9 +6925,8 @@ external_monitoring:
         short-circuit with an `over budget — skipped` summary so the model
         sees a tool_result acknowledgement on the next turn. Read-only
         context lookups (`_NON_ROUTING_TOOLS`: `lookup_person`,
-        `list_people`, `ask_about_person`) are exempt — they are passed to
-        `execute_tool_calls` as `free_tools`, never decrement the budget,
-        and never terminate the loop, so the Executive can resolve a
+        `list_people`, `ask_about_person`) are exempt — they are never
+        refused as over budget and never count toward it, so the Executive can resolve a
         department head without spending the budget meant for the DM that
         lookup was for (the "looks up people but never routes" bug).
       - Synthesis system prompt defaults to IGNORE — surfacing requires

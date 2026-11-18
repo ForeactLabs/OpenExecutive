@@ -38,14 +38,11 @@ from urllib.parse import urlsplit
 ARTIFACT_FORMAT_NAMES: tuple[str, ...] = ("docx", "html", "link", "markdown", "xlsx")
 DEFAULT_FORMAT = "markdown"
 
-# Largest document (Markdown / HTML) the tool accepts. A drafted artifact is
-# echoed into the chat transcript as a tool input, so this also bounds how
-# much one draft can grow the conversation.
-MAX_DOCUMENT_CHARS = 60_000
+# A document (Markdown / HTML) is any length. A sheet holds what Excel
+# holds: its rows below the header row, and its columns.
 MAX_SHEETS = 20
-MAX_ROWS_PER_SHEET = 5_000
-MAX_COLUMNS = 200
-MAX_TOTAL_CELLS = 200_000
+MAX_ROWS_PER_SHEET = 1_048_575
+MAX_COLUMNS = 16_384
 MAX_URL_CHARS = 2_000
 MAX_LINK_LABEL_CHARS = 60
 # Rows per sheet shown in the on-screen / read-back table preview. The full
@@ -95,10 +92,6 @@ def _document(tool_input: dict[str, Any], *, required: bool = True) -> str:
     doc = str(tool_input.get("document") or "").strip()
     if required and not doc:
         raise ArtifactInputError("document is required for this format")
-    if len(doc) > MAX_DOCUMENT_CHARS:
-        raise ArtifactInputError(
-            f"document is {len(doc)} chars; the limit is {MAX_DOCUMENT_CHARS}"
-        )
     return doc
 
 
@@ -505,7 +498,6 @@ def _normalize_sheets(raw: Any) -> list[dict[str, Any]]:
         raise ArtifactInputError(f"at most {MAX_SHEETS} sheets")
     seen: set[str] = set()
     sheets: list[dict[str, Any]] = []
-    total_cells = 0
     for idx, sheet in enumerate(raw):
         if not isinstance(sheet, dict):
             raise ArtifactInputError(f"sheet {idx + 1} must be an object")
@@ -534,9 +526,6 @@ def _normalize_sheets(raw: Any) -> list[dict[str, Any]]:
             if len(cells) > MAX_COLUMNS:
                 raise ArtifactInputError(f"sheet {idx + 1}: at most {MAX_COLUMNS} columns")
             norm_rows.append([_cell(v) for v in cells])
-            total_cells += len(cells)
-        if total_cells > MAX_TOTAL_CELLS:
-            raise ArtifactInputError(f"at most {MAX_TOTAL_CELLS} cells in total")
         sheets.append({
             "name": _sheet_name(sheet.get("name"), idx, seen),
             "columns": [xml_safe(str(c)) for c in columns],

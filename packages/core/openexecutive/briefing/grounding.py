@@ -61,8 +61,6 @@ BRIEF_SURFACES = ("morning brief", "end-of-day digest")
 _HELD_KEEP = 30
 _HELD_LINE_CHARS = 400
 
-_MAX_RESULT_CHARS = 4000
-
 
 # --------------------------------------------------------------------------- #
 # Data
@@ -895,7 +893,9 @@ class GroundingScope:
     def add_text(self, label: str, text: str) -> None:
         self._results += 1
         self.sources.extend(
-            sources_from_text(text[:_MAX_RESULT_CHARS], label, f"r{self._results}.")
+            # All of it: a name or figure the pass read anywhere in a result
+            # is what it read.
+            sources_from_text(text, label, f"r{self._results}.")
         )
         self._index = None
 

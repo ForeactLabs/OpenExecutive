@@ -89,13 +89,13 @@ class _Provider:
             return SimpleNamespace(content=[SimpleNamespace(
                 type="tool_use", id="g0", name=cr.GRADE_TOOL["name"], input={"grades": self.grades},
             )])
-        self.calls.append(kw)
+        self.calls.append({**kw, "messages": list(kw["messages"])})
         uses = self.script.pop(0) if self.script else []
         content = [
             SimpleNamespace(type="tool_use", id=f"tu{i}", name=name, input=args)
             for i, (name, args) in enumerate(uses)
         ] or [SimpleNamespace(type="text", text="nothing")]
-        return SimpleNamespace(content=content)
+        return SimpleNamespace(content=content, stop_reason="tool_use" if uses else "end_turn")
 
 
 @pytest.fixture

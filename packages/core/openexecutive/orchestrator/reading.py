@@ -10,8 +10,10 @@ action step both read through here.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import re
 from collections.abc import Awaitable
 from contextvars import ContextVar
 from typing import Any, TypeVar
@@ -21,6 +23,48 @@ from openexecutive.providers.feature_gate import _CHARS_PER_TOKEN, ReadingLimits
 from openexecutive.workflows import step_script, tool_catalog
 
 logger = logging.getLogger(__name__)
+
+# The same call with the same result this many times is no step of the work
+# (a write that keeps failing the same way, a retry that finds nothing new):
+# the turn then writes its answer from what it has and runs no more tools.
+# A turn that gets anywhere never meets it; it replaces a count of rounds.
+REPEAT_LIMIT = 4
+REPEATING_NOTE = (
+    "You have made the same call several times and it came back the same "
+    "each time. Do not call any more tools. Write your answer now from what "
+    "you have: say what worked, what kept failing and why, and what would fix it."
+)
+# Once a turn has read all its model holds (TurnReadingBudget.full), more
+# reads would push the prompt past the window: it writes its answer from
+# what it has read and offers to carry on, the same way a repeat ends.
+FULL_NOTE = (
+    "This question has now read all it can hold at once. Do not call any "
+    "more tools. Write your answer now from what you have read, say plainly "
+    "what you have not read yet, and offer to carry on with the rest in a new message."
+)
+
+# Ids and times in a result (a request id, a timestamp, a clock, time
+# elapsed or left) don't make it a different answer: they are left out of
+# call_key. Other numbers stay, so a status read whose progress moves
+# (20, 40, 60) is getting somewhere, and one whose only change is "42s
+# elapsed" is not.
+_VARYING_IN_A_RESULT = re.compile(
+    r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?"
+    r"|(?<![0-9A-Za-z:])\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?![0-9A-Za-z:])"
+    r"|(?<![0-9A-Za-z.])\d+(?:\.\d+)?\s?(?:ms|s|secs?|seconds?|mins?|minutes?|h|hrs?|hours?)(?![0-9A-Za-z])"
+    r"|(?<![0-9A-Za-z])(?=[0-9-]*[a-fA-F])[0-9a-fA-F]{8,}(?:-[0-9a-fA-F]{4,})*(?![0-9A-Za-z])"
+    r"|(?<![0-9A-Za-z])(?=[0-9A-Za-z_-]*\d)(?=[0-9A-Za-z_-]*[A-Za-z])[0-9A-Za-z_-]{12,}(?![0-9A-Za-z])"
+)
+
+
+def call_key(name: str, tool_input: Any, result: Any) -> str:
+    """One call with what it returned, for REPEAT_LIMIT: the same error with
+    a new request id or time each try is still the same result."""
+    same = _VARYING_IN_A_RESULT.sub("#", str(result))
+    return hashlib.sha256(
+        json.dumps([name, tool_input, same], sort_keys=True, default=str).encode()
+    ).hexdigest()
+
 
 # Smallest cap for which the never-exceeds-limit guarantee holds: the marker
 # is reserved inside the limit, and it is well under this.
@@ -235,6 +279,21 @@ class TurnReadingBudget:
         self._parts: dict[str, tuple[str, int, str, bool]] = {}
         # tool_use ids answered by ``replay``: already sized, not cut again.
         self._replayed: set[str] = set()
+        # How often each call came back with the same result (call_key).
+        self._repeats: dict[str, int] = {}
+
+    def came_back(self, name: str, tool_input: Any, result: Any) -> int:
+        """Note what one call returned; how many times it has now come back
+        the same (``repeating`` at REPEAT_LIMIT)."""
+        key = call_key(name, tool_input, result)
+        self._repeats[key] = seen = self._repeats.get(key, 0) + 1
+        return seen
+
+    @property
+    def repeating(self) -> bool:
+        """A call came back the same REPEAT_LIMIT times: the turn should
+        write up from what it has."""
+        return max(self._repeats.values(), default=0) >= REPEAT_LIMIT
 
     def prompt_was(self, tokens: int) -> None:
         """Note how big the turn's last prompt was, as the model counted it:
@@ -242,6 +301,17 @@ class TurnReadingBudget:
         if tokens >= self._prompt_tokens:
             self._prompt_tokens = tokens
             self._used_at_prompt = self.used
+
+    def saw(self, usage: Any) -> None:
+        """``prompt_was`` from a response's usage: all the model read, cached
+        or not. Nothing when the provider gave no usage."""
+        if usage is not None:
+            self.prompt_was(
+                sum(
+                    int(getattr(usage, k, 0) or 0)
+                    for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+                )
+            )
 
     def _used(self) -> int:
         """What counts as read for sizing the next part: the turn's reads, or

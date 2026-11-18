@@ -42,7 +42,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import hashlib
 import json
 import logging
 import re
@@ -55,7 +54,12 @@ from typing import Any
 from openexecutive.agents.workflow_actor import WORKFLOW_ACTOR_AGENT_ID, WorkflowActorAgent
 from openexecutive.config import get_settings
 from openexecutive.orchestrator import turn_live
-from openexecutive.orchestrator.reading import TurnReadingBudget, with_turn_limits
+from openexecutive.orchestrator.reading import (
+    REPEAT_LIMIT,
+    TurnReadingBudget,
+    call_key,
+    with_turn_limits,
+)
 from openexecutive.providers.feature_gate import ReadingLimits
 from openexecutive.providers.registry import reading_limits_for
 from openexecutive.providers.translator import reasoning_replay_block
@@ -70,9 +74,6 @@ _MAX_TOKENS = 4096
 # Model turns allowed beyond the tool budget: one for the final report, a
 # little slack for a turn that only talks.
 _EXTRA_TURNS = 3
-# A step that gets the same result from the same call this many times has
-# found nothing new: it stops and reports what it has.
-REPEAT_LIMIT = 4
 # The longest a step may run, model turns and tool calls together.
 STEP_MAX_S = 15 * 60
 # A long web search can pause the model's turn (``pause_turn``); a paused
@@ -632,11 +633,10 @@ class _StepCalls:
         return self.ended is not None
 
     def _note_repeat(self, name: str, arguments: dict[str, Any], content: str) -> None:
-        """Count a call that came back exactly as before; end the step at
+        """Count a call that came back as before (``reading.call_key``: a new
+        id or time is still the same result); end the step at
         ``REPEAT_LIMIT``."""
-        key = hashlib.sha256(
-            json.dumps([name, arguments, content], sort_keys=True, default=str).encode()
-        ).hexdigest()
+        key = call_key(name, arguments, content)
         seen = self._repeats.get(key, 0) + 1
         self._repeats[key] = seen
         if seen >= REPEAT_LIMIT and self.ended is None:

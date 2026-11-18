@@ -63,22 +63,13 @@ class ExecutiveReflectionInput(BaseModel):
 # Cap on yesterday's standup rendered into today's prompt.
 _PREVIOUS_REFLECTION_CHARS = 1500
 
-# Maximum iterations of the tool-use loop INSIDE the reflection workflow.
-# The reflection model can call a few tools, see the results, then
-# emit a final summary. 4 iterations is enough for "DM Sara + schedule
-# follow-up + flag an alert + summarize" without spiralling into a
-# multi-turn agentic loop. The fifth leaves room for a search_knowledge
-# lookup before acting.
-_MAX_REFLECTION_ITERATIONS = 5
 # Cap the LLM response size — the reflection prompt is structured so
 # the model emits one summary turn after all tool calls.
 _MAX_REFLECTION_TOKENS = 2000
 # With Take the lead as the Executive on, the pass also gets the deployment's
 # own tools (the MCP gateway's search_tools / call_tool, behind the gate), so
 # it can find a tool, use it and read what came back: more room for that.
-_LEAD_ITERATIONS = 10
 _LEAD_TOKENS = 4000
-_LEAD_RESULT_CHARS = 4000
 # Added to the user turn (never the cached system prompt) while it leads.
 _LEAD_NOTE = (
     "\n\nAs me (acting in your own name without being asked) is on: act on what you find instead of only reporting "
@@ -574,17 +565,9 @@ def _with_lead_tools(
     return tools, handlers, True
 
 
-# Re-export the synthesis helpers under the private aliases this module
-# used to define. Both helpers now live in `workflows/_synthesis.py` so
-# `executive_research` can reuse them without an underscore-import
-# tripwire; this re-export keeps any callers that still import the
-# private names from this module working.
-from openexecutive.providers.translator import reasoning_replay_block  # noqa: E402
+# One call of the pass, shared with executive_research.
 from openexecutive.workflows._synthesis import (  # noqa: E402
-    execute_tool_calls as _execute_tool_calls,
-)
-from openexecutive.workflows._synthesis import (  # noqa: E402
-    extract_artifact_from_response as _extract_artifact_from_response,
+    execute_tool_call as _execute_tool_call,
 )
 
 
@@ -789,9 +772,7 @@ class ExecutiveReflectionWorkflow(Workflow):
             KNOWLEDGE_TOOL_HANDLERS,
             KNOWLEDGE_TOOLS,
         )
-        from openexecutive.orchestrator.knowledge_tools import (
-            RESULT_CHARS as KNOWLEDGE_RESULT_CHARS,
-        )
+        from openexecutive.orchestrator.rounds import run_rounds
         from openexecutive.orchestrator.schedule_tools import (
             configured_integrations,
             current_session,
@@ -974,97 +955,59 @@ class ExecutiveReflectionWorkflow(Workflow):
         ]
         tool_call_summaries: list[dict[str, Any]] = []
         final_text = ""
+        failure: str | None = None
+        rounds = 0
+
+        def _logged(response: Any, iteration: int) -> None:
+            log_model_usage(response, model=model, actor=self.name, iteration=iteration)
+
+        async def _run(use: dict[str, Any]) -> Any:
+            # Only the call sits inside the tag: this is an async generator,
+            # and a ContextVar set across a `yield` would leak.
+            from openexecutive.attunement.outcomes import SOURCE_REFLECTION, tag_proactive
+
+            with tag_proactive(SOURCE_REFLECTION):
+                summary, result = await _execute_tool_call(use["name"], use["input"], handlers)
+            tool_call_summaries.append(summary)
+            return result
 
         try:
-            for iteration in range(1, (_LEAD_ITERATIONS if leading else _MAX_REFLECTION_ITERATIONS) + 1):
-                try:
-                    response = await get_provider(model).messages_create(
-                        model=model,
-                        max_tokens=_LEAD_TOKENS if leading else _MAX_REFLECTION_TOKENS,
-                        system=reflection_system,
-                        tools=tools,  # type: ignore[arg-type]
-                        messages=messages,  # type: ignore[arg-type]
-                    )
-                except Exception as exc:
-                    logger.exception("reflection: provider call failed iter=%d", iteration)
-                    yield WorkflowEvent(
-                        type="error", message=f"Reflection LLM call failed: {exc}"
-                    )
-                    return
-                log_model_usage(response, model=model, actor=self.name, iteration=iteration)
-
-                # Only the await sits inside the tag — this is an async
-                # generator, and a ContextVar set across a `yield` would leak.
-                from openexecutive.attunement.outcomes import SOURCE_REFLECTION, tag_proactive
-
-                with tag_proactive(SOURCE_REFLECTION):
-                    iter_summaries = await _execute_tool_calls(
-                        response, handlers, result_chars=_LEAD_RESULT_CHARS if leading else 160,
-                        wide_results={"search_knowledge": KNOWLEDGE_RESULT_CHARS},
-                    )
-                tool_call_summaries.extend(iter_summaries)
-
-                text = _extract_artifact_from_response(response)
-                # Capture the latest non-empty text on every iteration so the
-                # iteration-cap-exhaustion path still gets the model's
-                # mid-iteration narrative, not just the synth fallback.
-                if text:
-                    final_text = text
-
-                stop_reason = getattr(response, "stop_reason", "")
-                if stop_reason != "tool_use" or not iter_summaries:
-                    # Model is done — either it emitted text and no tools, or
-                    # it returned a text-only summary on a follow-up turn.
-                    break
-
-                # Build the next user turn carrying tool_result blocks so the
-                # model sees what it called succeeded/failed and can summarize.
-                assistant_blocks: list[dict[str, Any]] = []
-                for block in response.content:
-                    block_type = getattr(block, "type", "")
-                    if block_type == "text":
-                        assistant_blocks.append({"type": "text", "text": getattr(block, "text", "")})
-                    elif block_type == "tool_use":
-                        assistant_blocks.append({
-                            "type": "tool_use",
-                            "id": getattr(block, "id", ""),
-                            "name": getattr(block, "name", ""),
-                            "input": getattr(block, "input", {}) or {},
-                        })
-                    elif (replay := reasoning_replay_block(block)) is not None:
-                        # OpenRouter reasoning continuity across tool iterations.
-                        assistant_blocks.append(replay)
-                messages.append({"role": "assistant", "content": assistant_blocks})
-
-                # Pair each tool_use with the matching summary by index.
-                # Both lists are derived from the same response.content
-                # traversal so the alignment is stable.
-                tool_results: list[dict[str, Any]] = []
-                summary_iter = iter(iter_summaries)
-                for block in response.content:
-                    if getattr(block, "type", "") != "tool_use":
-                        continue
-                    summary = next(summary_iter, None)
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": getattr(block, "id", ""),
-                        "content": (
-                            summary["result_preview"] if summary
-                            else "no result captured"
-                        ),
-                    })
-                messages.append({"role": "user", "content": tool_results})
+            # No count of rounds: the pass ends when its work is done
+            # (orchestrator.rounds).
+            try:
+                done = await run_rounds(
+                    get_provider(model),
+                    model=model,
+                    max_tokens=_LEAD_TOKENS if leading else _MAX_REFLECTION_TOKENS,
+                    system=reflection_system,
+                    tools=tools,
+                    messages=messages,
+                    run_call=_run,
+                    on_response=_logged,
+                )
+            except Exception as exc:
+                logger.exception("reflection: provider call failed")
+                # Yielded after the finally: a caller that stops reading at
+                # the error leaves this generator to be closed later, in
+                # another context, where resetting the token raises.
+                failure = f"Reflection LLM call failed: {exc}"
+            else:
+                final_text, rounds = done.text, done.rounds
         finally:
             # Always release the reflection session ContextVar so the
             # tool guard goes back to its default for any subsequent
             # caller in this process (tests, other workflow runs).
             current_session.reset(ctx_token)
 
+        if failure is not None:
+            yield WorkflowEvent(type="error", message=failure)
+            return
+
         yield WorkflowEvent(
             type="step_done",
             step_id="decide",
             summary=(
-                f"iter={iteration} tools_fired={len(tool_call_summaries)} "
+                f"iter={rounds} tools_fired={len(tool_call_summaries)} "
                 f"ok={sum(1 for s in tool_call_summaries if s['ok'])}"
             ),
         )
@@ -1079,8 +1022,8 @@ class ExecutiveReflectionWorkflow(Workflow):
         )
 
         if not final_text:
-            # Model exhausted iterations without a final summary. Synth
-            # a minimal artifact so the run record isn't empty.
+            # The model wrote no closing summary. Synth a minimal
+            # artifact so the run record isn't empty.
             ok_count = sum(1 for s in tool_call_summaries if s["ok"])
             final_text = (
                 f"_Reflection complete — {ok_count}/{len(tool_call_summaries)} "
