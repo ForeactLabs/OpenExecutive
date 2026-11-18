@@ -699,8 +699,8 @@ def test_the_cards_work_switches_it_before_it_hands_back(
             raise SendRefused(409, "gone", "It was sent.")
 
         monkeypatch.setattr(card_work, "apply", refused)
-        out = json.loads(asyncio.run(reply_card_tools.handle_update_reply_card({"send_from": "me"})))
-        assert out["error"].startswith("Who it goes from was changed, but nothing else was")
+        out = json.loads(asyncio.run(reply_card_tools.handle_update_reply_card({"send_from": "me", "note": "From you again."})))
+        assert out["error"].startswith("Who it goes from was changed, and the reply was written again")
         out = json.loads(asyncio.run(reply_card_tools.handle_update_reply_card({"send_from": "someone"})))
         assert out["error"].startswith("Nothing was changed")
     finally:
@@ -781,3 +781,30 @@ def test_a_send_from_it_already_has_keeps_the_words_the_work_wrote(
     assert out["status"] == "ok" and len(rewrites) == asked
     saved = inbox.card_payload(_fresh(card))
     assert saved["draft_body"] == f"Hi Dana,\n\nI split the taxes 50/50.\n\n{send_from.sign_off(owner)}"
+
+
+def test_a_work_turn_that_would_be_turned_down_switches_nothing(
+    db: Path, owner: Any, models: dict[str, Any], rewrites: list[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.delegation import card_work
+    from openexecutive.orchestrator import reply_card_tools
+    from openexecutive.orchestrator.schedule_tools import current_session
+    from openexecutive.orchestrator.session import Session
+
+    mailbox, card = _card(owner)
+    before = inbox.card_payload(_fresh(card))
+    monkeypatch.setattr(card_work, "still_working", lambda c: True)
+    monkeypatch.setattr(card_work, "keep", lambda coro: coro.close())
+    writer = type("W", (), {"person": owner, "mailbox": mailbox})()
+    monkeypatch.setattr("openexecutive.orchestrator.delegation_tools._writer", lambda name: writer)
+    token = current_session.set(Session(reply_card_work=card.id))
+    try:
+        out = json.loads(asyncio.run(reply_card_tools.handle_update_reply_card({
+            "body": "Hi Dana,\n\nI'll send the figures Friday.", "note": "", "send_from": "executive",
+        })))
+    finally:
+        current_session.reset(token)
+    # Turned down before the switch: the card is as it was, so a retry
+    # with a note switches and writes the reply for the Executive then.
+    assert out["error"].startswith("Nothing was changed")
+    assert rewrites == [] and inbox.card_payload(_fresh(card)) == before

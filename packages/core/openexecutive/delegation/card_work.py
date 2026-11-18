@@ -655,6 +655,22 @@ def _close(card_id: int) -> None:
         person, gmail, ask = queued
         start(person, card_id, gmail=gmail, ask=ask)
 
+def checked(note: str, files: list[tuple[str, str, bytes]]) -> str:
+    """What ``apply`` turns down before it changes anything: too many or
+    too big files, no note. Returns the note as one line; raises
+    ``SendRefused``. The work turn checks it before a switch of who it goes
+    from too, so a refusal always means nothing was changed."""
+    from openexecutive.delegation.ghostwriter import one_line
+    from openexecutive.delegation.reply_send import SendRefused
+
+    if len(files) > MAX_FILES or sum(len(d) for _, _, d in files) > MAX_BYTES:
+        raise SendRefused(422, "too_big", f"At most {MAX_FILES} files and {MAX_BYTES // 2**20} MB in all.")
+    text = one_line(note, MAX_NOTE_CHARS)
+    if not text:
+        raise SendRefused(422, "no_note", "Say in one line what you did, in note.")
+    return text
+
+
 async def apply(
     card_id: int, person: Any, *, body: str, note: str, files: list[tuple[str, str, bytes]],
     gmail: Any = None, choices: list[str] | None = None, switched_from: str | None = None,
@@ -668,7 +684,7 @@ async def apply(
     Sends nothing itself (``_after`` may, when Approvals lets the reply go)."""
     from openexecutive.delegation import card_drafts, send_from
     from openexecutive.delegation.answers import changed_sentences
-    from openexecutive.delegation.ghostwriter import clean_gist, one_line
+    from openexecutive.delegation.ghostwriter import clean_gist
     from openexecutive.delegation.inbox import SENDING, card_payload
     from openexecutive.delegation.reply_send import SendRefused
     from openexecutive.memory.decision_ledger import (
@@ -684,11 +700,7 @@ async def apply(
         raise SendRefused(403, "not_yours", "That card isn't this person's.")
     if card_id in card_drafts._EDITING or card_id in card_drafts._MAKING:
         raise SendRefused(409, "busy", "The reply is being changed or sent right now. Try again in a moment.")
-    if len(files) > MAX_FILES or sum(len(d) for _, _, d in files) > MAX_BYTES:
-        raise SendRefused(422, "too_big", f"At most {MAX_FILES} files and {MAX_BYTES // 2**20} MB in all.")
-    text = one_line(note, MAX_NOTE_CHARS)
-    if not text:
-        raise SendRefused(422, "no_note", "Say in one line what you did, in note.")
+    text = checked(note, files)
     picks = clean_choices(choices)
     changed: dict[str, Any] = {
         **_end_turn(payload, state=STUCK if picks else DONE, text=text, choices=picks),

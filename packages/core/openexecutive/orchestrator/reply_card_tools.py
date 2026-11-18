@@ -264,6 +264,12 @@ async def handle_update_reply_card(tool_input: dict[str, Any]) -> str:
         from openexecutive.delegation import send_from
 
         try:
+            # What the card's save would turn down, before the switch changes it.
+            card_work.checked(note, files)
+        except SendRefused as refused:
+            return _error(f"Nothing was changed: {refused.message}")
+
+        try:
             # The body was written for who sent it before: the switch writes
             # it once for the new sender, told what this run did. None when it
             # already went from them: the body goes on as written.
@@ -286,7 +292,10 @@ async def handle_update_reply_card(tool_input: dict[str, Any]) -> str:
         )
     except SendRefused as refused:
         if switched:
-            return _error(f"Who it goes from was changed, but nothing else was: {refused.message}")
+            return _error(
+                "Who it goes from was changed, and the reply was written again for them, but nothing else was: "
+                f"{refused.message}"
+            )
         return _error(f"Nothing was changed: {refused.message}")
     if artifact_ids:
         # Only the card's wording: it never stops the hand-back.
