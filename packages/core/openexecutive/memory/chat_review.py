@@ -1488,7 +1488,6 @@ async def _run_loop(
     them, and only them. ``refused`` collects each change that didn't go
     through, as the tool's name and why (codes and the checks' own words,
     never the person's text), for the review's audit row."""
-    from openexecutive.audit.usage import log_model_usage
     from openexecutive.orchestrator.fact_tools import _quote_error
     from openexecutive.orchestrator.rounds import run_rounds
     from openexecutive.providers import get_provider
@@ -1511,9 +1510,6 @@ async def _run_loop(
     # One fact per subject a pass: the model tends to save a correction again
     # in other words, and each save replaces the last.
     facts_saved: set[str] = set()
-
-    def _read(response: Any, iteration: int) -> None:
-        log_model_usage(response, model=model, actor="chat_review", iteration=iteration)
 
     async def _run(use: dict[str, Any]) -> Any:
         nonlocal changes
@@ -1552,7 +1548,7 @@ async def _run_loop(
     # model has nothing more to call.
     await run_rounds(
         get_provider(model), model=model, max_tokens=_MAX_TOKENS, system=_SYSTEM,
-        tools=tools, messages=messages, run_call=_run, on_response=_read,
+        tools=tools, messages=messages, run_call=_run, actor="chat_review",
     )
     return done
 

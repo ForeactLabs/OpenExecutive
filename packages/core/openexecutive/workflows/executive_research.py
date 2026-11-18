@@ -47,7 +47,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from openexecutive.audit.usage import UsageRollup, bind_research_run, log_model_usage
+from openexecutive.audit.usage import UsageRollup, bind_research_run
 from openexecutive.knowledge.store import ChromaDBStore
 from openexecutive.monitoring.research.dedup import dedup_findings
 from openexecutive.monitoring.research.models import (
@@ -885,21 +885,25 @@ async def _executive_synthesis_loop(
     ]
     tool_calls: list[dict[str, Any]] = []
     final_text = ""
-
-    def _logged(response: Any, iteration: int) -> None:
-        log_model_usage(response, model=model, actor="research_synthesis", iteration=iteration)
+    # Outbound calls that ran, whatever they returned: one that errored may
+    # still have gone out (a send that timed out after delivering).
+    routed = 0
 
     async def _run(use: dict[str, Any]) -> Any:
+        nonlocal routed
         name, tool_input = use["name"], use["input"]
-        # Lookups are free; each outbound call that went through counts
-        # toward the run's routing calls.
-        over = name not in _NON_ROUTING_TOOLS and _routing_ok(tool_calls) >= _MAX_ROUTING_TOOLS_PER_RUN
+        # Lookups are free; each outbound call that runs counts toward the
+        # run's routing calls, whether or not it reported an error.
+        outbound = name not in _NON_ROUTING_TOOLS
+        over = outbound and routed >= _MAX_ROUTING_TOOLS_PER_RUN
         # DMs the synthesis sends are proactive research outreach; the
         # outcome ledger records whether they land.
         from openexecutive.attunement.outcomes import SOURCE_RESEARCH, tag_proactive
 
         with tag_proactive(SOURCE_RESEARCH):
             call, result = await execute_tool_call(name, tool_input, handlers, over_budget=over)
+        if outbound and call.get("ran"):
+            routed += 1
         call["done_label"] = _done_label(name, tool_input, str(call.get("result_preview", "")))
         tool_calls.append(call)
         return result
@@ -907,7 +911,7 @@ async def _executive_synthesis_loop(
     def _routed_enough() -> str | None:
         # Once the run's routing calls are made, it writes its closing
         # summary (a lookups-only round never ends it).
-        if _routing_ok(tool_calls) >= _MAX_ROUTING_TOOLS_PER_RUN:
+        if routed >= _MAX_ROUTING_TOOLS_PER_RUN:
             logger.info("research.synthesis: routing calls made (%d); writing up", _MAX_ROUTING_TOOLS_PER_RUN)
             return _CLOSING_SUMMARY_ASK
         return None
@@ -924,7 +928,7 @@ async def _executive_synthesis_loop(
             tools=tools,
             messages=messages,
             run_call=_run,
-            on_response=_logged,
+            actor="research_synthesis",
             enough=_routed_enough,
         )
         final_text = done.text
@@ -1014,9 +1018,6 @@ async def _watchlist_analysis_loop(
     )
     call_summaries: list[dict[str, Any]] = []
 
-    def _logged(response: Any, iteration: int) -> None:
-        log_model_usage(response, model=model, actor="research_watchlist", iteration=iteration)
-
     async def _run(use: dict[str, Any]) -> Any:
         over = len(proposals) >= _MAX_WATCHLIST_PROPOSALS_PER_RUN
         call, result = await execute_tool_call(use["name"], use["input"], handlers, over_budget=over)
@@ -1039,7 +1040,7 @@ async def _watchlist_analysis_loop(
             tools=tools,
             messages=messages,
             run_call=_run,
-            on_response=_logged,
+            actor="research_watchlist",
             enough=_proposed_enough,
         )
     except Exception:

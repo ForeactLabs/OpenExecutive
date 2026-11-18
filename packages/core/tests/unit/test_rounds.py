@@ -12,9 +12,18 @@ from typing import Any
 
 import pytest
 
+from openexecutive.audit import usage
 from openexecutive.orchestrator import rounds
 from openexecutive.orchestrator.reading import FULL_NOTE, REPEAT_LIMIT, REPEATING_NOTE
 from openexecutive.providers import feature_gate, registry
+
+
+@pytest.fixture(autouse=True)
+def _usage(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Each response's usage, recorded here rather than in a database."""
+    seen: list[dict[str, Any]] = []
+    monkeypatch.setattr(usage, "log_model_usage", lambda _response, **kw: seen.append(kw))
+    return seen
 
 
 def _use(name: str, args: dict[str, Any], id: str) -> Any:
@@ -45,7 +54,7 @@ class _Model:
 async def _run(model: _Model, run_call: Any, **kw: Any) -> rounds.Rounds:
     return await rounds.run_rounds(
         model, model="claude-opus-5", max_tokens=1000, system="s", tools=[],
-        messages=[{"role": "user", "content": "go"}], run_call=run_call, **kw,
+        messages=[{"role": "user", "content": "go"}], run_call=run_call, actor="a pass", **kw,
     )
 
 
@@ -150,7 +159,9 @@ async def test_a_pass_that_has_had_enough_writes_up_or_stops() -> None:
 
 
 @pytest.mark.asyncio
-async def test_each_response_is_seen_and_only_what_is_sent_goes() -> None:
+async def test_each_response_is_recorded_and_seen_and_only_what_is_sent_goes(
+    _usage: list[dict[str, Any]],
+) -> None:
     seen: list[int] = []
 
     async def run_call(_use: dict[str, Any]) -> str:
@@ -160,8 +171,29 @@ async def test_each_response_is_seen_and_only_what_is_sent_goes() -> None:
     messages: list[dict[str, Any]] = [{"role": "user", "content": "old"}, {"role": "user", "content": "go"}]
     await rounds.run_rounds(
         model, model="m", max_tokens=10, system="s", tools=[], messages=messages, run_call=run_call,
-        on_response=lambda _r, i: seen.append(i), sent=lambda m: m[1:],
+        actor="admin_chat", session_id="c1", on_response=lambda _r, i: seen.append(i), sent=lambda m: m[1:],
     )
     assert seen == [1, 2, 3]
+    assert [(u["actor"], u["iteration"], u["session_id"]) for u in _usage] == [("admin_chat", i, "c1") for i in (1, 2, 3)]
     assert all(r["messages"][0]["content"] == "go" for r in model.requests)
     assert messages[0]["content"] == "old" and messages[-1]["role"] == "assistant"
+
+
+def test_a_long_run_of_one_character_is_keyed_in_one_pass() -> None:
+    import time
+
+    from openexecutive.orchestrator.reading import call_key
+
+    started = time.monotonic()
+    for text in ("-" * 600_000, "a_" * 300_000, "0-" * 300_000):
+        call_key("browser_look", {}, '{"title": "' + text + '"}')
+    assert time.monotonic() - started < 5
+
+
+def test_ids_and_times_are_left_out_of_a_call_key() -> None:
+    from openexecutive.orchestrator.reading import call_key
+
+    one = call_key("t", {}, "busy; request 3f9a1c2e-4b5d-6e7f-8a9b-0c1d2e3f4a5b at 2026-11-18T01:02:03Z, 42s")
+    two = call_key("t", {}, "busy; request 9e8d7c6b-5a4f-3e2d-1c0b-a9f8e7d6c5b4 at 2026-11-18T01:05:09Z, 7s")
+    assert one == two
+    assert call_key("t", {}, "20 of 40 done") != call_key("t", {}, "40 of 40 done")

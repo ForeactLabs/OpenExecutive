@@ -78,6 +78,8 @@ async def run_rounds(
     tools: list[dict[str, Any]],
     messages: list[dict[str, Any]],
     run_call: Callable[[dict[str, Any]], Awaitable[Any]],
+    actor: str,
+    session_id: str | None = None,
     on_response: Callable[[Any, int], Any] | None = None,
     enough: Callable[[], str | None] | None = None,
     sent: Callable[[list[dict[str, Any]]], list[dict[str, Any]]] | None = None,
@@ -86,13 +88,14 @@ async def run_rounds(
 
     ``run_call`` runs one tool call (``{"id", "name", "input"}``) and returns
     its result; it is never called for a repeat that brings the next part of
-    a long result. ``on_response`` sees each response with its round number
-    (to log usage). ``enough``, asked after each round, returns a note when
+    a long result. Each response is recorded as ``actor``'s usage
+    (audit.usage), and ``on_response`` sees it with its round number. ``enough``, asked after each round, returns a note when
     the pass wants the model to write up now ("" to stop at once, with no
     write-up). ``sent`` picks what of ``messages`` each request sends (a chat
     that keeps only its newest turns). ``messages`` grows with each round. A
     provider error is raised to the caller.
     """
+    from openexecutive.audit.usage import log_model_usage
     from openexecutive.providers.registry import reading_limits_for
 
     reading = TurnReadingBudget(reading_limits_for(model))
@@ -111,6 +114,7 @@ async def run_rounds(
             # Writing up: nothing more runs.
             kwargs["tool_choice"] = {"type": "none"}
         response = await llm.messages_create(**kwargs)
+        log_model_usage(response, model=model, actor=actor, iteration=rounds, session_id=session_id)
         if on_response is not None:
             seen = on_response(response, rounds)
             if inspect.isawaitable(seen):

@@ -47,20 +47,38 @@ FULL_NOTE = (
 # elapsed or left) don't make it a different answer: they are left out of
 # call_key. Other numbers stay, so a status read whose progress moves
 # (20, 40, 60) is getting somewhere, and one whose only change is "42s
-# elapsed" is not.
+# elapsed" is not. Every pattern here matches in one pass over the text,
+# however long and whatever it holds: a result is outside text, and a
+# pattern that rescans a run of "-" from each of its characters would hold
+# the server for minutes on one long page title.
 _VARYING_IN_A_RESULT = re.compile(
     r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?"
     r"|(?<![0-9A-Za-z:])\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?![0-9A-Za-z:])"
     r"|(?<![0-9A-Za-z.])\d+(?:\.\d+)?\s?(?:ms|s|secs?|seconds?|mins?|minutes?|h|hrs?|hours?)(?![0-9A-Za-z])"
-    r"|(?<![0-9A-Za-z])(?=[0-9-]*[a-fA-F])[0-9a-fA-F]{8,}(?:-[0-9a-fA-F]{4,})*(?![0-9A-Za-z])"
-    r"|(?<![0-9A-Za-z])(?=[0-9A-Za-z_-]*\d)(?=[0-9A-Za-z_-]*[A-Za-z])[0-9A-Za-z_-]{12,}(?![0-9A-Za-z])"
+    # A whole word of letters, digits, "_" and "-": judged by _an_id.
+    r"|(?P<word>(?<![0-9A-Za-z_-])[0-9A-Za-z_-]{8,})"
 )
+# A hex id (a hash, a UUID): hex digits with a letter among them.
+_HEX_ID = re.compile(r"(?=[0-9-]*[a-fA-F])[0-9a-fA-F]{8,}(?:-[0-9a-fA-F]{4,})*")
+
+
+def _an_id(word: str) -> bool:
+    """Whether a word in a result is an id: a hex one, or 12 or more
+    characters mixing letters and digits."""
+    if _HEX_ID.fullmatch(word):
+        return True
+    return len(word) >= 12 and any(c.isdigit() for c in word) and any(c.isalpha() for c in word)
+
+
+def _varying(match: re.Match[str]) -> str:
+    word = match.group("word")
+    return "#" if word is None or _an_id(word) else word
 
 
 def call_key(name: str, tool_input: Any, result: Any) -> str:
     """One call with what it returned, for REPEAT_LIMIT: the same error with
     a new request id or time each try is still the same result."""
-    same = _VARYING_IN_A_RESULT.sub("#", str(result))
+    same = _VARYING_IN_A_RESULT.sub(_varying, str(result))
     return hashlib.sha256(
         json.dumps([name, tool_input, same], sort_keys=True, default=str).encode()
     ).hexdigest()

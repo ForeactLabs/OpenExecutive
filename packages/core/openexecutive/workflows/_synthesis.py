@@ -27,8 +27,8 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
-def _skipped(name: str, tool_input: Any, why: str) -> tuple[dict[str, Any], str]:
-    return {"tool": name, "input_preview": str(tool_input)[:120], "result_preview": why, "ok": False}, why
+def _skipped(name: str, tool_input: Any, why: str, *, ran: bool = False) -> tuple[dict[str, Any], str]:
+    return {"tool": name, "input_preview": str(tool_input)[:120], "result_preview": why, "ok": False, "ran": ran}, why
 
 
 async def execute_tool_call(
@@ -42,7 +42,8 @@ async def execute_tool_call(
     ``run_call``).
 
     Returns its summary for the pass's record and artifact
-    (``{tool, input_preview, result_preview, ok}``) and the result the model
+    (``{tool, input_preview, result_preview, ok, ran}``; ``ran`` is whether
+    the handler ran, error or not) and the result the model
     reads back, whole: the pass's reading sizes it (orchestrator.reading).
     A failure is caught and summarized, so one tool crash does not end the
     pass. ``over_budget`` refuses the call without running it (a pass's own
@@ -57,7 +58,7 @@ async def execute_tool_call(
         result = await handler(tool_input)
     except Exception as exc:
         logger.exception("synthesis: tool %s raised", name)
-        return _skipped(name, tool_input, f"raised: {exc}"[:160])
+        return _skipped(name, tool_input, f"raised: {exc}"[:160], ran=True)
     ok = True
     try:
         parsed = json.loads(result) if isinstance(result, str) else result
@@ -72,6 +73,7 @@ async def execute_tool_call(
         "input_preview": str(tool_input)[:120],
         "result_preview": str(result)[:160],
         "ok": ok,
+        "ran": True,
     }, result
 
 

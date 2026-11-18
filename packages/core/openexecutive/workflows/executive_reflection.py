@@ -767,7 +767,6 @@ class ExecutiveReflectionWorkflow(Workflow):
         )
         # The Python job tool as this instance describes it (a runner's libraries).
         _ALL_SKILL_TOOLS = _offered_skill_tools()
-        from openexecutive.audit.usage import log_model_usage
         from openexecutive.orchestrator.knowledge_tools import (
             KNOWLEDGE_TOOL_HANDLERS,
             KNOWLEDGE_TOOLS,
@@ -958,9 +957,6 @@ class ExecutiveReflectionWorkflow(Workflow):
         failure: str | None = None
         rounds = 0
 
-        def _logged(response: Any, iteration: int) -> None:
-            log_model_usage(response, model=model, actor=self.name, iteration=iteration)
-
         async def _run(use: dict[str, Any]) -> Any:
             # Only the call sits inside the tag: this is an async generator,
             # and a ContextVar set across a `yield` would leak.
@@ -983,7 +979,7 @@ class ExecutiveReflectionWorkflow(Workflow):
                     tools=tools,
                     messages=messages,
                     run_call=_run,
-                    on_response=_logged,
+                    actor=self.name,
                 )
             except Exception as exc:
                 logger.exception("reflection: provider call failed")
