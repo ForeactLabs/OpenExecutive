@@ -432,14 +432,15 @@ async def _remade(
 
 
 def undo_point(payload: dict[str, Any]) -> dict[str, Any]:
-    """What ``undo`` puts back: the card's words and the questions answered
-    as they are in ``payload``, before a change."""
+    """What ``undo`` puts back: the card's words, the questions answered and
+    whether they were settled, as they are in ``payload`` before a change."""
     from openexecutive.delegation.answers import ANSWERED_KEY
 
     answered = payload.get(ANSWERED_KEY)
     return {
         "draft_body": str(payload.get("draft_body") or ""),
         ANSWERED_KEY: dict(answered) if isinstance(answered, dict) else {},
+        QUESTIONS_SETTLED: payload.get(QUESTIONS_SETTLED) is True,
     }
 
 
@@ -479,6 +480,7 @@ async def undo(instance: Any, *, caller: Any, resolver: int | None, gmail: Any =
             point = payload[UNDO_KEY]
             extra = {
                 CONVERSATION_KEY: turns[-CONVERSATION_MAX:], "gist": "", ANSWERED_KEY: point[ANSWERED_KEY],
+                QUESTIONS_SETTLED: point[QUESTIONS_SETTLED],
             }
             return await _edit(
                 instance, person, payload, _check_words(str(point["draft_body"])), gmail, extra, by_hand=False,

@@ -261,6 +261,8 @@ def test_undo_puts_back_the_words_the_answers_and_their_mailbox_draft(
     undone = asyncio.run(card_drafts.undo(_fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox))
     assert undone["draft_body"] == first["draft_body"]
     assert undone[answers.ANSWERED_KEY] == {} and not card_drafts.can_undo(undone)
+    # Its questions are open again, as they were.
+    assert undone[card_drafts.QUESTIONS_SETTLED] is False
     # Their mailbox's draft says the same as the card again.
     assert mailbox.drafts[undone["draft_id"]].message.text == first["draft_body"]
     assert replies.cards(owner)[0].can_undo is False

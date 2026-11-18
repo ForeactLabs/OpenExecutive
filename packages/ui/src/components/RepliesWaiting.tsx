@@ -481,7 +481,8 @@ export function ReplyCardItem({
   const turns = card.conversation ?? [];
   const lastNote = turns.map((t) => t.kind).lastIndexOf("note");
   // The latest exchange shows; the rest waits behind "Earlier".
-  const shownFrom = showEarlier ? 0 : Math.max(0, turns.length - TALK_SHOWN);
+  // The last note (its questions, its Undo) always shows.
+  const shownFrom = showEarlier ? 0 : Math.max(0, Math.min(turns.length - TALK_SHOWN, lastNote < 0 ? turns.length : lastNote));
   const nextTimeTick = (className: string) => card.can_allow ? (
     <NextTimeTick
       className={className}

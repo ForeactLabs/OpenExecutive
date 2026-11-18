@@ -231,19 +231,6 @@ async def _rewritten_for(person: Any, payload: dict[str, Any], *, executive: boo
     return sign(person, {FROM_EXECUTIVE: executive}, new_main)
 
 
-def _addressed(payload: dict[str, Any]) -> tuple[list[str], list[str]] | None:
-    """To and Cc as the card shows them (``draft_to``): the sender it
-    answers in To, everyone else on cc. None when it shows nobody."""
-    from openexecutive.delegation.gmail import normalize_email
-
-    going = [a for a in payload.get("draft_to") or [] if isinstance(a, str) and a]
-    if not going:
-        return None
-    sender = normalize_email(str(payload.get("from_email") or ""))
-    to = [a for a in going if normalize_email(a) == sender] or going[:1]
-    return to, [a for a in going if a not in to]
-
-
 async def _switch(
     instance: Any, person: Any, payload: dict[str, Any], *, executive: bool, gmail: Any, asked: str = "",
     words: str = "",
@@ -277,11 +264,11 @@ async def _switch(
             CONVERSATION_KEY: turns[-CONVERSATION_MAX:],
             SWITCHED_AT if executive else SWITCHED_BACK_AT: datetime.now(UTC).isoformat(),
         }
-        # Back from them: their mailbox's draft also gets who the card says it
-        # goes to, which may have changed while it went from the Executive.
-        recipients = _addressed(payload) if not executive and payload.get("draft_id") else None
+        # Back from them, their mailbox's draft is made again from the card:
+        # who it goes to is already the card's (every change of it is saved
+        # there), so it is never rebuilt here.
         return await card_drafts._edit(
-            instance, person, payload, card_drafts._check_words(written), gmail, extra, recipients, by_hand=False,
+            instance, person, payload, card_drafts._check_words(written), gmail, extra, by_hand=False,
         )
     finally:
         card_drafts._EDITING.discard(instance.id)
