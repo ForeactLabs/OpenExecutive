@@ -228,12 +228,16 @@ export function namesFromLine(line: string): string {
 }
 
 /** Who an email goes to, for a button: first names ("Kyle", "Kyle and
- * Annamarie"), or the address for someone with no name. */
+ * Annamarie"). A name that came with an address is cut to its first word,
+ * unless that word ends in "," or "." ("Monaco, Brennan", "Dr. Kyle
+ * Harrelson"), which stays whole; a bare address or bare words stay whole. */
 export function firstNames(list: readonly string[]): string {
   return recipientNames(
     list.map((entry) => {
-      const name = recipientNames([entry]);
-      return name.includes("@") ? name : (name.split(/\s+/)[0] ?? name);
+      const named = /^\s*"?([^"<(]*?)"?\s*[<(]/.exec(entry)?.[1]?.trim();
+      if (!named) return entry.replace(/[<>()"]/g, "").trim();
+      const first = named.split(/\s+/)[0] ?? named;
+      return /[,.]$/.test(first) ? named : first;
     }),
   );
 }

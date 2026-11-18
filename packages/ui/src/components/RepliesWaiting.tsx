@@ -466,10 +466,11 @@ export function ReplyCardItem({
   const expanded = open || confirming || editing !== null || typing !== null || ask.trim() !== "";
   const gist = cardGist(card);
   // Who the reply goes to, by name; a follow-up says nobody answered yet.
-  const toNames = recipientNames(card.draft_to?.length ? card.draft_to : [who]);
+  const toList = card.draft_to?.length ? card.draft_to : [who];
+  const toNames = recipientNames(toList);
   const toLine = followUp ? `Nobody answered your email to ${toNames}` : `To ${toNames}`;
   // The closed card's way in to the reply, named for who it goes to.
-  const seeReply = followUp ? "See your follow-up" : `See reply to ${firstNames([who])}`;
+  const seeReply = followUp ? "See your follow-up" : `See reply to ${firstNames(toList)}`;
   const tappable = questions.some((q) => q.choices.length > 0);
   // Open, everything shows at once, as a conversation: what they wrote, the
   // Executive's word on the reply with what's left to decide, anything that

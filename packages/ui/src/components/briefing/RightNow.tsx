@@ -72,7 +72,7 @@ function ListRow({ row, actions }: { row: RightNowRow; actions?: RowActions }) {
   const draftId = draftRowId(row);
   if (row.kind === "draft" && draftId !== null) {
     // A draft in their own mailbox reads like a reply card: As you, the
-    // subject, who it goes to by name, and the same Send, Open, Don't send.
+    // subject, who it goes to by name, and the same Send, See draft, Don't send.
     return (
       <li className="py-4 sm:py-5">
         <div className="flex items-baseline gap-2">
@@ -149,7 +149,14 @@ const DRAFT_DONE: Record<string, string> = {
   you_replied: "You've already replied in this conversation.",
 };
 
-// A draft row's buttons: Send and Don't send right here, or Open to read and
+/** A draft's way in, named for who it goes to: "See draft to Kyle", or just
+ * "See draft" when nobody is named. */
+function seeDraft(who: string): string {
+  const names = firstNamesFromLine(who);
+  return names ? `See draft to ${names}` : "See draft";
+}
+
+// A draft row's buttons: Send and Don't send right here, or See draft to read and
 // change it first. Anything Send needs a second yes for, or a draft changed in
 // the mailbox, opens the draft so its card can say so.
 function DraftActions({
@@ -237,7 +244,7 @@ function DraftActions({
           {busy === "send" ? "Sending…" : "Send"}
         </Button>
         <Button variant="secondary" disabled={busy !== null} onClick={() => setOpen(true)}>
-          See draft to {firstNamesFromLine(row.who)}
+          {seeDraft(row.who)}
         </Button>
         <Button variant="ghost" className="ml-auto" disabled={busy !== null} onClick={() => void run("delete")}>
           {busy === "delete" ? "Removing…" : "Don't send"}
