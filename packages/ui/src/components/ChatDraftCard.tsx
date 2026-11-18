@@ -158,7 +158,11 @@ export default function ChatDraftCard({
     setWorking(SENDING);
     setError(null);
     try {
-      const result = await sendChatDraft(draft.row, threadMovedOn);
+      const result = await sendChatDraft(
+        draft.row,
+        threadMovedOn,
+        now?.status === "open" ? { version: now.version, fromExecutive } : {},
+      );
       if (result.status === "confirm") {
         setConfirm(result.message);
       } else {

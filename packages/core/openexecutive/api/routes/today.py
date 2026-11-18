@@ -867,6 +867,8 @@ class RightNowRow(BaseModel):
     at: str
     note: str = ""
     source: PointSource | None = None
+    # A draft switched to go from the Executive, with them on cc.
+    from_executive: bool = False
 
 
 class NarrativeProgress(BaseModel):
@@ -3507,7 +3509,7 @@ def _right_now_rows(now: datetime | None = None) -> list[RightNowRow]:
         RightNowRow(
             key=r.key, kind=r.kind,  # type: ignore[arg-type]
             who=r.who, subject=r.subject, at=r.at, note=r.note,
-            source=_point_source(r.source),
+            source=_point_source(r.source), from_executive=r.from_executive,
         )
         for r in found
     ]

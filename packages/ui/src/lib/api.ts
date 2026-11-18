@@ -61,6 +61,8 @@ export interface ChatDraftState {
   // on cc; and the Executive's name for the card's From.
   from_executive?: boolean;
   executive_name?: string;
+  // The version shown, sent back with Send.
+  version?: string;
 }
 
 // Names the round of tool calls currently in flight, so the progress line can
@@ -2863,11 +2865,22 @@ export async function sendReplyCard(
 // Send a draft the chat wrote as you, exactly as it was written (POST
 // /delegation/drafts/{row}/send). `threadMovedOn` is your second yes when a
 // newer message arrived in that conversation.
-export async function sendChatDraft(row: number, threadMovedOn = false): Promise<SendReplyResult> {
+// `seen` is what the tapped card showed: its version (the chat card), or
+// who it goes from (a Home row, which shows no words). Changed since, on
+// another screen: refused with `draft_changed`, nothing sent.
+export async function sendChatDraft(
+  row: number,
+  threadMovedOn = false,
+  seen: { version?: string; fromExecutive?: boolean } = {},
+): Promise<SendReplyResult> {
   const res = await fetch(`${API_BASE}/delegation/drafts/${row}/send`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ thread_moved_on: threadMovedOn }),
+    body: JSON.stringify({
+      thread_moved_on: threadMovedOn,
+      ...(seen.version ? { version: seen.version } : {}),
+      ...(seen.fromExecutive !== undefined ? { from_executive: seen.fromExecutive } : {}),
+    }),
   });
   if (res.ok) return { status: "sent" };
   const body = (await res.json().catch(() => ({}))) as { detail?: unknown };
@@ -6160,6 +6173,8 @@ export interface RightNowRow {
   subject: string;
   at: string;
   note?: string;
+  // A draft switched to go from the Executive (its note names it).
+  from_executive?: boolean;
   source?: {
     kind: "mail" | "alert" | "link";
     message_id?: string | null;

@@ -96,6 +96,9 @@ def _shown(row: Any, draft: Any, files: list[str] | None = None) -> dict[str, An
         "files": list(files or []),
         # Who it goes from: the person, or (switched on the card) the Executive.
         "from_executive": row.from_executive,
+        # The version shown: Send sends it back, so a card shown before a
+        # change (on another screen) sends nothing it didn't show.
+        "version": message.id,
         "executive_name": executive_name(),
     }
 

@@ -76,7 +76,7 @@ function ListRow({ row, actions }: { row: RightNowRow; actions?: RowActions }) {
     return (
       <li className="py-4 sm:py-5">
         <div className="flex items-baseline gap-2">
-          <FeatureName feature="act_as_me" className="shrink-0 text-[12px]" />
+          {!row.from_executive && <FeatureName feature="act_as_me" className="shrink-0 text-[12px]" />}
           <p className="min-w-0 flex-1 text-base sm:text-[17px] font-semibold leading-snug text-fg break-words">
             <span className="sr-only">{KIND_LABEL[row.kind]}: </span>
             {row.subject}
@@ -84,6 +84,7 @@ function ListRow({ row, actions }: { row: RightNowRow; actions?: RowActions }) {
           {when && <span className="shrink-0 text-sm tabular-nums text-fg-subtle">{when}</span>}
         </div>
         <p className="mt-1 text-sm text-fg-muted break-words">To {namesFromLine(row.who)}</p>
+        {row.from_executive && row.note && <p className="text-sm text-fg-muted">{row.note}</p>}
         <DraftActions
           row={row}
           draftId={draftId}
@@ -193,12 +194,12 @@ function DraftActions({
     setError(null);
     try {
       if (what === "send") {
-        const result = await sendChatDraft(draftId);
+        const result = await sendChatDraft(draftId, false, { fromExecutive: Boolean(row.from_executive) });
         if (result.status === "confirm") {
           setOpen(true);
           return;
         }
-        finish("✓ Sent from your mailbox.");
+        finish(row.from_executive ? "✓ Sent, cc you." : "✓ Sent from your mailbox.");
       } else {
         const state = await deleteChatDraft(draftId);
         if (state.status === "gone") finish("✓ Deleted from your Drafts.");

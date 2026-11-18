@@ -464,6 +464,10 @@ class ChatDraftSendIn(BaseModel):
 
     # The second yes for a reply whose conversation moved on since.
     thread_moved_on: bool = False
+    # The version the card showed (GET /delegation/drafts/{row} ``version``).
+    version: str | None = Field(default=None, max_length=512)
+    # Who a row without the words (Home) showed it going from.
+    from_executive: bool | None = None
 
 
 class ChatDraftSentOut(BaseModel):
@@ -1183,6 +1187,8 @@ class ChatDraftOut(BaseModel):
     # with the caller on cc; and the Executive's name for the card's From.
     from_executive: bool = False
     executive_name: str = ""
+    # The version shown, for Send (``ChatDraftSendIn.version``).
+    version: str = ""
 
 
 def _draft_refused(refused: Any) -> HTTPException:
@@ -1265,7 +1271,11 @@ async def send_chat_draft(request: Request, row_id: int, body: ChatDraftSendIn) 
     try:
         await send(
             person, row_id, caller=api_caller.caller(request),
-            confirm={"thread_moved_on": True} if body.thread_moved_on else None,
+            confirm={
+                **({"thread_moved_on": True} if body.thread_moved_on else {}),
+                **({"seen_version": body.version} if body.version else {}),
+                **({"seen_from_executive": body.from_executive} if body.from_executive is not None else {}),
+            },
         )
     except SendRefused as refused:
         raise HTTPException(

@@ -59,6 +59,8 @@ class WaitingDraft:
     # email): what Home's Right now keys and opens it by.
     row_id: int = 0
     thread_id: str = ""
+    # Switched on its card to go from the Executive.
+    from_executive: bool = False
 
 
 # (person id, row id) -> (to, subject) as the last ``settle_waiting`` read them from the
@@ -391,18 +393,19 @@ def _waiting(person_id: int, since: datetime, db_path: Path | None) -> list[tupl
 
 def _waiting_rows(
     person_id: int, since: datetime, db_path: Path | None
-) -> list[tuple[int, str, str, str]]:
-    """``(row id, draft id, created_at, thread id or "")``, newest first."""
+) -> list[tuple[int, str, str, str, bool]]:
+    """``(row id, draft id, created_at, thread id or "", from the
+    Executive)``, newest first."""
     where, params = _waiting_sql(person_id, since)
     conn = _connect(db_path)
     try:
         rows = conn.execute(
-            f"SELECT id, draft_id, created_at, thread_id {where} ORDER BY id DESC LIMIT ?",  # noqa: S608
+            f"SELECT id, draft_id, created_at, thread_id, from_executive {where} ORDER BY id DESC LIMIT ?",  # noqa: S608
             (*params, _SETTLE_MAX),
         ).fetchall()
     finally:
         conn.close()
-    return [(int(r[0]), str(r[1] or ""), str(r[2] or ""), str(r[3] or "")) for r in rows]
+    return [(int(r[0]), str(r[1] or ""), str(r[2] or ""), str(r[3] or ""), bool(r[4])) for r in rows]
 
 
 def waiting_drafts(
@@ -412,10 +415,11 @@ def waiting_drafts(
     newest first, each with who it goes to and its subject when a settle
     pass has read them (empty until one has)."""
     out = []
-    for row_id, _, created_at, thread_id in _waiting_rows(person_id, since, db_path):
+    for row_id, _, created_at, thread_id, from_executive in _waiting_rows(person_id, since, db_path):
         to, subject = _seen.get((person_id, row_id), ((), ""))
         out.append(WaitingDraft(
             created_at=created_at, to=to, subject=subject, row_id=row_id, thread_id=thread_id,
+            from_executive=from_executive,
         ))
     return out
 
@@ -519,7 +523,7 @@ async def settle_waiting(
     gone = 0
     # Still in their Drafts: (row id, created_at, every recipient, subject).
     present: list[tuple[int, str, tuple[str, ...], str]] = []
-    for row_id, draft_id, created_at, thread_id in waiting:
+    for row_id, draft_id, created_at, thread_id, _from in waiting:
         if not valid_id(draft_id):
             continue  # nothing to look up
         try:

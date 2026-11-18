@@ -655,3 +655,28 @@ def test_a_draft_with_no_one_in_to_goes_to_them_with_the_rest_as_written(
     asyncio.run(send_chat_draft(owner, row, caller=LOCAL, gmail=mailbox, now=LATER))
     args = exec_sends[0]["input"]
     assert args["to"] == _send_tests.OWNER and args["cc"] == _send_tests.DANA
+
+
+def test_a_card_shown_before_a_switch_sends_nothing(
+    db: Path, owner: Any, as_sender: list[str], exec_sends: list[dict[str, Any]],
+) -> None:
+    mailbox, row = _chat_draft(owner)
+    shown = _state(owner, row, mailbox)  # tab A
+    _switch(owner, row, mailbox, True)  # tab B
+    for seen in ({"seen_version": shown["version"]}, {"seen_from_executive": False}):
+        refused = _refused(send_chat_draft(owner, row, caller=LOCAL, confirm=seen, gmail=mailbox, now=LATER))
+        assert refused.code == "draft_changed" and "Look at it again" in refused.message
+    assert exec_sends == [] and mailbox.sent == []
+    # Shown as it is now, it goes.
+    now = _state(owner, row, mailbox)
+    asyncio.run(send_chat_draft(owner, row, caller=LOCAL, confirm={"seen_version": now["version"],
+                                                                   "seen_from_executive": True},
+                                gmail=mailbox, now=LATER))
+    assert len(exec_sends) == 1
+
+
+def test_home_names_who_a_switched_draft_goes_from(db: Path, owner: Any, as_sender: list[str]) -> None:
+    mailbox, row = _chat_draft(owner)
+    _switch(owner, row, mailbox, True)
+    (waiting,) = drafts.waiting_drafts(owner.id, NOW - timedelta(days=1))
+    assert waiting.row_id == row and waiting.from_executive is True

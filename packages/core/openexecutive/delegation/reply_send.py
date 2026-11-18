@@ -669,7 +669,9 @@ async def send_chat_draft(
     """Send the draft chat wrote as ``person`` (``delegation_drafts`` row
     ``row_id``), on their tap, exactly as it was written. ``confirm``
     ``{"thread_moved_on": true}`` is the second yes for a reply whose
-    conversation moved on. Returns the sent message's id; raises
+    conversation moved on; its ``seen_version`` is the version the tapped
+    card showed (``chat_draft_card.state``'s ``version``), so a card shown
+    before a change sends nothing. Returns the sent message's id; raises
     ``SendRefused``."""
     from openexecutive.audit import rows_for_person
 
@@ -741,11 +743,22 @@ async def _send_chat_draft(
     if draft is None:
         drafts.mark_gone(row.id, now)
         raise SendRefused(409, "draft_gone", _DRAFT_GONE)
-    if draft.message.id != row.message_id:
+    # The version the tapped card showed (``seen_version``; its words and
+    # who it goes from change together), or who a row without the words
+    # showed it going from (``seen_from_executive``): a card shown before a
+    # change on another screen sends nothing it didn't show.
+    seen = confirm.get("seen_version")
+    seen_from = confirm.get("seen_from_executive")
+    stale_card = (isinstance(seen, str) and seen != row.message_id) or (
+        isinstance(seen_from, bool) and seen_from != row.from_executive
+    )
+    if draft.message.id != row.message_id or stale_card:
         # Changed in the mailbox since chat wrote it: Send under the chat
         # sends what the chat showed, so that version is theirs to send there.
         raise SendRefused(
-            409, "draft_changed", "The draft changed in your mailbox since it was written. Send it from there.",
+            409, "draft_changed", "The draft changed since you saw it, so nothing was sent. Look at it again."
+            if stale_card and draft.message.id == row.message_id
+            else "The draft changed in your mailbox since it was written. Send it from there.",
         )
 
     recipients = sorted({normalize_email(a) for a in [*draft.message.to, *draft.message.cc, *draft.message.bcc]})
