@@ -9,6 +9,7 @@ import logging
 import re
 import time
 import uuid
+import zlib
 from collections.abc import AsyncIterator, Callable
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -556,6 +557,24 @@ _VARYING_IN_A_RESULT = re.compile(
     r"|(?<![0-9A-Za-z])[0-9a-fA-F]{8,}(?:-[0-9a-fA-F]{4,})*(?![0-9A-Za-z])"
     r"|(?<![0-9A-Za-z])(?=[0-9A-Za-z_-]*\d)(?=[0-9A-Za-z_-]*[A-Za-z])[0-9A-Za-z_-]{12,}(?![0-9A-Za-z])"
 )
+
+
+# A cut round's text that packs this small is a model repeating itself
+# ("... ... ...", one line over and over), no step of the work. Prose and
+# tables pack to a quarter or more of their length.
+_STUCK_TEXT_MIN = 2_000
+_STUCK_TEXT_RATIO = 0.05
+
+
+def _says_something(text: str) -> bool:
+    """Whether cut text is a step of the work: not empty, and not one thing
+    said over and over (it packs to almost nothing)."""
+    if not text.strip():
+        return False
+    if len(text) < _STUCK_TEXT_MIN:
+        return True
+    raw = text.encode()
+    return len(zlib.compress(raw, 6)) / len(raw) >= _STUCK_TEXT_RATIO
 
 
 def _call_key(tool_use: dict[str, Any], result: Any) -> str:
@@ -2780,7 +2799,7 @@ class Executive:
             cut_in_call = last_written is not None and last_written.get("type") == "tool_use"
             closed_calls = sum(b.get("type") == "tool_use" for b in response_content) - int(cut_in_call)
             got_somewhere = closed_calls > 0 or (
-                last_written is not None and not cut_in_call and str(last_written.get("text", "")).strip() != ""
+                last_written is not None and not cut_in_call and _says_something(str(last_written.get("text", "")))
             )
             empty_cuts = empty_cuts + 1 if cut_off and not got_somewhere else 0
             if empty_cuts > MAX_EMPTY_CUT_ROUNDS:

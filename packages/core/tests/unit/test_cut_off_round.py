@@ -468,3 +468,36 @@ def test_a_status_read_whose_progress_moves_is_not_a_repeat() -> None:
 
     assert len(reads) == rounds
     assert all(REPEATING_NOTE not in str(c["messages"][-1]["content"]) for c in provider.calls)
+
+
+def test_a_turn_that_keeps_writing_the_same_thing_until_cut_ends() -> None:
+    """A model stuck repeating itself, cut every round in its text, gets
+    nowhere: after MAX_EMPTY_CUT_ROUNDS of those the turn ends."""
+    from openexecutive.orchestrator.executive import EMPTY_CUTS_REPLY, MAX_EMPTY_CUT_ROUNDS
+
+    provider = _ScriptedProvider(
+        [_FinalMsg([_TextBlock("... " * 5_000)], "max_tokens") for _ in range(MAX_EMPTY_CUT_ROUNDS + 1)]
+        + [_FinalMsg([_TextBlock("never reached")], "end_turn")]
+    )
+    items = asyncio.run(_run(provider))
+
+    assert len(provider.calls) == MAX_EMPTY_CUT_ROUNDS + 1
+    assert EMPTY_CUTS_REPLY in "".join(i for i in items if isinstance(i, str))
+
+
+def test_long_real_writing_cut_every_round_carries_on() -> None:
+    import random
+
+    rng = random.Random(7)
+    words = ["revenue", "margin", "Q3", "plan", "hire", "risk", "board", "cash", "churn", "deal"]
+
+    def _prose() -> str:
+        return " ".join(rng.choice(words) + str(rng.randint(0, 999)) for _ in range(800))
+
+    provider = _ScriptedProvider(
+        [_FinalMsg([_TextBlock(_prose())], "max_tokens") for _ in range(6)]
+        + [_FinalMsg([_TextBlock("Done.")], "end_turn")]
+    )
+    asyncio.run(_run(provider))
+
+    assert len(provider.calls) == 7
