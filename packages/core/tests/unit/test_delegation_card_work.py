@@ -106,6 +106,9 @@ def test_the_work_on_a_switched_card_writes_as_the_executive(
     assert not card_drafts.can_undo(_apply(card, owner, mailbox, note="Nothing else to do."))
     with_files = _apply(card, owner, mailbox, body="Hi Dana,\n\nThe sheet is attached.", note="Done.", files=[SHEET])
     assert not card_drafts.can_undo(with_files)
+    # Nor a later run while the reply still carries them.
+    carried = _apply(card, owner, mailbox, body="Hi Dana,\n\nThe sheet is attached, totals checked.", note="Checked.")
+    assert carried["files"] and not card_drafts.can_undo(carried)
     assert changed["conversation"][-1]["changed"] == ["I built the spreadsheet."]
 
 

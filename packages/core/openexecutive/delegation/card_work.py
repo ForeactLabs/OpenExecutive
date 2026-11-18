@@ -727,8 +727,9 @@ async def apply(
         changed[card_drafts.QUESTIONS_SETTLED] = True
         if words != was:
             # The work's change can be taken back (``card_drafts.undo``) when
-            # its files stay as they were, and its note quotes what it made new.
-            if not files and switched_from is None:
+            # the reply carries no files (its words alone put back), and its
+            # note quotes what it made new.
+            if not files and not files_for(card_id) and switched_from is None:
                 changed[card_drafts.UNDO_KEY] = card_drafts.undo_point(payload)
             new = changed_sentences(send_from.split(person, payload, was)[0], send_from.split(person, payload, words)[0])
             if new:
