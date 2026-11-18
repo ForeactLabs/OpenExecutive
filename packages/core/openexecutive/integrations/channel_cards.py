@@ -612,6 +612,10 @@ async def _said_on_reply(instance: Any, person: Any, text: str) -> str | Tapped:
     from openexecutive.delegation.verified import ChatTap
     from openexecutive.memory.decision_ledger import get_decision_instance
 
+    def notes(card: Any) -> list[dict[str, Any]]:
+        return [t for t in answers.conversation(card_payload(card)) if t.get("kind") == "note"]
+
+    before = len(notes(instance))
     taken = await answers.take(
         instance, person=person, caller=ChatTap(normalize_email(person.email or "")), resolver=person.id, text=text,
     )
@@ -622,8 +626,11 @@ async def _said_on_reply(instance: Any, person: Any, text: str) -> str | Tapped:
     if taken.worked:
         return f"I'm on it. Follow along in the app: {_app_link(instance.id)}"
     fresh = await asyncio.to_thread(get_decision_instance, instance.id)
-    notes = [t for t in answers.conversation(card_payload(fresh or instance)) if t.get("kind") == "note"]
-    return str(notes[-1].get("text") or "") if notes else "I changed your reply."
+    said = notes(fresh) if fresh is not None else []
+    if len(said) <= before:
+        # Nothing was written for these words: the card changed under them.
+        return _shown_again(instance.id, "Not done: this card changed meanwhile. Look again.")
+    return str(said[-1].get("text") or "") or "I changed your reply."
 
 
 def _shown_again(decision_id: int, line: str) -> Tapped:

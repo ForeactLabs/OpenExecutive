@@ -573,11 +573,13 @@ def _reply_card(monkeypatch: pytest.MonkeyPatch, notes: list[str]) -> list[Any]:
 def test_words_said_on_a_reply_card_change_it_and_show_it_again(monkeypatch: pytest.MonkeyPatch) -> None:
     from openexecutive.delegation import answers
 
-    taken = _reply_card(monkeypatch, ["I offered Thursday instead."])
+    notes = ["I made it shorter."]
+    taken = _reply_card(monkeypatch, notes)
 
     async def take(instance: Any, *, person: Any, caller: Any, resolver: int | None, text: str,
                    work: bool = False) -> answers.Taken:
         taken.append((caller, resolver, text, 7 in channel_cards._resolving))
+        notes.append("I offered Thursday instead.")
         return answers.Taken(["Thursday works."])
 
     monkeypatch.setattr(answers, "take", take)
@@ -589,6 +591,24 @@ def test_words_said_on_a_reply_card_change_it_and_show_it_again(monkeypatch: pyt
     # As the person, holding the card while it changes.
     assert taken == [(ChatTap("sam@co.example"), 3, "offer Thursday", True)]
     assert 7 not in channel_cards._resolving
+
+
+def test_words_a_reply_card_wrote_nothing_for_say_it_changed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The card changed under the words, so nothing was written: an older note isn't their answer."""
+    from openexecutive.delegation import answers
+
+    _reply_card(monkeypatch, ["I made it shorter."])
+
+    async def take(instance: Any, **k: Any) -> answers.Taken:
+        return answers.Taken([], go=True)
+
+    monkeypatch.setattr(answers, "take", take)
+    who = SimpleNamespace(id=3, email="sam@co.example")
+    said = asyncio.run(channel_cards.say(channel_cards.Choice(7, "a", "0000beef"), who, "send it"))
+    assert said == channel_cards.Tapped(
+        "Not done: this card changed meanwhile. Look again.",
+        "Reply to Sam\nThursday works.", (("Send from me", "card:7:a:1111beef"),),
+    )
 
 
 def test_words_for_a_reply_cards_work_point_to_it_in_the_app(monkeypatch: pytest.MonkeyPatch) -> None:
