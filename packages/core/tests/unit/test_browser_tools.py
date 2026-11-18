@@ -115,6 +115,13 @@ async def test_an_extension_busy_with_a_step_stays_connected_and_says_busy() -> 
     assert not browser_relay.connected(7)
     await browser_relay.next_step(7, wait=0)
     assert browser_relay.connected(7)
+    # A tab asking again (a reload lost the answer) means it isn't busy any more.
+    first = asyncio.create_task(browser_relay.run(7, "look", {}, timeout=0.05))
+    assert await browser_relay.next_step(7, wait=1) is not None
+    await first
+    await browser_relay.next_step(7, wait=0)
+    _ago(7, browser_relay.CONNECTED_S + 10)
+    assert not browser_relay.connected(7)
 
 
 async def test_a_step_that_never_answers_stops_counting_as_busy() -> None:

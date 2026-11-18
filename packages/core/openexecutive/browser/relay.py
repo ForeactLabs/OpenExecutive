@@ -206,6 +206,9 @@ async def next_step(
     entry = _person(person_id)
     # Back from a long step counts as coming back: pick up what waited.
     was_connected = _asking(entry, time.monotonic())
+    # A tab asking is a browser that is there: a step it was doing is done or
+    # lost (a reloaded tab), and is no reason to count it connected later.
+    entry.busy.clear()
     entry.stay = stay
     deadline = time.monotonic() + max(0.0, min(wait, MAX_WAIT_S))
     if not was_connected or time.monotonic() - entry.picked >= PICKUP_EVERY_S:
