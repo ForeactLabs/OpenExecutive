@@ -38,7 +38,10 @@ UPDATE_REPLY_CARD_TOOL: dict[str, Any] = {
             },
             "body": {
                 "type": "string",
-                "description": "The whole reply in their voice, without a signature block. Omit to keep it.",
+                "description": (
+                    "The whole reply, written as your instructions say for who sends it now, without a "
+                    "signature block. With send_from, the card rewrites it once for the new sender. Omit to keep it."
+                ),
             },
             "artifact_ids": {
                 "type": "array",
@@ -254,17 +257,23 @@ async def handle_update_reply_card(tool_input: dict[str, Any]) -> str:
     # a Send tapped before the switch would otherwise go as the person.
     sender = tool_input.get("send_from")
     switched = sender in ("executive", "me")
+    body = tool_input.get("body")
+    body = body if isinstance(body, str) else ""
     if switched:
         from openexecutive.delegation import send_from
 
         try:
-            await send_from.switch_for_work(card_id, writer.person, executive=sender == "executive", gmail=writer.mailbox)
+            # The body was written for who sent it before: the switch writes
+            # it once for the new sender, so it isn't put on the card again.
+            await send_from.switch_for_work(
+                card_id, writer.person, executive=sender == "executive", gmail=writer.mailbox, words=body,
+            )
         except SendRefused as refused:
             return _error(f"Nothing was changed: who it goes from couldn't be switched: {refused.message}")
-    body = tool_input.get("body")
+        body = ""
     try:
         await card_work.apply(
-            card_id, writer.person, body=body if isinstance(body, str) else "",
+            card_id, writer.person, body=body,
             note=str(tool_input.get("note") or ""), files=files, gmail=writer.mailbox,
             choices=card_work.clean_choices(tool_input.get("choices")),
         )

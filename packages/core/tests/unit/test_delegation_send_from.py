@@ -703,3 +703,43 @@ def test_the_cards_work_switches_it_before_it_hands_back(
         assert out["error"].startswith("Nothing was changed")
     finally:
         current_session.reset(token)
+
+
+def test_words_the_work_wrote_with_a_switch_are_written_for_the_new_sender(
+    db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.delegation import card_work
+    from openexecutive.orchestrator import reply_card_tools
+    from openexecutive.orchestrator.schedule_tools import current_session
+    from openexecutive.orchestrator.session import Session
+
+    turns: list[str] = []
+
+    async def fake(model: str, system: str, turn: str) -> dict[str, Any]:
+        turns.append(turn)
+        return {"body": "Hi Dana,\n\nI attached the deck. Olivia will call you Thursday."}
+
+    monkeypatch.setattr(answers, "_call_model", fake)
+    mailbox, card = _card(owner)
+    monkeypatch.setattr(card_work, "still_working", lambda c: True)
+    monkeypatch.setattr(card_work, "keep", lambda coro: coro.close())
+    writer = type("W", (), {"person": owner, "mailbox": mailbox})()
+    monkeypatch.setattr("openexecutive.orchestrator.delegation_tools._writer", lambda name: writer)
+    token = current_session.set(Session(reply_card_work=card.id))
+    try:
+        out = json.loads(asyncio.run(reply_card_tools.handle_update_reply_card({
+            "body": "Hi Dana,\n\nI've attached the deck. I'll call you Thursday.",
+            "note": "Attached the deck.", "send_from": "executive",
+        })))
+    finally:
+        current_session.reset(token)
+    assert out["status"] == "ok"
+    # Written once for the Executive from the words the work wrote, never
+    # their words signed as the Executive.
+    assert len(turns) == 1 and "I'll call you Thursday." in turns[0]
+    saved = inbox.card_payload(_fresh(card))
+    assert saved[send_from.FROM_EXECUTIVE] is True
+    assert saved["draft_body"] == (
+        f"Hi Dana,\n\nI attached the deck. Olivia will call you Thursday.\n\n{send_from.sign_off(owner)}"
+    )
+    assert saved["conversation"][-1]["text"] == "Attached the deck."
