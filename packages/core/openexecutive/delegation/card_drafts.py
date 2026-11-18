@@ -349,6 +349,9 @@ async def edit(
             # Words changed by hand: the card's summary no longer says what
             # the draft says, so the card falls back to what they wrote.
             extra: dict[str, Any] = {} if recipients is not None else {QUESTIONS_SETTLED: True, "gist": ""}
+            if recipients is not None and can_undo(payload):
+                # Who it goes to only: the words' change can still be taken back.
+                extra[UNDO_KEY] = payload[UNDO_KEY]
             if rewrite is not None:
                 # The card's own words, rewritten for whoever sends them.
                 written, extra = await rewrite(person, payload)

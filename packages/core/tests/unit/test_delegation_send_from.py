@@ -808,3 +808,14 @@ def test_a_work_turn_that_would_be_turned_down_switches_nothing(
     # with a note switches and writes the reply for the Executive then.
     assert out["error"].startswith("Nothing was changed")
     assert rewrites == [] and inbox.card_payload(_fresh(card)) == before
+
+
+def test_a_change_of_who_it_goes_to_keeps_the_undo(db: Path, owner: Any, models: dict[str, Any]) -> None:
+    mailbox, card = _drafts_tests._group_card(owner)
+
+    async def write(person: Any, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        return "Hi Dana,\n\nFriday at 10 works.", {}
+
+    saved = asyncio.run(card_drafts.edit(_fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, rewrite=write))
+    moved = _drafts_tests._recipients(card, mailbox, owner, False)
+    assert moved["draft_to"] == [DANA] and moved[card_drafts.UNDO_KEY] == saved[card_drafts.UNDO_KEY]
