@@ -66,11 +66,11 @@ def thread_text(thread: Any, own: str) -> str:
     for i in range(len(shown), 0, -1):
         m = shown[i - 1]
         who = one_line(m.from_name or m.from_addr, 120)
-        own, forwarded = split_forward(
+        own_words, forwarded = split_forward(
             m.text or "", m.subject, max_chars=THREAD_MESSAGE_CHARS, forwarded_chars=budget,
         )
         budget -= len(forwarded)
-        said = f"{own}\n\n{FORWARDED_HEADING}\n{forwarded}".strip() if forwarded else own
+        said = f"{own_words}\n\n{FORWARDED_HEADING}\n{forwarded}".strip() if forwarded else own_words
         # Plain first, so no hidden or look-alike character dodges the quoting.
         text = _quote_headers(plain(said))
         parts.append(f"[{i}] From: {who} — {one_line(m.date, 60)}\n{text}")
