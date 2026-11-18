@@ -611,9 +611,7 @@ def _team_only(tool: str, tool_input: dict[str, Any]) -> bool:
     approval opens contact egress, and contacts are private to them."""
     from openexecutive.people.store import find_person_by_address
 
-    addresses, _ = _targets(tool, tool_input)
-    text = "\n".join(_strings(tool_input))
-    for address in {a.lower() for a in [*_EMAIL_RE.findall(text), *addresses]}:
+    for address in {a.lower() for a in _reach_addresses(tool, tool_input)}:
         try:
             person = find_person_by_address(address, include_contacts=True)
         except Exception:
@@ -621,6 +619,22 @@ def _team_only(tool: str, tool_input: dict[str, Any]) -> bool:
         if person is None or person.kind != "team":
             return False
     return True
+
+
+def _reach_addresses(tool: str, tool_input: dict[str, Any]) -> list[str]:
+    """The addresses a step reaches: every one it names, and who an
+    id-addressed tool reaches. A write into a file reaches no one by the
+    words it puts there (a contact line in website copy): only the arguments
+    that share or send it count (``_MCP_REACH_ARG_RE``, ``_MCP_PEOPLE_KEYS``,
+    ``_MCP_RECIPIENT_KEYS``)."""
+    addresses, _ = _targets(tool, tool_input)
+    named: Any = tool_input
+    if _file_tool(tool) and not _MAIL_TOOL_RE.search(tool):
+        named = {
+            k: v for k, v in tool_input.items()
+            if _MCP_REACH_ARG_RE.search(str(k)) or k in _MCP_PEOPLE_KEYS or k in _MCP_RECIPIENT_KEYS
+        }
+    return [*_EMAIL_RE.findall("\n".join(_strings(named))), *addresses]
 
 
 # Tools that name who they reach by an id rather than an address.
@@ -1134,10 +1148,10 @@ def check(
     Plain code; an added rule always holds, a base kind only while its Ask
     first switch is on."""
     text = "\n".join(_strings(tool_input))
-    addresses, names = _targets(tool, tool_input)
+    _, names = _targets(tool, tool_input)
     text = "\n".join([text, *names])
     recipients = sorted({
-        a.lower() for a in [*_EMAIL_RE.findall(text), *addresses, *(extra_recipients or [])]
+        a.lower() for a in [*_reach_addresses(tool, tool_input), *(extra_recipients or [])]
     })
     hit = _rule_hit(rules, text, recipients)
     if hit is not None:

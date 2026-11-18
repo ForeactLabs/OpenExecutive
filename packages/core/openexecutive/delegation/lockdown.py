@@ -406,6 +406,30 @@ def mail_lock_holds(pinned: Any, *, reading_now: bool = False) -> bool:
         return True
 
 
+# Opening a page in the person's own browser: on Balanced it waits after a
+# mail read only when the read was flagged or couldn't be checked
+# (``_page_open_waits``). A page opened in the same round as the read was
+# asked for before the model saw what the mail said, so it carries none of it.
+PAGE_OPENS: frozenset[str] = frozenset({"browser_navigate", "browser_open_tab"})
+
+
+def _page_open_waits(pinned: Any) -> bool:
+    """Whether opening a page waits for the mail this turn read: at Careful,
+    on a turn with no safety state (a workflow, a script outside chat), or
+    once a read was flagged or too big to check. Never raises; fails closed."""
+    from openexecutive.orchestrator import outside_content, outside_mode
+
+    try:
+        state = outside_content.current()
+        if state is None:
+            return True
+        if state.mode == outside_mode.ASK and not outside_content.go_turn(state):
+            return True
+        return getattr(pinned, "mail_held", False) is True or getattr(pinned, "unchecked_mail", False) is True
+    except Exception:
+        return True
+
+
 def mail_turn_withholds(
     tool_name: str, tool_input: Any, *, reading_now: bool = False, pinned: Any = None,
 ) -> bool:
@@ -425,6 +449,8 @@ def mail_turn_withholds(
         if pinned is None or not (getattr(pinned, "read_mail", False) is True or reading_now):
             return False
         if mail_lock_holds(pinned, reading_now=reading_now):
+            if tool_name in PAGE_OPENS and not _page_open_waits(pinned):
+                return False
             return mail_touched_withholds(tool_name, tool_input) or tool_name in MAIL_PRIVATE_WITHHELD_TOOLS
         # By the owner's level: Hands-off holds nothing. Below it, a read the
         # check cleared still keeps the posts to everyone and the roster

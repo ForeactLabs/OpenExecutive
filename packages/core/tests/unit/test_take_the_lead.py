@@ -162,6 +162,12 @@ def test_an_amount_is_money(text: str) -> None:
         "document_id": "d" * 30, "end_of_segment": True,
         "text": "Post drafts. No sign-up numbers; terms of the license stay as they are."}),
     ("google_workspace__modify_doc_text", {"document_id": "d" * 30, "text": "We should hire a second engineer."}),
+    # An address written into the copy reaches no one: still the team's file.
+    ("google_workspace__create_doc", {
+        "title": "Main page copy",
+        "content": "Plans from $49 a month. Questions? Write to help@far.example. Terms apply."}),
+    ("google_workspace__modify_doc_text", {
+        "document_id": "d" * 30, "text": "Contract questions go to legal@far.example."}),
 ])
 def test_words_inside_a_team_file_are_not_what_the_step_is_about(
     owner: Any, tool: str, tool_input: dict[str, Any]

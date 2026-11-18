@@ -788,6 +788,55 @@ def test_a_turn_with_no_safety_state_holds_after_any_mail_read() -> None:
         current_session.reset(token)
 
 
+@pytest.mark.parametrize(
+    ("mode", "pin", "reading_now", "waits"),
+    [
+        # Balanced: the read is still being checked, in this round or an
+        # earlier one, and the page opens anyway.
+        ("outsiders", {}, True, False),
+        ("outsiders", {}, False, False),
+        ("outsiders", {"mail_vetted": True}, False, False),
+        # A read the check flagged, or couldn't check, still holds it.
+        ("outsiders", {"mail_vetted": True, "mail_held": True}, False, True),
+        ("outsiders", {"unchecked_mail": True}, False, True),
+        # Careful waits after any mail read, as for every other step.
+        ("ask", {"mail_vetted": True}, False, True),
+        ("trust", {"mail_held": True}, True, False),
+    ],
+)
+def test_opening_a_page_waits_only_for_flagged_mail_on_balanced(
+    monkeypatch: pytest.MonkeyPatch, mode: str, pin: dict[str, Any], reading_now: bool, waits: bool,
+) -> None:
+    from openexecutive.orchestrator import content_trust, outside_content
+
+    monkeypatch.setattr(content_trust, "principal_only_withheld", lambda session: frozenset())
+    session, token, state = _pinned_turn(mode, **pin)
+    try:
+        for tool in lockdown.PAGE_OPENS:
+            assert lockdown.mail_turn_withholds(
+                tool, {"url": "https://example.com"}, reading_now=reading_now
+            ) is waits, tool
+        if mode == "outsiders" and not pin:
+            # A click or typing on the page still waits for the check.
+            assert lockdown.mail_turn_withholds("run_script", {}, reading_now=reading_now)
+    finally:
+        outside_content.end_turn(state)
+        current_session.reset(token)
+
+
+def test_a_page_waits_after_mail_on_a_turn_with_no_safety_state() -> None:
+    session = Session()
+    session.turn_delegation = TurnDelegation(  # type: ignore[attr-defined]
+        enabled=True, offered=True, touched_mail=True, read_mail=True, mail_vetted=True,
+        session_id=session.session_id,
+    )
+    token = current_session.set(session)
+    try:
+        assert lockdown.mail_turn_withholds("browser_open_tab", {"url": "https://example.com"})
+    finally:
+        current_session.reset(token)
+
+
 def test_check_mail_read_records_the_flag_for_the_person(monkeypatch: pytest.MonkeyPatch) -> None:
     from openexecutive.orchestrator import content_trust, outside_content
 
