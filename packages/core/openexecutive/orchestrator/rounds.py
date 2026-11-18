@@ -167,7 +167,8 @@ async def run_rounds(
                 continue
         else:
             empty_cuts = 0
-        if cut is None and (ending is not None or not uses):
+        if ending is not None or (cut is None and not uses):
+            # Writing up runs nothing, even a call a provider wrote anyway.
             if blocks:
                 messages.append({"role": "assistant", "content": blocks})
             return Rounds(text=(cut_text + text_of(blocks)).strip(), rounds=rounds, ended=ending or "done")

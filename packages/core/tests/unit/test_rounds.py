@@ -98,6 +98,26 @@ async def test_a_call_that_keeps_coming_back_the_same_writes_up() -> None:
 
 
 @pytest.mark.asyncio
+async def test_writing_up_runs_no_call_even_one_the_provider_wrote_anyway() -> None:
+    ran: list[str] = []
+
+    async def run_call(use: dict[str, Any]) -> str:
+        ran.append(str(use["id"]))
+        return "busy"
+
+    def reply(n: int, kw: dict[str, Any]) -> Any:
+        if kw.get("tool_choice") == {"type": "none"}:
+            return SimpleNamespace(
+                content=[SimpleNamespace(type="text", text="It kept saying busy."), _use("send", {}, "late")],
+                stop_reason="tool_use",
+            )
+        return _calls(_use("send", {"to": "a"}, f"t{n}"))
+
+    done = await _run(_Model(reply), run_call)
+    assert done.ended == "repeating" and done.text == "It kept saying busy." and "late" not in ran
+
+
+@pytest.mark.asyncio
 async def test_a_long_result_comes_in_parts_without_running_the_tool_again(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
