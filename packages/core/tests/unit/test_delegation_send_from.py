@@ -739,9 +739,18 @@ def test_words_the_work_wrote_with_a_switch_are_written_for_the_new_sender(
     # Written once for the Executive from the words the work wrote, never
     # their words signed as the Executive.
     assert len(turns) == 1 and "I'll call you Thursday." in turns[0]
+    # Told what this run did, as the assistant's own work.
+    assert "<work_done>\n- Attached the deck.\n</work_done>" in turns[0]
     saved = inbox.card_payload(_fresh(card))
     assert saved[send_from.FROM_EXECUTIVE] is True
     assert saved["draft_body"] == (
         f"Hi Dana,\n\nI attached the deck. Olivia will call you Thursday.\n\n{send_from.sign_off(owner)}"
     )
     assert saved["conversation"][-1]["text"] == "Attached the deck."
+    # The run wrote the reply: it goes on its own when Approvals says so,
+    # its questions are settled and its note quotes what changed.
+    assert saved[card_work.REWROTE_KEY] is True and saved[card_drafts.QUESTIONS_SETTLED] is True
+    assert saved["gist"] == "Attached the deck."
+    assert saved["conversation"][-1]["changed"] == ["I attached the deck.", "Olivia will call you Thursday."]
+    # A switch can't be undone.
+    assert not card_drafts.can_undo(saved)

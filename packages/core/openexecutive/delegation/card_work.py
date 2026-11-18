@@ -657,11 +657,14 @@ def _close(card_id: int) -> None:
 
 async def apply(
     card_id: int, person: Any, *, body: str, note: str, files: list[tuple[str, str, bytes]],
-    gmail: Any = None, choices: list[str] | None = None,
+    gmail: Any = None, choices: list[str] | None = None, switched_from: str | None = None,
 ) -> dict[str, Any]:
     """Put what the turn did on card ``card_id``: the reply's new words
     (``body``; "" keeps them), the files it carries and the line to the
-    person (``note``). Returns the payload as it now is; raises ``SendRefused``.
+    person (``note``). ``switched_from``: the turn's words were already put
+    on the card by its switch of who it goes from (``send_from.switch_for_work``),
+    and these were the card's words before it: the run wrote the reply all
+    the same. Returns the payload as it now is; raises ``SendRefused``.
     Sends nothing itself (``_after`` may, when Approvals lets the reply go)."""
     from openexecutive.delegation import card_drafts, send_from
     from openexecutive.delegation.answers import changed_sentences
@@ -689,27 +692,31 @@ async def apply(
     picks = clean_choices(choices)
     changed: dict[str, Any] = {
         **_end_turn(payload, state=STUCK if picks else DONE, text=text, choices=picks),
-        WORK_KEY: DONE, REWROTE_KEY: bool((body or "").strip()),
+        WORK_KEY: DONE, REWROTE_KEY: bool((body or "").strip()) or switched_from is not None,
     }
     # Only what this run changed can be taken back (Undo shows under its
     # note), never a change from before it.
     changed.pop(card_drafts.UNDO_KEY, None)
     words = (body or "").replace("\r", "").strip()
-    if words:
+    was = str(payload.get("draft_body") or "")
+    if switched_from is not None:
+        # Written and signed for the new sender by the switch already.
+        words, was = was, switched_from
+    elif words:
         # Written for whoever sends it (prompt_for), signed for them.
         words = send_from.sign(
             person, payload, words, on_its_own=getattr(card, "gate_mode", "") == "auto_execute",
         )
+    if words:
         if len(words) > card_drafts.MAX_TEXT_CHARS:
             raise SendRefused(422, "too_long", "That reply is too long.")
-        was = str(payload.get("draft_body") or "")
         changed["draft_body"] = words
         changed["gist"] = clean_gist(text)
         changed[card_drafts.QUESTIONS_SETTLED] = True
         if words != was:
             # The work's change can be taken back (``card_drafts.undo``) when
             # its files stay as they were, and its note quotes what it made new.
-            if not files:
+            if not files and switched_from is None:
                 changed[card_drafts.UNDO_KEY] = card_drafts.undo_point(payload)
             new = changed_sentences(send_from.split(person, payload, was)[0], send_from.split(person, payload, words)[0])
             if new:
@@ -729,7 +736,9 @@ async def apply(
     if handing:
         _HANDED.add(card_id)
     try:
-        await _save(card, payload, changed, person, files, gmail, rewrote=bool(words) or new_files)
+        # A switch already brought their mailbox's draft up to date with the words.
+        rewrote = (bool(words) and switched_from is None) or new_files
+        await _save(card, payload, changed, person, files, gmail, rewrote=rewrote)
     except BaseException:
         _store(card_id, before)
         if handing:

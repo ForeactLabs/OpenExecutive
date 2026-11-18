@@ -233,11 +233,12 @@ async def _rewritten_for(person: Any, payload: dict[str, Any], *, executive: boo
 
 async def _switch(
     instance: Any, person: Any, payload: dict[str, Any], *, executive: bool, gmail: Any, asked: str = "",
-    words: str = "",
+    words: str = "", done: str = "",
 ) -> dict[str, Any]:
     """Switch the card once its checks passed, one change at a time: its
-    words (or ``words``, new ones written for the sender it had) written
-    once for the new sender and saved like any change
+    words (or ``words``, new ones written for the sender it had, with
+    ``done``, what the work that wrote them did) written once for the new
+    sender and saved like any change
     (``card_drafts._edit``, which brings their mailbox's draft up to date
     when it goes from them again)."""
     from openexecutive.delegation import card_drafts
@@ -251,6 +252,11 @@ async def _switch(
     card_drafts._EDITING.add(instance.id)
     try:
         source = {**payload, "draft_body": words} if words.strip() else payload
+        if done.strip():
+            # The work this turn did is the assistant's own too (``_work_done``).
+            source = {**source, CONVERSATION_KEY: [
+                *conversation(payload), {"kind": "note", "state": "done", "text": done},
+            ]}
         written = await _rewritten_for(person, source, executive=executive)
         turns = [*conversation(payload)]
         if asked:
@@ -296,12 +302,13 @@ async def switch(
 
 
 async def switch_for_work(
-    card_id: int, person: Any, *, executive: bool, gmail: Any = None, words: str = "",
+    card_id: int, person: Any, *, executive: bool, gmail: Any = None, words: str = "", done: str = "",
 ) -> dict[str, Any]:
     """``switch``, from the card's own work turn (``reply_card_tools``),
     which already runs as that card's person. ``words``: the reply the turn
     wrote with it, for the sender it was told of (``card_work.prompt_for``),
-    so they are the ones written for the new sender. Raises ``SendRefused``."""
+    so they are the ones written for the new sender; ``done``: its note,
+    what it did. Raises ``SendRefused``."""
     from openexecutive.delegation.inbox import SENDING, _audit, card_payload
     from openexecutive.delegation.reply_send import SendRefused
     from openexecutive.memory.decision_ledger import STATUS_PROPOSED, get_decision_instance
@@ -315,7 +322,7 @@ async def switch_for_work(
     payload = card_payload(card)
     if card.approver_person_id != person.id or payload.get("person_id") != person.id:
         raise SendRefused(403, "not_yours", "That card isn't this person's.")
-    saved = await _switch(card, person, payload, executive=executive, gmail=gmail, words=words)
+    saved = await _switch(card, person, payload, executive=executive, gmail=gmail, words=words, done=done)
     _audit("delegation_reply_from", f"Person {person.id}'s card work chose who a reply goes from", {
         "person_id": person.id, "decision_id": card_id, "from_executive": executive,
     })
