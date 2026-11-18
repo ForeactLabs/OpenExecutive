@@ -14,6 +14,7 @@ the hardcoded ``OPENROUTER_MODELS`` snapshot when nothing has been loaded.
 """
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import replace
 from typing import Any, Literal, TypedDict
@@ -34,6 +35,8 @@ from openexecutive.providers.feature_gate import (
 from openexecutive.providers.openai_compatible import OpenAICompatibleProvider
 from openexecutive.providers.openrouter_provider import OpenRouterProvider
 from openexecutive.providers.provider import LLMProvider
+
+logger = logging.getLogger(__name__)
 
 # Anthropic-direct slugs — used as canonical model names everywhere in
 # the codebase (config defaults, agent class defaults, override DB).
@@ -545,10 +548,32 @@ def reading_limits_for(model: str = "") -> ReadingLimits:
     than from a number of its own. "" is the default model.
     """
     settings = get_settings()
+    model = model or settings.default_model
+    local_models = _local_models(settings)
+    if model in local_models:
+        _warn_local_context_unset(settings)
     return reading_limits(
         context_tokens(
-            model or settings.default_model,
-            local_models=_local_models(settings),
+            model,
+            local_models=local_models,
             local_context_tokens=int(getattr(settings, "local_context_tokens", 0) or 0),
         )
+    )
+
+
+_LOCAL_CONTEXT_WARNED = False
+
+
+def _warn_local_context_unset(settings: Any) -> None:
+    """Say once that a local model is read at the default window: a server
+    started with more holds more than the Executive will give it."""
+    global _LOCAL_CONTEXT_WARNED
+    fields_set = getattr(settings, "model_fields_set", None)
+    if _LOCAL_CONTEXT_WARNED or fields_set is None or "local_context_tokens" in fields_set:
+        return
+    _LOCAL_CONTEXT_WARNED = True
+    logger.warning(
+        "LOCAL_CONTEXT_TOKENS is not set: local models are read as holding %d tokens. "
+        "Set it to the context the local server is started with.",
+        int(getattr(settings, "local_context_tokens", 0) or 0),
     )

@@ -623,3 +623,31 @@ def test_a_part_fits_the_room_the_prompt_leaves() -> None:
     spent = budget.cap("search_files", {"q": "b"}, "y" * 100_000, "t2")
     assert len(spent) <= 3_000  # no room left: a short head and the "read all it can hold" notice
     assert "read all it can hold" in spent
+
+
+def test_a_local_model_at_the_default_window_says_so_once(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from types import SimpleNamespace
+
+    from openexecutive.providers import registry
+
+    settings = SimpleNamespace(
+        default_model="llama", local_models_enabled=True, local_models=["llama"],
+        local_context_tokens=32_768, model_fields_set=set(),
+    )
+    monkeypatch.setattr(registry, "get_settings", lambda: settings)
+    monkeypatch.setattr(registry, "_LOCAL_CONTEXT_WARNED", False)
+    with caplog.at_level("WARNING"):
+        registry.reading_limits_for("llama")
+        registry.reading_limits_for("llama")
+    assert [r.message for r in caplog.records].count(
+        "LOCAL_CONTEXT_TOKENS is not set: local models are read as holding 32768 tokens. "
+        "Set it to the context the local server is started with."
+    ) == 1
+
+    settings.model_fields_set = {"local_context_tokens"}
+    monkeypatch.setattr(registry, "_LOCAL_CONTEXT_WARNED", False)
+    caplog.clear()
+    registry.reading_limits_for("llama")
+    assert not caplog.records
