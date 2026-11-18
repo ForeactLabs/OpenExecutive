@@ -609,9 +609,15 @@ def _team_only(tool: str, tool_input: dict[str, Any]) -> bool:
     """Whether everyone the action reaches is on the team. Anyone else (a
     contact, someone unknown) is the principal's to approve: only their
     approval opens contact egress, and contacts are private to them."""
+    addresses, _ = _targets(tool, tool_input)
+    return _all_team([*_EMAIL_RE.findall("\n".join(_strings(tool_input))), *addresses])
+
+
+def _all_team(addresses: list[str]) -> bool:
+    """Whether every address is a teammate's. Fails closed."""
     from openexecutive.people.store import find_person_by_address
 
-    for address in {a.lower() for a in _reach_addresses(tool, tool_input)}:
+    for address in {a.lower() for a in addresses}:
         try:
             person = find_person_by_address(address, include_contacts=True)
         except Exception:
@@ -1139,7 +1145,10 @@ def _writes_team_file(tool: str, tool_input: dict[str, Any]) -> bool:
     slides, Drive file) and itself names no one outside the team: no mail,
     no event, no address of anyone but a teammate. Who could already open
     the file was settled when it was shared (sharing waits on its own)."""
-    return _file_tool(tool) and not _MAIL_TOOL_RE.search(tool) and _team_only(tool, tool_input)
+    return (
+        _file_tool(tool) and not _MAIL_TOOL_RE.search(tool)
+        and _all_team(_reach_addresses(tool, tool_input))
+    )
 
 
 def _mcp_deletes(tool: str, tool_input: dict[str, Any]) -> bool:

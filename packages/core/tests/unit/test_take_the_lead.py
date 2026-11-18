@@ -197,6 +197,11 @@ def test_a_team_files_name_and_who_it_reaches_still_count(owner: Any) -> None:
         assert not ttl._team_only(tool, share), tool
     hit = ttl.check("microsoft_365__share-drive-item", share, lead=_lead(), rules=[], mcp=True)
     assert hit is not None
+    # Who approves a held write still sees every address it names: one
+    # naming someone outside the team stays the principal's to approve.
+    named = {"document_id": "d" * 30, "text": "Renewal terms from jane@client.example"}
+    assert ttl._writes_team_file("google_workspace__modify_doc_text", named)
+    assert not ttl._team_only("google_workspace__modify_doc_text", named)
     # An address in a comment is a mention, which emails that person.
     comment = {"document_id": "d" * 30, "comment_content": "+bob@far.example please look"}
     assert not ttl._team_only("google_workspace__create_doc_comment", comment)
