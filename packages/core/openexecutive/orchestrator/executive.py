@@ -548,10 +548,17 @@ def _apply_loop_cache_marker(
     return bool(markable)
 
 
+# Numbers and ids in a result (a request id, a timestamp, a retry count) don't
+# make it a different answer: they are left out of _call_key.
+_VARYING_IN_A_RESULT = re.compile(r"[0-9a-fA-F]{8,}(?:-[0-9a-fA-F]{4,})*|\d+")
+
+
 def _call_key(tool_use: dict[str, Any], result: Any) -> str:
-    """One call with what it returned, for REPEAT_LIMIT."""
+    """One call with what it returned, for REPEAT_LIMIT: the same error with
+    a new request id or time each try is still the same result."""
+    same = _VARYING_IN_A_RESULT.sub("#", str(result))
     return hashlib.sha256(
-        json.dumps([tool_use["name"], tool_use["input"], str(result)], sort_keys=True, default=str).encode()
+        json.dumps([tool_use["name"], tool_use["input"], same], sort_keys=True, default=str).encode()
     ).hexdigest()
 
 

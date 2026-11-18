@@ -428,3 +428,23 @@ def test_a_cut_round_that_closed_a_call_first_is_a_step() -> None:
 
     assert len(ran) == rounds
     assert len(provider.calls) == rounds + 1
+
+
+def test_the_same_error_with_a_new_request_id_each_try_still_ends() -> None:
+    from openexecutive.orchestrator.executive import REPEAT_LIMIT, REPEATING_NOTE
+
+    tries: list[int] = []
+
+    async def _send(*_a: Any, **_k: Any) -> str:
+        tries.append(1)
+        return f"Error 401: sign-in expired (request req_{len(tries) * 7919:08x}, at 2026-11-18T00:0{len(tries)}:00Z)"
+
+    call = {"to": "dana@example.com"}
+    provider = _ScriptedProvider(
+        [_FinalMsg([_ToolUseBlock(f"s{i}", "send_mail", call)], "tool_use") for i in range(REPEAT_LIMIT)]
+        + [_FinalMsg([_TextBlock("Couldn't send it.")], "end_turn")]
+    )
+    asyncio.run(_run(provider, {"send_mail": _send}))
+
+    assert len(tries) == REPEAT_LIMIT
+    assert REPEATING_NOTE in str(provider.calls[-1]["messages"][-1]["content"])

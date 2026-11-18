@@ -438,3 +438,36 @@ def test_a_repeated_long_write_is_answered_not_run_again(monkeypatch: pytest.Mon
     second = provider.calls[2]["messages"][-1]["content"][0]["content"]
     assert "[LAST PART" in second
     assert len(writes) == 1
+
+
+def test_progress_updates_between_parts_keep_the_held_parts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A round that shows progress and asks for the next part gets it: a
+    progress update changes nothing a held result came from."""
+    monkeypatch.setattr("openexecutive.orchestrator.executive.reading_limits_for", _limits(5_000, 1_000_000))
+    doc = "".join(f"<{i:05d}>" for i in range(1_500))  # three parts
+    runs: list[int] = []
+
+    async def _read(*_a: Any, **_k: Any) -> str:
+        runs.append(1)
+        return doc
+
+    def _round(n: int) -> _FinalMsg:
+        return _FinalMsg(
+            [
+                _ToolUseBlock(f"p{n}", "show_progress", {"steps": [{"label": "Reading the guide", "state": "doing"}]}),
+                _ToolUseBlock(f"r{n}", "read_document", {"id": "guide"}),
+            ],
+            "tool_use",
+        )
+
+    provider = _ScriptedProvider([_round(1), _round(2), _round(3), _FinalMsg([_TextBlock("done")], "end_turn")])
+    _run(provider, {"read_document": _read})
+
+    def _result(n: int) -> str:
+        return next(
+            str(b["content"]) for b in provider.calls[n]["messages"][-1]["content"]
+            if b.get("tool_use_id") == f"r{n}"
+        )
+
+    assert len(runs) == 1
+    assert "[LAST PART" in _result(3)

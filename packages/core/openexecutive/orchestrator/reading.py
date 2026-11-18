@@ -14,7 +14,7 @@ import json
 import logging
 from typing import Any
 
-from openexecutive.orchestrator import tool_groups
+from openexecutive.orchestrator import tool_groups, turn_progress
 from openexecutive.providers.feature_gate import ReadingLimits
 from openexecutive.workflows import step_script, tool_catalog
 
@@ -40,8 +40,10 @@ _NEVER_CUT_BY_TURN_BUDGET = frozenset(
 
 # Calls that change nothing a held result came from, though their names
 # don't start with a read verb (tool_catalog.read_only_label): asking a
-# specialist, and finding or opening tools.
-_READS_NOTHING = frozenset({"consult_specialist", tool_groups.OPEN_TOOLS, "search_tools"})
+# specialist, finding or opening tools, and showing the person progress.
+_READS_NOTHING = frozenset(
+    {"consult_specialist", tool_groups.OPEN_TOOLS, "search_tools", turn_progress.SHOW_PROGRESS}
+)
 
 
 def _safe_tool_name(tool_name: Any) -> str:
