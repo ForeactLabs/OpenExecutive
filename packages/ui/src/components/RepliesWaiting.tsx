@@ -14,6 +14,7 @@ import {
   ReplySendError,
   sendReplyCard,
   stopReplyWork,
+  undoReplyChange,
   type ReplyCard,
   type ReplyTurn,
 } from "@/lib/api";
@@ -45,13 +46,16 @@ import NextTimeTick from "@/components/NextTimeTick";
 // with "See the reply", the options (Send from me, or from the Executive
 // with you on cc; with something left to decide, its answers to tap), "Or
 // tell me…" and Skip. A go said in the box ("send it") brings up the same
-// confirm a tap on Send does. Open, everything shows at once as a conversation: what
-// they wrote; the Executive's word on the reply with what's left to decide
-// (short answers to tap, or "Something else…" to type one) and what was
-// decided (Change to pick again); any newer email in the conversation, which
-// the Executive brought the reply up to date with, and what you asked it to
-// change and what it did; then the reply itself with its Reply to choice,
-// and "Tell me what to change…" (POST /delegation/replies/{id}/change). Each
+// confirm a tap on Send does. Open, top to bottom: what they wrote and the
+// Executive's word on the reply with what's left to decide (short answers to
+// tap, or "Something else…" to type one) and what was decided (Change to pick
+// again); the reply itself, the one version that goes, with From and Reply
+// to; Send and Skip; then the talk, newest last: any newer email the
+// Executive brought the reply up to date with, what you asked it to change
+// and what it did, quoting the lines it changed, with Undo (POST
+// /delegation/replies/{id}/undo), "Earlier" for the rest; and "Tell me what
+// to change…" last (POST /delegation/replies/{id}/change), so an answer
+// lands next to where you typed. Each
 // answer or change rewrites the draft (POST /delegation/replies/{id}/answer)
 // and lightly marks the new sentences. "Edit the words myself" changes them
 // right on the card (and in your Drafts when it's there: PUT
@@ -74,6 +78,9 @@ const RECIPIENTS_RUNNING = "Changing who it goes to…";
 // What shows while From is being changed (the Executive rewrites it).
 const FROM_RUNNING = "Switching who it's from…";
 const STOPPING = "Stopping…";
+const UNDOING = "Undoing…";
+// Turns the card's talk shows before "Earlier": your latest words and my answer.
+const TALK_SHOWN = 2;
 
 // The cards and their refresh, for the Home "Needs you" list, which shows
 // each one as a card among the proposals. `cards` stays null for anyone but
@@ -244,6 +251,8 @@ export function ReplyCardItem({
   const [typing, setTyping] = useState<{ index: number; text: string } | null>(null);
   // "Tell me what to change…": the words in the box under the reply.
   const [ask, setAsk] = useState("");
+  // The card's talk shows its latest exchange; "Earlier" shows the rest.
+  const [showEarlier, setShowEarlier] = useState(false);
   // Answered questions opened again with Change, to tap another answer.
   const [reopened, setReopened] = useState<number[]>([]);
   const questions = card.questions ?? [];
@@ -368,6 +377,19 @@ export function ReplyCardItem({
     }
   };
 
+  // Undo: the words as they were before the last change you asked for.
+  const undo = async () => {
+    setStep({ kind: "busy", label: UNDOING });
+    setError(null);
+    try {
+      onChanged?.(await undoReplyChange(card.decision_id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't undo that.");
+    } finally {
+      setStep({ kind: "idle" });
+    }
+  };
+
   // Stop what it is doing: the card keeps what it did so far.
   const stopWork = async () => {
     setStep({ kind: "busy", label: STOPPING });
@@ -458,6 +480,8 @@ export function ReplyCardItem({
     .filter(({ q, i }) => q.choices.length > 0 && q.answer && !reopened.includes(i));
   const turns = card.conversation ?? [];
   const lastNote = turns.map((t) => t.kind).lastIndexOf("note");
+  // The latest exchange shows; the rest waits behind "Earlier".
+  const shownFrom = showEarlier ? 0 : Math.max(0, turns.length - TALK_SHOWN);
   const nextTimeTick = (className: string) => card.can_allow ? (
     <NextTimeTick
       className={className}
@@ -762,70 +786,6 @@ export function ReplyCardItem({
             </ExecBubble>
           )
         )}
-        {turns.map((t, i) =>
-          t.kind === "news" ? (
-            <div
-              key={i}
-              className="max-w-[92%] self-start rounded-2xl rounded-tl-md border border-emerald-500/60 bg-surface-overlay px-3 py-2"
-            >
-              <div className="text-xs text-fg-subtle break-words">
-                <span className="mr-1.5 font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">New</span>
-                {(t.from_name || t.from_email || "").trim()}
-                {t.at && formatRelativeTime(t.at) ? ` · ${formatRelativeTime(t.at)}` : ""}
-                <NewsExtras turn={t} subject={card.subject} />
-              </div>
-              {t.text && <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-fg">{t.text}</p>}
-            </div>
-          ) : t.kind === "asked" ? (
-            <div key={i} className="max-w-[85%] self-end rounded-2xl rounded-tr-md bg-accent/20 px-3 py-2 text-sm text-fg break-words">
-              {t.text}
-            </div>
-          ) : (
-            <ExecBubble
-              key={i}
-              status={WORK_STATUS[t.state ?? ""] ?? ""}
-              dim={t.state === "stopped" && (i < turns.length - 1 || card.working)}
-            >
-              <p>{t.text}</p>
-              <WorkSteps steps={t.steps ?? []} end={t.state ?? ""} />
-              {(t.choices ?? []).length > 0 && i === turns.length - 1 && !card.working && (
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {(t.choices ?? []).map((choiceText) => (
-                    <button
-                      key={choiceText}
-                      type="button"
-                      disabled={busy}
-                      onClick={() => void askChange(choiceText, true)}
-                      className="min-h-9 cursor-pointer rounded-full border border-accent/40 bg-surface px-3 text-[13px] font-semibold text-accent hover:bg-accent/10 disabled:opacity-50"
-                    >
-                      {choiceText}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {i === lastNote && hasOpen && decideBlock}
-            </ExecBubble>
-          ),
-        )}
-        {card.working && (
-          <ExecBubble status="working">
-            <p>Working on it. You can tell me to do it differently below.</p>
-            <WorkSteps steps={card.work_steps ?? []} now={card.work_now || "Starting…"} />
-            <div className="mt-1.5 flex justify-end">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void stopWork()}
-                className="min-h-8 cursor-pointer px-1 text-[13px] font-semibold text-accent disabled:opacity-50"
-              >
-                {running(STOPPING) ? STOPPING : "Stop"}
-              </button>
-            </div>
-          </ExecBubble>
-        )}
-        {busy && (step.label === "Writing it in…" || step.label === "Changing it…") && (
-          <p className="text-xs text-fg-subtle" aria-live="polite">Writing it into your reply…</p>
-        )}
       </div>
       <div
         className={`mt-3 rounded-xl border border-line-strong bg-surface px-3 py-2.5 ${card.working ? "opacity-60" : ""}`}
@@ -964,31 +924,6 @@ export function ReplyCardItem({
           </>
         )}
       </div>
-      {!unconfirmed && !confirming && editing === null && (
-        <form
-          className="mt-3 flex items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void askChange();
-          }}
-        >
-          <input
-            type="text"
-            aria-label={card.working ? "Tell me to do it differently" : "Or tell me"}
-            placeholder={card.working ? "Tell me to do it differently…" : "Or tell me…"}
-            value={ask}
-            maxLength={500}
-            disabled={busy}
-            onChange={(e) => setAsk(e.target.value)}
-            className="min-h-11 min-w-0 flex-1 rounded-full border border-line-strong bg-surface px-4 text-[15px] text-fg placeholder:text-fg-subtle focus:outline-none focus:ring-2 focus:ring-accent/40"
-          />
-          {ask.trim() && (
-            <Button type="submit" variant="secondary" disabled={busy}>
-              Go
-            </Button>
-          )}
-        </form>
-      )}
       {warnings.length > 0 && (
         <ul className="mt-3 space-y-0.5 text-sm text-amber-700 dark:text-amber-300">
           {warnings.map((w) => (
@@ -1076,6 +1011,129 @@ export function ReplyCardItem({
           {dismissButton}
         </div>
         </>
+      )}
+      {/* The talk: below the reply and Send, newest last, with the box
+          under it, so an answer lands next to where you typed. */}
+      {(turns.length > 0 || card.working || busy) && (
+        <div className="mt-4 flex flex-col gap-2.5 border-t border-line pt-3">
+          {shownFrom > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowEarlier(true)}
+              className="self-start min-h-8 cursor-pointer text-[13px] text-fg-muted hover:text-fg"
+            >
+              Earlier ({shownFrom})
+            </button>
+          )}
+          {turns.map((t, i) =>
+            i < shownFrom ? null : t.kind === "news" ? (
+              <div
+                key={i}
+                className="max-w-[92%] self-start rounded-2xl rounded-tl-md border border-emerald-500/60 bg-surface-overlay px-3 py-2"
+              >
+                <div className="text-xs text-fg-subtle break-words">
+                  <span className="mr-1.5 font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">New</span>
+                  {(t.from_name || t.from_email || "").trim()}
+                  {t.at && formatRelativeTime(t.at) ? ` · ${formatRelativeTime(t.at)}` : ""}
+                  <NewsExtras turn={t} subject={card.subject} />
+                </div>
+                {t.text && <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-fg">{t.text}</p>}
+              </div>
+            ) : t.kind === "asked" ? (
+              <div key={i} className="max-w-[85%] self-end rounded-2xl rounded-tr-md bg-accent/20 px-3 py-2 text-sm text-fg break-words">
+                {t.text}
+              </div>
+            ) : (
+              <ExecBubble
+                key={i}
+                status={WORK_STATUS[t.state ?? ""] ?? ""}
+                dim={t.state === "stopped" && (i < turns.length - 1 || card.working)}
+              >
+                <p>{t.text}</p>
+                {(t.changed ?? []).length > 0 && (
+                  <ul className="mt-1.5 space-y-1" aria-label="What changed">
+                    {(t.changed ?? []).slice(0, 4).map((line, k) => (
+                      <li key={k} className="line-clamp-3 border-l-2 border-accent/50 pl-2 text-fg break-words">
+                        {line}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {i === lastNote && card.can_undo && !card.working && !unconfirmed && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void undo()}
+                    className="mt-1.5 min-h-8 cursor-pointer text-[13px] font-semibold text-accent disabled:opacity-50"
+                  >
+                    {running(UNDOING) ? UNDOING : "Undo"}
+                  </button>
+                )}
+                <WorkSteps steps={t.steps ?? []} end={t.state ?? ""} />
+                {(t.choices ?? []).length > 0 && i === turns.length - 1 && !card.working && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {(t.choices ?? []).map((choiceText) => (
+                      <button
+                        key={choiceText}
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void askChange(choiceText, true)}
+                        className="min-h-9 cursor-pointer rounded-full border border-accent/40 bg-surface px-3 text-[13px] font-semibold text-accent hover:bg-accent/10 disabled:opacity-50"
+                      >
+                        {choiceText}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {i === lastNote && hasOpen && decideBlock}
+              </ExecBubble>
+            ),
+          )}
+          {card.working && (
+            <ExecBubble status="working">
+              <p>Working on it. You can tell me to do it differently below.</p>
+              <WorkSteps steps={card.work_steps ?? []} now={card.work_now || "Starting…"} />
+              <div className="mt-1.5 flex justify-end">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void stopWork()}
+                  className="min-h-8 cursor-pointer px-1 text-[13px] font-semibold text-accent disabled:opacity-50"
+                >
+                  {running(STOPPING) ? STOPPING : "Stop"}
+                </button>
+              </div>
+            </ExecBubble>
+          )}
+          {busy && (step.label === "Writing it in…" || step.label === "Changing it…") && (
+            <p className="text-xs text-fg-subtle" aria-live="polite">Writing it into your reply…</p>
+          )}
+        </div>
+      )}
+      {!unconfirmed && !confirming && editing === null && (
+        <form
+          className="mt-3 flex items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void askChange();
+          }}
+        >
+          <input
+            type="text"
+            aria-label={card.working ? "Tell me to do it differently" : "Tell me what to change"}
+            placeholder={card.working ? "Tell me to do it differently…" : "Tell me what to change…"}
+            value={ask}
+            maxLength={500}
+            disabled={busy}
+            onChange={(e) => setAsk(e.target.value)}
+            className="min-h-11 min-w-0 flex-1 rounded-full border border-line-strong bg-surface px-4 text-[15px] text-fg placeholder:text-fg-subtle focus:outline-none focus:ring-2 focus:ring-accent/40"
+          />
+          {ask.trim() && (
+            <Button type="submit" variant="secondary" disabled={busy}>
+              Go
+            </Button>
+          )}
+        </form>
       )}
         </>
       )}

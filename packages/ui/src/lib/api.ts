@@ -2227,6 +2227,8 @@ export interface ReplyTurn {
   state?: "done" | "stopped" | "stuck" | string;
   steps?: string[];
   choices?: string[];
+  // A note on a change: the sentences it made new, quoted under it.
+  changed?: string[];
 }
 
 export interface ReplyCard {
@@ -2301,6 +2303,8 @@ export interface ReplyCard {
   from_executive?: boolean;
   // The Executive's name, for the From choice.
   executive_name?: string;
+  // Undo can take back the last change you asked for (undoReplyChange).
+  can_undo?: boolean;
 }
 
 // One thing a reply leaves you to decide (GET /delegation/replies).
@@ -2673,6 +2677,14 @@ export async function changeReply(id: number, text: string, opts: { work?: boole
     body: JSON.stringify({ text, work: Boolean(opts.work) }),
   });
   if (!res.ok) throw await delegationError(res, "Couldn't change your reply.");
+  return (await res.json()) as ReplyCard;
+}
+
+// Take back the last change you asked for on a reply card: its words as
+// they were before it (POST .../undo). Sends nothing.
+export async function undoReplyChange(id: number): Promise<ReplyCard> {
+  const res = await fetch(`${API_BASE}/delegation/replies/${id}/undo`, { method: "POST" });
+  if (!res.ok) throw await delegationError(res, "Couldn't undo that.");
   return (await res.json()) as ReplyCard;
 }
 

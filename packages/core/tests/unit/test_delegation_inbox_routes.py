@@ -280,9 +280,11 @@ def test_choosing_who_a_reply_goes_to(
 def test_choosing_who_a_reply_goes_from(
     client: TestClient, ids: dict[str, int], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from openexecutive.delegation import answers
+    from openexecutive.delegation import answers, send_from
 
     async def as_executive(model: str, system: str, turn: str) -> dict[str, Any]:
+        if system == send_from.AS_YOU_PROMPT:
+            return {"body": "Hi Dana,\n\nI'll get back to you soon."}
         return {"body": "Hi Dana,\n\nOlivia asked me to say she'll get back to you."}
 
     mailbox, card_id = _card(ids["principal"], monkeypatch)
@@ -300,9 +302,14 @@ def test_choosing_who_a_reply_goes_from(
     card = resp.json()
     assert card["from_executive"] is True and card["executive_name"]
     assert card["draft_body"].startswith("Hi Dana,\n\nOlivia asked me")
-    # Back to them: their words as they were.
+    # Back to them: the same words, written once more as them.
     back = client.put(url, json={"executive": False}, headers=OWNER).json()
-    assert back["from_executive"] is False and back["draft_body"] == before["draft_body"]
+    assert back["from_executive"] is False and back["draft_body"].startswith("Hi Dana,\n\nI'll get back to you soon.")
+    # A switch is no change to take back.
+    assert back["can_undo"] is False
+    undo = client.post(f"/delegation/replies/{card_id}/undo", headers=OWNER)
+    assert undo.status_code == 409 and undo.json()["detail"]["code"] == "nothing_to_undo"
+    assert client.post(f"/delegation/replies/{card_id}/undo", headers=TEAMMATE).status_code == 404
 
     # A rewrite that fails says so, and the card stays from them.
     async def broken(model: str, system: str, turn: str) -> dict[str, Any]:

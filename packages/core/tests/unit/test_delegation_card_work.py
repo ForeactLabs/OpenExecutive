@@ -79,6 +79,29 @@ def test_the_work_rewrites_the_reply_and_its_files_go_with_send(
     assert "$4,812.36" in mailbox.specs[0].body
 
 
+def test_the_work_on_a_switched_card_writes_as_the_executive(
+    db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.delegation import card_drafts, send_from
+
+    async def as_executive(model: str, system: str, turn: str) -> dict[str, Any]:
+        return {"body": "Hi Dana,\n\nOlivia asked me to reply."}
+
+    monkeypatch.setattr(answers, "_call_model", as_executive)
+    mailbox, card = _card(owner)
+    before = asyncio.run(send_from.switch(
+        _fresh(card), caller=_card_tests.LOCAL, resolver=owner.id, executive=True, gmail=mailbox,
+    ))["draft_body"]
+    # Its turn is told the reply goes from it, and who "I" is.
+    prompt = card_work.prompt_for(owner, inbox.card_payload(_fresh(card)), card.id)
+    assert "which goes from you" in prompt and send_from.AS_EXECUTIVE_RULE in prompt
+    changed = _apply(card, owner, mailbox, body="Hi Dana,\n\nI built the spreadsheet.", note="I built it.")
+    # Signed as the Executive, never with their signature.
+    assert changed["draft_body"] == f"Hi Dana,\n\nI built the spreadsheet.\n\n{send_from.sign_off(owner)}"
+    assert changed[card_drafts.UNDO_KEY] == before
+    assert changed["conversation"][-1]["changed"] == ["I built the spreadsheet."]
+
+
 def test_a_note_alone_keeps_the_reply(db: Path, owner: Any, models: dict[str, Any]) -> None:
     mailbox, card = _card(owner)
     before = inbox.card_payload(_fresh(card))["draft_body"]

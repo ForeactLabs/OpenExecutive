@@ -86,6 +86,8 @@ Routes:
                                     route (same checks); returns the card
                                     with changed_sentences. 429 past the
                                     hourly limit (delegation.answers)
+  POST   /delegation/replies/{id}/undo — take back the last change the
+                                    caller asked for (its words before it)
   POST   /delegation/replies/{id}/change — {text}: what to change, in the
                                     caller's words; rewritten and saved like
                                     an answer (same checks and limit); the
@@ -374,6 +376,8 @@ class ReplyTurnOut(BaseModel):
     state: str = ""
     steps: list[str] = Field(default_factory=list)
     choices: list[str] = Field(default_factory=list)
+    # A note on a change: the sentences it made new, quoted under it.
+    changed: list[str] = Field(default_factory=list)
 
 
 class ReplyCardOut(BaseModel):
@@ -441,6 +445,8 @@ class ReplyCardOut(BaseModel):
     from_executive: bool = False
     # The Executive's name, for the card's From choice.
     executive_name: str = ""
+    # Undo can take back the last change they asked for (POST .../undo).
+    can_undo: bool = False
 
 
 class RepliesOut(BaseModel):
@@ -1403,6 +1409,34 @@ async def change_delegation_reply(request: Request, decision_id: int, body: Repl
         raise _refuse(404, "not_found", "That reply isn't waiting for you any more.")
     out = ReplyCardOut(**{k: v for k, v in asdict(card).items() if k in ReplyCardOut.model_fields})
     return out.model_copy(update={"changed_sentences": changed, "send_now": go})
+
+
+@router.post("/delegation/replies/{decision_id}/undo", response_model=ReplyCardOut)
+async def undo_delegation_reply_change(request: Request, decision_id: int) -> ReplyCardOut:
+    """Take back the last change the caller asked for on one of their reply
+    cards: its words as they were before it (``card_drafts.undo``, the same
+    checks as any change). Their own cards only; sends nothing."""
+    from openexecutive.delegation import card_drafts
+    from openexecutive.delegation.inbox import DECISION_CLASS
+    from openexecutive.delegation.replies import cards
+    from openexecutive.delegation.reply_send import SendRefused
+    from openexecutive.memory.decision_ledger import get_decision_instance
+
+    person = _caller(request)
+    person_id = _person_id(person)
+    instance = get_decision_instance(decision_id)
+    if instance is None or instance.decision_class != DECISION_CLASS or instance.approver_person_id != person_id:
+        raise _refuse(404, "not_found", "That reply isn't waiting for you any more.")
+    try:
+        await card_drafts.undo(instance, caller=api_caller.caller(request), resolver=person_id)
+    except SendRefused as refused:
+        raise HTTPException(
+            status_code=refused.status, detail={"code": refused.code, "message": refused.message, **refused.extra},
+        ) from None
+    card = next((c for c in cards(person) if c.decision_id == decision_id), None)
+    if card is None:
+        raise _refuse(404, "not_found", "That reply isn't waiting for you any more.")
+    return ReplyCardOut(**{k: v for k, v in asdict(card).items() if k in ReplyCardOut.model_fields})
 
 
 @router.post("/delegation/replies/{decision_id}/stop", response_model=ReplyCardOut)

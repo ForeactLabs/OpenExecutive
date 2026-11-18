@@ -151,6 +151,11 @@ and still set send_from.
 draft as it was: the card asks them to confirm the send. That is never \
 needs_tools. With who it goes from too ("send it from you"), also set \
 send_from. A change of words with it is not send_now: do the change.
+15. <sender>, when given, says the email goes from the assistant, not the \
+writer, and who "I" is in it. Follow it in every sentence you write or \
+change, and keep <draft> written that way; it overrides rule 6 on who "I" \
+is. A <change> about whose name a sentence uses ("say you, not John") is a \
+change of words: do it.
 
 Return the new body (and gist, note, questions) through rewrite_reply."""
 
@@ -478,7 +483,7 @@ def _today(now: datetime | None) -> str:
 
 def _render_turn(
     writer_name: str, recipients: list[str], draft: str, pairs: list[_Pair], today: str, gist: str = "",
-    change: str = "", news: list[dict[str, Any]] | None = None,
+    change: str = "", news: list[dict[str, Any]] | None = None, sender: str = "",
 ) -> str:
     from openexecutive.delegation.ghostwriter import one_line
     from openexecutive.utils.prompt_blocks import no_tags, plain, scrub_block_line
@@ -501,6 +506,7 @@ def _render_turn(
         block("today", today),
         block("writer", f"Name: {one_line(writer_name, 120)}"),
         block("recipients", "\n".join(f"- {r}" for r in recipients) or "(none)"),
+        *([block("sender", sender)] if sender else []),
         # The draft was written from other people's email: it can't open or
         # close a tag either.
         block("draft", draft),
@@ -542,6 +548,7 @@ async def rewrite(
     that can confirm a send takes "send it" as a go (``SendNow``); anywhere
     else it leaves the words as they are. Raises ``SendRefused``."""
     from openexecutive.config import get_settings
+    from openexecutive.delegation import send_from
     from openexecutive.delegation.ghostwriter import (
         _drop_name_before_signature,
         clean_gist,
@@ -580,7 +587,8 @@ async def rewrite(
     stored = get_voice(person.id)
     names = (person.full_name or "").split()
     body = str(payload.get("draft_body") or "")
-    main, tail = _split_tail(body, stored.profile.signature)
+    # The card's one version, for whoever sends it (``send_from``).
+    main, tail = send_from.split(person, payload, body)
     recipients = [a for a in payload.get("draft_to") or [] if isinstance(a, str)]
     system = REWRITE_PROMPT + "\n\n" + (
         render_voice_block(stored.profile, first_name=names[0] if names else "them")
@@ -589,7 +597,7 @@ async def rewrite(
     gist = str(payload.get("gist") or "")
     turn = _render_turn(
         " ".join(names) or str(person.email or ""), recipients, main, pairs, _today(now), gist,
-        change=change, news=news,
+        change=change, news=news, sender=send_from.writer_note(payload),
     )
     try:
         written = await _call_model(composer_model(), system, turn)
@@ -607,7 +615,7 @@ async def rewrite(
         # Who it goes from is the card's to switch (it rewrites the words
         # itself), after any change of words asked with it.
         raw_words = written.get("body")
-        if not isinstance(raw_words, str) or raw_words.strip() == _split_tail(body, stored.profile.signature)[0].strip():
+        if not isinstance(raw_words, str) or raw_words.strip() == main.strip():
             raise SendFrom(executive=sender == "executive")
     else:
         sender = None
@@ -617,7 +625,7 @@ async def rewrite(
         # A question gets an answer and leaves the reply word for word.
         if not str(written.get("note") or "").strip():
             raise SendRefused(502, "rewrite_failed", "Couldn't answer that. Try asking again.")
-        return body, _turns(payload, written, change=change, news=[], now=now), []
+        return body, _turns(payload, written, change=change, news=[], now=now, changed=[]), []
     raw = written.get("body")
     if not isinstance(raw, str) or not raw.strip():
         raise SendRefused(502, "rewrite_failed", "Couldn't write that into your reply. Try again, or tap Edit.")
@@ -648,17 +656,20 @@ async def rewrite(
     if gist:
         new_gist = written.get("gist")
         extra["gist"] = clean_gist(new_gist) if isinstance(new_gist, str) else ""
+    new = changed_sentences(main, new_main)
     if change or news:
-        extra.update(_turns(payload, written, change=change, news=news or [], now=now))
+        extra.update(_turns(payload, written, change=change, news=news or [], now=now, changed=new))
     if sender is not None:
         # Asked with a change of words: ``change`` switches it after saving.
         extra[_SEND_FROM_ASKED] = sender
     if news:
         extra.update(_new_questions(payload, written.get("questions")))
-    return new_body, extra, changed_sentences(main, new_main)
+    return new_body, extra, new
 
 
-_TURN_LISTS = ("files", "steps", "choices")
+# A note's ``changed``: the sentences its change made new, quoted under it
+# on the card so nobody has to look for them in the reply.
+_TURN_LISTS = ("files", "steps", "choices", "changed")
 
 
 def conversation(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -681,7 +692,7 @@ def conversation(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _turns(
     payload: dict[str, Any], written: dict[str, Any], *, change: str, news: list[dict[str, Any]],
-    now: datetime | None,
+    now: datetime | None, changed: list[str],
 ) -> dict[str, Any]:
     from openexecutive.delegation.ghostwriter import clean_gist
 
@@ -694,6 +705,7 @@ def _turns(
         "kind": "note",
         "text": note or ("I brought your reply up to date." if news else "I changed your reply."),
         "at": (now or datetime.now(UTC)).isoformat(),
+        **({"changed": changed} if changed else {}),
     })
     return {CONVERSATION_KEY: turns[-CONVERSATION_MAX:]}
 

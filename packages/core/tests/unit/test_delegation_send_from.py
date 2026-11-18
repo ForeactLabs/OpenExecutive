@@ -29,13 +29,16 @@ _fresh = _drafts_tests._fresh
 
 @pytest.fixture
 def rewrites(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """The model's rewrite as the Executive: what it was given, and a body."""
+    """The model's rewrite for the new sender: which prompt it was given,
+    and a body."""
     seen: list[str] = []
 
     async def fake(model: str, system: str, turn: str) -> dict[str, Any]:
         seen.append(system)
         if system == send_from.AS_EXECUTIVE_PROMPT:
             return {"body": "Hi Dana,\n\nOlivia asked me to say she'll get back to you shortly."}
+        if system == send_from.AS_YOU_PROMPT:
+            return {"body": "Hi Dana,\n\nI'll get back to you shortly."}
         return {"body": "unused"}
 
     monkeypatch.setattr(answers, "_call_model", fake)
@@ -78,15 +81,18 @@ def test_switch_to_the_executive_and_back(
     assert saved[send_from.FROM_EXECUTIVE] is True
     assert saved["draft_body"].startswith("Hi Dana,\n\nOlivia asked me")
     assert saved["draft_body"].endswith(send_from.sign_off(owner))
-    assert saved[send_from.WORDS_AS_YOU] == before
+    # One version: no hidden copy of their words kept anywhere.
+    assert before not in json.dumps(saved)
     assert saved["conversation"][-1]["text"] == send_from.NOTE_TO_EXECUTIVE
     shown = replies.cards(owner)[0]
     assert shown.from_executive is True and shown.executive_name
-    # Back to them: their own words, as they were, with no model call.
-    calls = len(rewrites)
+    # Back to them: the card's words written once more, as them.
     back = _switch(card, mailbox, owner, False)
-    assert back["draft_body"] == before and back[send_from.FROM_EXECUTIVE] is False
-    assert len(rewrites) == calls
+    assert rewrites[-1] == send_from.AS_YOU_PROMPT
+    assert back["draft_body"].startswith("Hi Dana,\n\nI'll get back to you shortly.")
+    assert send_from.sign_off(owner) not in back["draft_body"]
+    assert back[send_from.FROM_EXECUTIVE] is False
+    assert back["conversation"][-1]["text"] == send_from.NOTE_TO_YOU
 
 
 def test_only_its_person_switches_it(db: Path, owner: Any, models: dict[str, Any], rewrites: list[str]) -> None:
@@ -200,63 +206,104 @@ def test_send_it_from_you_switches_the_sender_and_waits(
     assert saved["conversation"][-1]["text"] == send_from.NOTE_TO_EXECUTIVE
 
 
-def test_a_rewrite_on_a_switched_card_keeps_it_from_the_executive(
+def test_a_change_on_a_switched_card_edits_the_words_that_go(
     db: Path, owner: Any, models: dict[str, Any], rewrites: list[str],
 ) -> None:
     mailbox, card = _card(owner)
-    theirs = inbox.card_payload(_fresh(card))["draft_body"]
-    _switch(card, mailbox, owner, True)
+    shown = _switch(card, mailbox, owner, True)["draft_body"]
     given: list[str] = []
 
     async def write(person: Any, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         given.append(payload["draft_body"])
-        return "Hi Dana,\n\nFriday works.\n\nOlivia", {}
+        return f"Hi Dana,\n\nI'll get back to you Friday.\n\n{send_from.sign_off(person)}", {}
 
     saved = asyncio.run(card_drafts.edit(_fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, rewrite=write))
-    # Rewritten from their own words, never the Executive's.
-    assert given == [theirs]
-    # Still from the Executive: their new words kept, the card's written again.
+    # The change is made to the words on the card, the ones that go.
+    assert given == [shown]
     assert saved[send_from.FROM_EXECUTIVE] is True
-    assert saved[send_from.WORDS_AS_YOU] == "Hi Dana,\n\nFriday works.\n\nOlivia"
-    assert saved["draft_body"].endswith(send_from.sign_off(owner))
-    # Back to them: the new words, as they wrote them.
-    back = _switch(card, mailbox, owner, False)
-    assert back["draft_body"] == "Hi Dana,\n\nFriday works.\n\nOlivia"
-    # A change by hand on the card is the Executive's words, kept as typed.
-    _switch(card, mailbox, owner, True)
+    assert saved["draft_body"] == f"Hi Dana,\n\nI'll get back to you Friday.\n\n{send_from.sign_off(owner)}"
+    # And can be taken back.
+    assert saved[card_drafts.UNDO_KEY] == shown
+    undone = asyncio.run(card_drafts.undo(_fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox))
+    assert undone["draft_body"] == shown and not card_drafts.can_undo(undone)
+    assert undone["conversation"][-1]["text"] == card_drafts.NOTE_UNDONE
+    with pytest.raises(SendRefused) as err:
+        asyncio.run(card_drafts.undo(_fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox))
+    assert err.value.code == "nothing_to_undo"
+    # A change by hand is kept as typed, and drops the undo.
+    asyncio.run(card_drafts.edit(_fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, rewrite=write))
     kept = asyncio.run(card_drafts.edit(
         _fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, text="Hi Dana,\n\nShort and sweet.",
     ))
-    assert kept[send_from.FROM_EXECUTIVE] is True and kept["draft_body"] == "Hi Dana,\n\nShort and sweet."
-    assert kept[send_from.WORDS_AS_YOU] == "Hi Dana,\n\nFriday works.\n\nOlivia"
-    # Switching back puts their own words back and says the change isn't in them.
-    again = _switch(card, mailbox, owner, False)
-    assert again["draft_body"] == "Hi Dana,\n\nFriday works.\n\nOlivia"
-    assert again["conversation"][-1]["text"] == send_from.NOTE_TO_YOU_WITHOUT_CHANGE
+    assert kept["draft_body"] == "Hi Dana,\n\nShort and sweet." and not card_drafts.can_undo(kept)
 
 
-def test_a_rewrite_keeps_their_words_in_their_mailbox(
+def test_a_switched_card_tells_the_rewrite_who_i_is(
+    db: Path, owner: Any, models: dict[str, Any], rewrites: list[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mailbox, card = _card(owner)
+    _switch(card, mailbox, owner, True)
+    turns: list[str] = []
+
+    async def fake(model: str, system: str, turn: str) -> dict[str, Any]:
+        turns.append(turn)
+        return {"body": "Hi Dana,\n\nI split the taxes 50/50.", "note": "Said I split them."}
+
+    monkeypatch.setattr(answers, "_call_model", fake)
+    saved, changed, _ = asyncio.run(answers.change(
+        _fresh(card), caller=LOCAL, resolver=owner.id, text="where you say Olivia split taxes, say you", gmail=mailbox,
+    ))
+    assert "<sender>" in turns[0] and send_from.AS_EXECUTIVE_RULE.split(":")[0] in turns[0]
+    # The draft it was given is the Executive's, without its sign-off.
+    assert "Olivia asked me" in turns[0] and send_from.sign_off(owner) not in turns[0]
+    assert saved["draft_body"] == f"Hi Dana,\n\nI split the taxes 50/50.\n\n{send_from.sign_off(owner)}"
+    # The note quotes what changed.
+    assert changed == ["I split the taxes 50/50."]
+    assert saved["conversation"][-1]["changed"] == changed
+    assert replies.cards(owner)[0].conversation[-1]["changed"] == changed
+    # Nothing tells a card from them who "I" is: the prompt's default.
+    assert send_from.writer_note({}) == ""
+
+
+def test_the_switch_is_told_what_the_executive_did(
+    db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.memory.decision_ledger import update_open_payload
+
+    mailbox, card = _card(owner)
+    payload = inbox.card_payload(_fresh(card))
+    done = {"kind": "note", "state": "done", "text": "I built the spreadsheet.", "at": "2026-11-17T10:00:00+00:00"}
+    assert update_open_payload(card.id, {**payload, "conversation": [done]}, expected_json=_fresh(card).proposed_payload_json)
+    turns: list[str] = []
+
+    async def fake(model: str, system: str, turn: str) -> dict[str, Any]:
+        turns.append(turn)
+        return {"body": "Hi Dana,\n\nI built the spreadsheet."}
+
+    monkeypatch.setattr(answers, "_call_model", fake)
+    _switch(card, mailbox, owner, True)
+    assert "<work_done>\n- I built the spreadsheet.\n</work_done>" in turns[0]
+
+
+def test_their_mailbox_draft_waits_while_it_goes_from_the_executive(
     db: Path, owner: Any, models: dict[str, Any], rewrites: list[str],
 ) -> None:
     inbox.set_mailbox_drafts(owner.id, True, updated_by="test")
     mailbox, card = _card(owner)
+    draft_id = inbox.card_payload(_fresh(card))["draft_id"]
+    theirs = mailbox.drafts[draft_id].message.text
     _switch(card, mailbox, owner, True)
 
     async def write(person: Any, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-        return "Hi Dana,\n\nFriday works.\n\nOlivia", {}
+        return "Hi Dana,\n\nOlivia asked me: Friday works.", {}
 
-    saved = asyncio.run(card_drafts.edit(_fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, rewrite=write))
-    there = mailbox.drafts[saved["draft_id"]].message.text
-    assert "Friday works." in there and "asked me" not in there
-    # A change by hand on the card is the Executive's words: their draft
-    # keeps their own, and switching back finds the two the same.
-    edited = asyncio.run(card_drafts.edit(
-        _fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, text="Hi Dana,\n\nOlivia asked me: Friday.",
-    ))
-    assert edited["draft_body"] == "Hi Dana,\n\nOlivia asked me: Friday."
-    assert "asked me" not in mailbox.drafts[saved["draft_id"]].message.text
+    asyncio.run(card_drafts.edit(_fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, rewrite=write))
+    # It never goes from their mailbox in the Executive's words.
+    assert mailbox.drafts[draft_id].message.text == theirs
+    # From them again: their draft gets the card's words.
     back = _switch(card, mailbox, owner, False)
-    assert back["draft_body"] == mailbox.drafts[saved["draft_id"]].message.text
+    assert mailbox.drafts[draft_id].message.text == back["draft_body"]
+    assert "I'll get back to you shortly." in back["draft_body"]
 
 
 def test_a_chat_app_card_shows_who_it_goes_from_when_posted() -> None:
