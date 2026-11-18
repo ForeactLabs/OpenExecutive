@@ -243,3 +243,18 @@ def test_lead_ins_keep_the_forward_and_stay_the_senders() -> None:
         "As Dana <d@x> wrote yesterday:\nCan we?"
     )
 
+
+def test_a_reply_whose_quote_opens_with_a_forward_marker_is_history() -> None:
+    from openexecutive.integrations.email_poller import _forwarded, split_forward
+
+    body = (
+        "Gracias.\n\nEl lun, 3 nov 2026 a las 10:00, Dana <d@x> escribi\u00f3:\n"
+        "> Begin forwarded message:\n> From: Bank\n> old text"
+    )
+    own, forwarded = split_forward(body, "Re: Rates")
+    assert forwarded == "" and "old text" not in own
+    raw = "Message ID: 1\nSubject: AW: Rates\nFrom: owner@example.com\n\n--- BODY ---\n" + body
+    assert not _forwarded(raw)
+    # The same quote in a forward is the forwarded email.
+    assert split_forward(body, "Fwd: Rates")[1] == "From: Bank\nold text"
+

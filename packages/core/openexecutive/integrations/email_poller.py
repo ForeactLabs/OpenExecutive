@@ -219,6 +219,11 @@ _FORWARDED_RE = re.compile(r"^-{2,}\s*Forwarded message\s*-{2,}", re.IGNORECASE)
 # with ">" below it ("> Begin forwarded message:"), or unquoted.
 _BEGIN_FORWARDED_RE = re.compile(r"^(>\s?)?Begin forwarded message:\s*$", re.IGNORECASE)
 _FORWARD_SUBJECT_RE = re.compile(r"^\s*(\[[^\]]{0,40}\]\s*)*(fwd?|fw|wg|tr|rv)(\[\d{1,3}\])?\s*:", re.IGNORECASE)
+# A reply's subject prefix, in the common mail languages.
+_REPLY_SUBJECT_RE = re.compile(
+    r"^\s*(\[[^\]]{0,40}\]\s*)*(re|aw|sv|vs|antw|antwort|rif|res|odp|ynt|vá|отв|回复|答复)(\[\d{1,3}\])?\s*[:：]",
+    re.IGNORECASE,
+)
 _OUTLOOK_RULE_RE = re.compile(r"^_{10,}\s*$")
 _OUTLOOK_HEADER_RE = re.compile(r"^From:\s")
 _OUTLOOK_SENT_RE = re.compile(r"^(Sent|Date):\s")
@@ -394,15 +399,16 @@ def _retrieval_query(raw_email: str) -> str:
     return (words or topic or raw_email)[:500]
 
 
-def _new_text_lines(body: list[str]) -> tuple[list[str], bool]:
+def _new_text_lines(body: list[str], subject: str = "") -> tuple[list[str], bool]:
     """The sender's own lines, without quoted replies, stopping where an
     older message is appended below. Returns (lines, whether a forwarded
-    message was cut off)."""
-    kept, cut_at, forwarded = _scan_new_text(body)
+    message was cut off). A ">"-quoted forward does not count under a
+    reply ``subject``."""
+    kept, cut_at, forwarded = _scan_new_text(body, subject)
     return kept, forwarded and cut_at is not None
 
 
-def _scan_new_text(body: list[str]) -> tuple[list[str], int | None, bool]:
+def _scan_new_text(body: list[str], subject: str = "") -> tuple[list[str], int | None, bool]:
     """The sender's own lines, the index where an older message appended
     below them starts (None when none is), and whether that line opened a
     forwarded message rather than reply history.
@@ -416,6 +422,9 @@ def _scan_new_text(body: list[str]) -> tuple[list[str], int | None, bool]:
     """
     kept: list[str] = []
     i = 0
+    # A ">"-quoted forward marker in a reply (Re:, AW:, SV: ...) is quoted
+    # history, whatever language the reply's attribution line is in.
+    quoted_forwards = _REPLY_SUBJECT_RE.match(subject or "") is None
     replied = False
     quoted_forward: int | None = None
 
@@ -428,7 +437,7 @@ def _scan_new_text(body: list[str]) -> tuple[list[str], int | None, bool]:
         text = body[i].strip()
         if _FORWARDED_RE.match(text) or (
             not replied and quoted_forward is None and _BEGIN_FORWARDED_RE.match(text)
-            and not (text.startswith(">") and _inside_quote(body, i))
+            and not (text.startswith(">") and (not quoted_forwards or _inside_quote(body, i)))
         ):
             if not text.startswith(">"):
                 return stop(i, True)
@@ -514,7 +523,7 @@ def split_forward(
     except in a forward (``subject`` Fwd:/Fw:), where an Outlook-style header
     block is the forwarded message."""
     lines = body.splitlines()
-    kept, cut_at, forwarded = _scan_new_text(lines)
+    kept, cut_at, forwarded = _scan_new_text(lines, subject)
     is_forward = _FORWARD_SUBJECT_RE.match(subject or "") is not None
     if cut_at is None and is_forward:
         # A forward whose marker is in another language ("Anfang der
@@ -568,7 +577,7 @@ def _email_memory_text(raw: str) -> str:
         (ln.split(":", 1)[1].strip() for ln in header if ln.lower().startswith("subject:")),
         "",
     )
-    new_lines, forwarded = _new_text_lines(body)
+    new_lines, forwarded = _new_text_lines(body, subject)
     new_text = "\n".join(new_lines).strip()
     names = [name for name in map(_attachment_name, attachments) if name]
 
@@ -1374,7 +1383,7 @@ def _unproven_notice(from_addr: str, person: Any, principal_name: str) -> str:
 def _forwarded(raw_email: str) -> bool:
     """Whether the message carries a forwarded one below the sender's text."""
     _header, body, _attachments = _split_gmail_content(raw_email)
-    return _new_text_lines(body)[1]
+    return _new_text_lines(body, _header_subject(raw_email))[1]
 
 
 def _private_to_principal_mail(from_addr: str, raw_email: str) -> bool:
