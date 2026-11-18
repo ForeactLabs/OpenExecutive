@@ -79,7 +79,7 @@ export default function LeadTrainingCard({
   // What it would send or set, shown in full: the card's own fields, or a
   // connected app's email.
   // A connected app's email shows who it goes to too: its details, in full.
-  const details = card?.details ?? [];
+  const details = card && card.saidDetails.length > 0 ? card.saidDetails : card?.details ?? [];
   // Either way, with what was said on the card: what Approve sends.
   const shownFields =
     details.length > 0 ? details : fields.map((f) => ({ ...f, value: card?.said[f.field] ?? f.value }));

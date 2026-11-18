@@ -68,6 +68,8 @@ export default function HeldActionCard({
 
   // What was said on the card, and the step's fields as it shows them.
   const said = held?.said ?? {};
+  // Its Do it sends what was said, so the step shows with it.
+  const shownDetails = held && held.saidDetails.length > 0 ? held.saidDetails : held?.details ?? [];
   const seen = { ...Object.fromEntries((held?.fields ?? []).map((f) => [f.field, f.value])), ...said };
 
   return (
@@ -99,11 +101,11 @@ export default function HeldActionCard({
         />
       ) : (
       <>
-      {held && held.details.length > 0 && (
+      {held && shownDetails.length > 0 && (
         <div className="mt-3">
           <div className="mb-0.5 text-xs font-semibold uppercase tracking-wide text-fg-subtle">What I&apos;ll do</div>
           <dl className="flex flex-col gap-2 rounded-xl border border-line bg-surface p-3">
-            {held.details.map((d) => (
+            {shownDetails.map((d) => (
               <div key={d.field} className="min-w-0">
                 <dt className="text-xs font-semibold uppercase tracking-wide text-fg-muted">{d.field}</dt>
                 <dd className="whitespace-pre-wrap break-words text-[15px] leading-snug text-fg"><CardDetailValue detail={d} /></dd>

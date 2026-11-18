@@ -128,10 +128,11 @@ def _served_json(raw: str | None) -> str | None:
     shown = card_details.served(payload)
     said = payload.get(SAID_INPUT)
     if isinstance(said, dict) and said and not isinstance(payload.get("steps"), list):
-        # The page's card sends what was said on it with its Approve, so its
-        # step shows with it. A chat card shows (and sends) the step as filed.
-        details = card_details.served({**payload, "input": {**payload["input"], **said}})["details"]
-        shown = {**shown, "details": details}
+        # The step with what was said on its card, for the cards whose
+        # Approve sends it (``edits.input``). ``details`` stay the step as
+        # filed: what a plain Approve, in chat or on a page, carries out.
+        said_details = card_details.served({**payload, "input": {**payload["input"], **said}})["details"]
+        shown = {**shown, "said_details": said_details}
     return json.dumps(shown, ensure_ascii=False)
 
 

@@ -534,8 +534,12 @@ def test_words_on_a_held_step_rewrite_its_fields_and_approve_sends_them(
     assert served["input"]["body"] == "Draft text" and served["said_input"] == {"body": "Short text"}
     assert [f["value"] for f in served["fields"]] == ["Hi", "Draft text"]
     # What the card shows of the step is what its Approve sends.
-    shown = " ".join(str(d.get("value", "")) for d in served["details"])
-    assert "Short text" in shown and "Draft text" not in shown
+    # A card that sends what was said shows it; a plain Approve's details
+    # are the step as filed, which is what it carries out.
+    with_said = " ".join(str(d.get("value", "")) for d in served["said_details"])
+    assert "Short text" in with_said and "Draft text" not in with_said
+    as_filed = " ".join(str(d.get("value", "")) for d in served["details"])
+    assert "Draft text" in as_filed and "Short text" not in as_filed
     # A chat card, whose Approve sends the step as filed, shows it as filed.
     from openexecutive.integrations import channel_cards
 

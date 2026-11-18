@@ -7412,6 +7412,8 @@ export interface LeadCardPayload {
   where: string;
   // What a connected app's call would send, read-only (to, subject, message).
   details: LeadCardField[];
+  // The same with what was said on the card, which its Approve sends.
+  saidDetails: LeadCardField[];
   reason: string;
   kind: string;
   fields: LeadCardField[];
@@ -7466,6 +7468,7 @@ export async function getLeadCard(id: number, signal?: AbortSignal): Promise<Lea
     headline: String(payload.headline ?? ""),
     where: String(payload.where ?? ""),
     details: Array.isArray(payload.details) ? payload.details.map(leadDetail) : [],
+    saidDetails: Array.isArray(payload.said_details) ? payload.said_details.map(leadDetail) : [],
     reason: String(payload.reason ?? ""),
     kind: String(payload.kind ?? ""),
     fields: Array.isArray(payload.fields) ? payload.fields : [],
@@ -7483,6 +7486,9 @@ export interface HeldActionPayload {
   reason: string;
   requestedBy: string;
   details: CardDetail[];
+  // The step with what was said on the card: what an Approve that sends
+  // `said` carries out. Empty when nothing was said.
+  saidDetails: CardDetail[];
   // What Edit may change before Approve (an email's subject and text).
   fields: LeadCardField[];
   // What was said on the card, put into its fields: Approve sends it.
@@ -7502,6 +7508,7 @@ export async function getHeldAction(id: number, signal?: AbortSignal): Promise<H
     reason: String(payload.reason ?? ""),
     requestedBy: String(payload.requested_by ?? ""),
     details: cardDetails(details),
+    saidDetails: cardDetails(Array.isArray(payload.said_details) ? payload.said_details : []),
     fields: (Array.isArray(payload.fields) ? payload.fields : []).filter(
       (f: { field?: unknown; value?: unknown }) => typeof f?.field === "string" && typeof f?.value === "string",
     ),
