@@ -625,9 +625,7 @@ def test_a_part_fits_the_room_the_prompt_leaves() -> None:
     assert "read all it can hold" in spent
 
 
-def test_a_local_model_at_the_default_window_says_so_once(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_a_local_model_at_the_default_window_says_so_once(monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
 
     from openexecutive.providers import registry
@@ -636,22 +634,22 @@ def test_a_local_model_at_the_default_window_says_so_once(
         default_model="llama", local_models_enabled=True, local_models=["llama"],
         local_context_tokens=32_768, model_fields_set=set(),
     )
+    said: list[str] = []
     monkeypatch.setattr(registry, "get_settings", lambda: settings)
     monkeypatch.setattr(registry, "_LOCAL_CONTEXT_WARNED", False)
-    with caplog.at_level("WARNING"):
-        registry.reading_limits_for("llama")
-        registry.reading_limits_for("llama")
-    assert [r.message for r in caplog.records].count(
+    monkeypatch.setattr(registry.logger, "warning", lambda msg, *a: said.append(msg % a))
+    registry.reading_limits_for("llama")
+    registry.reading_limits_for("llama")
+    assert said == [
         "LOCAL_CONTEXT_TOKENS is not set: local models are read as holding 32768 tokens. "
         "Set it to the context the local server is started with."
-    ) == 1
+    ]
 
     settings.model_fields_set = {"local_context_tokens"}
     monkeypatch.setattr(registry, "_LOCAL_CONTEXT_WARNED", False)
-    caplog.clear()
+    said.clear()
     registry.reading_limits_for("llama")
-    assert not caplog.records
-
+    assert said == []
 
 def test_a_long_write_up_after_reading_a_lot_carries_on_while_the_window_has_room() -> None:
     """Having read all a turn may read asks for the write-up; a write-up cut
