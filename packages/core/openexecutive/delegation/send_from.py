@@ -303,12 +303,14 @@ async def switch(
 
 async def switch_for_work(
     card_id: int, person: Any, *, executive: bool, gmail: Any = None, words: str = "", done: str = "",
-) -> dict[str, Any]:
+) -> str | None:
     """``switch``, from the card's own work turn (``reply_card_tools``),
     which already runs as that card's person. ``words``: the reply the turn
     wrote with it, for the sender it was told of (``card_work.prompt_for``),
     so they are the ones written for the new sender; ``done``: its note,
-    what it did. Raises ``SendRefused``."""
+    what it did. Returns the card's words from before the switch, None when
+    it already went from that sender (nothing switched, ``words`` unused).
+    Raises ``SendRefused``."""
     from openexecutive.delegation.inbox import SENDING, _audit, card_payload
     from openexecutive.delegation.reply_send import SendRefused
     from openexecutive.memory.decision_ledger import STATUS_PROPOSED, get_decision_instance
@@ -322,11 +324,13 @@ async def switch_for_work(
     payload = card_payload(card)
     if card.approver_person_id != person.id or payload.get("person_id") != person.id:
         raise SendRefused(403, "not_yours", "That card isn't this person's.")
-    saved = await _switch(card, person, payload, executive=executive, gmail=gmail, words=words, done=done)
+    if is_from_executive(payload) == executive:
+        return None
+    await _switch(card, person, payload, executive=executive, gmail=gmail, words=words, done=done)
     _audit("delegation_reply_from", f"Person {person.id}'s card work chose who a reply goes from", {
         "person_id": person.id, "decision_id": card_id, "from_executive": executive,
     })
-    return saved
+    return str(payload.get("draft_body") or "")
 
 
 def _claim_as_checked(instance: Any, resolver: int | None) -> bool:

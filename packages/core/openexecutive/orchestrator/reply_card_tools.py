@@ -255,29 +255,29 @@ async def handle_update_reply_card(tool_input: dict[str, Any]) -> str:
         files += [(f.name, f.mime, f.data) for f in resolved.items]
     # Who it goes from first, while the card still shows it being worked on:
     # a Send tapped before the switch would otherwise go as the person.
-    from openexecutive.delegation import send_from
-    from openexecutive.delegation.inbox import card_payload
-
     sender = tool_input.get("send_from")
-    # Already from that sender: nothing to switch, and the body goes on as written.
-    switched = sender in ("executive", "me") and send_from.is_from_executive(card_payload(card)) != (sender == "executive")
     body = tool_input.get("body")
     body = body if isinstance(body, str) else ""
     note = str(tool_input.get("note") or "")
     switched_from: str | None = None
-    if switched:
-        before = str(card_payload(card).get("draft_body") or "")
+    if sender in ("executive", "me"):
+        from openexecutive.delegation import send_from
+
         try:
             # The body was written for who sent it before: the switch writes
-            # it once for the new sender, told what this run did.
-            await send_from.switch_for_work(
+            # it once for the new sender, told what this run did. None when it
+            # already went from them: the body goes on as written.
+            switched_from = await send_from.switch_for_work(
                 card_id, writer.person, executive=sender == "executive", gmail=writer.mailbox, words=body, done=note,
             )
         except SendRefused as refused:
             return _error(f"Nothing was changed: who it goes from couldn't be switched: {refused.message}")
-        if body.strip():
-            # Already on the card: the run still wrote the reply.
-            switched_from, body = before, ""
+    switched = switched_from is not None
+    if not body.strip():
+        switched_from = None
+    elif switched:
+        # Already on the card: the run still wrote the reply.
+        body = ""
     try:
         await card_work.apply(
             card_id, writer.person, body=body, switched_from=switched_from,

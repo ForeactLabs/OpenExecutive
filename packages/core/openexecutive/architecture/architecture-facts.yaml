@@ -12070,15 +12070,21 @@ delegation:
     the mailbox draft's To/Cc, never an address from the request; a stranger's
     card starts on the sender only), and From: the person (default) or the
     Executive (PUT /delegation/replies/{id}/from {executive},
-    delegation/send_from.py; the words are rewritten as the Executive writing
-    for them, signed "<Executive>, for <first name>", their own kept in
-    words_as_you; Send then goes from the Executive's own mailbox with them
-    on cc and the card's files, as an approved step via
-    take_the_lead.carry_out; typed on the card, the rewrite's send_from or
-    update_reply_card's send_from switches the same card; a rewrite on a
-    switched card is written from their own words (send_from.theirs) and
-    the card stays from the Executive, written again from them
-    (send_from.restyled), their mailbox's draft keeping their words; Send
+    delegation/send_from.py; the card keeps one version of the words,
+    draft_body, the email that goes: a switch rewrites it once for the new
+    sender (AS_EXECUTIVE_PROMPT keeps "I" for the Executive's own work,
+    given the card's done notes; AS_YOU_PROMPT writes it back as them),
+    signed "<Executive>, for <first name>" from the Executive; Send then
+    goes from the Executive's own mailbox with them on cc and the card's
+    files, as an approved step via take_the_lead.carry_out; typed on the
+    card, the rewrite's send_from or update_reply_card's send_from switches
+    the same card (a work turn's body with it is the switch's source, told
+    the turn's note); every later change, answer, catch-up and the card's
+    work edit those same words, told who sends them
+    (send_from.writer_note); their mailbox's draft is left alone while it
+    goes from the Executive and made again from the card when it goes from
+    them again (refused when changed there, card closed when gone); a
+    change asked for on the card can be undone once (before_change); Send
     asks again on newer mail or a change the tapped card didn't show,
     card_drafts.asks_again, shared with their own Send, a chat app's card
     judged by when it was posted (channel_cards.shown_at); replies on their
