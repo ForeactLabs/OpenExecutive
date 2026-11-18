@@ -476,8 +476,20 @@ def test_a_tap_on_a_card_no_chat_shows_whole_does_nothing(monkeypatch: pytest.Mo
         raise AssertionError("not done")
 
     monkeypatch.setattr(channel_cards, "card_text", lambda decision_id: None)
+    monkeypatch.setattr(channel_cards, "_waits", lambda decision_id: True)
     monkeypatch.setattr(channel_cards, "resolve", done)
     monkeypatch.setattr(channel_cards, "_switch", done)
     tapped = asyncio.run(channel_cards.tap(channel_cards.Choice(7, choice, "0000beef"), SimpleNamespace(id=3)))
     assert tapped.line.startswith("Not done: this card changed. Open it in the app: ")
     assert tapped.line.endswith("/cards/7") and tapped.options == ()
+
+
+def test_a_tap_on_a_card_handled_meanwhile_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def resolve(decision_id: int, who: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None) -> str:
+        return "This card was already handled."
+
+    monkeypatch.setattr(channel_cards, "card_text", lambda decision_id: None)
+    monkeypatch.setattr(channel_cards, "_waits", lambda decision_id: False)
+    monkeypatch.setattr(channel_cards, "resolve", resolve)
+    tapped = asyncio.run(channel_cards.tap(channel_cards.Choice(7, "a", "0000beef"), SimpleNamespace(id=3)))
+    assert tapped.line == "This card was already handled."

@@ -447,8 +447,9 @@ async def tap(tapped: Choice, person: Any) -> Tapped:
     # Taken before the card is read: a change saved after it isn't shown.
     read_at = datetime.now(UTC).isoformat()
     current = card_text(decision_id) if choice != SKIP else None
-    if choice != SKIP and current is None:
+    if choice != SKIP and current is None and _waits(decision_id):
         # Its words no longer fit a chat: nothing to check the tap against.
+        # (One that waits no more is answered as handled, below.)
         return Tapped(f"Not done: this card changed. Open it in the app: {_app_link(decision_id)}")
     if current is not None and version(decision_id, current) != tapped.version:
         return Tapped(CHANGED, current, card_options(decision_id, current))
@@ -493,6 +494,13 @@ async def _switch(decision_id: int, person: Any) -> Tapped:
     if text is None:
         return Tapped(f"Changed who it goes from. It waits for your OK in the app: {_app_link(decision_id)}")
     return Tapped("Changed who it goes from. Check it, then send it.", text, card_options(decision_id, text))
+
+
+def _waits(decision_id: int) -> bool:
+    from openexecutive.memory.decision_ledger import STATUS_PROPOSED, get_decision_instance
+
+    instance = get_decision_instance(decision_id)
+    return instance is not None and instance.status == STATUS_PROPOSED
 
 
 def _app_link(decision_id: int) -> str:
