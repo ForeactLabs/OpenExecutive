@@ -890,7 +890,7 @@ def from_openai_response(body: dict[str, Any]) -> SimpleNamespace:
         stop_reason=stop_reason,
         stop_sequence=None,
         usage=SimpleNamespace(
-            input_tokens=usage.get("prompt_tokens", 0),
+            input_tokens=_fresh_input_tokens(usage, cache_read, cache_create),
             output_tokens=usage.get("completion_tokens", 0),
             cache_creation_input_tokens=cache_create,
             cache_read_input_tokens=cache_read,
@@ -921,6 +921,18 @@ def _server_tool_usage(usage: dict[str, Any]) -> SimpleNamespace:
     except (TypeError, ValueError, OverflowError):
         count = 0
     return SimpleNamespace(web_search_requests=count)
+
+
+def _fresh_input_tokens(usage: dict[str, Any], cache_read: int, cache_create: int) -> int:
+    """Anthropic-shape ``input_tokens``: the prompt tokens neither read from
+    nor written to the cache. OpenAI-format ``prompt_tokens`` counts the
+    whole prompt, cached parts included, so those come off; without this a
+    cached prompt is counted twice by anything that adds the three up."""
+    try:
+        prompt = int(usage.get("prompt_tokens") or 0)
+    except (TypeError, ValueError, OverflowError):
+        prompt = 0
+    return max(0, prompt - cache_read - cache_create)
 
 
 def _extract_cache_token_counts(usage: dict[str, Any]) -> tuple[int, int]:
@@ -1123,7 +1135,7 @@ class StreamAccumulator:
             ),
             stop_sequence=None,
             usage=SimpleNamespace(
-                input_tokens=self._usage.get("prompt_tokens", 0),
+                input_tokens=_fresh_input_tokens(self._usage, cache_read, cache_create),
                 output_tokens=self._usage.get("completion_tokens", 0),
                 cache_creation_input_tokens=cache_create,
                 cache_read_input_tokens=cache_read,
