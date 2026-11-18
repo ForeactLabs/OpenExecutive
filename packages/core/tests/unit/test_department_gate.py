@@ -528,9 +528,10 @@ def test_words_on_a_held_step_rewrite_its_fields_and_approve_sends_them(
     # Only the step's own editable fields change: who it goes to never does.
     assert {f["field"]: f["value"] for f in body["fields"]} == {"subject": "Hi", "body": "Short text"}
     assert "<person_said>\nmake it shorter" in turns[0]
-    # The card shows the step as it will go.
+    # The card keeps what was said beside the step as filed; the card that
+    # shows it sends it.
     served = json.loads(client.get(f"/decisions/{decision_id}", headers=OWNER).json()["proposed_payload_json"])
-    assert served["input"]["body"] == "Short text" and served["said_input"] == {"body": "Short text"}
+    assert served["input"]["body"] == "Draft text" and served["said_input"] == {"body": "Short text"}
     assert [f["value"] for f in served["fields"]] == ["Hi", "Draft text"]
     # Approve sends what was said as the edit, under the step's own rules.
     ok = client.post(f"/decisions/{decision_id}/approve", json={"edits": {"input": {"body": "Short text"}}},
@@ -577,23 +578,42 @@ def test_a_go_that_cant_be_read_leaves_the_step_waiting(
     assert res.json()["reply"] == "Here it is now. Tap Do it to go ahead."
 
 
-def test_an_approve_without_edits_sends_what_was_said(
+def test_an_approve_sends_only_what_its_card_showed(
     client: TestClient, team: dict[str, Person], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     done = _carry_out(monkeypatch)
     _model(monkeypatch, {"body": "Short text"})
     decision_id = _mail_card(team)
     assert client.post(f"/decisions/{decision_id}/say", json={"text": "make it shorter"}, headers=OWNER).status_code == 200
-    # Any way of approving (another page, a chat app) sends the step the card shows.
+    # A page or chat card that showed the step as filed sends it as filed,
+    # never wording said after it was shown.
     ok = client.post(f"/decisions/{decision_id}/approve", json={}, headers=OWNER)
     assert ok.status_code == 200, ok.text
-    assert done[0]["input"]["body"] == "Short text"
+    assert done[0]["input"]["body"] == "Draft text"
     after = ledger.get_decision_instance(decision_id)
-    assert after is not None and after.status == "approved_with_edit"
+    assert after is not None and after.status == "approved_unchanged"
     # What was carried out shows as sent: what was said is in it, not beside it.
     final = json.loads(after.final_payload_json or "{}")
     assert "said_input" not in final
 
+
+
+def test_words_the_step_cant_take_change_nothing(
+    client: TestClient, team: dict[str, Person], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    done = _carry_out(monkeypatch)
+    # A rewrite the step's own rules for a change turn down.
+    _model(monkeypatch, {"body": "x" * (ttl.EDIT_MAX + 1)}, go=True, said_go=True)
+    decision_id = _mail_card(team)
+    res = client.post(f"/decisions/{decision_id}/say", json={"text": "make it much longer, send it"}, headers=OWNER)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["approved"] is None and done == []
+    assert body["reply"].startswith("I couldn't change it that way") and body["reply"].endswith("Nothing changed.")
+    # Nothing kept, so every way of approving still works.
+    instance = ledger.get_decision_instance(decision_id)
+    assert instance is not None and "said_input" not in json.loads(instance.proposed_payload_json)
+    assert client.post(f"/decisions/{decision_id}/approve", json={}, headers=OWNER).status_code == 200
 
 def test_a_go_on_a_long_email_is_judged_on_all_of_it(
     client: TestClient, team: dict[str, Person], monkeypatch: pytest.MonkeyPatch,

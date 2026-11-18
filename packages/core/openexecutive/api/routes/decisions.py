@@ -633,12 +633,12 @@ async def _carry_out_lead(
 
     payload = _parse_payload(instance)
     edits = body.edits or {}
-    if edits.get("input") is not None:  # noqa: SIM102 - what was said goes on without this check
+    if edits.get("input") is not None:  # noqa: SIM102
         # Changing what the Executive says or books is the principal's: an
         # area approver says yes or no to what it would do, as it stands.
         if not _approver_is_principal(request):
             raise HTTPException(status_code=403, detail="Only the account owner can change this before approving.")
-    payload, changed = _with_edits(payload, _input_edits(payload, edits))
+    payload, changed = _with_edits(payload, edits.get("input"))
     grant = payload.get("allow") if isinstance(payload.get("allow"), dict) else None
     allowing = edits.get("allow") is True
     if allowing:
@@ -859,7 +859,7 @@ async def _carry_out_department_action(
         mine = resolver is not None and resolver == instance.approver_person_id
         if not (_approver_is_principal(request) or mine):
             raise HTTPException(status_code=403, detail="Only the person this card waits on can change it before approving.")
-    payload, changed = _with_edits(payload, _input_edits(payload, edits))
+    payload, changed = _with_edits(payload, edits.get("input"))
     return await _run_department_action(
         instance, resolver, by_principal=_approver_is_principal(request), payload=payload, edited=bool(changed),
     )
@@ -872,18 +872,6 @@ def _may_change(instance: DecisionInstance, request: Request, resolver: int | No
     if _approver_is_principal(request):
         return True
     return instance.decision_class == _DEPARTMENT_ACTION.name and resolver == instance.approver_person_id
-
-
-def _input_edits(payload: dict[str, Any], edits: dict[str, Any]) -> dict[str, Any] | None:
-    """The changes to a held step's fields an Approve carries out: the ones
-    sent with it, else what was said on the card (``said_input``), which the
-    card already shows as the step. None when there are none, so no way of
-    approving sends a step other than the one shown."""
-    if edits.get("input") is not None:
-        sent: dict[str, Any] = edits["input"]
-        return sent
-    said = payload.get(SAID_INPUT)
-    return dict(said) if isinstance(said, dict) and said else None
 
 
 def _with_edits(
@@ -1191,21 +1179,29 @@ async def say_on_step(instance_id: int, body: StepSayBody, request: Request) -> 
     # The fields as filed: what was said is kept as the change from these.
     original = {f.field: f.value for f in said_fields({**payload, SAID_INPUT: {}})}
     now = {**{f.field: f.value for f in fields}, **new.values}
+    refused = ""
     if new.values:
         said = {k: v for k, v in now.items() if v != original.get(k)}
-        changed = {**payload, SAID_INPUT: said}
-        if not update_open_payload(instance_id, changed, expected_json=instance.proposed_payload_json):
-            raise HTTPException(status_code=409, detail="This card changed meanwhile. Look again.")
-        payload = changed
-        fields = said_fields(payload)
+        # Kept only when the step's own rules for a change take it, so any
+        # Approve of the card can carry it out.
+        try:
+            _with_edits(payload, said)
+        except HTTPException as exc:
+            refused = f"I couldn't change it that way: {str(exc.detail).rstrip('.')}. Nothing changed."
+        if not refused:
+            changed = {**payload, SAID_INPUT: said}
+            if not update_open_payload(instance_id, changed, expected_json=instance.proposed_payload_json):
+                raise HTTPException(status_code=409, detail="This card changed meanwhile. Look again.")
+            payload = changed
+            fields = said_fields(payload)
 
     alert = get_alert_by_external(DECISION_ALERT_SOURCE, decision_alert_external_id(instance_id))
     talk_id = alert.id if alert is not None else None
     if talk_id is not None:
         card_talk.add_turn(talk_id, "you", line, person_id=resolver)
 
-    reply, approved = new.reply, None
-    if new.go:
+    reply, approved = refused or new.reply, None
+    if new.go and not refused:
         step = [replan.StepField(field=f.field, label=f.label, value=f.value) for f in fields]
         seen = [replan.StepField(field=f.field, label=f.label, value=body.seen.get(f.field, "")) for f in fields]
         try:
@@ -1225,7 +1221,7 @@ async def say_on_step(instance_id: int, body: StepSayBody, request: Request) -> 
                 if fresh is None:
                     raise HTTPException(status_code=409, detail=_COULD_NOT_DO)
                 approved = await _spec_for(fresh).approve(
-                    fresh, ApproveBody(edits={"input": edits} if edits else None), request, resolver,
+                    fresh, ApproveBody(edits={"input": edits}), request, resolver,
                 )
                 approved = _served(approved)
             except HTTPException:
@@ -1378,13 +1374,13 @@ async def resolve_in_chat(
                     status_code=409,
                     detail=f"It can learn at most {take_the_lead.ALLOWED_MAX} things. Remove one in Settings first.",
                 )
-        # What was said on the card goes as the chat card showed it.
-        payload, changed = _with_edits(payload, _input_edits(payload, {}))
+        # As the chat card showed it: the step as filed.
+        payload, changed = _with_edits(payload, None)
         return await _run_lead(
             instance, payload, person.id, by_principal=is_principal, changed=changed, grant=grant if allow else None,
         )
     if instance.decision_class == _DEPARTMENT_ACTION.name:
-        payload, changed = _with_edits(_parse_payload(instance), _input_edits(_parse_payload(instance), {}))
+        payload, changed = _with_edits(_parse_payload(instance), None)
         return await _run_department_action(
             instance, person.id, by_principal=is_principal, payload=payload, edited=bool(changed),
         )

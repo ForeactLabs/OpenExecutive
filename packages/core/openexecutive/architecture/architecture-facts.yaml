@@ -4138,12 +4138,12 @@ departments:
     (tool rewrite_fields, actor card_fields, constant FIELDS_SYSTEM, the
     same hourly budget) returns only the step's editable fields that
     changed, kept as said_input on the decision's payload
-    (update_open_payload, compare-and-set); card_details.served shows the
-    step with it put in, and every Approve of the card (any page, a chat
-    app's tap) puts it in unless the request sends its own edits.input
-    (decisions._input_edits / _with_edits), so the step's own rules for a
-    change (take_the_lead.apply_edits) apply there and no way of approving
-    sends a step other than the one shown. A field longer than EDIT_MAX is
+    (update_open_payload, compare-and-set) once the step's own rules for a
+    change (take_the_lead.apply_edits) take it; words they turn down change
+    nothing. The card that shows it puts it in and sends it as edits.input;
+    an Approve without edits (another page, a chat app's tap, which show
+    the step as filed) sends the step as filed, so nothing goes out with
+    wording said after it was shown. A go approves with the edits it judged. A field longer than EDIT_MAX is
     not rewritten (422: changed by hand), never cut. A go is judged by
     replan.said_go against the fields the card showed, whole
     (STEP_TEXT_MAX, not a plan's 600), and approves through the class's
