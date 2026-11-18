@@ -481,11 +481,14 @@ def _look(tapped: Choice, person: Any) -> tuple[Tapped | None, bool, bool | None
     decision_id = tapped.decision_id
     if tapped.choice == SKIP:
         return None, False, None
+    # Read before the card: a switch saved after it changes what the card
+    # reads, so the version no longer matches and nothing is switched.
+    executive = _switches_to_executive(decision_id) if tapped.choice == SWITCH else None
     current = card_text(decision_id)
     if current is None and not _waits(decision_id):
         return None, False, None  # waits no more: answered as handled
     if current is not None and version(decision_id, current) == tapped.version:
-        return None, True, _switches_to_executive(decision_id) if tapped.choice == SWITCH else None
+        return None, True, executive
     # Answered here, not done: only to its own person, as anywhere else.
     if not _theirs(decision_id, person):
         return Tapped("Not done: this card is no longer there."), False, None
