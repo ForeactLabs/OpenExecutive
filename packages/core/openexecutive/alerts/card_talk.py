@@ -172,9 +172,12 @@ def _now() -> str:
 
 
 def keep_options(
-    alert_id: int, plan: str, happened: str, options: list[CardOption], *, db_path: Path | None = None,
+    alert_id: int, plan: str, happened: str, options: list[CardOption], *,
+    keep_said: bool = False, db_path: Path | None = None,
 ) -> None:
-    """Keep the card's line and options, written for ``plan``."""
+    """Keep the card's line and options, written for ``plan``. With
+    ``keep_said`` (a background fill), options already kept for the same
+    plan stay: they may be what was just offered in reply on the card."""
     with _get_conn(db_path) as conn:
         ensure_schema(conn)
         conn.execute(
@@ -183,8 +186,11 @@ def keep_options(
             # What happened doesn't change with the plan: a new plan with no
             # line of its own keeps the one already written.
             "happened = CASE WHEN excluded.happened = '' THEN alert_card_options.happened "
-            "ELSE excluded.happened END, options = excluded.options, made_at = excluded.made_at",
-            (alert_id, plan, happened, json.dumps([o.model_dump() for o in options]), _now()),
+            "ELSE excluded.happened END, "
+            "options = CASE WHEN ? AND alert_card_options.plan = excluded.plan "
+            "AND alert_card_options.options != '[]' THEN alert_card_options.options "
+            "ELSE excluded.options END, made_at = excluded.made_at",
+            (alert_id, plan, happened, json.dumps([o.model_dump() for o in options]), _now(), keep_said),
         )
 
 
@@ -386,11 +392,13 @@ async def fill(card: Alert, *, db_path: Path | None = None) -> CardTalk | None:
         return None
     # Kept even when nothing came of it, so the card isn't asked again for
     # this plan on every read.
-    keep_options(card.id, (card.suggested_action or "").strip(), happened, options, db_path=db_path)
+    keep_options(
+        card.id, (card.suggested_action or "").strip(), happened, options, keep_said=True, db_path=db_path,
+    )
     if not happened:
         # Tried again later (after RETRY_AFTER_S), so the card gets its line.
         return None
-    return CardTalk(happened=happened, options=options, written=True)
+    return read([card], db_path=db_path).get(card.id)
 
 
 _FILLING: set[int] = set()

@@ -520,7 +520,10 @@ def card_talks(alerts: list[Alert], viewer: Any = None) -> dict[int, Any]:
         from openexecutive.alerts import card_talk
 
         talk = card_talk.read(alerts)
-        card_talk.fill_soon(alerts, talk)
+        # Written when someone reads the cards, never for a brief or digest
+        # build nobody is looking at.
+        if viewer is not None:
+            card_talk.fill_soon(alerts, talk)
     except Exception:
         logger.warning("today: couldn't read the cards' options", exc_info=True)
         return {}

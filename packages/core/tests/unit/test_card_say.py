@@ -795,6 +795,35 @@ async def test_fill_writes_options_once_and_never_for_a_stale_plan(
     assert card_talk.read([alert_store.get_alert(aid)])[aid].options == []  # type: ignore[list-item]
 
 
+async def test_a_background_fill_keeps_the_options_offered_in_reply(
+    db: Path, options_model: dict[str, Any],
+) -> None:
+    """Options offered in reply on the card while a fill ran stay; the fill
+    only adds the card's line."""
+    aid = _card(db)
+    card = alert_store.get_alert(aid)
+    assert card is not None
+    said = [card_talk.CardOption(label="Do it", plan=OLD), card_talk.CardOption(label="Ask Dan", plan=NEW)]
+    card_talk.keep_options(aid, OLD, "", said)
+    options_model["data"] = {"happened": "Alex asked.", "label": "Ask Alex", "others": []}
+    made = await card_talk.fill(card)
+    assert made is not None and made.happened == "Alex asked." and made.options == said
+
+
+def test_a_brief_build_starts_no_option_calls(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.api.routes import today
+    from openexecutive.orchestrator.artifact_records import Viewer
+
+    started: list[int] = []
+    monkeypatch.setattr(card_talk, "fill_soon", lambda cards, talk: started.append(len(cards)))
+    alert = alert_store.get_alert(_card(db))
+    assert alert is not None
+    today.card_talks([alert])
+    assert started == []
+    today.card_talks([alert], Viewer(person_id=1))
+    assert started == [1]
+
+
 def test_deleting_a_card_drops_what_was_said_on_it(db: Path) -> None:
     aid = _card(db)
     card_talk.keep_options(aid, OLD, "Alex can't open the Drive.", [card_talk.CardOption(label="Ask Alex", plan=OLD)])
