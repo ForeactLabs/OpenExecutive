@@ -209,3 +209,28 @@ async def test_a_long_page_range_reads_on_with_the_same_pages(dirs, monkeypatch)
     out = await handle_read_document({"path": str(downloads / "deck.pdf"), "pages": "11-20"})
 
     assert "call again with pages='11-20' and start=" in out
+
+
+async def test_a_part_is_what_the_turns_own_model_holds(dirs, monkeypatch) -> None:
+    """Inside a turn the part follows that turn's model, not the default one."""
+    from openexecutive.orchestrator.reading import bind_turn_limits
+    from openexecutive.providers.feature_gate import ReadingLimits
+
+    monkeypatch.setattr("openexecutive.providers.registry.reading_limits_for", _parts_of(100_000))
+    downloads, _ = dirs
+    (downloads / "long.txt").write_text("x" * 5000)
+    bind_turn_limits(ReadingLimits(per_read=1000, per_turn=2000))
+
+    out = await handle_read_document({"path": str(downloads / "long.txt")})
+
+    assert len(out) <= 1000 and "call again with start=" in out
+
+
+async def test_a_part_of_text_written_a_token_a_character_is_a_third_as_long(dirs, monkeypatch) -> None:
+    monkeypatch.setattr("openexecutive.providers.registry.reading_limits_for", _parts_of(3000))
+    downloads, _ = dirs
+    (downloads / "jp.txt").write_text("契約" * 5000)
+
+    out = await handle_read_document({"path": str(downloads / "jp.txt")})
+
+    assert len(out) <= 1000 and "call again with start=" in out

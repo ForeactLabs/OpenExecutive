@@ -209,12 +209,18 @@ async def _read_path(resolved: Path, tool_input: dict[str, Any]) -> str:
     # where to read on, so the rest is one more call (not a Python job). A
     # part leaves room under the turn's per-result cap for the header and the
     # notes, so a part never cuts the note off. The part is what one read of
-    # the default model holds (providers.registry.reading_limits_for).
+    # the turn's model holds (reading.turn_limits; the default model's
+    # outside a turn), counting text written about one token a character
+    # three times its length.
     total = len(result.text)
     if start >= total:
         return _err(f"that file has only {total} characters")
     head = "".join(header)
-    end = start + max(1, reading_limits_for().per_read - len(head) - _NOTES_ROOM)
+    from openexecutive.orchestrator.reading import text_weight, turn_limits
+
+    per_read = (turn_limits() or reading_limits_for()).per_read
+    weight = text_weight(result.text[start:])
+    end = start + max(1, int(per_read / weight) - len(head) - _NOTES_ROOM)
     text = result.text[start:end]
     if start:
         text = f"…[from character {start} of {total}]\n" + text

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+from contextvars import ContextVar
 from typing import Any
 
 from openexecutive.orchestrator import tool_groups, turn_progress
@@ -55,6 +56,38 @@ def _safe_tool_name(tool_name: Any) -> str:
     #   * it is length-bounded, so the marker cannot outgrow the budget
     #     it is supposed to fit inside.
     return tool_name[:_TOOL_NAME_MARKER_MAX] if isinstance(tool_name, str) else "?"
+
+
+# Scripts written about one token a character (Chinese, Japanese, Korean)
+# start here; the limits count about three characters a token, so such text
+# counts three times its length (text_weight).
+_DENSE_SCRIPT_FROM = 0x2E80
+_DENSE_SAMPLE = 20_000
+
+# The reading limits of the turn running now (bind_turn_limits), for a tool
+# that sizes its own parts (orchestrator.document_tools).
+_TURN_LIMITS: ContextVar[ReadingLimits | None] = ContextVar("turn_reading_limits", default=None)
+
+
+def bind_turn_limits(limits: ReadingLimits) -> None:
+    """The turn running now reads with ``limits``: a tool that sizes its own
+    parts reads them back with ``turn_limits``."""
+    _TURN_LIMITS.set(limits)
+
+
+def turn_limits() -> ReadingLimits | None:
+    return _TURN_LIMITS.get()
+
+
+def text_weight(text: str) -> float:
+    """How many plain characters each character of ``text`` counts as: 1 for
+    text written in letters, up to 3 for text written about one token a
+    character, from a sample of it."""
+    sample = text[:_DENSE_SAMPLE]
+    if not sample:
+        return 1.0
+    dense = sum(1 for ch in sample if ord(ch) >= _DENSE_SCRIPT_FROM)
+    return 1.0 + 2.0 * dense / len(sample)
 
 
 def _part_marker(name: str, *, start: int, end: int, total: int) -> str:
@@ -166,20 +199,25 @@ class TurnReadingBudget:
     re-running matters: any tool's result can be long, and a repeated write
     (an event, a message) would happen twice.
 
-    A held result is the one in hand when it ran. Once a round runs a call
-    that may change things (``ran``: anything not plainly a read), the held
-    parts are dropped, so a repeat after a click or an edit runs the tool
-    again and reads what is there now. The content check's notice on a
+    A held read is the one in hand when it ran. Once a round runs a call
+    that may change things (``ran``: anything not plainly a read), the parts
+    held for reads are dropped, so a repeat after a click or an edit reads
+    what is there now. The parts of a call that may change things are kept
+    until read to the end, so its repeat never runs it again. Text written
+    about one token a character counts three times its length
+    (``text_weight``). The content check's notice on a
     result (``notice``) goes on every one of its parts.
     """
 
     def __init__(self, limits: ReadingLimits) -> None:
+        self.limits = limits
         self.per_result = limits.per_read
         self.turn_budget = limits.per_turn
         self.used = 0
         # Each result that came back in parts, by call: its whole text, where
-        # the next part starts, and the notice each part carries.
-        self._parts: dict[str, tuple[str, int, str]] = {}
+        # the next part starts, the notice each part carries, and whether the
+        # call only read (so a later change drops it).
+        self._parts: dict[str, tuple[str, int, str, bool]] = {}
         # tool_use ids answered by ``replay``: already sized, not cut again.
         self._replayed: set[str] = set()
 
@@ -198,12 +236,13 @@ class TurnReadingBudget:
         held = self._parts.get(key)
         if held is None:
             return None
-        text, start, notice = held
+        text, start, notice, reads = held
         name = _safe_tool_name(tool_use["name"])
         limit, budget_spent = _turn_result_limit(
             tool_use["name"], per_result=self.per_result, turn_budget=self.turn_budget, used=self.used
         )
-        limit = max(_MIN_USEFUL_CAP, limit - len(notice))
+        weight = text_weight(text[start:])
+        limit = max(_MIN_USEFUL_CAP, int(limit / weight) - len(notice))
         if budget_spent:
             # Nothing more fits: say so, and keep the rest for no one.
             del self._parts[key]
@@ -221,25 +260,30 @@ class TurnReadingBudget:
         else:
             room = max(1, limit - len(_part_marker(name, start=start, end=start + limit, total=len(text))))
             end = start + room
-            self._parts[key] = (text, end, notice)
+            self._parts[key] = (text, end, notice, reads)
             part = text[start:end] + _part_marker(name, start=start, end=end, total=len(text))
         self._replayed.add(tool_use["id"])
+        self.used += int(len(part) * weight)
         return notice + part
+
+    @staticmethod
+    def _only_reads(name: str, tool_input: Any) -> bool:
+        inner = tool_input.get("name") if isinstance(tool_input, dict) else None
+        if name == "call_tool" and isinstance(inner, str):
+            name = inner  # a connected app's tool, through the gateway: judged by its own name
+        return name in _READS_NOTHING or bool(tool_catalog.read_only_label(name, {}))
 
     def ran(self, tool_uses: list[dict[str, Any]]) -> None:
         """Note the calls a round ran: one that may have changed something
-        (not plainly a read) drops every held part, so the next repeat reads
-        afresh. Next parts handed back by ``replay`` ran nothing."""
+        (not plainly a read) drops the parts held for reads, so the next
+        repeat reads afresh. Next parts handed back by ``replay`` ran
+        nothing."""
         for tu in tool_uses:
             if tu.get("id") in self._replayed:
                 continue
-            name = str(tu.get("name") or "")
-            inner = (tu.get("input") or {}).get("name") if isinstance(tu.get("input"), dict) else None
-            if name == "call_tool" and isinstance(inner, str):
-                name = inner  # a connected app's tool, through the gateway: judged by its own name
-            if name in _READS_NOTHING or tool_catalog.read_only_label(name, {}):
+            if self._only_reads(str(tu.get("name") or ""), tu.get("input")):
                 continue
-            self._parts.clear()
+            self._parts = {k: v for k, v in self._parts.items() if not v[3]}
             return
 
     def cap(self, name: str, tool_input: Any, text: Any, tool_use_id: str = "", notice: str = "") -> Any:
@@ -247,19 +291,21 @@ class TurnReadingBudget:
         counted against the turn's reading. ``notice`` is the content check's
         notice ``text`` starts with, for its later parts too."""
         if tool_use_id and tool_use_id in self._replayed:
-            content = text
-        else:
-            limit, budget_spent = _turn_result_limit(
-                name, per_result=self.per_result, turn_budget=self.turn_budget, used=self.used
-            )
-            content = _cap_tool_result(text, tool_name=name, limit=limit, budget_spent=budget_spent)
-            if not budget_spent and isinstance(text, str) and content is not text:
-                # Where the next part starts: what the first part showed.
-                start = content.rindex("\n\n[PART")
-                if notice and text.startswith(notice) and start > len(notice):
-                    self._parts[self._key(name, tool_input)] = (text[len(notice):], start - len(notice), notice)
-                else:
-                    self._parts[self._key(name, tool_input)] = (text, start, "")
+            return text  # sized and counted by ``replay``
+        weight = text_weight(text) if isinstance(text, str) else 1.0
+        limit, budget_spent = _turn_result_limit(
+            name, per_result=self.per_result, turn_budget=self.turn_budget, used=self.used
+        )
+        limit = max(_MIN_USEFUL_CAP, int(limit / weight)) if not budget_spent else limit
+        content = _cap_tool_result(text, tool_name=name, limit=limit, budget_spent=budget_spent)
+        if not budget_spent and isinstance(text, str) and content is not text:
+            # Where the next part starts: what the first part showed.
+            start = content.rindex("\n\n[PART")
+            reads = self._only_reads(name, tool_input)
+            if notice and text.startswith(notice) and start > len(notice):
+                self._parts[self._key(name, tool_input)] = (text[len(notice):], start - len(notice), notice, reads)
+            else:
+                self._parts[self._key(name, tool_input)] = (text, start, "", reads)
         if name != "consult_specialist" and isinstance(content, str):
-            self.used += len(content)
+            self.used += int(len(content) * weight)
         return content

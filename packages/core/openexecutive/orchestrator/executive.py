@@ -164,7 +164,7 @@ from openexecutive.orchestrator.people_tools import (
     is_principal_on_verified_surface,
     turn_is_private_to_principal,
 )
-from openexecutive.orchestrator.reading import TurnReadingBudget
+from openexecutive.orchestrator.reading import TurnReadingBudget, bind_turn_limits
 from openexecutive.orchestrator.research_tools import (
     RESEARCH_TOOL_HANDLERS,
     RESEARCH_TOOLS,
@@ -2562,6 +2562,7 @@ class Executive:
         # What this turn's tool results have put in the prompt so far: every
         # one is re-sent on each later call.
         reading_budget = TurnReadingBudget(reading_limits_for(model))
+        bind_turn_limits(reading_budget.limits)
 
         # Every tool call this turn with the start of its result, for the
         # end-of-turn check that the reply claims nothing it didn't do

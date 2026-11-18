@@ -28,6 +28,7 @@ from openexecutive.orchestrator.reading import (
     TurnReadingBudget,
     _cap_tool_result,
     _turn_result_limit,
+    text_weight,
 )
 from openexecutive.providers.feature_gate import ReadingLimits, context_tokens, reading_limits
 
@@ -200,9 +201,32 @@ def test_a_call_that_may_change_things_drops_the_held_parts() -> None:
     """A repeat after a click or an edit reads what is there now, never the
     rest of the old result."""
     budget = TurnReadingBudget(ReadingLimits(per_read=5_000, per_turn=1_000_000))
-    budget.cap("browser_look", {}, "old page " * 3_000, "t1")
+    budget.cap("read_page", {}, "old page " * 3_000, "t1")
     budget.ran([{"id": "t2", "name": "browser_click", "input": {"n": 4}}])
-    assert budget.replay({"id": "t3", "name": "browser_look", "input": {}}) is None
+    assert budget.replay({"id": "t3", "name": "read_page", "input": {}}) is None
+
+
+def test_a_long_result_of_a_change_keeps_its_parts_so_it_never_runs_twice() -> None:
+    """The marker promises a repeat doesn't run the call again: a write's
+    parts outlive a later change, so that holds."""
+    budget = TurnReadingBudget(ReadingLimits(per_read=5_000, per_turn=1_000_000))
+    budget.cap("execute_sql", {"q": "update"}, "row " * 5_000, "t1")
+    budget.ran([{"id": "t2", "name": "browser_click", "input": {"n": 4}}])
+    part = budget.replay({"id": "t3", "name": "execute_sql", "input": {"q": "update"}})
+    assert part is not None and "characters 5," not in part[:50]
+
+
+def test_text_written_a_token_a_character_counts_three_times_its_length() -> None:
+    """Japanese or Chinese runs about one token a character: a part of it is
+    a third as long, so the model's window still holds the turn's reads."""
+    assert text_weight("hello world") == 1.0
+    assert text_weight("契約書の第三条") == 3.0
+    budget = TurnReadingBudget(ReadingLimits(per_read=30_000, per_turn=60_000))
+    first = budget.cap("read_document", {"id": "jp"}, "契約" * 50_000, "t1")
+    assert len(first) <= 10_000
+    second = budget.replay({"id": "t2", "name": "read_document", "input": {"id": "jp"}})
+    assert second is not None and len(second) <= 10_000
+    assert budget.used <= 60_000
 
 
 def test_reads_and_next_parts_keep_the_held_parts() -> None:

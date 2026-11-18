@@ -55,7 +55,7 @@ from typing import Any
 from openexecutive.agents.workflow_actor import WORKFLOW_ACTOR_AGENT_ID, WorkflowActorAgent
 from openexecutive.config import get_settings
 from openexecutive.orchestrator import turn_live
-from openexecutive.orchestrator.reading import TurnReadingBudget
+from openexecutive.orchestrator.reading import TurnReadingBudget, bind_turn_limits
 from openexecutive.providers.registry import reading_limits_for
 from openexecutive.providers.translator import reasoning_replay_block
 from openexecutive.workflows import step_script, tool_catalog
@@ -874,6 +874,7 @@ async def run_action_step(
     # How much the step's reads may hold, from its model; a long result
     # comes back in parts (orchestrator.reading).
     reading = TurnReadingBudget(reading_limits_for(resolved_model))
+    bind_turn_limits(reading.limits)
     max_turns = step.max_tool_calls + _EXTRA_TURNS
     fanout_hinted = False
     turn = 0

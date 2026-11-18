@@ -327,7 +327,16 @@ caching:
     same input; that repeat (same tool, input compared as sorted JSON) is
     answered with the next part from the result in hand (replay, before
     dispatch), never by running the tool again (it may have been a write),
-    and the last part says it is the last. Only a turn that has read all its
+    and the last part says it is the last. A round that runs a call that may
+    change things drops the parts held for reads (a repeat then reads what
+    is there now) and keeps those of a call that may change things, so its
+    repeat never runs it twice; show_progress, consult_specialist,
+    open_tools, search_tools and a connected app's read through call_tool
+    change nothing. Text written about one token a character (Chinese,
+    Japanese, Korean) counts three times its length (reading.text_weight), so
+    its parts are a third as long. read_document sizes its own parts from the
+    turn's model (reading.bind_turn_limits / turn_limits; the default model's
+    outside a turn). Only a turn that has read all its
     model holds stops short: a further result shows 3,000 characters
     (_TURN_BUDGET_FLOOR) and its note says plainly the question has read all
     it can hold, to answer from what it has, say what it has not read and
