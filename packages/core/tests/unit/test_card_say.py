@@ -926,6 +926,21 @@ async def test_a_card_whose_call_failed_waits_before_the_next_try(
     assert calls == [1, 2, 2, 3]
 
 
+def test_a_fill_never_writes_over_a_plan_changed_after_its_call(db: Path) -> None:
+    aid = _card(db)
+    alert_store.update_alert_content(aid, suggested_action=NEW)
+    said = [card_talk.CardOption(label="Share it", plan=NEW)]
+    assert card_talk.keep_options(aid, NEW, "", said)
+    # A fill for the plan it read (OLD) lands after the change: it writes
+    # nothing, and the options offered in reply stay.
+    late = [card_talk.CardOption(label="Ask Alex", plan=OLD)]
+    assert not card_talk.keep_options(aid, OLD, "Alex asked.", late, keep_said=True, while_plan_is=OLD)
+    card = alert_store.get_alert(aid)
+    assert card is not None
+    talk = card_talk.read([card]).get(aid)
+    assert talk is not None and [o.label for o in talk.options] == ["Share it"]
+
+
 def test_options_show_only_for_the_plan_they_were_written_for(db: Path) -> None:
     aid = _card(db)
     card_talk.keep_options(aid, OLD, "Alex asked.", [card_talk.CardOption(label="Ask Alex", plan=OLD)])

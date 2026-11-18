@@ -173,16 +173,21 @@ def _now() -> str:
 
 def keep_options(
     alert_id: int, plan: str, happened: str, options: list[CardOption], *,
-    keep_said: bool = False, db_path: Path | None = None,
-) -> None:
+    keep_said: bool = False, while_plan_is: str | None = None, db_path: Path | None = None,
+) -> bool:
     """Keep the card's line and options, written for ``plan``. With
     ``keep_said`` (a background fill), options already kept for the same
-    plan stay: they may be what was just offered in reply on the card."""
+    plan stay: they may be what was just offered in reply on the card. With
+    ``while_plan_is``, it writes only while the card's plan is still that
+    one, checked in the same statement, so a plan changed meanwhile keeps
+    the options it came with. Whether it wrote."""
     with _get_conn(db_path) as conn:
         ensure_schema(conn)
-        conn.execute(
+        cur = conn.execute(
             "INSERT INTO alert_card_options (alert_id, plan, happened, options, made_at) "
-            "VALUES (?, ?, ?, ?, ?) ON CONFLICT(alert_id) DO UPDATE SET plan = excluded.plan, "
+            "SELECT ?, ?, ?, ?, ? WHERE ? IS NULL OR EXISTS "
+            "(SELECT 1 FROM alerts WHERE id = ? AND COALESCE(suggested_action, '') = ?) "
+            "ON CONFLICT(alert_id) DO UPDATE SET plan = excluded.plan, "
             # What happened doesn't change with the plan: a new plan with no
             # line of its own keeps the one already written.
             "happened = CASE WHEN excluded.happened = '' THEN alert_card_options.happened "
@@ -190,8 +195,12 @@ def keep_options(
             "options = CASE WHEN ? AND alert_card_options.plan = excluded.plan "
             "AND alert_card_options.options != '[]' THEN alert_card_options.options "
             "ELSE excluded.options END, made_at = excluded.made_at",
-            (alert_id, plan, happened, json.dumps([o.model_dump() for o in options]), _now(), keep_said),
+            (
+                alert_id, plan, happened, json.dumps([o.model_dump() for o in options]), _now(),
+                while_plan_is, alert_id, while_plan_is or "", keep_said,
+            ),
         )
+        return cur.rowcount > 0
 
 
 def add_turn(
@@ -383,26 +392,24 @@ async def fill(card: Alert, *, db_path: Path | None = None) -> CardTalk | None:
         logger.warning("card options: model call failed for card %s (%s)", card.id, type(exc).__name__)
         return None
     happened, options = parse(data, card)
-    if _moved_on(card):
-        # The plan changed while the call ran (something said on the card
-        # keeps its own options): these were for the old one.
-        return None
     # Kept even when nothing came of it, so the card isn't asked again for
-    # this plan on every read.
-    keep_options(
-        card.id, (card.suggested_action or "").strip(), happened, options, keep_said=True, db_path=db_path,
+    # this plan on every read; never when the plan changed while the call
+    # ran (something said on the card keeps its own options).
+    kept = keep_options(
+        card.id, (card.suggested_action or "").strip(), happened, options,
+        keep_said=True, while_plan_is=card.suggested_action or "", db_path=db_path,
     )
-    if not happened:
+    if not kept or not happened:
         # Tried again later (after RETRY_AFTER_S), so the card gets its line.
         return None
     return read([card], db_path=db_path).get(card.id)
 
 
-def _moved_on(card: Alert) -> bool:
+def _moved_on(card: Alert, db_path: Path | None = None) -> bool:
     """Whether the card's plan changed since ``card`` was read."""
     from openexecutive.alerts import store
 
-    now = store.get_alert(card.id) if card.id is not None else None
+    now = store.get_alert(card.id, db_path) if card.id is not None else None
     return now is None or (now.suggested_action or "").strip() != (card.suggested_action or "").strip()
 
 
