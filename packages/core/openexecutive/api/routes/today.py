@@ -492,13 +492,14 @@ def _watch_title_of(slug: str | None, watches: dict[str, Any] | None = None) -> 
         return None
 
 
-def _watch_trust_by_slug(alerts: list[Any]) -> dict[str, float]:
+def _watch_trust_by_slug(
+    alerts: list[Any], watches: dict[str, Any] | None = None,
+) -> dict[str, float]:
     """``{watch slug: trust_score}`` for every watch referenced by ``alerts``,
-    so ranking can discount watches the principal keeps dismissing."""
-    return {
-        slug: float(getattr(item, "trust_score", 1.0))
-        for slug, item in _watches_by_slug(alerts).items()
-    }
+    so ranking can discount watches the principal keeps dismissing.
+    ``watches`` is the board's lookup when it already has one."""
+    found = _watches_by_slug(alerts) if watches is None else watches
+    return {slug: float(getattr(item, "trust_score", 1.0)) for slug, item in found.items()}
 
 
 def _watches_by_slug(alerts: list[Any]) -> dict[str, Any]:
@@ -1404,7 +1405,7 @@ def _build_today(
         raw_alerts = [a for a in raw_alerts if not is_private_alert(a)]
     superseded_counts = count_superseded_by()
     watches = _watches_by_slug(raw_alerts)
-    trust_by_slug = {slug: float(getattr(w, "trust_score", 1.0)) for slug, w in watches.items()}
+    trust_by_slug = _watch_trust_by_slug(raw_alerts, watches)
     proposal_items = []
     for alert in raw_alerts:
         # Surface every unread alert as a briefing action item, including
