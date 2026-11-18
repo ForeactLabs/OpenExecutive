@@ -275,6 +275,28 @@ def test_the_review_ends_once_it_has_made_its_changes(db: Path, roster: SimpleNa
     assert len(provider.calls) == 1
 
 
+def test_a_review_that_fails_part_way_still_lists_its_changes(db: Path, roster: SimpleNamespace,
+                                                              provider: _Provider) -> None:
+    _record(roster.principal)
+    fact = {"subject": "Vendor email", "statement": "The vendor email was sent already.",
+            "source_quote": "I sent the vendor email already"}
+    provider.script = [[("remember_fact", fact)]]
+    calls = {"n": 0}
+    create = provider.messages_create
+
+    async def _then_fail(**kw: Any) -> Any:
+        calls["n"] += 1
+        if calls["n"] > 2:  # the grading call, the change, then the provider goes down
+            raise RuntimeError("provider down")
+        return await create(**kw)
+
+    provider.messages_create = _then_fail  # type: ignore[method-assign]
+    _review(db)
+    events = audit_logger.get_audit_logger().query(event_type="chat_review", all_owners=True)
+    failed = [e for e in events if "FAILED" in e.summary]
+    assert failed and failed[0].details["changes"] == ["remember_fact"]
+
+
 def test_a_change_without_their_words_is_refused(db: Path, roster: SimpleNamespace,
                                                  provider: _Provider) -> None:
     loop_id = open_loop(owner_person_id=roster.principal.id, description="Send the vendor email",

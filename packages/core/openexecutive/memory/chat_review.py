@@ -115,7 +115,6 @@ _GRADE_MAX_TOKENS = 1500
 _GRADE_TIMEOUT_S = 45.0
 MAX_CHANGES = 8
 _MAX_TOKENS = 1500
-_TIMEOUT_S = 60.0
 
 _SURFACE_FIELDS = (
     "from_web_chat",
@@ -782,6 +781,9 @@ async def _review_person(
     from openexecutive.audit.context import set_turn
     from openexecutive.people.store import get_person
 
+    # The changes that went through, kept here so the audit row lists them
+    # however the pass ends.
+    done: list[str] = []
     try:
         person = get_person(person_id)
         if person is None or person.archived or person.id is None:
@@ -804,11 +806,10 @@ async def _review_person(
                 graded = await _grade_turns(session_id, person, turns, db_path=db_path)
                 missed = {i for i, row in enumerate(turns, 1) if graded.get(int(row["id"])) == "miss"}
                 refused: list[dict[str, str]] = []
-                done = await asyncio.wait_for(
-                    _run_loop(session, person, turns, words, misses=missed, mail=mail,
-                              db_path=db_path, refused=refused),
-                    timeout=_TIMEOUT_S,
-                )
+                # No deadline: the review ends when it has nothing more to call
+                # or has made MAX_CHANGES (orchestrator.rounds).
+                await _run_loop(session, person, turns, words, misses=missed, mail=mail,
+                                db_path=db_path, refused=refused, done=done)
             misses = sum(1 for v in graded.values() if v == "miss")
             _audit(session_id,
                    f"conversation review for person {person_id}: {len(done)} change(s), "
@@ -818,7 +819,8 @@ async def _review_person(
     except Exception as exc:
         logger.exception("chat_review: pass failed")
         _audit(session_id, f"FAILED({type(exc).__name__}) conversation review",
-               {"op": "chat_review", "person_id": person_id, "failure": type(exc).__name__})
+               {"op": "chat_review", "person_id": person_id, "failure": type(exc).__name__,
+                "changes": done})
 
 # --------------------------------------------------------------------------- #
 # Grading: how did each turn go?
@@ -1482,12 +1484,15 @@ async def _run_loop(
     mail: bool = False,
     db_path: Path | None = None,
     refused: list[dict[str, str]] | None = None,
+    done: list[str] | None = None,
 ) -> list[str]:
     """The tool loop; the names of the changes that went through. ``misses``
     are the numbers of the turns graded a miss: learn_lesson is offered for
     them, and only them. ``refused`` collects each change that didn't go
     through, as the tool's name and why (codes and the checks' own words,
-    never the person's text), for the review's audit row."""
+    never the person's text), for the review's audit row. ``done`` is the
+    caller's list for the changes, so the audit row lists them even when the
+    pass fails part way."""
     from openexecutive.orchestrator.fact_tools import _quote_error
     from openexecutive.orchestrator.rounds import run_rounds
     from openexecutive.providers import get_provider
@@ -1505,7 +1510,7 @@ async def _run_loop(
     )
     content = intro + (f"{facts}\n\n" if facts else "") + "THE CHAT:\n\n" + _render_turns(turns, misses)
     messages: list[dict[str, Any]] = [{"role": "user", "content": content}]
-    done: list[str] = []
+    done = done if done is not None else []
     changes = 0
     # One fact per subject a pass: the model tends to save a correction again
     # in other words, and each save replaces the last.
