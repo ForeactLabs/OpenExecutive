@@ -5409,7 +5409,13 @@ chat:
     big job is never stopped at a count. The one exception is a cut round that wrote
     nothing at all (no text, no call: a model spending its whole answer
     thinking), which is no step of the work: after MAX_EMPTY_CUT_ROUNDS (3)
-    of those in a row the turn ends with EMPTY_CUTS_REPLY. A call whose block closed before the cut (cut in the
+    of those in a row the turn ends with EMPTY_CUTS_REPLY. The other is a
+    call that keeps coming back the same: once the same call (name and
+    input) has returned the same result REPEAT_LIMIT (4) times in a turn
+    (a write failing on an expired sign-in, a retry finding nothing new),
+    REPEATING_NOTE asks for the answer from what the turn has and no more
+    tools run, as on a hand-over; workflow steps follow the same rule
+    (action_step.REPEAT_LIMIT). A call whose block closed before the cut (cut in the
     text after it) is whole and runs as usual. Only Claude is asked for
     32,000: every non-Claude FeatureSpec (OpenRouter, OpenAI, unknown slugs)
     carries NON_CLAUDE_MAX_OUTPUT_TOKENS (16,000, what the PDF reader already asked), since hosted models cap

@@ -313,3 +313,61 @@ def test_a_turn_whose_cut_rounds_write_nothing_ends_and_says_so() -> None:
 
     assert len(provider.calls) == MAX_EMPTY_CUT_ROUNDS + 1
     assert EMPTY_CUTS_REPLY in "".join(i for i in items if isinstance(i, str))
+
+
+def _always_failing_send(ran: list[dict[str, Any]]) -> Any:
+    async def _send(tool_input: dict[str, Any], *_a: Any, **_k: Any) -> str:
+        ran.append(tool_input)
+        return "Error: the mail sign-in has expired."
+
+    return _send
+
+
+def test_a_turn_whose_tool_always_errors_ends_with_a_written_answer() -> None:
+    """The same call coming back the same way is no step of the work: after
+    REPEAT_LIMIT of them the turn is told to write up, and runs no more tools."""
+    from openexecutive.orchestrator.executive import REPEAT_LIMIT, REPEATING_NOTE
+
+    ran: list[dict[str, Any]] = []
+    call = {"to": "dana@example.com", "body": "hi"}
+    provider = _ScriptedProvider(
+        [_FinalMsg([_ToolUseBlock(f"s{i}", "send_mail", call)], "tool_use") for i in range(REPEAT_LIMIT)]
+        + [_FinalMsg([_TextBlock("I couldn't send it: the mail sign-in has expired.")], "end_turn")]
+    )
+    asyncio.run(_run(provider, {"send_mail": _always_failing_send(ran)}))
+
+    assert len(ran) == REPEAT_LIMIT
+    assert len(provider.calls) == REPEAT_LIMIT + 1
+    assert REPEATING_NOTE in str(provider.calls[-1]["messages"][-1]["content"])
+
+
+def test_a_write_up_that_still_calls_the_failing_tool_runs_nothing() -> None:
+    from openexecutive.orchestrator.executive import REPEAT_LIMIT, REPEATING_EMPTY_REPLY
+
+    ran: list[dict[str, Any]] = []
+    call = {"to": "dana@example.com", "body": "hi"}
+    provider = _ScriptedProvider(
+        [_FinalMsg([_ToolUseBlock(f"s{i}", "send_mail", call)], "tool_use") for i in range(REPEAT_LIMIT + 1)]
+        + [_FinalMsg([_TextBlock("never reached")], "end_turn")]
+    )
+    items = asyncio.run(_run(provider, {"send_mail": _always_failing_send(ran)}))
+
+    assert len(ran) == REPEAT_LIMIT
+    assert len(provider.calls) == REPEAT_LIMIT + 1
+    assert REPEATING_EMPTY_REPLY in "".join(i for i in items if isinstance(i, str))
+
+
+def test_two_calls_taking_turns_with_the_same_errors_still_end() -> None:
+    from openexecutive.orchestrator.executive import REPEAT_LIMIT
+
+    ran: list[dict[str, Any]] = []
+    calls = [{"to": "dana@example.com"}, {"to": "dana@example.org"}]
+    rounds = 2 * REPEAT_LIMIT
+    provider = _ScriptedProvider(
+        [_FinalMsg([_ToolUseBlock(f"s{i}", "send_mail", calls[i % 2])], "tool_use") for i in range(rounds)]
+        + [_FinalMsg([_TextBlock("Couldn't send.")], "end_turn")]
+    )
+    asyncio.run(_run(provider, {"send_mail": _always_failing_send(ran)}))
+
+    assert len(ran) <= rounds
+    assert len(provider.calls) <= rounds + 1

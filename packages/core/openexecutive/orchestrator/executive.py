@@ -548,6 +548,13 @@ def _apply_loop_cache_marker(
     return bool(markable)
 
 
+def _call_key(tool_use: dict[str, Any], result: Any) -> str:
+    """One call with what it returned, for REPEAT_LIMIT."""
+    return hashlib.sha256(
+        json.dumps([tool_use["name"], tool_use["input"], str(result)], sort_keys=True, default=str).encode()
+    ).hexdigest()
+
+
 def _with_notice(result: Any, notice: str) -> Any:
     """``result`` with the content check's notice before it
     (``outside_content.FLAG_NOTICE``): text gets it as a prefix, content
@@ -1048,6 +1055,21 @@ CUT_OFF_LABEL = "Writing it in shorter parts…"
 # is no step of the work, so this never stops a job that is getting written;
 # without it the loop would bill a full answer each round, forever.
 MAX_EMPTY_CUT_ROUNDS = 3
+# The same call with the same result this many times in a turn is no step
+# of the work (a write that keeps failing the same way, a retry that finds
+# nothing new): the turn then writes its answer from what it has and runs no
+# more tools. A turn that gets anywhere never meets it; it replaces a count
+# of rounds. Workflow steps follow the same rule (action_step.REPEAT_LIMIT).
+REPEAT_LIMIT = 4
+REPEATING_NOTE = (
+    "You have made the same call several times and it came back the same "
+    "each time. Do not call any more tools. Write your answer now from what "
+    "you have: say what worked, what kept failing and why, and what would fix it."
+)
+REPEATING_EMPTY_REPLY = (
+    "I stopped because the same step kept coming back the same way, and "
+    "nothing was ready to show yet."
+)
 # Said when it ends that way.
 EMPTY_CUTS_REPLY = (
     "I kept running out of room before I could write anything for this. "
@@ -2544,6 +2566,10 @@ class Executive:
         # Set once the person asks to finish the work themselves: the next
         # round writes up what the turn has, and runs no tool.
         handing_over = False
+        # Set once the same call came back the same REPEAT_LIMIT times: the next
+        # round writes up what the turn has, and runs no tool, as on a hand-over.
+        repeating = False
+        repeats: dict[str, int] = {}
         # What the turn last showed the person (show_progress), so each call
         # adds to it, and the reads it made, counted once each for the card.
         shown_progress: turn_progress.Progress | None = None
@@ -2759,7 +2785,7 @@ class Executive:
                     return
                 # Do what it says: a reply that claims a change no call this
                 # turn made gets one more round to make it or say it can't.
-                if claim_checked or handing_over:
+                if claim_checked or handing_over or repeating:
                     return
                 claim_checked = True
                 reply_text = cut_text + "\n".join(
@@ -2795,14 +2821,14 @@ class Executive:
                 # _round_separator, like any other round's.
                 continue
 
-            # Handed over: the write-up asked for a tool anyway. Run nothing;
-            # what it wrote (if anything) is the reply.
-            if handing_over:
+            # Handed over (or repeating itself): the write-up asked for a tool
+            # anyway. Run nothing; what it wrote (if anything) is the reply.
+            if handing_over or repeating:
                 if not any(
                     b.get("type") == "text" and str(b.get("text", "")).strip()
                     for b in response_content
                 ):
-                    yield HAND_OVER_EMPTY_REPLY
+                    yield HAND_OVER_EMPTY_REPLY if handing_over else REPEATING_EMPTY_REPLY
                 return
 
             cut_text = ""
@@ -3990,6 +4016,13 @@ class Executive:
                 tool_results.append({"type": "text", "text": HAND_OVER_NOTE})
                 handing_over = True
                 yield {"type": "handing_over"}
+            for tu in tool_uses:
+                key = _call_key(tu, results_by_id.get(tu["id"], ""))
+                repeats[key] = repeats.get(key, 0) + 1
+            if not handing_over and max(repeats.values(), default=0) >= REPEAT_LIMIT:
+                logger.warning("round %d: a call came back the same %d times; writing up", iteration, REPEAT_LIMIT)
+                tool_results.append({"type": "text", "text": REPEATING_NOTE})
+                repeating = True
             if sees:
                 # Only the newest screenshots ride along: older ones would be
                 # sent again every round.
