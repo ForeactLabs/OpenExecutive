@@ -159,3 +159,24 @@ async def test_a_step_that_gave_nothing_back_still_carries_on(monkeypatch: pytes
     monkeypatch.setattr(decisions, "approve_decision", ok)
     note = await decisions.approve_in_chat(43, SimpleNamespace())
     assert "it was done" in note and "<untrusted_content" not in note
+
+
+def test_a_page_in_another_app_never_approves_a_card(
+    temp_db: Path, patched_deps: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A conversation a host origin's page wrote in only reads and advises:
+    approve_card there approves nothing, and the turn says the card waits."""
+    people_store.upsert_person(full_name="Alex", is_principal=True)
+    captured: dict[str, Any] = {}
+    _capture(monkeypatch, captured)
+
+    async def never(*_a: Any, **_kw: Any) -> Any:
+        raise AssertionError("a host page must not approve")
+
+    monkeypatch.setattr(decisions, "approve_decision", never)
+    monkeypatch.setattr(chat_route, "_host_wrote", lambda _sid: True)
+    resp = _client().post("/chat", json={"message": "hi", "session_id": "s-host", "approve_card": 43})
+    assert resp.status_code == 200
+    _ = resp.text
+    block = captured["stream_chat"]["page_context_block"]
+    assert decisions.HOST_APPROVE_NOTE in block

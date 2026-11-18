@@ -1113,6 +1113,12 @@ async def approve_decision(
 
 # What an approved step gave back that the chat's next turn reads.
 _CHAT_RESULT_CHARS = 1500
+# What the turn reads when Approve came from a page in another app, which
+# never approves a card: the card still waits where it was.
+HOST_APPROVE_NOTE = (
+    "Approve came from a page in another app, which can't approve a card, so nothing was done. "
+    "The card still waits where it was. Say so in a line."
+)
 
 
 async def approve_in_chat(instance_id: int, request: Request, input_edits: dict[str, Any] | None = None) -> str:
@@ -1129,8 +1135,9 @@ async def approve_in_chat(instance_id: int, request: Request, input_edits: dict[
         instance = await approve_decision(instance_id, body, request)
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else "it couldn't be done"
+        # Quoted: a failed step's words can carry the outside service's text.
         return (
-            f"They tapped Approve on a card in this chat, but it didn't go through: {detail} "
+            f"They tapped Approve on a card in this chat, but it didn't go through: {json.dumps(detail[:300])}. "
             "Say so in a line, then carry on with what you can."
         )
     except Exception:
@@ -1144,9 +1151,10 @@ async def approve_in_chat(instance_id: int, request: Request, input_edits: dict[
         final = json.loads(instance.final_payload_json or "{}")
     except ValueError:
         final = {}
-    summary = " ".join(str(payload.get("summary") or "the step").split())[:200]
+    # Quoted: a step's summary can quote what it sends, words from outside.
+    summary = json.dumps(" ".join(str(payload.get("summary") or "the step").split())[:200])
     note = (
-        f'They tapped Approve on the card "{summary}" in this chat, and it was done. '
+        f"They tapped Approve on the card {summary} in this chat, and it was done. "
         "Carry on with what they asked in this chat, using what it gave back; "
         "don't ask them to approve it again."
     )

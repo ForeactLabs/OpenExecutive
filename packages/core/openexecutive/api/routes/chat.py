@@ -1441,9 +1441,14 @@ async def _run_chat_turn(
 
         page_context_block = _build_page_context_block(page_context)
         if approve_card is not None:
-            from openexecutive.api.routes.decisions import approve_in_chat
+            from openexecutive.api.routes.decisions import HOST_APPROVE_NOTE, approve_in_chat
 
-            approved = await approve_in_chat(approve_card, request, approve_input)
+            # A page in another app never approves a card (docs/auth.md): its
+            # turn only reads and advises, so the card stays as it is.
+            approved = (
+                HOST_APPROVE_NOTE if session.from_host
+                else await approve_in_chat(approve_card, request, approve_input)
+            )
             page_context_block = "\n\n".join(
                 part for part in (page_context_block, f"THE CARD THEY JUST APPROVED:\n{approved}") if part
             )
