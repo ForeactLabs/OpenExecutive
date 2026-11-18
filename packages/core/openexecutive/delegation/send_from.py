@@ -108,8 +108,9 @@ def writer_note(payload: dict[str, Any]) -> str:
 def split(person: Any, payload: dict[str, Any], body: str | None = None) -> tuple[str, str]:
     """The card's words (``body``, else its own) without their closing
     sign-off, and that sign-off: the Executive's (``sign_off``) when it goes
-    from the Executive; else their signature and AI line
-    (``answers._split_tail``)."""
+    from the Executive, also when the words don't end with it (a name changed
+    since, or it was typed over), so a change never sends it unsigned; else
+    their signature and AI line (``answers._split_tail``)."""
     from openexecutive.delegation.answers import _split_tail
     from openexecutive.delegation.voice import get_voice
 
@@ -119,7 +120,7 @@ def split(person: Any, payload: dict[str, Any], body: str | None = None) -> tupl
         stripped = text.rstrip()
         if stripped.endswith(mine):
             return stripped[: -len(mine)].rstrip(), mine
-        return stripped, ""
+        return stripped, mine
     return _split_tail(text, get_voice(person.id).profile.signature)
 
 

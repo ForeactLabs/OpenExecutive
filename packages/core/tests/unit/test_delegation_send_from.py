@@ -223,7 +223,7 @@ def test_a_change_on_a_switched_card_edits_the_words_that_go(
     assert saved[send_from.FROM_EXECUTIVE] is True
     assert saved["draft_body"] == f"Hi Dana,\n\nI'll get back to you Friday.\n\n{send_from.sign_off(owner)}"
     # And can be taken back.
-    assert saved[card_drafts.UNDO_KEY] == shown
+    assert saved[card_drafts.UNDO_KEY]["draft_body"] == shown
     undone = asyncio.run(card_drafts.undo(_fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox))
     assert undone["draft_body"] == shown and not card_drafts.can_undo(undone)
     assert undone["conversation"][-1]["text"] == card_drafts.NOTE_UNDONE
@@ -236,6 +236,43 @@ def test_a_change_on_a_switched_card_edits_the_words_that_go(
         _fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, text="Hi Dana,\n\nShort and sweet.",
     ))
     assert kept["draft_body"] == "Hi Dana,\n\nShort and sweet." and not card_drafts.can_undo(kept)
+
+
+def test_undo_puts_back_the_words_the_answers_and_their_mailbox_draft(
+    db: Path, owner: Any, models: dict[str, Any],
+) -> None:
+    inbox.set_mailbox_drafts(owner.id, True, updated_by="test")
+    mailbox, card = _card(owner)
+    first = inbox.card_payload(_fresh(card))
+    calls: list[int] = []
+
+    async def write(person: Any, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        calls.append(1)
+        if len(calls) == 2:
+            # A question asked: the words stay as they are.
+            return payload["draft_body"], {}
+        return "Hi Dana,\n\nFriday at 10 works.", {answers.ANSWERED_KEY: {"0": "Friday"}}
+
+    saved = asyncio.run(card_drafts.edit(_fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, rewrite=write))
+    assert saved[answers.ANSWERED_KEY] == {"0": "Friday"} and card_drafts.can_undo(saved)
+    asked = asyncio.run(card_drafts.edit(_fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, rewrite=write))
+    # The change before the question can still be taken back.
+    assert asked[card_drafts.UNDO_KEY] == saved[card_drafts.UNDO_KEY]
+    undone = asyncio.run(card_drafts.undo(_fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox))
+    assert undone["draft_body"] == first["draft_body"]
+    assert undone[answers.ANSWERED_KEY] == {} and not card_drafts.can_undo(undone)
+    # Their mailbox's draft says the same as the card again.
+    assert mailbox.drafts[undone["draft_id"]].message.text == first["draft_body"]
+    assert replies.cards(owner)[0].can_undo is False
+
+
+def test_a_switched_card_keeps_its_sign_off_when_its_words_lost_it(
+    db: Path, owner: Any, models: dict[str, Any], rewrites: list[str],
+) -> None:
+    mailbox, card = _card(owner)
+    payload = _switch(card, mailbox, owner, True)
+    main, tail = send_from.split(owner, payload, "Hi Dana,\n\nFriday works.\n\nSomeone Else")
+    assert main == "Hi Dana,\n\nFriday works.\n\nSomeone Else" and tail == send_from.sign_off(owner)
 
 
 def test_a_switched_card_tells_the_rewrite_who_i_is(

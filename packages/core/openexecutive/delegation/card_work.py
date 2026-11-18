@@ -691,6 +691,9 @@ async def apply(
         **_end_turn(payload, state=STUCK if picks else DONE, text=text, choices=picks),
         WORK_KEY: DONE, REWROTE_KEY: bool((body or "").strip()),
     }
+    if (body or "").strip() or files:
+        # Only the change made now can be taken back, never one before it.
+        changed.pop(card_drafts.UNDO_KEY, None)
     words = (body or "").replace("\r", "").strip()
     if words:
         # Written for whoever sends it (prompt_for), signed for them.
@@ -704,9 +707,10 @@ async def apply(
         changed["gist"] = clean_gist(text)
         changed[card_drafts.QUESTIONS_SETTLED] = True
         if words != was:
-            # The work's change can be taken back (``card_drafts.undo``),
-            # and its note quotes what it made new.
-            changed[card_drafts.UNDO_KEY] = was
+            # The work's change can be taken back (``card_drafts.undo``) when
+            # its files stay as they were, and its note quotes what it made new.
+            if not files:
+                changed[card_drafts.UNDO_KEY] = card_drafts.undo_point(payload)
             new = changed_sentences(send_from.split(person, payload, was)[0], send_from.split(person, payload, words)[0])
             if new:
                 changed["conversation"][-1]["changed"] = new

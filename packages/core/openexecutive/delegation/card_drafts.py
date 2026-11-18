@@ -52,10 +52,11 @@ QUESTIONS_SETTLED = "questions_settled"
 # When a reply asked for in chat last replaced the card's (``from_chat``). A
 # card shown before then sends only once it was shown again (``version``).
 CHANGED_IN_CHAT = "changed_in_chat_at"
-# The words before the last change they asked for on the card (an answer,
-# their words in its box, its work): ``undo`` puts them back. Any other
-# change of the words, or a switch of who it goes from, drops it.
-UNDO_KEY = "words_before_change"
+# The card before the last change they asked for on it (an answer, their
+# words in its box, its work): its words and the questions answered then
+# (``undo_point``). ``undo`` puts them back. Any other change of the words,
+# a switch of who it goes from, or work that changed the files drops it.
+UNDO_KEY = "before_change"
 NOTE_UNDONE = "I put back the words from before that change."
 
 # Cards whose draft is being made right now in this process, so two taps
@@ -355,7 +356,7 @@ async def edit(
                 before = str(payload.get("draft_body") or "")
                 if words != before:
                     # Their change can be taken back (``undo``).
-                    extra[UNDO_KEY] = before
+                    extra[UNDO_KEY] = undo_point(payload)
                 elif can_undo(payload):
                     # A question answered: the change before it still can.
                     extra[UNDO_KEY] = payload[UNDO_KEY]
@@ -430,24 +431,42 @@ async def _remade(
     return changed
 
 
+def undo_point(payload: dict[str, Any]) -> dict[str, Any]:
+    """What ``undo`` puts back: the card's words and the questions answered
+    as they are in ``payload``, before a change."""
+    from openexecutive.delegation.answers import ANSWERED_KEY
+
+    answered = payload.get(ANSWERED_KEY)
+    return {
+        "draft_body": str(payload.get("draft_body") or ""),
+        ANSWERED_KEY: dict(answered) if isinstance(answered, dict) else {},
+    }
+
+
 def can_undo(payload: dict[str, Any]) -> bool:
-    return bool(str(payload.get(UNDO_KEY) or "").strip())
+    point = payload.get(UNDO_KEY)
+    return isinstance(point, dict) and bool(str(point.get("draft_body") or "").strip())
 
 
 async def undo(instance: Any, *, caller: Any, resolver: int | None, gmail: Any = None) -> dict[str, Any]:
-    """Take back the last change they asked for on the card: its words as
-    they were before it (``UNDO_KEY``), saved like any change, with a line
+    """Take back the last change they asked for on the card: its words and
+    the questions answered as they were before it (``UNDO_KEY``), saved like
+    any change, also in their mailbox's draft, with a line
     in the card's conversation. The same checks as ``edit``. Returns the
     card's payload as it now is; raises ``SendRefused``. Sends nothing."""
     from openexecutive.audit import rows_for_person
-    from openexecutive.delegation.answers import CONVERSATION_KEY, CONVERSATION_MAX, conversation
+    from openexecutive.delegation.answers import (
+        ANSWERED_KEY,
+        CONVERSATION_KEY,
+        CONVERSATION_MAX,
+        conversation,
+    )
     from openexecutive.delegation.inbox import card_payload
     from openexecutive.delegation.reply_send import SendRefused
 
     payload = card_payload(instance)
     person = check(instance, caller=caller, resolver=resolver)
-    before = str(payload.get(UNDO_KEY) or "")
-    if not before.strip():
+    if not can_undo(payload):
         raise SendRefused(409, "nothing_to_undo", "There's no change to take back. Look at it again.")
     with rows_for_person(person.id):
         if instance.id in _EDITING or instance.id in _MAKING:
@@ -457,8 +476,13 @@ async def undo(instance: Any, *, caller: Any, resolver: int | None, gmail: Any =
             turns = [*conversation(payload), {
                 "kind": "note", "text": NOTE_UNDONE, "at": datetime.now(UTC).isoformat(),
             }]
-            extra = {CONVERSATION_KEY: turns[-CONVERSATION_MAX:], "gist": ""}
-            return await _edit(instance, person, payload, _check_words(before), gmail, extra, by_hand=False)
+            point = payload[UNDO_KEY]
+            extra = {
+                CONVERSATION_KEY: turns[-CONVERSATION_MAX:], "gist": "", ANSWERED_KEY: point[ANSWERED_KEY],
+            }
+            return await _edit(
+                instance, person, payload, _check_words(str(point["draft_body"])), gmail, extra, by_hand=False,
+            )
         finally:
             _EDITING.discard(instance.id)
 
