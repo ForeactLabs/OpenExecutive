@@ -590,6 +590,9 @@ def test_an_approve_without_edits_sends_what_was_said(
     assert done[0]["input"]["body"] == "Short text"
     after = ledger.get_decision_instance(decision_id)
     assert after is not None and after.status == "approved_with_edit"
+    # What was carried out shows as sent: what was said is in it, not beside it.
+    final = json.loads(after.final_payload_json or "{}")
+    assert "said_input" not in final
 
 
 def test_a_go_on_a_long_email_is_judged_on_all_of_it(

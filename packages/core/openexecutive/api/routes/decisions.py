@@ -865,6 +865,15 @@ async def _carry_out_department_action(
     )
 
 
+def _may_change(instance: DecisionInstance, request: Request, resolver: int | None) -> bool:
+    """Whether the caller may change a held step's fields, as Approve's own
+    ``edits.input`` allows: a Take the lead card's are the principal's, a
+    held step's the principal's or the person it waits on."""
+    if _approver_is_principal(request):
+        return True
+    return instance.decision_class == _DEPARTMENT_ACTION.name and resolver == instance.approver_person_id
+
+
 def _input_edits(payload: dict[str, Any], edits: dict[str, Any]) -> dict[str, Any] | None:
     """The changes to a held step's fields an Approve carries out: the ones
     sent with it, else what was said on the card (``said_input``), which the
@@ -886,7 +895,7 @@ def _with_edits(
     from openexecutive.orchestrator import card_details, take_the_lead
 
     if input_edits is None:
-        return payload, {}
+        return {k: v for k, v in payload.items() if k != SAID_INPUT}, {}
     if len(card_details.held_steps(payload)) > 1:
         # One card for several calls: Approve runs each as shown.
         raise HTTPException(status_code=422, detail="This one can't be changed from its card.")
@@ -897,7 +906,9 @@ def _with_edits(
         )
     except take_the_lead.EditError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
-    return _edited(payload, new_input, changed), changed
+    # What was said is in the input now: what was carried out shows as sent.
+    done = {k: v for k, v in _edited(payload, new_input, changed).items() if k != SAID_INPUT}
+    return done, changed
 
 
 def _edited(payload: dict[str, Any], new_input: dict[str, Any], changed: dict[str, str] | None) -> dict[str, Any]:
@@ -1161,7 +1172,9 @@ async def say_on_step(instance_id: int, body: StepSayBody, request: Request) -> 
     if instance.status != STATUS_PROPOSED:
         raise HTTPException(status_code=409, detail="This card was already answered.")
     payload = _parse_payload(instance)
-    fields = said_fields(payload)
+    # Its wording is changed only by whoever may change it with Approve's
+    # own edits, so what was said can go on any way the card is approved.
+    fields = said_fields(payload) if _may_change(instance, request, resolver) else []
     if not fields:
         raise HTTPException(status_code=409, detail="This one can't be changed from its card.")
     try:

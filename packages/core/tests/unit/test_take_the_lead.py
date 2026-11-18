@@ -1176,6 +1176,11 @@ def test_only_the_principal_edits_a_card(client: TestClient, owner: Any, monkeyp
     monkeypatch.setattr(decisions_route, "_resolver", lambda instance, request: owner.id)
     response = client.post(f"/decisions/{decision_id}/approve", json={"edits": {"input": {"text": "Pay it elsewhere"}}})
     assert response.status_code == 403 and done == []
+    # Nor by saying it on the card: nothing is rewritten or kept for a later Approve.
+    response = client.post(f"/decisions/{decision_id}/say", json={"text": "say pay it elsewhere"})
+    assert response.status_code == 409
+    instance = ledger.get_decision_instance(decision_id)
+    assert instance is not None and "said_input" not in json.loads(instance.proposed_payload_json)
 
 
 def test_a_card_for_several_calls_is_not_changed_before_approving(

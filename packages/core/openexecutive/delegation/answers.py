@@ -521,13 +521,15 @@ async def _call_model(model: str, system: str, turn: str) -> dict[str, Any]:
 
 async def rewrite(
     person: Any, payload: dict[str, Any], answers: list[Answer], *, now: datetime | None = None,
-    change: str = "", news: list[dict[str, Any]] | None = None,
+    change: str = "", news: list[dict[str, Any]] | None = None, send_now: bool = False,
 ) -> tuple[str, dict[str, Any], list[str]]:
     """The card's draft rewritten with ``answers``, with what the person
     asked to ``change``, or with ``news`` (newer email in the conversation,
     ``catch_up``): the new body, the payload fields to keep with it, and the
     sentences that are new. A ``change`` that is a question gets its answer
-    in the conversation and the body back unchanged. Raises ``SendRefused``."""
+    in the conversation and the body back unchanged. ``send_now``: a card
+    that can confirm a send takes "send it" as a go (``SendNow``); anywhere
+    else it leaves the words as they are. Raises ``SendRefused``."""
     from openexecutive.config import get_settings
     from openexecutive.delegation.ghostwriter import (
         _drop_name_before_signature,
@@ -585,7 +587,7 @@ async def rewrite(
         written = {}
     asked_only = bool(change and not pairs and not news and written.get("question") is True)
     sender = written.get("send_from") if change and not pairs and not news else None
-    if change and not pairs and not news and written.get("send_now") is True and not asked_only:
+    if send_now and change and not pairs and not news and written.get("send_now") is True and not asked_only:
         raw_words = written.get("body")
         if not isinstance(raw_words, str) or raw_words.strip() == main.strip():
             # Only a go: the words stay, and the card asks to confirm the send.
@@ -770,7 +772,7 @@ async def change(
     asked: list[str] = []
 
     async def write(person: Any, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-        body, extra, new = await rewrite(person, payload, [], change=text, now=now)
+        body, extra, new = await rewrite(person, payload, [], change=text, now=now, send_now=True)
         changed[:] = new
         sender = extra.pop(_SEND_FROM_ASKED, None)
         if isinstance(sender, str):

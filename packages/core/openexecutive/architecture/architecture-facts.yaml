@@ -4148,6 +4148,10 @@ departments:
     replan.said_go against the fields the card showed, whole
     (STEP_TEXT_MAX, not a plan's 600), and approves through the class's
     own approve, as a tap; when it isn't sure, the reply says to tap Do it.
+    Only someone who may change the step with Approve's own edits says it
+    (decisions._may_change: a Take the lead card's principal, a held
+    step's principal or approver; anyone else gets 409), and the carried
+    out payload drops said_input, so the final record shows what was sent.
     Both what the person said and the reply are kept as the card's
     conversation (alert_card_turns), each line with the person it is
     between (person_id); /today and the say response show a reader only
