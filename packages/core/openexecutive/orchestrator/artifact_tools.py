@@ -396,11 +396,13 @@ async def handle_get_artifact(tool_input: dict[str, Any]) -> str:
     composite_id = str(tool_input.get("id") or "").strip()
     asked = tool_input.get("max_chars")
     try:
-        rec = load_artifact(composite_id, viewer=current_viewer())
+        # Off the event loop, as the draft and download are: a sheet at the
+        # cap is tens of MB to read and parse.
+        rec = await asyncio.to_thread(load_artifact, composite_id, viewer=current_viewer())
     except (MalformedArtifactId, ArtifactNotFound) as exc:
         return _err(str(exc))
 
-    content = get_format(rec.format).display(rec.stored or "")
+    content = await asyncio.to_thread(get_format(rec.format).display, rec.stored or "")
     max_chars = len(content) if asked is None else _clamp_int(asked, len(content), 200, max(200, len(content)))
     truncated = len(content) > max_chars
     result: dict[str, Any] = {
