@@ -1170,3 +1170,35 @@ def test_a_malformed_default_space_never_falls_back(monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("GOOGLE_CHAT_DEFAULT_SPACE", "AAAA123")
     monkeypatch.setattr(gc_module, "group_spaces", lambda **_: [{"space": "spaces/ONLY", "title": "", "announce": False}])
     assert gc_module.announce_space() is None
+
+
+def test_a_card_that_still_waits_is_rewritten_with_its_new_buttons(monkeypatch: pytest.MonkeyPatch) -> None:
+    """After a switch (or a tap on an older copy), the card shows its new
+    words with buttons the next tap is checked against: the same data on
+    the message as the tap will carry."""
+    from openexecutive.integrations import channel_cards
+
+    options = (("Send from Ada, cc me", "card:12:a:1234abcd"), ("Send from me", "card:12:x:1234abcd"),
+               ("Skip", "card:12:s:1234abcd"))
+
+    async def tap(tapped: Any, who: Any) -> Any:
+        return channel_cards.Tapped("Changed who it goes from. Check it, then send it.", "Reply from Ada", options)
+
+    monkeypatch.setattr(channel_cards, "tap", tap)
+    monkeypatch.setattr("openexecutive.audit.log_event", lambda *a, **k: None)
+    service = MagicMock()
+    with (
+        patch.object(gc_module, "_build_credentials", return_value="creds"),
+        patch("googleapiclient.discovery.build", return_value=service),
+    ):
+        asyncio.run(gc_module._decide_tap(
+            data="card:12:x:0000beef", person=SimpleNamespace(id=3), shown="Reply from you", space_name="spaces/DM1",
+            message_name="spaces/DM1/messages/C1", user_name="users/111",
+            service_account_file="/k.json", service_account_email=None,
+        ))
+    kwargs = service.spaces.return_value.messages.return_value.patch.call_args.kwargs
+    assert kwargs["name"] == "spaces/DM1/messages/C1"
+    assert kwargs["body"]["text"] == "Reply from Ada\n\nChanged who it goes from. Check it, then send it."
+    buttons = kwargs["body"]["cardsV2"][0]["card"]["sections"][0]["widgets"][0]["buttonList"]["buttons"]
+    assert [b["text"] for b in buttons] == [label for label, _ in options]
+    assert [b["onClick"]["action"]["parameters"][0]["value"] for b in buttons] == [data for _, data in options]

@@ -207,3 +207,37 @@ def test_a_discord_tap_anywhere_else_is_turned_away(
     other = _discord_tap(custom_id="something_else")
     asyncio.run(discord_bot.handle_card_tap(other))
     assert other.response.sent == [] and chat_apps == []
+
+
+_AGAIN = channel_cards.Tapped(
+    "Changed who it goes from. Check it, then send it.", "Reply from Ada",
+    (("Send from Ada, cc me", "card:7:a:1234abcd"), ("Send from me", "card:7:x:1234abcd"),
+     ("Skip", "card:7:s:1234abcd")),
+)
+
+
+async def _again(tapped: Any, who: Any) -> channel_cards.Tapped:
+    return _AGAIN
+
+
+def test_a_slack_card_that_still_waits_is_shown_again_with_its_new_buttons(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("openexecutive.people.store.find_person_by_slack_id", lambda uid: PERSON)
+    monkeypatch.setattr(channel_cards, "tap", _again)
+    client = FakeSlack()
+    asyncio.run(slack_bot.handle_card_tap(_slack_tap(value="card:7:x:0000beef"), client))
+    update = client.updates[0]
+    assert update["text"] == f"Reply from Ada\n\n{_AGAIN.line}"
+    elements = update["blocks"][1]["elements"]
+    assert [e["value"] for e in elements] == [data for _, data in _AGAIN.options]
+    assert [e["action_id"] for e in elements] == ["oe_card_approve", "oe_card_switch", "oe_card_skip"]
+
+
+def test_a_discord_card_that_still_waits_is_shown_again_with_its_new_buttons(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("openexecutive.people.store.find_person_by_discord_id", lambda uid: PERSON)
+    monkeypatch.setattr(channel_cards, "tap", _again)
+    tap = _discord_tap(custom_id="card:7:x:0000beef")
+    asyncio.run(discord_bot.handle_card_tap(tap))
+    edit = tap.edits[0]
+    assert edit["content"] == f"Reply from Ada\n\n{_AGAIN.line}"
+    assert [b.custom_id for b in edit["view"].children] == [data for _, data in _AGAIN.options]
+    assert [b.label for b in edit["view"].children] == [label for label, _ in _AGAIN.options]
