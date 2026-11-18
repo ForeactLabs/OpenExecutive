@@ -1105,8 +1105,9 @@ def _team_file_name(tool_input: dict[str, Any]) -> str:
 
 def _writes_team_file(tool: str, tool_input: dict[str, Any]) -> bool:
     """Whether a connected-app step writes into a file (a sheet, doc,
-    slides, Drive file) and reaches no one outside the team: no mail, no
-    event, no address of anyone but a teammate."""
+    slides, Drive file) and itself names no one outside the team: no mail,
+    no event, no address of anyone but a teammate. Who could already open
+    the file was settled when it was shared (sharing waits on its own)."""
     return _file_tool(tool) and not _MAIL_TOOL_RE.search(tool) and _team_only(tool, tool_input)
 
 
