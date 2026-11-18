@@ -298,7 +298,7 @@ def card_text(decision_id: int, instance: Any = None) -> str | None:
         # It opens as on every app (``card_details.top``), read by the
         # person it waits on: who started it and why it waits.
         top = card_details.top(
-            payload, approver_id=instance.approver_person_id, viewer_id=instance.approver_person_id,
+            as_said(payload), approver_id=instance.approver_person_id, viewer_id=instance.approver_person_id,
         )
         lines.append(str(top["title"] or shown.get("summary") or payload.get("tool") or "").strip()[:400])
         lines.append(top["started"] + ".")
