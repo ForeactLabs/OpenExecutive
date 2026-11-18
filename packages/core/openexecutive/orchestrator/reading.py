@@ -257,11 +257,15 @@ class TurnReadingBudget:
     @property
     def full(self) -> bool:
         """The turn has read all its model holds, or its prompt has filled
-        most of the window (``_PROMPT_FULL_SHARE``): it should answer now."""
+        most of the window (``window_full``): it should answer now."""
+        return self.used >= self.turn_budget or self.window_full
+
+    @property
+    def window_full(self) -> bool:
+        """The prompt has filled most of the window (``_PROMPT_FULL_SHARE``):
+        another round of writing would not fit."""
         window = self.limits.window_tokens
-        return self.used >= self.turn_budget or bool(
-            window and self._prompt_tokens >= window * _PROMPT_FULL_SHARE
-        )
+        return bool(window and self._prompt_tokens >= window * _PROMPT_FULL_SHARE)
 
     @staticmethod
     def _key(name: str, tool_input: Any) -> str:

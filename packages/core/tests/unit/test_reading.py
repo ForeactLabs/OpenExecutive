@@ -651,3 +651,14 @@ def test_a_local_model_at_the_default_window_says_so_once(
     caplog.clear()
     registry.reading_limits_for("llama")
     assert not caplog.records
+
+
+def test_a_long_write_up_after_reading_a_lot_carries_on_while_the_window_has_room() -> None:
+    """Having read all a turn may read asks for the write-up; a write-up cut
+    for length still carries on while the prompt has room in the window."""
+    budget = TurnReadingBudget(ReadingLimits(per_read=60_000, per_turn=120_000, window_tokens=1_000_000))
+    budget.used = 120_000
+    budget.prompt_was(450_000)
+    assert budget.full and not budget.window_full
+    budget.prompt_was(810_000)
+    assert budget.window_full

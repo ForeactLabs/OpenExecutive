@@ -2831,7 +2831,7 @@ class Executive:
                     cut_text += "".join(
                         str(b.get("text", "")) for b in response_content if b.get("type") == "text"
                     )
-                    if reading_budget.full:
+                    if reading_budget.window_full:
                         # Another cut round would not fit the window: what
                         # it wrote stays shown and the turn ends plainly.
                         logger.warning("round %d cut off with the window full; ending the turn", iteration)
