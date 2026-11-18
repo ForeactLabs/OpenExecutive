@@ -944,8 +944,9 @@ def test_a_confirmed_tap_is_decided_and_its_card_rewritten(monkeypatch: pytest.M
         return "Approved."
 
     monkeypatch.setattr(channel_cards, "resolve", resolve)
-    # No card in this test's ledger: the tap goes ahead.
-    monkeypatch.setattr(channel_cards, "card_text", lambda i: None)
+    # The card as its message shows it (no ledger in this test).
+    monkeypatch.setattr(channel_cards, "card_text", lambda decision_id: "The card")
+    monkeypatch.setattr(channel_cards, "version", lambda decision_id, text: "0000beef")
     monkeypatch.setattr("openexecutive.audit.log_event", lambda *a, **k: rows.append(k.get("details") or {}))
     monkeypatch.setattr(gc_module, "update_card", lambda *a: updated.append(a))
 

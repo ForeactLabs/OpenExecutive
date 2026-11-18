@@ -280,6 +280,9 @@ def test_a_tap_answers_audits_and_leaves_the_card_without_buttons(
         resolved.append((decision_id, who, approve))
         return "Approved."
 
+    # The card as its message shows it (no ledger in this test).
+    monkeypatch.setattr(channel_cards, "card_text", lambda decision_id: "Meeting to book")
+    monkeypatch.setattr(channel_cards, "version", lambda decision_id, text: "0000beef")
     monkeypatch.setattr(channel_cards, "resolve", resolve)
     audited: list[dict[str, Any]] = []
     monkeypatch.setattr("openexecutive.audit.log_event", lambda *a, **k: audited.append(k["details"]))
@@ -333,6 +336,9 @@ def test_a_busy_tap_only_answers(fake_telegram: _FakeTelegram, monkeypatch: pyte
     async def busy(decision_id: int, who: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None) -> str:
         return channel_cards.BUSY
 
+    # The card as its message shows it (no ledger in this test).
+    monkeypatch.setattr(channel_cards, "card_text", lambda decision_id: "Meeting to book")
+    monkeypatch.setattr(channel_cards, "version", lambda decision_id, text: "0000beef")
     monkeypatch.setattr(channel_cards, "resolve", busy)
     monkeypatch.setattr("openexecutive.audit.log_event", lambda *a, **k: None)
     asyncio.run(telegram_bot._handle_card_tap(
@@ -442,8 +448,7 @@ def test_a_card_shown_only_in_part_changes_its_version_where_it_isnt_shown(monke
 
 def test_a_tap_is_checked_against_when_its_card_was_read(monkeypatch: pytest.MonkeyPatch) -> None:
     """A matching tap counts its card as shown when the card was read, so a
-    change saved after it isn't; a card no chat shows whole any more is
-    checked against when it was posted (``shown_at`` None)."""
+    change saved after it isn't."""
     seen: list[str | None] = []
 
     async def resolve(decision_id: int, who: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None) -> str:
@@ -456,22 +461,23 @@ def test_a_tap_is_checked_against_when_its_card_was_read(monkeypatch: pytest.Mon
         reads.append(datetime.now(UTC).isoformat())
         return texts.pop(0)
 
-    texts: list[str | None] = ["Reply ready to send", None]
+    texts: list[str | None] = ["Reply ready to send"]
     monkeypatch.setattr(channel_cards, "resolve", resolve)
     monkeypatch.setattr(channel_cards, "card_text", card_text)
     shown = channel_cards.version(7, "Reply ready to send")
     asyncio.run(channel_cards.tap(channel_cards.Choice(7, "a", shown), SimpleNamespace(id=3)))
     assert seen[0] is not None and seen[0] <= reads[0]
-    asyncio.run(channel_cards.tap(channel_cards.Choice(7, "a", shown), SimpleNamespace(id=3)))
-    assert seen[1] is None
+    assert len(seen) == 1
 
 
-def test_a_switch_on_a_card_no_chat_shows_whole_does_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def switch(decision_id: int, who: Any) -> channel_cards.Tapped:
-        raise AssertionError("not switched")
+@pytest.mark.parametrize("choice", ["a", "n", "x"])
+def test_a_tap_on_a_card_no_chat_shows_whole_does_nothing(monkeypatch: pytest.MonkeyPatch, choice: str) -> None:
+    async def done(*a: Any, **k: Any) -> Any:
+        raise AssertionError("not done")
 
     monkeypatch.setattr(channel_cards, "card_text", lambda decision_id: None)
-    monkeypatch.setattr(channel_cards, "_switch", switch)
-    tapped = asyncio.run(channel_cards.tap(channel_cards.Choice(7, "x", "0000beef"), SimpleNamespace(id=3)))
+    monkeypatch.setattr(channel_cards, "resolve", done)
+    monkeypatch.setattr(channel_cards, "_switch", done)
+    tapped = asyncio.run(channel_cards.tap(channel_cards.Choice(7, choice, "0000beef"), SimpleNamespace(id=3)))
     assert tapped.line.startswith("Not done: this card changed. Open it in the app: ")
     assert tapped.line.endswith("/cards/7") and tapped.options == ()

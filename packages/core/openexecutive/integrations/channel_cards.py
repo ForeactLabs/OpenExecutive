@@ -447,17 +447,16 @@ async def tap(tapped: Choice, person: Any) -> Tapped:
     # Taken before the card is read: a change saved after it isn't shown.
     read_at = datetime.now(UTC).isoformat()
     current = card_text(decision_id) if choice != SKIP else None
+    if choice != SKIP and current is None:
+        # Its words no longer fit a chat: nothing to check the tap against.
+        return Tapped(f"Not done: this card changed. Open it in the app: {_app_link(decision_id)}")
     if current is not None and version(decision_id, current) != tapped.version:
         return Tapped(CHANGED, current, card_options(decision_id, current))
     if choice == SWITCH:
-        if current is None:
-            # Its words no longer fit a chat: nothing to check the tap against.
-            return Tapped(f"Not done: this card changed. Open it in the app: {_app_link(decision_id)}")
         return await _switch(decision_id, person)
     line = await resolve(
         decision_id, person, approve=choice != SKIP, allow=choice == ALLOW,
-        # It showed the card as it was read; a card no chat shows whole now
-        # is checked against when it was posted.
+        # It showed the card as it was read.
         shown_at=read_at if current is not None else None,
     )
     return Tapped(line)

@@ -104,8 +104,9 @@ def test_a_slack_tap_in_its_own_dm_decides_the_card(
     chat_apps: list[Any], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("openexecutive.people.store.find_person_by_slack_id", lambda uid: PERSON)
-    # No card in this test's ledger: the tap goes ahead.
-    monkeypatch.setattr(channel_cards, "card_text", lambda decision_id: None)
+    # The card as its message shows it (no ledger in this test).
+    monkeypatch.setattr(channel_cards, "card_text", lambda decision_id: "The card")
+    monkeypatch.setattr(channel_cards, "version", lambda decision_id, text: "0000beef")
     client = FakeSlack()
     asyncio.run(slack_bot.handle_card_tap(_slack_tap(), client))
     assert chat_apps == [(7, PERSON, True)]
