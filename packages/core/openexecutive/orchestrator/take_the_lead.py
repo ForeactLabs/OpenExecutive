@@ -1142,9 +1142,12 @@ def _team_file_name(tool_input: dict[str, Any]) -> str:
 
 def _writes_team_file(tool: str, tool_input: dict[str, Any]) -> bool:
     """Whether a connected-app step writes into a file (a sheet, doc,
-    slides, Drive file) and itself names no one outside the team: no mail,
-    no event, no address of anyone but a teammate. Who could already open
-    the file was settled when it was shared (sharing waits on its own)."""
+    slides, Drive file) and reaches no one outside the team: no mail, no
+    event, and no one but a teammate in its share or recipient arguments
+    (``_reach_addresses``); an address written into the file's text doesn't
+    count. Who approves a held step is ``_team_only``'s, which counts every
+    address. Who could already open the file was settled when it was shared
+    (sharing waits on its own)."""
     return (
         _file_tool(tool) and not _MAIL_TOOL_RE.search(tool)
         and _all_team(_reach_addresses(tool, tool_input))
