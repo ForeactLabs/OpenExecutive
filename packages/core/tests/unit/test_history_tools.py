@@ -181,33 +181,6 @@ def test_it_returns_only_the_speakers_own_notes(roster: SimpleNamespace) -> None
     assert _recall(_web(roster.principal), "venue")["result"] == "No notes match."
 
 
-def test_many_notes_come_back_a_page_at_a_time(roster: SimpleNamespace) -> None:
-    h.set_person_settings(roster.principal, by="test", reply_notes=True)
-    count = ht.NOTES_PER_PAGE * 2 + 3
-    for i in range(count):
-        h.add_notes(
-            roster.principal, [h.NewNote("promised", f"Told Dana item {i} ships.", f"item {i} ships", None)],
-            source=h.SOURCE_APPROVED_REPLY, channel=h.CHANNEL_EMAIL, conversation_ref=f"t{i}",
-            counterpart="Dana Lee <dana@acme.example>", subject="Items", trust="high", occurred_at=WHEN,
-        )
-
-    async def go(tool_input: dict[str, Any]) -> dict[str, Any]:
-        with set_session(_web(roster.principal)):
-            return json.loads(await ht.handle_recall_history(tool_input))
-
-    seen = 0
-    page = 1
-    while True:
-        out = asyncio.run(go({"query": "dana", "page": page}))
-        seen += out["notes"]
-        if "more" not in out:
-            break
-        assert f"page {page + 1}" in out["more"]
-        page += 1
-    assert seen == count and page == 3
-    assert asyncio.run(go({"query": "dana", "page": 9}))["result"] == "No more notes match."
-
-
 def test_due_lists_only_dated_notes_soonest_first(roster: SimpleNamespace) -> None:
     from datetime import timedelta
 

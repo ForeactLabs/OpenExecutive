@@ -47,6 +47,11 @@ from openexecutive.workflows.base import (
 
 logger = logging.getLogger(__name__)
 
+# The most rounds of tool calls a reflection runs, and a Take the lead pass
+# (the owner's choice, 11-18: background passes keep their old counts).
+_MAX_REFLECTION_ITERATIONS = 5
+_LEAD_ITERATIONS = 10
+
 
 class ExecutiveReflectionInput(BaseModel):
     """Inputs for an executive reflection run.
@@ -980,6 +985,7 @@ class ExecutiveReflectionWorkflow(Workflow):
                     messages=messages,
                     run_call=_run,
                     actor=self.name,
+                    max_rounds=_LEAD_ITERATIONS if leading else _MAX_REFLECTION_ITERATIONS,
                     on_result=grounding.read,
                 )
             except Exception as exc:

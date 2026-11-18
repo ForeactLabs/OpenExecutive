@@ -35,6 +35,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+MAX_BODY_CHARS = 6000
 MAX_SUBJECT_CHARS = 200
 _MAX_TOKENS = 2000
 MAX_OPEN_QUESTIONS = 5
@@ -271,7 +272,25 @@ def lint(
         flags.append("names_the_executive")
     text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    if len(text) > MAX_BODY_CHARS:
+        text = _shorten(text, MAX_BODY_CHARS)
+        flags.append("shortened")
     return text, flags
+
+
+def _shorten(text: str, cap: int) -> str:
+    """``text`` cut to at most ``cap`` characters at the last paragraph or
+    line break, else the last space, in the final fifth — so a cut never
+    drops more than a fifth of what fits."""
+    cut = text[:cap]
+    if text[cap:cap + 1].isspace():
+        return cut.rstrip()  # the cut already falls on a break
+    floor = cap * 4 // 5
+    for mark in ("\n\n", "\n", " "):
+        at = cut.rfind(mark)
+        if at >= floor:
+            return cut[:at].rstrip()
+    return cut.rstrip()
 
 
 _WORD = re.compile(r"[^\W\d_]+(?:['’-][^\W\d_]+)*")

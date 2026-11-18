@@ -401,7 +401,7 @@ async def _find_thread(client: Any, tool_input: dict[str, Any]) -> tuple[Any, st
         if not valid_id(thread_id):
             return None, _error("That thread_id isn't a thread id from their mailbox.")
     else:
-        matches = (await client.search_threads(str(find)[:300], max_results=5)).threads
+        matches = await client.search_threads(str(find)[:300], max_results=5)
         if not matches:
             return None, json.dumps({
                 "status": "not_found",

@@ -316,10 +316,11 @@ caching:
     Read sizes come from the turn's model, not from settings
     (providers.registry.reading_limits_for, which reads
     providers.feature_gate.context_tokens and reading_limits): a turn's reads
-    may fill 40% of the model's window at 3 characters a token
-    (ReadingLimits.per_turn: 1,200,000 characters for a 1M-token Claude,
-    240,000 for Haiku 4.5, a share of LOCAL_CONTEXT_TOKENS for a self-hosted
-    model), and one part of one read is half that (per_read). So an ordinary
+    may fill 40% of the model's window at 3 characters a token, capped at
+    MAX_TURN_READ_CHARS (200,000; the owner's cost limit, 11-18)
+    (ReadingLimits.per_turn: 200,000 for a 1M-token Claude or Haiku 4.5, a
+    share of LOCAL_CONTEXT_TOKENS for a small self-hosted model), and one
+    part of one read is half that (per_read). So an ordinary
     long document fits whole. orchestrator/reading.py holds it for the
     Executive's loop, a workflow action step and the background passes alike
     (TurnReadingBudget; the passes through orchestrator/rounds.py). A
@@ -456,9 +457,10 @@ caching:
     The passes that run with nobody watching (executive_reflection and Take
     the lead, executive_research's routing and watch passes, the chat review)
     run their tool calls through one loop,
-    orchestrator/rounds.py run_rounds, with no count of rounds: each ended at
-    a fixed number of iterations (3 to 10), so a long job stopped half done.
-    A pass ends when the model answers without a call. Its results go
+    orchestrator/rounds.py run_rounds. A pass ends when the model answers
+    without a call, or writes up after its max_rounds (the owner kept each
+    pass's own count, 11-18: reflection 5, Take the lead 10, research
+    synthesis 3, watchlist 2, chat review 5; STEPS_NOTE). Its results go
     through TurnReadingBudget, sized from the pass's model (whole, or in
     parts with replay), not a preview of 160 or 4,000 characters. It writes
     up, with one more call offering no tools (tool_choice none), when a call
@@ -514,8 +516,9 @@ caching:
     providers.translator_shapes), so a research specialist or the
     Executive pinned to e.g. Gemini still searches, with the same
     per-request contract as Anthropic-direct: the model decides when to
-    search, ``max_uses`` (when a caller sets one; none of ours does) caps
-    searches server-side per request (the same on both deployment types; on either path a multi-step chat turn
+    search, ``max_uses`` caps searches server-side per request (so
+    RESEARCH_WEB_SEARCH_MAX_USES and WEB_SEARCH_MAX_USES mean the same
+    thing on both deployment types; on either path a multi-step chat turn
     gets the cap afresh on each step),
     WEB_SEARCH_ALLOWED_DOMAINS / BLOCKED_DOMAINS map to allowed_domains /
     excluded_domains, and the response's search count
@@ -948,9 +951,10 @@ routing:
     the same generation. The Executive echoes those blocks in the
     assistant turn on the next iteration so continuity is preserved. The
     tool is appended after the sorted client-tool list so it never
-    receives the cache_control marker. It carries no `max_uses`: the
-    Executive, a specialist and the research fan-out search as often as the
-    work needs (each search is billed). ENABLE_WEB_SEARCH=false turns it off.
+    receives the cache_control marker. Each turn is capped at
+    `WEB_SEARCH_MAX_USES` searches (default 2) — every search is billed, so
+    this bounds per-turn search spend and, multiplied across the
+    7-specialist research fan-out, is a primary cost control.
 
     When the selected model is non-Claude (routed via OpenRouter), the
     feature gate strips this server tool from the request before it
@@ -1741,10 +1745,9 @@ knowledge:
     be a DefaultEmbeddingFunction instance: Collection._embed ignores those
     and embeds with a fresh default rebuilt from the collection config.
   chat_excerpt_budget: |
-    The chat surfaces (web chat, Telegram, Discord, Google Chat, 1:1s) pass
-    no max_chars to retrieve(): every chunk that passed the gate comes along.
-    A caller that passes one (the meeting voice, 4000) gets
-    retriever._fit_to_budget, which keeps the closest chunks across every
+    The chat surfaces (web chat, Telegram, Discord, Google Chat) pass
+    max_chars=KNOWLEDGE_CHAT_MAX_CHARS (default 6000, 0 = no cap) to
+    retrieve(). retriever._fit_to_budget keeps the closest chunks across every
     collection until the cap, skipping one that would overflow so a shorter
     weaker one can still fit, and always keeps the closest. Each excerpt is
     re-sent on every model call of the turn, so the tail of weak matches cost
@@ -2040,7 +2043,7 @@ knowledge:
           txt / md / csv are downloaded and read with
           loader.extract_text_from_file. A PDF goes through
           pdf_reader.read_pdf_text, the path uploads take (not inbound, so
-          every page, not the inbound budget): the text layer, else
+          PDF_VISION_MAX_PAGES, not the inbound budget): the text layer, else
           the opt-in model step (PDF_PROVIDER_READING), else local OCR in a
           child process under the two-slot OCR gate, with PDF_OCR_ENABLED
           switching it off for Drive as for uploads. Why: a scanned contract
@@ -2441,7 +2444,7 @@ knowledge:
        errors, refuses or returns nothing.
        PDF_OCR_ENABLED=false turns it off. Not installed on Python >= 3.13
        (the wheel's cap) — the note then says OCR is not installed.
-    Every page is read (the model in slices of PDF_VISION_PAGES_PER_CALL).
+    PDF_VISION_MAX_PAGES (default 100) caps pages read (note says so).
     inbound=True (a file a channel delivered: chat/Slack/Google Chat/email
     attachments; NOT POST /chat/upload, the signed-in user's own) caps at
     PDF_INBOUND_MAX_PAGES (30) and draws on a rolling hourly budget,
@@ -3100,10 +3103,7 @@ memory:
       way (not locked down) and, for a team member, the principal can't open
       it.
     - recall_history takes due=true to list only dated notes, a week overdue
-      to two weeks ahead, soonest first ("what's due today?"). Notes come
-      back NOTES_PER_PAGE (20) at a time; when more match the result says
-      which page to ask for next (list_notes offset), so no note is out of
-      reach.
+      to two weeks ahead, soonest first ("what's due today?").
     - search_past_chats (orchestrator/chat_search_tools.py) searches the
       speaker's own earlier chats (session_store.search_past_messages, owned
       chats only, not the one in progress) on the same surface as recall, no
@@ -5520,7 +5520,7 @@ today:
 chat:
   round_cut_off: |
     Each Executive round (and the committee revision) may write
-    MAX_OUTPUT_TOKENS (32,000; was 8192) in providers/feature_gate.py; a specialist's analysis takes the same (agents/base.py, was 4,096). A
+    MAX_OUTPUT_TOKENS (32,000; was 8192) in providers/feature_gate.py; a specialist's analysis takes SPECIALIST_MAX_TOKENS (8,000; agents/base.py, was 4,096). A
     round that reaches it (stop_reason max_tokens) no longer ends the turn:
     the tool call it was still writing (the last one) is answered with
     CUT_OFF_RESULT and never runs, since its input is unfinished; with no
@@ -5529,9 +5529,11 @@ chat:
     CUT_OFF_LABEL ("Writing it in shorter parts…"), so a card's step list
     names the real stop. Why: a reply card writing a long spreadsheet as one
     draft_artifact call was cut at 8192 twice and showed "couldn't finish"
-    with the mark on the read before it. A turn has no step limit: it runs
-    rounds, cut ones included, until the model answers (Stop ends it), so a
-    big job is never stopped at a count. The one exception is a cut round that
+    with the mark on the read before it. A turn runs at most MAX_STEPS (40)
+    rounds, cut ones included (orchestrator/reading.py, the owner's cost
+    limit, 11-18): at the 40th its results end with STEPS_NOTE and the next
+    call writes the answer, saying what is left (Stop ends it sooner). The
+    other exception is a cut round that
     got nowhere: one that wrote nothing at all (a model spending its whole
     answer thinking), or one cut while writing its only call (a document too
     long for one call, asked for again just as long), whose call never runs.
@@ -6872,8 +6874,10 @@ external_monitoring:
          (3) three ways: the prompt says so, the tool schema carries
          `maxItems`, and `_extract_findings` keeps the first N for a
          provider that does not enforce the schema.
-         Controls: the fan-out's web_search tool carries no `max_uses`, as
-         in chat; `RESEARCH_SPECIALISTS`
+         Controls: the fan-out's web_search tool takes its `max_uses` from
+         `RESEARCH_WEB_SEARCH_MAX_USES` (default 3) — separate from the
+         chat / query knob `WEB_SEARCH_MAX_USES`, because here it is
+         multiplied by the number of specialists; `RESEARCH_SPECIALISTS`
          (comma-separated slugs, empty = all seven) filters the fan-out via
          `active_research_specialists` (unknown slugs are logged and
          dropped; an all-unknown value runs every specialist). The tool is
@@ -8670,7 +8674,7 @@ integrations:
     model_text, memory_text, reply_ref, image_blocks,
     co_present_person_ids, offers_cards, session_facts, history, store,
     chat_scope) and channel_turn.run does the rest in one order: Session,
-    history, retrieve (own words, every excerpt that passed) and the active
+    history, retrieve (own words, KNOWLEDGE_CHAT_MAX_CHARS) and the active
     projects off the event loop, attach_briefing_context (the person's own
     direct message only), hydrate_user_message when reply_ref is given
     (model only, never kept), then Executive.chat. The adapter posts the
@@ -11312,21 +11316,18 @@ delegation:
     ghostwrite_email, so they are offered, re-checked (_writer: the pin and
     the verified surface) and locked down exactly as it is, and every call
     is in DELEGATION_TOOL_NAMES (private rows, the round counts as touched).
-    Read-only: nothing is changed, labelled, drafted or sent. No count per
-    turn: each call goes to _open_mailbox (shared with ghostwrite_email),
-    which sets touched_mail, marks the conversation mail_private and runs
-    gmail_status. search_my_email: a Gmail-style query through the
-    client's search_threads (Outlook translates it), or with no query the
-    newest message of each thread that reached their Primary/Focused inbox
-    in the last 3 days (inbox_message_ids + get_message); summaries only
-    (thread_id, subject, from, date), each on one line, THREADS_PER_PAGE
-    (25) at a time. When more match it returns next_page and a note to call
-    again with that page (gmail.ThreadPage: Gmail's own nextPageToken, the
-    IMAP bridge's offset, or an offset into Outlook's search, which has no
-    page to hand back; checked against PAGE_TOKEN_RE). read_my_email: every
-    non-draft message, then every draft, each sender's whole new text
-    (sender_new_text, plain), a long thread coming back in parts through the
-    turn's reader (orchestrator.reading); a
+    Read-only: nothing is changed, labelled, drafted or sent. Each takes a
+    per-turn slot on the pin before the first await — 10 searches
+    (TurnDelegation.searches; my_email_awaiting_reply counts as one), 20
+    thread reads (threads_read) and 5 attachment reads (attachments_read) — then _open_mailbox (shared with
+    ghostwrite_email) sets touched_mail, marks the conversation
+    mail_private and runs gmail_status. search_my_email: a Gmail-style
+    query through the client's search_threads (Outlook translates it), or
+    with no query the newest message of each thread that reached their
+    Primary/Focused inbox in the last 3 days (inbox_message_ids +
+    get_message); summaries only (thread_id, subject, from, date), each on
+    one line. read_my_email: the thread's last 10 non-draft messages, each
+    sender's new text (sender_new_text, plain) cut to 4000 characters; a
     message someone else wrote is wrapped in its own untrusted_content block
     (content_trust.wrap_untrusted, source email), the speaker's own (SENT and
     from their address, threads.mine) is marked Yours outside any block.
@@ -11345,10 +11346,9 @@ delegation:
     or over 20 MB before downloading, then attachment_bytes looks the
     provider id up on that fetch (Gmail's attachment id changes per fetch;
     a small Gmail part's data is inline) and reads it.
-    attachments._extract_text (isolated worker for pdf/doc/xlsx; read on
-    their ask, so a scanned PDF's every page, not the inbound budget) and
-    format_attached_text (an untrusted_content block, source attachment,
-    the whole text; a long one comes back in parts). Never
+    attachments._extract_text (isolated worker for pdf/doc/xlsx, scanned PDFs
+    converted under the inbound page budget) and format_attached_text (an
+    untrusted_content block, source attachment, 15,000 characters). Never
     build_attachment_output: that would add the person's private file to the
     company knowledge (_schedule_ingest).
     The lockdown refuses tools, not reply text, so the ways reply text
@@ -11362,8 +11362,8 @@ delegation:
     orchestrator.mail_file_save) copies one attached file of the speaker's
     own mail into the storage the Executive has connected and shares it with
     them alone, returning {status saved | saved_not_shared | failed |
-    no_storage | too_large, name, where, link}. Whenever asked, in any
-    words, as often as asked. A remembered folder the
+    no_storage | too_large, name, where, link}. Whenever asked, in any words
+    (TurnDelegation.files_saved, SAVES_PER_TURN 10). A remembered folder the
     Executive can no longer reach (made in a Drive it no longer signs in to)
     is made again, once. Bytes via
     mailbox.attachment_bytes, never the model; any type, MAX_ATTACHMENT_BYTES
@@ -11447,8 +11447,8 @@ delegation:
     calendar {enabled, connect_command (provider's command + --calendar)}.
     my_calendar (mail_read_tools, in MAIL_READ_TOOLS so DELEGATION_TOOLS,
     MAILBOX_TOOL_NAMES, the lockdown allow-list and the my_calendar
-    redaction substring): refuses calendar_off before anything opens, then
-    _open_mailbox (touched_mail, read_mail), events from
+    redaction substring): refuses calendar_off before anything opens, then a
+    searches slot, _open_mailbox (touched_mail, read_mail), events from
     start (default today) for 1-31 days in get_user_timezone, singleEvents /
     calendarView, cancelled and working-location left out, one-line fields,
     data-not-instructions note. Nothing kept. The Act as me addendum names
@@ -11612,8 +11612,9 @@ delegation:
     log_model_usage(actor="ghostwriter"). lint() runs in code after it — a
     URL or email address survives only if it appears in the intent, the
     signature or the recipients (flags removed_link / removed_address), the
-    exec name is flagged (names_the_executive). The body is kept whole,
-    however long. A body lint leaves empty is a ComposeError. asks_if_ai on the last inbound message
+    exec name is flagged (names_the_executive) and the body is capped at
+    6000 characters (shortened; cut at a paragraph, line or word break in
+    the last fifth). A body lint leaves empty is a ComposeError. asks_if_ai on the last inbound message
     adds an open question for the person to answer themselves.
   voice: |
     delegation.voice — "How I write", learned from the person's OWN sent
@@ -12007,11 +12008,10 @@ delegation:
     short constant (uncached); the user turn is a few one-lined header
     lines — From, the sender's relation (and "address not verified"), the
     recipient count, the subject — and the sender's own new words
-    (sender_new_text, whole: up to one read of the classifier's model,
-    providers.registry.reading_limits_for), every line scrubbed, inside
+    (sender_new_text, at most 3000 characters), every line scrubbed, inside
     one <email> block marked as data, after the person's own last email in
     the thread (their_last_words: only mail their own mailbox sent, SENT
-    label, up to a quarter of one read) in a <their_last_email> block, so a reply
+    label, at most 1500 characters) in a <their_last_email> block, so a reply
     to their own ask reads as one. Real miss it fixes: they asked a contact
     for a call, the contact wrote back "my week is open, I'll circle back
     with times", and with only the new words it was filed fyi. Now a reply
@@ -12280,9 +12280,7 @@ delegation:
     rules hold, on Hands-off too. The per-mode limits are gone.
     Only when it passes, a last look (delegation.injection_check.held_back:
     one tool-less classifier-model call reading the sender's new words as
-    plain text in an <email> block, all of them: a longer email than one
-    read of its model is checked part by part, inbox_classifier.email_parts,
-    and any part flagged holds) asks whether they
+    plain text in an <email> block, up to 20,000 chars) asks whether they
     carry instructions for an assistant (ignore rules, forward/quote other
     mail, reveal what it knows, reply elsewhere, a passage addressed to the
     assistant; styling is gone, so hidden text is judged by its words); true, a failed call or a malformed answer
@@ -12321,7 +12319,7 @@ delegation:
     at most PER_LOOK 2 a look, within the drafts cap. Ghostwriter
     FOLLOW_UP_INTENT, draft to exactly the original To/Cc.
     handle_it.follow_up_refusal: off, level, signing_off, recipients (must
-    equal the original), long, flagged, then
+    equal the original), long (MAX_BODY_CHARS), flagged, then
     count_refusal. Card payload source follow_up (from_email = first
     recipient); the reconciler closes it "answered" and deletes its
     unedited draft when anyone else writes in the thread.

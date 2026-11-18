@@ -110,11 +110,12 @@ def test_long_text_is_read_in_pieces_all_of_it(monkeypatch: pytest.MonkeyPatch) 
     """A long document is checked like a short one: every piece is read, and
     clean pieces make it clean."""
     calls = _answering(monkeypatch, [_tool({"steers_assistant": False})])
-    text = "".join(f"line {n} of the quarterly report.\n" for n in range(9_000))
-    assert len(text) > 4 * content_scan.MAX_CHARS
+    # Longer than three pieces, within what one turn reads (200,000).
+    text = "".join(f"line {n} of the quarterly report.\n" for n in range(5_500))
+    assert 3 * content_scan.MAX_CHARS < len(text) < 200_000
     assert _scan(text) == content_scan.CLEAN
     read = "".join(str(c["messages"]) for c in calls)
-    assert "line 0 of" in read and "line 8999 of" in read
+    assert "line 0 of" in read and "line 5499 of" in read
     assert all(len(str(c["messages"])) < content_scan.MAX_CHARS + 5_000 for c in calls)
 
 

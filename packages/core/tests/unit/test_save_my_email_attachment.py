@@ -378,12 +378,12 @@ def test_it_copies_whatever_words_they_used(roster: SimpleNamespace, said: str) 
     assert _save(_owner_session(asked=said))["status"] == "saved"
 
 
-def test_saves_have_no_count_per_turn(roster: SimpleNamespace) -> None:
+def test_saves_are_capped_per_turn(roster: SimpleNamespace) -> None:
     storage = FakeStorage()
     _gateway(storage)
     session = _owner_session()
-    for _ in range(12):
-        assert "error" not in _save(session)
+    session.turn_delegation.files_saved = mr.SAVES_PER_TURN
+    assert "file copies" in _save(session)["error"]
 
 
 def test_a_failed_share_says_the_link_may_not_open_yet(roster: SimpleNamespace) -> None:

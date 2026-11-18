@@ -105,8 +105,10 @@ async def reads(
     also records on ``session`` which cards the turn may answer).
 
     Every step blocks (a vector search, SQLite reads), so none runs on the
-    event loop every other conversation shares. Knowledge is every excerpt
-    that passed the retriever's gate, the same as the web chat."""
+    event loop every other conversation shares. Knowledge is capped the same
+    everywhere: uncapped, a turn carried ~25k characters of excerpts, paid on
+    every model call of the turn."""
+    from openexecutive.config import get_settings
     from openexecutive.integrations.channel_context import attach_briefing_context
     from openexecutive.knowledge.retriever import chat_builtin_results, retrieve
     from openexecutive.memory.episodic import format_for_prompt
@@ -116,6 +118,7 @@ async def reads(
             return ""
         kwargs: dict[str, Any] = {
             "query": query,
+            "max_chars": get_settings().knowledge_chat_max_chars,
             "n_builtin": chat_builtin_results(),
         }
         if store is not None:

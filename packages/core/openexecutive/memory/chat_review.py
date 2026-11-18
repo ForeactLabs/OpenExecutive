@@ -82,6 +82,10 @@ from openexecutive.utils import db
 
 logger = logging.getLogger(__name__)
 
+# The most rounds of tool calls a chat review runs (the owner's choice,
+# 11-18: background passes keep their old counts).
+MAX_ITERATIONS = 5
+
 CHAT_REVIEW_KIND = "chat_review"
 TURNS_TABLE = "chat_review_turns"
 DAYS_TABLE = "chat_review_days"
@@ -1553,7 +1557,7 @@ async def _run_loop(
     # model has nothing more to call, or once it has made MAX_CHANGES.
     await run_rounds(
         get_provider(model), model=model, max_tokens=_MAX_TOKENS, system=_SYSTEM,
-        tools=tools, messages=messages, run_call=_run, actor="chat_review",
+        tools=tools, messages=messages, run_call=_run, actor="chat_review", max_rounds=MAX_ITERATIONS,
         enough=lambda: "" if changes >= MAX_CHANGES else None,
     )
     return done

@@ -10,6 +10,7 @@ Unlike the feed adapters (rss / stock / vendor_status), this one is **billed** â
 it issues an LLM call plus web searches per poll. The cost governors are:
 
   - a deliberately slow ``default_poll_interval_minutes`` (6h),
+  - ``web_search_max_uses`` (caps searches per call, set in config),
   - ``max_results`` per row (caps emitted Signals),
   - and the pipeline's global ``external_monitor_max_signals_per_scan``.
 

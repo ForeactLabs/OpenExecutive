@@ -275,9 +275,9 @@ def retrieve(
     ``orchestrator.answer_sources``).
 
     ``max_chars`` caps the excerpts' total text: the closest matches across
-    every collection are kept until it is reached (``_fit_to_budget``).
-    ``None`` or ``0`` (the chat surfaces) keeps every chunk that passed the
-    gate.
+    every collection are kept until it is reached (``_fit_to_budget``). The
+    chat surfaces pass ``KNOWLEDGE_CHAT_MAX_CHARS``; ``None`` or ``0`` keeps
+    every chunk that passed the gate.
     """
     effective_domains = domain_filter
     if effective_domains is None and specialist_name:

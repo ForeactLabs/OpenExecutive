@@ -46,6 +46,10 @@ class FeatureSpec:
 # answer is written in parts rather than stopped.
 MAX_OUTPUT_TOKENS = 32_000
 
+# The most a specialist's analysis may write (the owner's choice, 11-18).
+# The Executive's own answers keep MAX_OUTPUT_TOKENS.
+SPECIALIST_MAX_TOKENS = 8_000
+
 
 # What a non-Claude model is asked to write at most. Hosted models cap their
 # output at different limits (gpt-4o at 16,384) and refuse a larger request.
@@ -75,6 +79,10 @@ _CLAUDE_VERSION_RE = re.compile(
 # read (figures, code, another language) still fits.
 _READ_SHARE = 0.4
 _CHARS_PER_TOKEN = 3
+
+# The most one turn's reads add up to, whatever the window (the owner's
+# choice, 11-18). At it the turn writes its answer from what it has.
+MAX_TURN_READ_CHARS = 200_000
 
 
 def context_tokens(model: str, *, local_models: Any = (), local_context_tokens: int = 0) -> int:
@@ -111,7 +119,7 @@ class ReadingLimits:
 
 def reading_limits(window_tokens: int) -> ReadingLimits:
     """The reading limits for a model that holds ``window_tokens``."""
-    per_turn = int(window_tokens * _READ_SHARE) * _CHARS_PER_TOKEN
+    per_turn = min(int(window_tokens * _READ_SHARE) * _CHARS_PER_TOKEN, MAX_TURN_READ_CHARS)
     return ReadingLimits(per_read=per_turn // 2, per_turn=per_turn, window_tokens=window_tokens)
 
 

@@ -500,6 +500,7 @@ the app refuses to start.
 | `HONCHO_API_KEY` | No | — | Required when `HONCHO_ENABLED=true` |
 | `HONCHO_BASE_URL` | No | — | Self-hosted Honcho endpoint |
 | `ENABLE_WEB_SEARCH` | No | `true`² | Let the Executive and specialists answer with live web results (news, market data, competitor moves) alongside your uploaded documents |
+| `WEB_SEARCH_MAX_USES` | No | `2` | Max billed searches per agent per turn |
 
 See [.env.example](.env.example) for the full list.
 

@@ -42,6 +42,7 @@ from openexecutive.memory.history import (
 logger = logging.getLogger(__name__)
 
 MAX_NOTES = 3
+MAX_BODY_CHARS = 6000
 _MAX_TOKENS = 600
 _QUOTE_MIN_CHARS = 12
 _QUOTE_MIN_WORDS = 3
@@ -231,15 +232,14 @@ async def take_notes(
 ) -> list[NewNote]:
     """The checked notes for one sent reply. Empty on any failure."""
     from openexecutive.integrations.email_poller import sender_new_text
-    from openexecutive.providers.registry import reading_limits_for
 
-    chosen = model or notes_model()
-    # Their whole reply, up to what the model reads at once.
-    own = sender_new_text(body or "")[:reading_limits_for(chosen).per_read]
+    own = sender_new_text(body or "")[:MAX_BODY_CHARS]
     if not own.strip():
         return []
     try:
-        payload = await _call_model(chosen, render_reply(own, to_names=to_names, sent_on=sent_on))
+        payload = await _call_model(
+            model or notes_model(), render_reply(own, to_names=to_names, sent_on=sent_on),
+        )
     except Exception:
         logger.warning("history: taking notes on a sent reply failed", exc_info=True)
         return []

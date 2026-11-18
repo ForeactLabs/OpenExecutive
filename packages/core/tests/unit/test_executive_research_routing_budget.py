@@ -23,7 +23,7 @@ from typing import Any
 
 import pytest
 
-from openexecutive.orchestrator.reading import REPEAT_LIMIT, REPEATING_NOTE
+from openexecutive.orchestrator.reading import STEPS_NOTE
 from openexecutive.workflows import executive_research as er
 from openexecutive.workflows._synthesis import execute_tool_call
 
@@ -217,11 +217,11 @@ async def test_synthesis_routes_after_lookups(
 
 
 @pytest.mark.asyncio
-async def test_synthesis_writes_up_when_a_call_keeps_failing_the_same_way(
+async def test_synthesis_writes_up_after_its_rounds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """No count of rounds: a call that keeps coming back with the same error
-    ends the pass at REPEAT_LIMIT, with a closing summary and no tools."""
+    """A pass that never wraps up writes up after its rounds
+    (_MAX_SYNTHESIS_ITERATIONS), with a closing summary and no tools."""
     call_count = {"n": 0}
 
     async def _failing_route(_inp: dict[str, Any]) -> str:
@@ -248,9 +248,9 @@ async def test_synthesis_writes_up_when_a_call_keeps_failing_the_same_way(
 
     narrative, tool_calls = await er._executive_synthesis_loop([_finding()])
 
-    assert call_count["n"] == REPEAT_LIMIT
-    assert len(seen) == REPEAT_LIMIT + 1
-    assert seen[-1]["messages"][-1]["content"][-1] == {"type": "text", "text": REPEATING_NOTE}
+    assert call_count["n"] == er._MAX_SYNTHESIS_ITERATIONS
+    assert len(seen) == er._MAX_SYNTHESIS_ITERATIONS + 1
+    assert seen[-1]["messages"][-1]["content"][-1] == {"type": "text", "text": STEPS_NOTE}
     assert narrative == "Nothing could be flagged."
     assert all(not t["ok"] for t in tool_calls)
 

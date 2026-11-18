@@ -570,9 +570,7 @@ async def read_pdf_text(
         return result
 
     settings = get_settings()
-    # Every page is read (the model in slices of PDF_VISION_PAGES_PER_CALL),
-    # except a file that arrived on its own (``inbound``, below).
-    limit = pages
+    limit = min(pages, settings.pdf_vision_max_pages)
     reservation: tuple[float, int] | None = None
     if inbound:
         limit = min(limit, settings.pdf_inbound_max_pages)
