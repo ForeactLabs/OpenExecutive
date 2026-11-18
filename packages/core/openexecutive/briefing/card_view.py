@@ -418,7 +418,7 @@ def card_view(
     open_in_app = button("open_url", f"Open in app ({_host(link)})", href=link) if link else None
     snooze = None if artifact else button("snooze", "Snooze")
 
-    plan = item.suggested_action or ""
+    plan = (item.suggested_action or "").strip()
     # The ways to go: Approve of the card's plan first (or of another plan
     # it offers), or on a card that asks, its answers.
     own_options = list(getattr(talk, "options", None) or [])

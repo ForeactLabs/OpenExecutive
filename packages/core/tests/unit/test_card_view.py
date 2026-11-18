@@ -77,6 +77,9 @@ def test_the_options_are_the_executives_own_and_follow_the_plan() -> None:
     assert v.happened == "Dana's contract lapses Friday."
     assert picks(v) == [("approve", "Email Dana", plan), ("approve", "Ask Sam first", "Ask Sam whether to renew.")]
     assert [(t.who, t.text) for t in v.turns] == [("you", "who's Dana?"), ("me", "Our vendor.")]
+    # A plan filed with spaces around it is the same plan: its options stay.
+    spaced = card_view(item(suggested_action=f"{plan}\n"), talk=talk, now=NOW)
+    assert picks(spaced) == picks(v)
     # Options kept for another plan are not offered: the card's own plan is.
     old = card_view(item(suggested_action="Call Dana."), talk=talk, now=NOW)
     assert picks(old) == [("approve", "Approve", "Call Dana.")]
