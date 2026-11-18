@@ -87,6 +87,8 @@ interface Tile {
   href?: string;
   // What it says, whole ("5 goals, 1 at risk").
   text: string;
+  // More on hover: where a watch's change was noticed.
+  hint?: string;
 }
 
 interface BriefingProps {
@@ -489,7 +491,7 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
     const waitingOn = waitingOnTeam(otherProposals, today.people ?? []);
     if (waitingOn) tiles.push({ key: "team", panel: "team", text: waitingOn.line });
     const watched = watchingRow(monitoringProposals);
-    if (watched) tiles.push({ key: "monitoring", panel: "monitoring", text: watched.line });
+    if (watched) tiles.push({ key: "monitoring", panel: "monitoring", text: watched.line, hint: watched.detail || undefined });
     if (solo && weeklyReview)
       tiles.push({ key: "weeklyReview", panel: "weeklyReview", text: "This week's review is ready" });
   }
@@ -884,7 +886,14 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
                     const cls = "font-medium text-accent hover:underline underline-offset-4";
                     const panel = t.panel;
                     return panel ? (
-                      <button key={t.key} type="button" onClick={() => setOpenPanel(panel)} aria-haspopup="dialog" className={cls}>
+                      <button
+                        key={t.key}
+                        type="button"
+                        onClick={() => setOpenPanel(panel)}
+                        aria-haspopup="dialog"
+                        title={t.hint}
+                        className={cls}
+                      >
                         {t.text}
                       </button>
                     ) : (
