@@ -464,3 +464,14 @@ def test_a_tap_is_checked_against_when_its_card_was_read(monkeypatch: pytest.Mon
     assert seen[0] is not None and seen[0] <= reads[0]
     asyncio.run(channel_cards.tap(channel_cards.Choice(7, "a", shown), SimpleNamespace(id=3)))
     assert seen[1] is None
+
+
+def test_a_switch_on_a_card_no_chat_shows_whole_does_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def switch(decision_id: int, who: Any) -> channel_cards.Tapped:
+        raise AssertionError("not switched")
+
+    monkeypatch.setattr(channel_cards, "card_text", lambda decision_id: None)
+    monkeypatch.setattr(channel_cards, "_switch", switch)
+    tapped = asyncio.run(channel_cards.tap(channel_cards.Choice(7, "x", "0000beef"), SimpleNamespace(id=3)))
+    assert tapped.line.startswith("Not done: this card changed. Open it in the app: ")
+    assert tapped.line.endswith("/cards/7") and tapped.options == ()

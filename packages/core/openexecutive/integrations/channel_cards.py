@@ -450,6 +450,9 @@ async def tap(tapped: Choice, person: Any) -> Tapped:
     if current is not None and version(decision_id, current) != tapped.version:
         return Tapped(CHANGED, current, card_options(decision_id, current))
     if choice == SWITCH:
+        if current is None:
+            # Its words no longer fit a chat: nothing to check the tap against.
+            return Tapped(f"Not done: this card changed. Open it in the app: {_app_link(decision_id)}")
         return await _switch(decision_id, person)
     line = await resolve(
         decision_id, person, approve=choice != SKIP, allow=choice == ALLOW,
@@ -489,11 +492,14 @@ async def _switch(decision_id: int, person: Any) -> Tapped:
         _resolving.discard(decision_id)
     text = card_text(decision_id)
     if text is None:
-        from openexecutive.config import get_settings
-
-        link = f"{get_settings().ui_base_url.rstrip('/')}/cards/{decision_id}"
-        return Tapped(f"Changed who it goes from. It waits for your OK in the app: {link}")
+        return Tapped(f"Changed who it goes from. It waits for your OK in the app: {_app_link(decision_id)}")
     return Tapped("Changed who it goes from. Check it, then send it.", text, card_options(decision_id, text))
+
+
+def _app_link(decision_id: int) -> str:
+    from openexecutive.config import get_settings
+
+    return f"{get_settings().ui_base_url.rstrip('/')}/cards/{decision_id}"
 
 
 async def resolve(
