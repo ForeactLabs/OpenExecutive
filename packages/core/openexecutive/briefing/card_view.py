@@ -165,6 +165,10 @@ class CardView(BaseModel):
     document: bool = False
     reviewed: str = ""
     buttons: list[CardButton] = Field(default_factory=list)
+    # A held step's card opens with these, on every app
+    # (``orchestrator.card_details.top``): waiting_on, started, why, waits,
+    # title. Empty on every other card.
+    top: dict[str, str] = Field(default_factory=dict)
 
 
 def _now(now: datetime | None) -> datetime:
@@ -330,6 +334,7 @@ def card_view(
     assignee_name: str = "",
     talk: Any = None,
     now: datetime | None = None,
+    viewer_id: int | None = None,
 ) -> CardView:
     """What one card (a ``ProposalItem``) shows.
 
@@ -351,10 +356,18 @@ def card_view(
     # one exact step: its panel shows the step, its options and "Or tell
     # me…" (POST /decisions/{id}/say), and what was said on it.
     said = [CardLine(who=t.who, text=t.text) for t in (getattr(talk, "turns", None) or [])]
-    if decision and (LEAD_TRAINING_TAG in tags or LEAD_ACTION_TAG in tags):
-        return CardView(kind="lead", panel="lead", need="Needs your OK", as_me=True, tell_me=True, turns=said)
-    if decision and HELD_ACTION_TAG in tags:
-        return CardView(kind="held", panel="held", need="Needs your OK", tell_me=True, turns=said)
+    lead = decision and (LEAD_TRAINING_TAG in tags or LEAD_ACTION_TAG in tags)
+    if lead or (decision and HELD_ACTION_TAG in tags):
+        from openexecutive.orchestrator.card_details import held_top
+
+        top = held_top(int(item.decision_instance_id), viewer_id) or {}
+        # Whose OK it waits for, and who started it: the same words on
+        # every app (``card_details.top``).
+        need = f"Waiting on {top['waiting_on']}" if top.get("waiting_on") else "Needs your OK"
+        return CardView(
+            kind="lead" if lead else "held", panel="lead" if lead else "held", need=need,
+            source=top.get("started", ""), tell_me=True, turns=said, top=top,
+        )
 
     artifact = ARTIFACT_TAG in tags
     monitoring = item.category == "monitoring"
@@ -566,9 +579,11 @@ def attach_views(
     *,
     talk: dict[int, Any] | None = None,
     now: datetime | None = None,
+    viewer_id: int | None = None,
 ) -> None:
     """Set ``view`` on every card. ``names`` maps person id to full name;
-    ``talk`` card id to its ``alerts.card_talk.CardTalk``."""
+    ``talk`` card id to its ``alerts.card_talk.CardTalk``; ``viewer_id`` is
+    who reads them."""
     for item in items:
         routed = item.routed_to_person_id
         item.view = card_view(
@@ -576,4 +591,5 @@ def attach_views(
             assignee_name=names.get(routed, "") if routed is not None else "",
             talk=(talk or {}).get(item.alert_id),
             now=now,
+            viewer_id=viewer_id,
         )

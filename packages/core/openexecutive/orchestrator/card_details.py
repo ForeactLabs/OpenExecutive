@@ -559,3 +559,74 @@ def served(payload: dict[str, Any]) -> dict[str, Any]:
     if isinstance(payload.get("steps"), list):
         out["steps"] = [short(s) if isinstance(s, dict) else s for s in payload["steps"]]
     return out
+
+
+def _first_name(full: str) -> str:
+    return (full or "").strip().split(" ")[0] if (full or "").strip() else ""
+
+
+def top(payload: dict[str, Any], *, approver_id: int | None, viewer_id: int | None) -> dict[str, str]:
+    """The lines every held step's card opens with, the same on every app
+    (web, phone, chat apps):
+
+    - ``waiting_on``: whose OK it waits for, when that isn't the reader
+      ("Alex"); empty when it's theirs or the reader isn't known ("Needs
+      your OK").
+    - ``started``: who started it: "You asked", "Alex asked", or "I started
+      this" when no one on the team asked (Take the lead's own work).
+    - ``waits``: why it waits, in a sentence.
+    - ``title``: the card's title, naming the file it works on (``served``).
+    """
+    from openexecutive.people.store import get_person
+
+    def name(person_id: object) -> str:
+        if not isinstance(person_id, int):
+            return ""
+        with contextlib.suppress(Exception):
+            person = get_person(person_id)
+            if person is not None:
+                return _first_name(person.full_name)
+        return ""
+
+    asker_id = payload.get("requested_by_person_id") or payload.get("asked_by_person_id")
+    if isinstance(asker_id, int) and asker_id == viewer_id:
+        started = "You asked"
+    elif isinstance(asker_id, int) or payload.get("requested_by"):
+        who = name(asker_id) or _first_name(str(payload.get("requested_by") or ""))
+        started = f"{who} asked" if who else "Someone on the team asked"
+    elif payload.get("source") == "chat":
+        # Asked in a conversation by someone it can't name.
+        started = "Someone asked"
+    else:
+        started = "I started this"
+    # Unknown reader (a build with no one signed in): say it plainly, as
+    # before, rather than name someone who may be the reader.
+    waiting_on = name(approver_id) if None not in (approver_id, viewer_id) and approver_id != viewer_id else ""
+    reason = " ".join(str(payload.get("reason") or "").split()).removesuffix(".")
+    if payload.get("kind") == "training":
+        waits = "It's a new kind of step for me, so it waits for an OK once."
+    elif reason:
+        waits = f"It waits because {reason}."
+    else:
+        waits = "It waits for an OK."
+    if waiting_on:
+        waits += f" It's on {waiting_on}'s list."
+    title = ""
+    with contextlib.suppress(Exception):
+        title = str(served(payload).get("headline") or "")
+    return {"waiting_on": waiting_on, "started": started, "waits": waits, "title": title}
+
+
+def held_top(decision_id: int, viewer_id: int | None) -> dict[str, str] | None:
+    """``top`` for a held step's card by its decision, or None when it
+    can't be read."""
+    from openexecutive.memory.decision_ledger import get_decision_instance
+
+    try:
+        instance = get_decision_instance(decision_id)
+        payload = json.loads(instance.proposed_payload_json or "") if instance is not None else None
+    except Exception:
+        return None
+    if not isinstance(payload, dict) or instance is None:
+        return None
+    return top(payload, approver_id=instance.approver_person_id, viewer_id=viewer_id)

@@ -154,6 +154,59 @@ def test_an_amount_is_money(text: str) -> None:
     assert ttl.mentions_money(text)
 
 
+@pytest.mark.parametrize(("tool", "tool_input"), [
+    ("google_workspace__modify_sheet_values", {
+        "spreadsheet_id": "s" * 30, "range_name": "Prospects!A1:F2",
+        "values": [["Name", "Fit reason"], ["Vlad Stan", "Owner-operator; fits $100 Starter"]]}),
+    ("google_workspace__modify_doc_text", {
+        "document_id": "d" * 30, "end_of_segment": True,
+        "text": "Post drafts. No sign-up numbers; terms of the license stay as they are."}),
+    ("google_workspace__modify_doc_text", {"document_id": "d" * 30, "text": "We should hire a second engineer."}),
+])
+def test_words_inside_a_team_file_are_not_what_the_step_is_about(
+    owner: Any, tool: str, tool_input: dict[str, Any]
+) -> None:
+    """A price in a prospect's note or "sign-up" in a post draft is no
+    payment or contract: a write into a company file is about the file."""
+    assert ttl.check(tool, tool_input, lead=_lead(), rules=[], mcp=True) is None
+
+
+def test_a_team_files_name_and_who_it_reaches_still_count(owner: Any) -> None:
+    named = {"spreadsheet_id": "s" * 30, "title": "Q3 budget $40,000", "values": [["x"]]}
+    hit = ttl.check("google_workspace__create_spreadsheet", named, lead=_lead(), rules=[], mcp=True)
+    assert hit is not None and hit.kind == "money"
+    # An email is what it says, wherever it goes.
+    mail = {"to": DANA, "subject": "Plan", "body": "It fits the $100 Starter plan."}
+    hit = ttl.check("google_workspace__send_gmail_message", mail, lead=_lead(), rules=[], mcp=True)
+    assert hit is not None and hit.kind == "money"
+    # A file shared outside the team is not a team file.
+    shared = {"document_id": "d" * 30, "text": "Pay $4,000", "share_with": "stranger@far.example"}
+    hit = ttl.check("google_workspace__modify_doc_text", shared, lead=_lead(), rules=[], mcp=True)
+    assert hit is not None and hit.kind == "money"
+
+
+def test_a_team_files_known_name_counts_when_the_step_gives_only_an_id(
+    owner: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.orchestrator import card_details
+
+    monkeypatch.setattr(card_details, "file_name", lambda file_id: "Q3 budget $40,000" if file_id else "")
+    write = {"spreadsheet_id": "s" * 30, "range_name": "A1:B2", "values": [["Alex", "note"]]}
+    hit = ttl.check("google_workspace__modify_sheet_values", write, lead=_lead(), rules=[], mcp=True)
+    assert hit is not None and hit.kind == "money"
+
+
+@pytest.mark.parametrize(("tool", "tool_input", "kind"), [
+    ("hris__update_employee_profile", {"employee_id": 5, "title": "Senior Engineer", "salary": "$180,000"}, "money"),
+    ("hris__update_payroll_sheet", {"title": "November", "text": "Pay $4,000 more"}, "money"),
+    ("docusign__send_envelope", {"title": "Offer", "text": "Please sign the contract by Friday."}, "contracts"),
+])
+def test_only_a_file_apps_tool_writes_a_team_file(owner: Any, tool: str, tool_input: dict[str, Any], kind: str) -> None:
+    """Another app's step is read in full, however its tool is named."""
+    hit = ttl.check(tool, tool_input, lead=_lead(), rules=[], mcp=True)
+    assert hit is not None and hit.kind == kind
+
+
 def test_a_plain_message_to_someone_known_goes(owner: Any) -> None:
     assert ttl.check("message_person", {"person_id": 1, "text": "Are we still on for Thursday?"},
                      lead=_lead(), rules=[]) is None
@@ -663,6 +716,114 @@ def test_approving_does_the_exact_action_once(client: TestClient, owner: Any, mo
     assert ttl.done([ttl.SCOPE_EXECUTIVE])[0].status == "approved"
     [alert] = alerts_store.list_alerts(limit=10, status="ack")
     assert alert.external_id == f"decision:{decision_id}"
+
+
+def test_a_step_the_app_turns_down_says_why_in_plain_words(
+    client: TestClient, owner: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The card names the app and says nothing changed; the app's own error
+    text (its argument names) never reaches the person."""
+    async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bool = False) -> str:
+        return "Error: 'start_index' is required unless 'heading' is provided."
+
+    monkeypatch.setattr(ttl, "carry_out", carry_out)
+    decision_id = ttl.hold("google_workspace__modify_doc_text", {"document_id": "d" * 30, "text": "Post 3"},
+                           ttl.Hit("level", "Approvals is on Careful"), source="reflection", mcp=True)
+    response = client.post(f"/decisions/{decision_id}/approve", json={})
+    assert response.status_code == 502
+    detail = response.json()["detail"]
+    assert detail == "It couldn't do that. Google Docs turned that step down, so nothing changed."
+    assert "start_index" not in detail
+    assert ledger.get_decision_instance(decision_id).status == ledger.STATUS_FAILED
+
+
+@pytest.mark.parametrize(("tool", "result", "words"), [
+    ("google_workspace__modify_doc_text", "Error: 'start_index' is required unless 'heading' is provided.",
+     "Google Docs turned that step down, so nothing changed."),
+    ("google_workspace__modify_sheet_values", '{"error": "invalid_grant: Token has been expired or revoked."}',
+     "Google Sheets needs to be connected again, so nothing changed."),
+    ("google_workspace__send_gmail_message", "Error: HttpError 429 rateLimitExceeded",
+     "Email was busy, so nothing changed. Try again in a few minutes."),
+    ("google_workspace__get_doc_content", "Error: HttpError 404 File not found: https://docs.google.com/x",
+     "Google Docs couldn't open that for me, so nothing changed."),
+    ("some_app__do_thing", "Error: the request timed out",
+     "The app took too long, so it may not have gone through. Check before trying again."),
+    ("google_workspace__modify_doc_text",
+     '{"error": "Couldn\'t check which files are private just now, so the result of x was withheld. It did run."}',
+     "Google Docs did the step, but I couldn't read back how it went. Check it before trying again."),
+    ("google_workspace__modify_sheet_values", "Error: HttpError 403 dailyLimitExceeded: Quota exceeded",
+     "Google Sheets has used up its limit for today, so nothing changed. Try again tomorrow."),
+    ("google_workspace__modify_sheet_values",
+     '{"error": "2 of 4 went through, then step 3 didn\'t: Error: HttpError 429", "done": 2, "of": 4}',
+     "2 of 4 went through, then Google Sheets turned the next one down, and the rest didn't run. "
+     "Check before trying again."),
+    ("google_workspace__modify_sheet_values",
+     '{"error": "1 of 2 went through, then step 2 didn\'t: Error: HttpError 403", "done": 1, "of": 2}',
+     "1 of 2 went through, then Google Sheets turned the next one down. Check before trying again."),
+    ("some_app__do_thing", '{"error": "1 of 2 went through, then step 2 didn\'t: Error: no", "done": 1, "of": 2}',
+     "1 of 2 went through, then the app turned the next one down. Check before trying again."),
+    ("google_workspace__modify_sheet_values",
+     '{"error": "2 of 4 went through, then step 3 didn\'t: the result was withheld. It did run.", "done": 2, "of": 4}',
+     "3 of 4 ran, but I couldn't read back how the last one went, and the rest didn't run. Check before trying again."),
+])
+def test_failure_words_name_the_app_and_never_quote_it(tool: str, result: str, words: str) -> None:
+    assert ttl.failure_words(tool, result) == words
+
+
+def test_a_held_cards_top_is_read_by_who_opens_it(client: TestClient, owner: Any) -> None:
+    """GET /decisions/{id} opens the card as its reader sees it: the owner
+    sees whose OK it waits for, the teammate it waits on sees it's theirs."""
+    sam = people_store.upsert_person(full_name="Sam Team", email=SAM)
+    people_registry.invalidate()
+    decision_id = ledger.create_decision_instance(
+        decision_class=ttl.DECISION_CLASS, department="executive", originating_session_id=None,
+        proposed_payload={
+            "held": True, "tool": "assign_open_loop", "input": {"person_id": owner.id, "task": "Check the list"},
+            "mcp": False, "kind": "level", "reason": "Approvals is on Careful", "summary": "Assign a task",
+            "source": "chat", "requested_by_person_id": sam, "requested_by": "Sam Team",
+        },
+        idempotency_key="top-by-reader", gate_mode="propose", approver_person_id=sam, confidence=None,
+    )
+    def top(email: str) -> dict[str, str]:
+        response = client.get(f"/decisions/{decision_id}", headers={"x-caller-email": email})
+        assert response.status_code == 200, response.text
+        return json.loads(response.json()["proposed_payload_json"])["top"]
+
+    as_sam = top(SAM)
+    assert as_sam["waiting_on"] == "" and as_sam["started"] == "You asked"
+    assert as_sam["waits"] == "It waits because Approvals is on Careful."
+    as_owner = top(OWNER)
+    assert as_owner["waiting_on"] == "Sam" and as_owner["started"] == "Sam asked"
+    assert as_owner["waits"] == "It waits because Approvals is on Careful. It's on Sam's list."
+
+
+def test_the_owners_own_ask_held_in_chat_reads_you_asked(owner: Any) -> None:
+    from openexecutive.orchestrator import card_details
+    from openexecutive.orchestrator.session import Session
+
+    token = schedule_tools.current_session.set(Session(from_web_chat=True, caller_person_id=owner.id))
+    try:
+        decision_id = ttl.hold("message_person", {"person_id": owner.id, "text": "Pay the invoice"},
+                               ttl.Hit("money", "it's about money"), source="chat", mcp=False)
+    finally:
+        schedule_tools.current_session.reset(token)
+    payload = json.loads(ledger.get_decision_instance(decision_id).proposed_payload_json)
+    assert "requested_by_person_id" not in payload  # a teammate's ask only
+    assert card_details.top(payload, approver_id=owner.id, viewer_id=owner.id)["started"] == "You asked"
+    unasked = ttl.hold("message_person", {"person_id": owner.id, "text": "Pay the other invoice"},
+                       ttl.Hit("money", "it's about money"), source="reflection", mcp=False)
+    payload = json.loads(ledger.get_decision_instance(unasked).proposed_payload_json)
+    assert card_details.top(payload, approver_id=owner.id, viewer_id=owner.id)["started"] == "I started this"
+
+
+@pytest.mark.parametrize(("tool_input", "words"), [
+    ({"document_id": "d" * 30, "end_of_segment": True, "text": "Post 3"}, "Add to the end of a document (Google Docs)"),
+    ({"document_id": "d" * 30, "end_of_segment": "true", "text": "Post 3"}, "Add to the end of a document (Google Docs)"),
+    ({"document_id": "d" * 30, "title": "Post drafts", "end_of_segment": True, "text": "Post 3"},
+     "Add to the end of Post drafts (Google Docs)"),
+])
+def test_an_append_to_a_doc_is_titled_by_its_job(owner: Any, tool_input: dict[str, Any], words: str) -> None:
+    assert ttl.title("google_workspace__modify_doc_text", tool_input, mcp=True) == words
 
 
 def test_a_teammates_own_held_card_reaches_carry_out_as_theirs(
@@ -2007,3 +2168,15 @@ def test_today_is_the_owners_day(monkeypatch: pytest.MonkeyPatch, db: Path) -> N
     # Late evening in Los Angeles is the next UTC day: still today there.
     afternoon = datetime.now(UTC).astimezone(ZoneInfo("America/Los_Angeles")).replace(hour=23, minute=59)
     assert ttl.done_today(now=afternoon.astimezone(UTC))[0] == 1
+
+
+@pytest.mark.parametrize(("text", "failed"), [
+    ('{"error": "not found"}', True),
+    ("Error: 'start_index' is required unless 'heading' is provided.", True),
+    ("  error: no such sheet", True),
+    ("Errors in the plan were fixed.", False),
+    ('Sent. They wrote: {"error": "x"}', False),
+    ("", False),
+])
+def test_only_an_error_result_counts_as_failed(text: str, failed: bool) -> None:
+    assert ttl.result_failed(text) is failed

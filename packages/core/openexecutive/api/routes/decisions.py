@@ -444,7 +444,16 @@ def get_decision(instance_id: int, request: Request) -> DecisionInstance:
         may = _may_change(instance, request, _resolver(instance, request))
     except HTTPException:
         may = False
-    shown = {**json.loads(served.proposed_payload_json), "may_change": may}
+    from openexecutive.api.routes.chat import _resolve_caller_person_id
+    from openexecutive.orchestrator import card_details
+
+    proposed = json.loads(served.proposed_payload_json)
+    # The card's opening lines (who it waits on, who started it, why it
+    # waits), as every app shows them.
+    top = card_details.top(
+        proposed, approver_id=instance.approver_person_id, viewer_id=_resolve_caller_person_id(request),
+    )
+    shown = {**proposed, "may_change": may, "top": top}
     return served.model_copy(update={"proposed_payload_json": json.dumps(shown, ensure_ascii=False)})
 
 
@@ -728,7 +737,11 @@ async def _run_lead(
     take_the_lead.resolved(instance.id, "failed" if failed else "approved")
     _clear_decision_alert(instance.id, "dismissed" if failed else "ack")
     if failed:
-        raise HTTPException(status_code=502, detail=f"It couldn't do that: {result[:300]}")
+        logger.warning("decisions/approve: step %d failed: %s", instance.id, result[:300])
+        raise HTTPException(
+            status_code=502,
+            detail=f"It couldn't do that. {take_the_lead.failure_words(str(payload.get('tool') or ''), result)}",
+        )
     if grant is not None:
         try:
             take_the_lead.allow(
@@ -978,7 +991,11 @@ async def _run_department_action(
         instance, payload, resolver,
     )
     if failed:
-        raise HTTPException(status_code=502, detail=f"It couldn't do that: {result[:300]}")
+        logger.warning("decisions/approve: step %d failed: %s", instance.id, result[:300])
+        raise HTTPException(
+            status_code=502,
+            detail=f"It couldn't do that. {take_the_lead.failure_words(str(payload.get('tool') or ''), result)}",
+        )
     return _refresh(instance.id)
 
 

@@ -132,7 +132,7 @@ def test_a_failed_send_leaves_the_card_waiting(
     from openexecutive.orchestrator import take_the_lead
 
     async def refused(payload: dict[str, Any], *, by_principal: bool, own_card: bool = False) -> str:
-        return json.dumps({"error": "The mailbox is not connected."})
+        return "Error: HttpError 429 rateLimitExceeded"
 
     monkeypatch.setattr(take_the_lead, "carry_out", refused)
     mailbox, card = _card(owner)
@@ -140,6 +140,8 @@ def test_a_failed_send_leaves_the_card_waiting(
     with pytest.raises(SendRefused) as err:
         asyncio.run(send_approved_reply(_fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, confirm=_seen(card)))
     assert err.value.code == "send_failed"
+    # Plain words, never the app's own error text.
+    assert err.value.message == "It wasn't sent. Email was busy, so nothing changed. Try again in a few minutes."
     assert _fresh(card).status == "proposed"
 
 

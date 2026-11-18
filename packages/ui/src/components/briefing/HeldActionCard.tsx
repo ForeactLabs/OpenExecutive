@@ -15,11 +15,11 @@ import {
   getHeldAction,
   rejectDecision,
   type HeldActionPayload,
+  heldCardTop,
   type ProposalItem,
 } from "@/lib/api";
 
-import { Section } from "./CardTalk";
-import CardTopRow from "./CardTopRow";
+import HeldCardTop from "./HeldCardTop";
 import StepTalk from "./StepTalk";
 
 // The tag such a card carries (department_gate.DECISION_CLASS).
@@ -79,13 +79,12 @@ export default function HeldActionCard({
         emphasized ? "border-accent/60 ring-1 ring-accent/25 shadow-sm" : "border-line"
       }`}
     >
-      <CardTopRow need="Needs your OK" mode="take_the_lead" at={proposal.created_at} waitingOn={proposal.waiting_on} />
-      <div className="min-w-0 text-base sm:text-[17px] font-semibold leading-snug text-fg break-words">
-        {proposal.headline}
-      </div>
-      <Section title="What happened">
-        {held?.reason ? `It waited because ${held.reason}.` : "It waited for your OK."}
-      </Section>
+      <HeldCardTop
+        top={heldCardTop(proposal.view?.top) ?? held?.top ?? null}
+        title={proposal.headline}
+        at={proposal.created_at}
+        fallbackWaits={held?.reason ? `It waits because ${held.reason}.` : "It waits for an OK."}
+      />
       {editing && held ? (
         <HeldFieldsEdit
           id={decisionId}

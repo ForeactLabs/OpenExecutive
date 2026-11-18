@@ -242,9 +242,10 @@ def test_the_page_and_chat_apps_name_the_file_in_the_title(monkeypatch) -> None:
         "headline": take_the_lead.title(tool, _SHEET_CALL, mcp=True, private=True),
         "summary": take_the_lead.summarize(tool, _SHEET_CALL, mcp=True),
     }
-    assert payload["headline"] == "Update a spreadsheet (Google Sheets)"
+    rows = len(_SHEET_CALL["values"])
+    assert payload["headline"] == f"Write {rows} rows to a spreadsheet (Google Sheets)"
     served = card_details.served(payload)
-    assert served["headline"] == "Update Launch tracker (Google Sheets)"
+    assert served["headline"] == f"Write {rows} rows to Launch tracker (Google Sheets)"
     assert served["summary"].startswith("Update Launch tracker")
     # No amount in it: nothing is quoted.
     assert not any(d["field"] == "The amount it saw" for d in served["details"])
@@ -340,3 +341,31 @@ def test_rows_written_as_text_outside_a_sheet_show_as_written(monkeypatch) -> No
     assert all("table" not in d for d in shown)
     assert any(d["value"] == body for d in shown)
     assert card_details._grid("[" * 400000) is None
+
+
+def test_a_held_cards_top_says_who_it_waits_on_who_started_it_and_why_it_waits(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from openexecutive.people import store as people_store
+
+    people = {1: "Rufus Owner", 12: "Alex Cohen", 7: "Sam Teammate"}
+    monkeypatch.setattr(people_store, "get_person", lambda pid, db_path=None: SimpleNamespace(full_name=people[pid]))
+    lead = {"kind": "money", "reason": "it's about money"}
+    # Take the lead's own step on Alex's list, read by the owner.
+    assert card_details.top(lead, approver_id=12, viewer_id=1) == {
+        "waiting_on": "Alex", "started": "I started this",
+        "waits": "It waits because it's about money. It's on Alex's list.", "title": "",
+    }
+    # Alex reads their own card.
+    assert card_details.top(lead, approver_id=12, viewer_id=12)["waiting_on"] == ""
+    asked = {"kind": "level", "reason": "Approvals is on Careful", "requested_by_person_id": 7}
+    assert card_details.top(asked, approver_id=7, viewer_id=7)["started"] == "You asked"
+    assert card_details.top(asked, approver_id=7, viewer_id=1)["started"] == "Sam asked"
+    # The owner's own ask in chat, and one no one on the team can be named for.
+    own = {"kind": "money", "reason": "x", "source": "chat", "asked_by_person_id": 1}
+    assert card_details.top(own, approver_id=1, viewer_id=1)["started"] == "You asked"
+    assert card_details.top(own, approver_id=1, viewer_id=12)["started"] == "Rufus asked"
+    assert card_details.top({"kind": "money", "reason": "x", "source": "chat"}, approver_id=1, viewer_id=1)[
+        "started"] == "Someone asked"
+    training = card_details.top({"kind": "training", "reason": "x"}, approver_id=1, viewer_id=1)
+    assert training["waits"] == "It's a new kind of step for me, so it waits for an OK once."

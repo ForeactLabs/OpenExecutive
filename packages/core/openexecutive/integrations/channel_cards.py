@@ -70,6 +70,7 @@ _VERSION = re.compile(r"^[0-9a-f]{8}$")
 # The card's two parts, as on the app's cards.
 HAPPENED = "What happened"
 WILL_DO = "What I'll do"
+WHY_IT_WAITS = "Why it waits"
 # A reply leaves at most this many cards (action_cards.CARDS_PER_TURN plus a meeting).
 MAX_CARDS = 4
 
@@ -294,13 +295,14 @@ def card_text(decision_id: int, instance: Any = None) -> str | None:
         if not card_details.held_steps(payload):
             return None
         shown = card_details.served(as_said(payload))
-        lines.append(str(shown.get("summary") or payload.get("tool") or "").strip()[:400])
-        happened = []
-        if payload.get("requested_by"):
-            happened.append(f"{str(payload['requested_by'])[:120]} asked for this.")
-        reason = str(payload.get("reason") or "").strip()[:300]
-        happened.append(f"It waited because {reason.removesuffix('.')}." if reason else "It waited for your OK.")
-        lines += ["", HAPPENED, " ".join(happened), "", WILL_DO]
+        # It opens as on every app (``card_details.top``), read by the
+        # person it waits on: who started it and why it waits.
+        top = card_details.top(
+            as_said(payload), approver_id=instance.approver_person_id, viewer_id=instance.approver_person_id,
+        )
+        lines.append(str(top["title"] or shown.get("summary") or payload.get("tool") or "").strip()[:400])
+        lines.append(top["started"] + ".")
+        lines += ["", WHY_IT_WAITS, top["waits"][:300], "", WILL_DO]
         for detail in shown.get("details") or []:
             value = str(detail.get("value") or "")
             if detail.get("href"):

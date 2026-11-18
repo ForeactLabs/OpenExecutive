@@ -45,6 +45,7 @@ activity on Today names what it did (``api.routes.today._build_activity``).
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -119,9 +120,18 @@ KIND_LABELS: dict[str, str] = {
 }
 # One line under each switch saying what it catches, in the words check() uses.
 KIND_HINTS: dict[str, str] = {
-    MONEY: "Anything with an amount of money in it, such as a payment, an invoice, a price or a budget.",
-    CONTRACTS: "Contracts, agreements, signatures, terms and other legal matters.",
-    PEOPLE_DECISIONS: "Hiring, firing, pay, promotions and performance reviews.",
+    MONEY: (
+        "Anything with an amount of money in it, such as a payment, an invoice, a price or a budget."
+        " Words inside a team file it writes don't count."
+    ),
+    CONTRACTS: (
+        "Contracts, agreements, signatures, terms and other legal matters."
+        " Words inside a team file it writes don't count."
+    ),
+    PEOPLE_DECISIONS: (
+        "Hiring, firing, pay, promotions and performance reviews."
+        " Words inside a team file it writes don't count."
+    ),
     DELETE_SHARE: "Deleting or cancelling something, or sharing a file or access.",
     SOMEONE_NEW: "Messages to anyone who isn't on your team or in your contacts.",
     BIG_SEND: f"Company-wide or department-wide messages, or anything going to more than {BIG_SEND_RECIPIENTS} people.",
@@ -1085,6 +1095,22 @@ def rule_text(rule: Rule) -> str:
     return f"anything with {rule.value}"
 
 
+def _team_file_name(tool_input: dict[str, Any]) -> str:
+    """A file step's file name: the one it gives, else the file's known
+    name by its id (``card_details.file_name``), else ""."""
+    from openexecutive.orchestrator import card_details
+
+    return _first_text(tool_input, _MCP_NAME_KEYS) or card_details.file_name(card_details._file_of(tool_input))
+
+
+def _writes_team_file(tool: str, tool_input: dict[str, Any]) -> bool:
+    """Whether a connected-app step writes into a file (a sheet, doc,
+    slides, Drive file) and itself names no one outside the team: no mail,
+    no event, no address of anyone but a teammate. Who could already open
+    the file was settled when it was shared (sharing waits on its own)."""
+    return _file_tool(tool) and not _MAIL_TOOL_RE.search(tool) and _team_only(tool, tool_input)
+
+
 def _mcp_deletes(tool: str, tool_input: dict[str, Any]) -> bool:
     """Whether a connected tool deletes, cancels or shares: by its name, or
     by its ``action`` (Google's ``manage_event`` deletes with
@@ -1116,14 +1142,23 @@ def check(
     hit = _rule_hit(rules, text, recipients)
     if hit is not None:
         return hit
+    deletes = tool in _DELETE_TOOLS or (mcp and _mcp_deletes(tool, tool_input))
+    # What the step is about, for money, contracts and people decisions. A
+    # write into a company file that reaches only the team is about that
+    # file, not the words it puts in it: a price in a prospect's note or
+    # "sign-up" in a post draft is no payment or contract. Its name still
+    # counts ("Q3 budget"), the known one when the step gives only an id.
+    about = (
+        _team_file_name(tool_input)
+        if mcp and not deletes and _writes_team_file(tool, tool_input) else text
+    )
     checks: list[tuple[str, bool, str]] = [
-        (DELETE_SHARE, tool in _DELETE_TOOLS or (mcp and _mcp_deletes(tool, tool_input)),
-         "it deletes, cancels or shares something"),
+        (DELETE_SHARE, deletes, "it deletes, cancels or shares something"),
         (BIG_SEND, tool in _BROADCAST_TOOLS or len(recipients) > BIG_SEND_RECIPIENTS,
          "it goes to a lot of people"),
-        (MONEY, mentions_money(text), "it's about money"),
-        (CONTRACTS, bool(_CONTRACTS_RE.search(text)), "it's about a contract or legal matter"),
-        (PEOPLE_DECISIONS, bool(_PEOPLE_RE.search(text)), "it's about hiring or a people decision"),
+        (MONEY, mentions_money(about), "it's about money"),
+        (CONTRACTS, bool(_CONTRACTS_RE.search(about)), "it's about a contract or legal matter"),
+        (PEOPLE_DECISIONS, bool(_PEOPLE_RE.search(about)), "it's about hiring or a people decision"),
         (SOMEONE_NEW, any(not _known(r) for r in recipients), "it goes to someone new"),
     ]
     for kind, matched, reason in checks:
@@ -1661,6 +1696,26 @@ _MCP_APPS: tuple[tuple[re.Pattern[str], str, str], ...] = tuple(
         (r"drive|file|folder", "Google Drive", "a file"),
     )
 )
+# A file app's tool: a sheet, document, presentation, workbook or drive file,
+# from a file app's server ("google_workspace__modify_sheet_values"). Whole
+# name parts only, so "profile", "docusign", "driver" or "timesheet" aren't
+# files, and another app's tool is never a file however it's named.
+_FILE_APP_RE = re.compile(
+    r"^(?:google_workspace|microsoft_365|ms365|onedrive|g?drive|g?docs|g?sheets|g?slides|excel)__", re.I,
+)
+_FILE_WORD_RE = re.compile(
+    r"(?:^|[_-])(?:(?:spread)?sheets?|docs?|documents?|slides?|presentations?|drive|files?|folders?"
+    r"|excel|workbooks?|worksheets?|onedrive|word)(?=$|[_-])", re.I,
+)
+_MAIL_TOOL_RE = re.compile(r"mail|message|calendar|event", re.I)
+
+
+def _file_tool(tool: str) -> bool:
+    """Whether ``tool`` is a file app's tool (``_FILE_APP_RE``)."""
+    app = _FILE_APP_RE.match(tool or "")
+    return app is not None and bool(_FILE_WORD_RE.search(tool[app.end():]))
+
+
 _MCP_NAME_KEYS = ("title", "name", "file_name", "filename", "document_title", "spreadsheet_title", "sheet_title")
 # An argument whose name says the call reaches or opens to someone.
 _MCP_REACH_ARG_RE = re.compile(
@@ -1770,13 +1825,36 @@ def summarize(tool: str, tool_input: dict[str, Any], *, mcp: bool = False, quote
 def title(tool: str, tool_input: dict[str, Any], *, mcp: bool = False, private: bool = False) -> str:
     """A held step's card title in a few words: who it goes to ("Email Leo
     Park") on a card only its approver sees (``private``), else just what
-    it does ("Send an email"). The message itself shows under it."""
+    it does ("Send an email"). The message itself shows under it. A write
+    into a file says the job: "Write 6 rows to Launch tracker (Google
+    Sheets)", "Add to Post drafts (Google Docs)"."""
+    job = _file_job(tool, tool_input) if mcp else ""
+    if job:
+        return job
     if not private:
         return summarize(tool, tool_input, mcp=mcp, quote=False)
     return summarize(tool, {k: v for k, v in tool_input.items() if k not in _SNIPPET_KEYS}, mcp=mcp)
 
 
 _SNIPPET_KEYS = frozenset({"text", "message", "body", "description", "subject"})
+
+def _file_job(tool: str, tool_input: dict[str, Any]) -> str:
+    """A file write's title as the job it does, or "" for any other step:
+    rows written to a sheet, text added to the end of a doc."""
+    if not _file_tool(tool) or _MAIL_TOOL_RE.search(tool) or _mcp_deletes(tool, tool_input):
+        return ""
+    app, noun = next(((a, n) for rx, a, n in _MCP_APPS if rx.search(tool)), ("", ""))
+    what = _first_text(tool_input, _MCP_NAME_KEYS) or noun
+    if not what:
+        return ""
+    where = f"{what} ({app})" if app else what
+    values = tool_input.get("values")
+    if isinstance(values, list) and values and all(isinstance(r, list) for r in values):
+        return f"Write {len(values)} {'row' if len(values) == 1 else 'rows'} to {where}"
+    if tool_input.get("end_of_segment") in (True, "true") and isinstance(tool_input.get("text"), str):
+        return f"Add to the end of {where}"
+    return ""
+
 
 
 def mail_sent(tool: str, tool_input: dict[str, Any]) -> tuple[str, str] | None:
@@ -1973,6 +2051,23 @@ def _asker_id() -> int | None:
 
         value = getattr(current_session.get(), "caller_person_id", None)
         return int(value) if value is not None else None
+    except Exception:
+        return None
+
+
+def _team_asker_id() -> int | None:
+    """The owner or teammate whose own turn this is, or None (no one, or
+    someone outside the team). Never raises."""
+    try:
+        pid = _asker_id()
+        if pid is None:
+            return None
+        from openexecutive.people.store import get_person
+
+        person = get_person(pid)
+        if person is None or person.archived or not (person.is_principal or person.kind == "team"):
+            return None
+        return pid
     except Exception:
         return None
 
@@ -2219,6 +2314,10 @@ def hold(
         "fields": editable_fields(tool, tool_input, mcp=mcp),
         **({"allow": {"key": grant[0], "label": grant[1]}} if grant is not None else {}),
         **({"requested_by_person_id": asker.id, "requested_by": asker.full_name} if asker is not None else {}),
+        # Who asked, the owner included, for the card's "You asked" /
+        # "Olivia asked" (``card_details.top``); a step no one asked for has
+        # none and reads "I started this".
+        **({"asked_by_person_id": asked_by} if (asked_by := _team_asker_id() if source == "chat" else None) else {}),
     }
     decision_id = create_decision_instance(
         decision_class=DECISION_CLASS,
@@ -2457,13 +2556,76 @@ async def _gated(name: str, inner: _Handler, tool_input: dict[str, Any], *, sour
 
 def result_failed(text: str) -> bool:
     """Whether a tool's result says it failed: a JSON object with an
-    ``error`` key. Free text that merely mentions "error" (a subject line,
-    a quoted message) is a success."""
+    ``error`` key, or text that starts with "Error:" (how the MCP gateway
+    and connected apps say a call didn't run). Free text that merely
+    mentions "error" (a subject line, a quoted message) is a success."""
+    if isinstance(text, str) and text.lstrip().lower().startswith("error:"):
+        return True
     try:
         parsed = json.loads(text)
     except (TypeError, ValueError):
         return False
     return isinstance(parsed, dict) and "error" in parsed
+
+
+# A result kept back after its step ran (the gateway's "It did run").
+_DID_RUN_RE = re.compile(r"it did run|was withheld", re.IGNORECASE)
+# What a failed step's card says, by what the app's error is about. Matched
+# against the error's text, first match wins.
+_FAILED_WHY: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+    (re.compile(p, re.IGNORECASE), w) for p, w in (
+        # The step ran and only its result was kept back (the gateway's "It
+        # did run"): never "nothing changed", or a retry does it twice.
+        (_DID_RUN_RE.pattern,
+         "{app} did the step, but I couldn't read back how it went. Check it before trying again."),
+        (r"invalid_grant|unauthori[sz]ed|\b401\b|expired or revoked|revoked|reconnect|sign in again",
+         "{app} needs to be connected again, so nothing changed."),
+        (r"daily.?limit|per day|limit for today",
+         "{app} has used up its limit for today, so nothing changed. Try again tomorrow."),
+        (r"\b429\b|rate.?limit|too many requests|quota", "{app} was busy, so nothing changed. Try again in a few minutes."),
+        (r"\b40[34]\b|not found|forbidden|permission|insufficient", "{app} couldn't open that for me, so nothing changed."),
+        (r"time.?out|timed out", "{app} took too long, so it may not have gone through. Check before trying again."),
+    )
+)
+
+
+def failure_words(tool: str, result: str) -> str:
+    """What a card says when its step ran and the app turned it down
+    (``result_failed``): one plain sentence naming the app. Never the app's
+    own error text, which names its arguments ("'start_index' is required");
+    that stays in the step's record and the log."""
+    app = next((a for rx, a, _ in _MCP_APPS if rx.search(tool or "")), "") or next(
+        (a for rx, a in _APP_NAMES if rx.search(tool or "")), "The app",
+    )
+    text = result if isinstance(result, str) else str(result)
+    # A card of several steps (``carry_out``) that stopped partway: the
+    # steps before it went through, so say how many rather than "nothing".
+    with contextlib.suppress(TypeError, ValueError):
+        parsed = json.loads(text)
+        done, of = (parsed.get("done"), parsed.get("of")) if isinstance(parsed, dict) else (0, 0)
+        if isinstance(done, int) and done > 0:
+            total = f" of {of}" if isinstance(of, int) and of > done else ""
+            rest = ", and the rest didn't run" if isinstance(of, int) and of > done + 1 else ""
+            if _DID_RUN_RE.search(text):
+                # The step it stopped at ran too; only its result was kept back.
+                total = f" of {of}" if isinstance(of, int) and of > done + 1 else ""
+                return (f"{done + 1}{total} ran, but I couldn't read back how the last one went{rest}. "
+                        "Check before trying again.")
+            mid = "the" + app[3:] if app.startswith("The ") else app  # "then the app turned…"
+            return f"{done}{total} went through, then {mid} turned the next one down{rest}. Check before trying again."
+    for rx, words in _FAILED_WHY:
+        if rx.search(text):
+            return words.format(app=app)
+    return f"{app} turned that step down, so nothing changed."
+
+
+# Apps a step can reach that aren't files (``_MCP_APPS``), for a failed card.
+_APP_NAMES: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+    (re.compile(p, re.IGNORECASE), a) for p, a in (
+        (r"mail", "Email"),
+        (r"calendar|event", "The calendar"),
+    )
+)
 
 
 def result_waiting(text: str, name: str | None = None) -> bool:
@@ -2806,6 +2968,7 @@ async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bo
                             f"{failure[:300]}" + (" The rest didn't run." if done + 1 < len(steps) else "")
                         ),
                         "done": done,
+                        "of": len(steps),
                     })
                     if failure else json.dumps({"done": done, "results": [r[:300] for r in results]})
                 )

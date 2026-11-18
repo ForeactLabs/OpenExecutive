@@ -18,11 +18,11 @@ import {
   getLeadCard,
   rejectDecision,
   type LeadCardPayload,
+  heldCardTop,
   type ProposalItem,
 } from "@/lib/api";
 
-import { Section } from "./CardTalk";
-import CardTopRow from "./CardTopRow";
+import HeldCardTop from "./HeldCardTop";
 import StepTalk from "./StepTalk";
 
 // The tag a training card carries (orchestrator.take_the_lead.TRAINING_TAG).
@@ -108,18 +108,20 @@ export default function LeadTrainingCard({
         emphasized ? "border-accent/60 ring-1 ring-accent/25 shadow-sm" : "border-line"
       }`}
     >
-      <CardTopRow need="Needs your OK" mode="take_the_lead" at={proposal.created_at} tag={training ? "In training" : undefined} />
-      <div className="min-w-0 text-base sm:text-[17px] font-semibold leading-snug text-fg break-words">
-        {headline}
-      </div>
+      <HeldCardTop
+        top={heldCardTop(proposal.view?.top) ?? card?.top ?? null}
+        title={headline}
+        at={proposal.created_at}
+        tag={training ? "In training" : undefined}
+        fallbackWaits={
+          training
+            ? "It’s a new kind of step for me, so it waits for an OK once."
+            : card?.reason
+              ? `It waits because ${card.reason}.`
+              : "It waits for an OK."
+        }
+      />
       {card?.where && <p className="mt-1 text-sm leading-snug text-fg-muted">{card.where}</p>}
-      <Section title="What happened">
-        {training
-          ? "It waited because it’s in training."
-          : card?.reason
-            ? `It waited because ${card.reason}.`
-            : "It waited for your OK."}
-      </Section>
       {!editing && shownFields.length > 0 && (
         <div className="mt-3">
           <div className="mb-0.5 text-xs font-semibold uppercase tracking-wide text-fg-subtle">What I&apos;ll do</div>
