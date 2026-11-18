@@ -920,6 +920,8 @@ async def _send_chat_draft_from_executive(
         })
     except Exception as exc:
         logger.warning("delegation.reply_send: recording a sent chat draft failed (%s)", type(exc).__name__)
-    # Their own draft of it would only wait there unsent.
+    # Their own draft of it would only wait there unsent. No history note
+    # (``_note_sent``): those come from the person's own words, and these
+    # are written for the Executive.
     await _delete_quietly(client, row.draft_id)
     return ""

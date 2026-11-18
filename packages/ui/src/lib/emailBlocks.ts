@@ -25,8 +25,22 @@ function alignOf(cell: string): "left" | "center" | "right" {
   return left && right ? "center" : right ? "right" : "left";
 }
 
+// Where a forwarded message starts (email_html.py `split_forward`): its
+// "Forwarded message" line, or the "From:" / "Sent:" header Outlook's
+// forward starts with. The email sends what is under it as written, so the
+// card shows it as written too, tables and all.
+const FORWARDED = /^-{2,}\s*Forwarded message\s*-{2,}\s*$/im;
+const OUTLOOK_FORWARDED = /^From:[^\n]*\n(?:[ \t]*\n)*Sent:/m;
+
 export function emailBlocks(text: string): EmailBlock[] {
-  const lines = (text || "").split("\n");
+  const all = text || "";
+  const at = all.search(FORWARDED) >= 0 ? all.search(FORWARDED) : all.search(OUTLOOK_FORWARDED);
+  if (at > 0) {
+    const note = all.slice(0, at).replace(/\n+$/, "");
+    return [...emailBlocks(note), { kind: "text", text: "\n" + all.slice(at) }];
+  }
+  if (at === 0) return [{ kind: "text", text: all }];
+  const lines = all.split("\n");
   const blocks: EmailBlock[] = [];
   let plain: string[] = [];
   const flush = () => {

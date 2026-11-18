@@ -41,3 +41,14 @@ test("a reply's HTML link shows as a link, anything else as written", () => {
   const code = 'Use:\n```html\n<a href="https://x.example/c">Book</a>\n```\nor `<a href="https://x.example/c">Book</a>`';
   assert.equal(htmlLinks(code), code);
 });
+
+test("a forwarded message reads as written, as the email sends it", () => {
+  const fwd = "Here it is.\n\n---------- Forwarded message ---------\nFrom: A\n| a | b |\n|---|---|\n| 1 | 2 |";
+  const blocks = emailBlocks(fwd);
+  assert.ok(blocks.every((b) => b.kind === "text"));
+  assert.equal(blocks.map((b) => b.text).join("\n"), fwd);
+  const outlook = "| a | b |\n|---|---|\n| 1 | 2 |\n\nFrom: A\nSent: Monday\n| c | d |\n|---|---|";
+  const [table, ...rest] = emailBlocks(outlook);
+  assert.equal(table.kind, "table");
+  assert.deepEqual(rest, [{ kind: "text", text: "\nFrom: A\nSent: Monday\n| c | d |\n|---|---|" }]);
+});
