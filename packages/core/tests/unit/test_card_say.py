@@ -395,6 +395,17 @@ def test_a_picked_option_is_what_runs(
     assert card is not None and card.suggested_action == other and card.action_label == "Ask Sam"
 
 
+def test_a_changed_plan_never_keeps_the_old_buttons_words(
+    client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    aid = _card(db, action_label="Ask Alex")
+    _model(monkeypatch, {"plan": NEW, "label": "", "reply": "Here's the plan now."})
+    res = _say(client, aid, "share it instead")
+    assert res.status_code == 200, res.text
+    first = res.json()["card"]["view"]["options"][0]
+    assert (first["label"], first["plan"]) == ("Do it", NEW)
+
+
 def test_approve_carries_out_the_changed_plan(
     client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch, turns: _Turns,
 ) -> None:
