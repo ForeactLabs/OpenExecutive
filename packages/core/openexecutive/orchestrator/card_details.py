@@ -588,12 +588,15 @@ def top(payload: dict[str, Any], *, approver_id: int | None, viewer_id: int | No
                 return _first_name(person.full_name)
         return ""
 
-    asker_id = payload.get("requested_by_person_id")
+    asker_id = payload.get("requested_by_person_id") or payload.get("asked_by_person_id")
     if isinstance(asker_id, int) and asker_id == viewer_id:
         started = "You asked"
     elif isinstance(asker_id, int) or payload.get("requested_by"):
         who = name(asker_id) or _first_name(str(payload.get("requested_by") or ""))
         started = f"{who} asked" if who else "Someone on the team asked"
+    elif payload.get("source") == "chat":
+        # Asked in a conversation by someone it can't name.
+        started = "Someone asked"
     else:
         started = "I started this"
     # Unknown reader (a build with no one signed in): say it plainly, as

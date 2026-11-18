@@ -797,6 +797,25 @@ def test_a_held_cards_top_is_read_by_who_opens_it(client: TestClient, owner: Any
     assert as_owner["waits"] == "It waits because Approvals is on Careful. It's on Sam's list."
 
 
+def test_the_owners_own_ask_held_in_chat_reads_you_asked(owner: Any) -> None:
+    from openexecutive.orchestrator import card_details
+    from openexecutive.orchestrator.session import Session
+
+    token = schedule_tools.current_session.set(Session(from_web_chat=True, caller_person_id=owner.id))
+    try:
+        decision_id = ttl.hold("message_person", {"person_id": owner.id, "text": "Pay the invoice"},
+                               ttl.Hit("money", "it's about money"), source="chat", mcp=False)
+    finally:
+        schedule_tools.current_session.reset(token)
+    payload = json.loads(ledger.get_decision_instance(decision_id).proposed_payload_json)
+    assert "requested_by_person_id" not in payload  # a teammate's ask only
+    assert card_details.top(payload, approver_id=owner.id, viewer_id=owner.id)["started"] == "You asked"
+    unasked = ttl.hold("message_person", {"person_id": owner.id, "text": "Pay the other invoice"},
+                       ttl.Hit("money", "it's about money"), source="reflection", mcp=False)
+    payload = json.loads(ledger.get_decision_instance(unasked).proposed_payload_json)
+    assert card_details.top(payload, approver_id=owner.id, viewer_id=owner.id)["started"] == "I started this"
+
+
 @pytest.mark.parametrize(("tool_input", "words"), [
     ({"document_id": "d" * 30, "end_of_segment": True, "text": "Post 3"}, "Add to the end of a document (Google Docs)"),
     ({"document_id": "d" * 30, "end_of_segment": "true", "text": "Post 3"}, "Add to the end of a document (Google Docs)"),

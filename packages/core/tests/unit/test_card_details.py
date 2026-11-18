@@ -361,5 +361,11 @@ def test_a_held_cards_top_says_who_it_waits_on_who_started_it_and_why_it_waits(m
     asked = {"kind": "level", "reason": "Approvals is on Careful", "requested_by_person_id": 7}
     assert card_details.top(asked, approver_id=7, viewer_id=7)["started"] == "You asked"
     assert card_details.top(asked, approver_id=7, viewer_id=1)["started"] == "Sam asked"
+    # The owner's own ask in chat, and one no one on the team can be named for.
+    own = {"kind": "money", "reason": "x", "source": "chat", "asked_by_person_id": 1}
+    assert card_details.top(own, approver_id=1, viewer_id=1)["started"] == "You asked"
+    assert card_details.top(own, approver_id=1, viewer_id=12)["started"] == "Rufus asked"
+    assert card_details.top({"kind": "money", "reason": "x", "source": "chat"}, approver_id=1, viewer_id=1)[
+        "started"] == "Someone asked"
     training = card_details.top({"kind": "training", "reason": "x"}, approver_id=1, viewer_id=1)
     assert training["waits"] == "It's a new kind of step for me, so it waits for an OK once."

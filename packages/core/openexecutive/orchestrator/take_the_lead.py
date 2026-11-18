@@ -2051,6 +2051,23 @@ def _asker_id() -> int | None:
         return None
 
 
+def _team_asker_id() -> int | None:
+    """The owner or teammate whose own turn this is, or None (no one, or
+    someone outside the team). Never raises."""
+    try:
+        pid = _asker_id()
+        if pid is None:
+            return None
+        from openexecutive.people.store import get_person
+
+        person = get_person(pid)
+        if person is None or person.archived or not (person.is_principal or person.kind == "team"):
+            return None
+        return pid
+    except Exception:
+        return None
+
+
 def _teammate_asking() -> Any:
     """The teammate (on People, not the owner) whose own turn this is, or
     None. Never raises."""
@@ -2293,6 +2310,10 @@ def hold(
         "fields": editable_fields(tool, tool_input, mcp=mcp),
         **({"allow": {"key": grant[0], "label": grant[1]}} if grant is not None else {}),
         **({"requested_by_person_id": asker.id, "requested_by": asker.full_name} if asker is not None else {}),
+        # Who asked, the owner included, for the card's "You asked" /
+        # "Olivia asked" (``card_details.top``); a step no one asked for has
+        # none and reads "I started this".
+        **({"asked_by_person_id": asked_by} if (asked_by := _team_asker_id() if source == "chat" else None) else {}),
     }
     decision_id = create_decision_instance(
         decision_class=DECISION_CLASS,
