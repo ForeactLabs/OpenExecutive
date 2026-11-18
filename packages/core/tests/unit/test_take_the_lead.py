@@ -2239,3 +2239,21 @@ def test_an_approved_email_reads_as_what_went_out_and_when(owner: Any) -> None:
     other = ttl.hold(send, {**held, "subject": "Other"}, ttl.Hit("money", "it's about money"), source="chat", mcp=True)
     ttl.resolved(other, "declined")
     assert next(r for r in ttl.done([ttl.SCOPE_EXECUTIVE]) if r.decision_id == other).status == "declined"
+
+
+def test_approving_an_edited_email_logs_what_went_and_when(
+    client: TestClient, owner: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bool = False) -> str:
+        return "Email sent! Message ID: ab"
+
+    monkeypatch.setattr(ttl, "carry_out", carry_out)
+    send = "google_workspace__send_gmail_message"
+    decision_id = ttl.hold(send, {"to": DANA, "subject": "Racking repair", "body": "Go ahead."},
+                           ttl.Hit("money", "it's about money"), source="reflection", mcp=True)
+    [held] = ttl.done([ttl.SCOPE_EXECUTIVE])
+    edits = {"input": {"subject": "Racking repair: approved"}}
+    response = client.post(f"/decisions/{decision_id}/approve", json={"edits": edits})
+    assert response.status_code == 200, response.text
+    [row] = ttl.done([ttl.SCOPE_EXECUTIVE])
+    assert row.status == "approved" and row.mail_subject == "Racking repair: approved" and row.at > held.at
