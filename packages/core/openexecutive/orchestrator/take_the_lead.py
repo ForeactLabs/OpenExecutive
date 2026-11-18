@@ -2585,7 +2585,8 @@ def failure_words(tool: str, result: str) -> str:
                 total = f" of {of}" if isinstance(of, int) and of > done + 1 else ""
                 return (f"{done + 1}{total} ran, but I couldn't read back how the last one went{rest}. "
                         "Check before trying again.")
-            return f"{done}{total} went through, then {app} turned the next one down{rest}. Check before trying again."
+            mid = "the" + app[3:] if app.startswith("The ") else app  # "then the app turned…"
+            return f"{done}{total} went through, then {mid} turned the next one down{rest}. Check before trying again."
     for rx, words in _FAILED_WHY:
         if rx.search(text):
             return words.format(app=app)

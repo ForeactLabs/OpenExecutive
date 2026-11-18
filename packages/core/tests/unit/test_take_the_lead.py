@@ -760,6 +760,8 @@ def test_a_step_the_app_turns_down_says_why_in_plain_words(
     ("google_workspace__modify_sheet_values",
      '{"error": "1 of 2 went through, then step 2 didn\'t: Error: HttpError 403", "done": 1, "of": 2}',
      "1 of 2 went through, then Google Sheets turned the next one down. Check before trying again."),
+    ("some_app__do_thing", '{"error": "1 of 2 went through, then step 2 didn\'t: Error: no", "done": 1, "of": 2}',
+     "1 of 2 went through, then the app turned the next one down. Check before trying again."),
     ("google_workspace__modify_sheet_values",
      '{"error": "2 of 4 went through, then step 3 didn\'t: the result was withheld. It did run.", "done": 2, "of": 4}',
      "3 of 4 ran, but I couldn't read back how the last one went, and the rest didn't run. Check before trying again."),
