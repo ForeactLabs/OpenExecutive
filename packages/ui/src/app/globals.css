@@ -169,9 +169,8 @@
 
 @layer utilities {
   /* The box where you ask your Executive (Home's ask box and the chat's
-   * message box): white, outlined in the accent with a soft glow, so it
-   * reads as the way to ask and to start a chat. The phone app's Composer
-   * draws the same box. */
+   * message box): the elevated surface, outlined in the accent with a soft
+   * glow, so it reads as the way to ask and to start a chat. */
   .ask-box {
     background-color: rgb(var(--surface-elevated));
     border: 1.5px solid rgb(var(--accent));
