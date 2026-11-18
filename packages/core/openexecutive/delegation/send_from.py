@@ -419,7 +419,10 @@ async def send(
                 ) from exc
             if take_the_lead.result_failed(result):
                 release_claim(instance.id)
-                raise SendRefused(502, "send_failed", f"It wasn't sent: {result[:300]}")
+                logger.warning("delegation.send_from: the send failed: %s", result[:300])
+                raise SendRefused(
+                    502, "send_failed", f"It wasn't sent. {take_the_lead.failure_words(provider.send_tool_name, result)}",
+                )
             finish_execution(
                 instance.id, STATUS_APPROVED_UNCHANGED,
                 final_payload={"from_executive": True, "recipient_count": len(everyone)},

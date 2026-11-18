@@ -665,6 +665,41 @@ def test_approving_does_the_exact_action_once(client: TestClient, owner: Any, mo
     assert alert.external_id == f"decision:{decision_id}"
 
 
+def test_a_step_the_app_turns_down_says_why_in_plain_words(
+    client: TestClient, owner: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The card names the app and says nothing changed; the app's own error
+    text (its argument names) never reaches the person."""
+    async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bool = False) -> str:
+        return "Error: 'start_index' is required unless 'heading' is provided."
+
+    monkeypatch.setattr(ttl, "carry_out", carry_out)
+    decision_id = ttl.hold("google_workspace__modify_doc_text", {"document_id": "d" * 30, "text": "Post 3"},
+                           ttl.Hit("level", "Approvals is on Careful"), source="reflection", mcp=True)
+    response = client.post(f"/decisions/{decision_id}/approve", json={})
+    assert response.status_code == 502
+    detail = response.json()["detail"]
+    assert detail == "It couldn't do that. Google Docs turned that step down, so nothing changed."
+    assert "start_index" not in detail
+    assert ledger.get_decision_instance(decision_id).status == ledger.STATUS_FAILED
+
+
+@pytest.mark.parametrize(("tool", "result", "words"), [
+    ("google_workspace__modify_doc_text", "Error: 'start_index' is required unless 'heading' is provided.",
+     "Google Docs turned that step down, so nothing changed."),
+    ("google_workspace__modify_sheet_values", '{"error": "invalid_grant: Token has been expired or revoked."}',
+     "Google Sheets needs to be connected again, so nothing changed."),
+    ("google_workspace__send_gmail_message", "Error: HttpError 429 rateLimitExceeded",
+     "Email was busy, so nothing changed. Try again in a few minutes."),
+    ("google_workspace__get_doc_content", "Error: HttpError 404 File not found: https://docs.google.com/x",
+     "Google Docs couldn't open that for me, so nothing changed."),
+    ("some_app__do_thing", "Error: the request timed out",
+     "The app took too long, so it may not have gone through. Check before trying again."),
+])
+def test_failure_words_name_the_app_and_never_quote_it(tool: str, result: str, words: str) -> None:
+    assert ttl.failure_words(tool, result) == words
+
+
 def test_a_teammates_own_held_card_reaches_carry_out_as_theirs(
     client: TestClient, owner: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1991,3 +2026,15 @@ def test_today_is_the_owners_day(monkeypatch: pytest.MonkeyPatch, db: Path) -> N
     # Late evening in Los Angeles is the next UTC day: still today there.
     afternoon = datetime.now(UTC).astimezone(ZoneInfo("America/Los_Angeles")).replace(hour=23, minute=59)
     assert ttl.done_today(now=afternoon.astimezone(UTC))[0] == 1
+
+
+@pytest.mark.parametrize(("text", "failed"), [
+    ('{"error": "not found"}', True),
+    ("Error: 'start_index' is required unless 'heading' is provided.", True),
+    ("  error: no such sheet", True),
+    ("Errors in the plan were fixed.", False),
+    ('Sent. They wrote: {"error": "x"}', False),
+    ("", False),
+])
+def test_only_an_error_result_counts_as_failed(text: str, failed: bool) -> None:
+    assert ttl.result_failed(text) is failed

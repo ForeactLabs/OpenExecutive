@@ -2453,13 +2453,53 @@ async def _gated(name: str, inner: _Handler, tool_input: dict[str, Any], *, sour
 
 def result_failed(text: str) -> bool:
     """Whether a tool's result says it failed: a JSON object with an
-    ``error`` key. Free text that merely mentions "error" (a subject line,
-    a quoted message) is a success."""
+    ``error`` key, or text that starts with "Error:" (how the MCP gateway
+    and connected apps say a call didn't run). Free text that merely
+    mentions "error" (a subject line, a quoted message) is a success."""
+    if isinstance(text, str) and text.lstrip().lower().startswith("error:"):
+        return True
     try:
         parsed = json.loads(text)
     except (TypeError, ValueError):
         return False
     return isinstance(parsed, dict) and "error" in parsed
+
+
+# What a failed step's card says, by what the app's error is about. Matched
+# against the error's text, first match wins.
+_FAILED_WHY: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+    (re.compile(p, re.IGNORECASE), w) for p, w in (
+        (r"invalid_grant|unauthori[sz]ed|\b401\b|expired or revoked|revoked|reconnect|sign in again",
+         "{app} needs to be connected again, so nothing changed."),
+        (r"\b429\b|rate.?limit|too many requests|quota", "{app} was busy, so nothing changed. Try again in a few minutes."),
+        (r"\b40[34]\b|not found|forbidden|permission|insufficient", "{app} couldn't open that for me, so nothing changed."),
+        (r"time.?out|timed out", "{app} took too long, so it may not have gone through. Check before trying again."),
+    )
+)
+
+
+def failure_words(tool: str, result: str) -> str:
+    """What a card says when its step ran and the app turned it down
+    (``result_failed``): one plain sentence naming the app. Never the app's
+    own error text, which names its arguments ("'start_index' is required");
+    that stays in the step's record and the log."""
+    app = next((a for rx, a, _ in _MCP_APPS if rx.search(tool or "")), "") or next(
+        (a for rx, a in _APP_NAMES if rx.search(tool or "")), "The app",
+    )
+    text = result if isinstance(result, str) else str(result)
+    for rx, words in _FAILED_WHY:
+        if rx.search(text):
+            return words.format(app=app)
+    return f"{app} turned that step down, so nothing changed."
+
+
+# Apps a step can reach that aren't files (``_MCP_APPS``), for a failed card.
+_APP_NAMES: tuple[tuple[re.Pattern[str], str], ...] = tuple(
+    (re.compile(p, re.IGNORECASE), a) for p, a in (
+        (r"mail", "Email"),
+        (r"calendar|event", "The calendar"),
+    )
+)
 
 
 def result_waiting(text: str, name: str | None = None) -> bool:

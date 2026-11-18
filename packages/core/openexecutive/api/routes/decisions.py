@@ -728,7 +728,11 @@ async def _run_lead(
     take_the_lead.resolved(instance.id, "failed" if failed else "approved")
     _clear_decision_alert(instance.id, "dismissed" if failed else "ack")
     if failed:
-        raise HTTPException(status_code=502, detail=f"It couldn't do that: {result[:300]}")
+        logger.warning("decisions/approve: step %d failed: %s", instance.id, result[:300])
+        raise HTTPException(
+            status_code=502,
+            detail=f"It couldn't do that. {take_the_lead.failure_words(str(payload.get('tool') or ''), result)}",
+        )
     if grant is not None:
         try:
             take_the_lead.allow(
@@ -978,7 +982,11 @@ async def _run_department_action(
         instance, payload, resolver,
     )
     if failed:
-        raise HTTPException(status_code=502, detail=f"It couldn't do that: {result[:300]}")
+        logger.warning("decisions/approve: step %d failed: %s", instance.id, result[:300])
+        raise HTTPException(
+            status_code=502,
+            detail=f"It couldn't do that. {take_the_lead.failure_words(str(payload.get('tool') or ''), result)}",
+        )
     return _refresh(instance.id)
 
 
