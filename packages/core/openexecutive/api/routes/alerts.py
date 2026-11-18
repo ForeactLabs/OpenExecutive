@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from openexecutive.alerts import approvals, lifecycle, store
 from openexecutive.alerts.models import (
     ARTIFACT_SOURCE,
+    NEEDS_FYI,
     PERSONAL_SOURCES,
     Alert,
     is_private_alert,
@@ -431,7 +432,7 @@ async def _approve(
         )
     if alert.source == ARTIFACT_SOURCE:
         raise HTTPException(status_code=409, detail="A drafted document has nothing to approve.")
-    from openexecutive.alerts.models import NEEDS_ANSWER, NEEDS_CHOICE, NEEDS_FYI
+    from openexecutive.alerts.models import NEEDS_ANSWER, NEEDS_CHOICE
 
     if alert.needs in (NEEDS_ANSWER, NEEDS_CHOICE):
         # It asks something; the answer is the go (POST /answer).
@@ -972,7 +973,14 @@ async def say_on_card(alert_id: int, body: SayBody, request: Request) -> SayResp
         raise _refuse(exc) from exc
 
     previous = (existing.suggested_action or "").strip()
-    if new.plan.strip() != previous:
+    plan = new.plan if new.plan.strip() != previous else existing.suggested_action or ""
+    # A go runs the plan through the same Approve as a tap. Whether they
+    # said go is read from their words and the plans alone, never from the
+    # card, so text from outside on the card can't make its plan run.
+    go = new.go and await replan.said_go(plan, line, before=existing.suggested_action or "")
+    # A card only for them to know takes a step once they say one, or say
+    # go: from then on it waits for their OK like any other.
+    if new.plan.strip() != previous or (go and existing.needs == NEEDS_FYI):
         # The model call takes seconds: only an open card still showing the
         # plan the model read takes the new one.
         change = replan.apply_change(
@@ -989,17 +997,12 @@ async def say_on_card(alert_id: int, body: SayBody, request: Request) -> SayResp
             actor="user",
             details={"alert_id": alert_id, "change_id": change.id, "by": api_caller.actor(request)},
         )
-    plan = new.plan if new.plan.strip() != previous else existing.suggested_action or ""
     had = card_talk.read([existing]).get(alert_id)
     own = card_talk.CardOption(label=new.label or "Do it", plan=plan)
     card_talk.keep_options(
         alert_id, plan.strip(), had.happened if had else "",
         [own, *(card_talk.CardOption(label=label, plan=text) for label, text in new.others)],
     )
-    # A go runs the plan through the same Approve as a tap. Whether they
-    # said go is read from their words and the plan alone, never from the
-    # card, so text from outside on the card can't make its plan run.
-    go = new.go and await replan.said_go(plan, line, before=existing.suggested_action or "")
     reply = new.reply if go or not new.go else "Here's the plan now. Pick it to go ahead."
     card_talk.add_turn(alert_id, "you", line, person_id=person)
     approval = None

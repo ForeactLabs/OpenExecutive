@@ -255,6 +255,10 @@ def status_chip(item: Any, now: datetime | None = None) -> CardChip | None:
 PLAN_TITLE = "What I'll do"
 
 
+# Over what a card that asks something wants to know.
+ASKS_TITLE = "What I need to know"
+
+
 def plan_title(changed_by: str | None = None) -> str:
     """The heading over what the card will do: it names who changed it when
     that wasn't the reader, so nobody approves someone else's plan as the
@@ -477,6 +481,7 @@ def card_view(
     # step it carries out (who it copies, what it attaches). A browser
     # hand-over's step is the Executive's own note.
     show_plan = bool(plan) and approve is not None and not handed_over
+    question = (getattr(item, "question", "") or "").strip() if asks else ""
     review, chips, reviewed = _lifecycle(item, now)
     description = _description(item, artifact, monitoring)
     turns = [
@@ -494,8 +499,9 @@ def card_view(
         description=description,
         long=len(description) > LONG_BODY_CHARS,
         happened=(getattr(talk, "happened", "") or "") if not artifact else "",
-        plan_title=plan_title(item.plan_changed_by) if show_plan else "",
-        plan=plan if approve is not None else "",
+        # A card that asks something shows what it asks where a plan goes.
+        plan_title=ASKS_TITLE if question else plan_title(item.plan_changed_by) if show_plan else "",
+        plan=question or (plan if approve is not None else ""),
         options=options,
         tell_me=tell_me,
         turns=turns,

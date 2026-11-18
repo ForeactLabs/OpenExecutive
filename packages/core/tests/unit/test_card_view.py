@@ -128,6 +128,8 @@ def test_a_question_is_answered_on_the_card() -> None:
     v = view(needs="choice", question="Which vendor?", choices=["A", "B"])
     assert (v.kind, v.panel, v.need) == ("ask", "", "Pick one")
     assert picks(v) == [("answer", "A", ""), ("answer", "B", "")]
+    # What it asks shows where a plan goes, so the answers have their question.
+    assert (v.plan_title, v.plan) == ("What I need to know", "Which vendor?")
     assert v.tell_me
     assert shown(v) == [("menu", "snooze", "Snooze"), ("side", "dismiss", "Skip")]
 
@@ -321,6 +323,7 @@ def test_no_step_is_nothing_to_approve() -> None:
 
 
 def test_a_card_without_approve_has_no_plan_box() -> None:
-    for kw in ({"needs": "fyi"}, {"needs": "answer", "question": "Which one?"}):
-        v = view(**kw)
-        assert (v.plan_title, v.plan) == ("", "")
+    assert (view(needs="fyi").plan_title, view(needs="fyi").plan) == ("", "")
+    # A card that asks shows its question there instead.
+    v = view(needs="answer", question="Which one?")
+    assert (v.plan_title, v.plan) == ("What I need to know", "Which one?")
