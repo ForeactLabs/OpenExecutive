@@ -221,6 +221,11 @@ class TurnReadingBudget:
         # tool_use ids answered by ``replay``: already sized, not cut again.
         self._replayed: set[str] = set()
 
+    @property
+    def full(self) -> bool:
+        """The turn has read all its model holds: it should answer now."""
+        return self.used >= self.turn_budget
+
     @staticmethod
     def _key(name: str, tool_input: Any) -> str:
         try:

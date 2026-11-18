@@ -1085,6 +1085,18 @@ REPEATING_EMPTY_REPLY = (
     "I stopped because the same step kept coming back the same way, and "
     "nothing was ready to show yet."
 )
+# Once a turn has read all its model holds (TurnReadingBudget.full), more
+# reads would push the prompt past the window: it writes its answer from
+# what it has read and offers to carry on, the same way a repeat ends.
+FULL_NOTE = (
+    "This question has now read all it can hold at once. Do not call any "
+    "more tools. Write your answer now from what you have read, say plainly "
+    "what you have not read yet, and offer to carry on with the rest in a new message."
+)
+FULL_EMPTY_REPLY = (
+    "I've read all I can hold for this one question. Ask me to carry on and "
+    "I'll pick up the rest."
+)
 # Said when it ends that way.
 EMPTY_CUTS_REPLY = (
     "I kept running out of room before I could finish a step of this. "
@@ -2585,6 +2597,8 @@ class Executive:
         # Set once the same call came back the same REPEAT_LIMIT times: the next
         # round writes up what the turn has, and runs no tool, as on a hand-over.
         repeating = False
+        # What a write-up that wrote nothing says: why it was asked for.
+        write_up_empty = REPEATING_EMPTY_REPLY
         repeats: dict[str, int] = {}
         # What the turn last showed the person (show_progress), so each call
         # adds to it, and the reads it made, counted once each for the card.
@@ -2860,7 +2874,7 @@ class Executive:
                     b.get("type") == "text" and str(b.get("text", "")).strip()
                     for b in response_content
                 ):
-                    yield HAND_OVER_EMPTY_REPLY if handing_over else REPEATING_EMPTY_REPLY
+                    yield HAND_OVER_EMPTY_REPLY if handing_over else write_up_empty
                 return
 
             cut_text = ""
@@ -4044,6 +4058,11 @@ class Executive:
                 logger.warning("round %d: a call came back the same %d times; writing up", iteration, REPEAT_LIMIT)
                 tool_results.append({"type": "text", "text": REPEATING_NOTE})
                 repeating = True
+            elif not handing_over and not repeating and reading_budget.full:
+                logger.info("round %d: the turn has read all its model holds; writing up", iteration)
+                tool_results.append({"type": "text", "text": FULL_NOTE})
+                repeating = True
+                write_up_empty = FULL_EMPTY_REPLY
             if sees:
                 # Only the newest screenshots ride along: older ones would be
                 # sent again every round.

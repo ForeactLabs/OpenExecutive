@@ -412,8 +412,10 @@ def test_the_loop_reads_a_long_document_to_the_end(monkeypatch: pytest.MonkeyPat
 
 
 def test_a_turns_reads_share_what_the_model_holds(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Reads past what the model holds stop short with a plain note; a
-    specialist's answer after that is neither counted nor cut."""
+    """Reads share what the model holds; once they fill it the turn is told
+    to answer from what it has, and runs no more tools."""
+    from openexecutive.orchestrator.executive import FULL_NOTE
+
     monkeypatch.setattr("openexecutive.orchestrator.executive.reading_limits_for", _limits(20_000, 40_000))
 
     async def _read(*_a: Any, **_k: Any) -> str:
@@ -436,9 +438,8 @@ def test_a_turns_reads_share_what_the_model_holds(monkeypatch: pytest.MonkeyPatc
     # 2,000 left: a smaller part, read on as usual.
     second = provider.calls[2]["messages"][-1]["content"][0]["content"]
     assert len(second) <= 2_000 and "exactly the same input" in second
-    third = {b["tool_use_id"]: b["content"] for b in provider.calls[3]["messages"][-1]["content"]}
-    assert len(third["r4"]) <= _TURN_BUDGET_FLOOR and "read all it can hold" in third["r4"]
-    assert "read all it can hold" not in third["s1"]
+    assert FULL_NOTE in str(provider.calls[2]["messages"][-1]["content"])
+    assert len(provider.calls) == 3  # the write-up's calls never ran
 
 
 def test_a_repeated_long_write_is_answered_not_run_again(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -504,3 +505,27 @@ def test_a_connected_apps_read_keeps_the_held_parts() -> None:
     assert budget.replay({"id": "t3", "name": "read_document", "input": {"id": "a"}}) is not None
     budget.ran([{"id": "t4", "name": "call_tool", "input": {"name": "google_workspace__modify_sheet_values"}}])
     assert budget.replay({"id": "t5", "name": "read_document", "input": {"id": "a"}}) is None
+
+
+def test_a_turn_that_has_read_all_it_holds_writes_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Calls that change every round (a new search each time) still end once
+    the turn has read all its model holds: it answers from what it has."""
+    from openexecutive.orchestrator.executive import FULL_NOTE
+
+    monkeypatch.setattr("openexecutive.orchestrator.executive.reading_limits_for", _limits(5_000, 10_000))
+    ran: list[str] = []
+
+    async def _search(tool_input: dict[str, Any], *_a: Any, **_k: Any) -> str:
+        ran.append(tool_input["query"])
+        return "hit " * 1_000
+
+    provider = _ScriptedProvider(
+        [_FinalMsg([_ToolUseBlock(f"s{i}", "search_mail", {"query": f"X {i}"})], "tool_use") for i in range(8)]
+        + [_FinalMsg([_TextBlock("never reached")], "end_turn")]
+    )
+    _run(provider, {"search_mail": _search})
+
+    noted = [n for n, c in enumerate(provider.calls) if FULL_NOTE in str(c["messages"][-1]["content"])]
+    assert noted, "the turn was never told to write up"
+    assert len(provider.calls) == noted[0] + 1
+    assert len(ran) == noted[0]

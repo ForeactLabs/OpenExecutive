@@ -340,7 +340,10 @@ caching:
     model holds stops short: a further result shows 3,000 characters
     (_TURN_BUDGET_FLOOR) and its note says plainly the question has read all
     it can hold, to answer from what it has, say what it has not read and
-    offer to carry on, and never to edit from the cut result.
+    offer to carry on, and never to edit from the cut result. The round
+    after the reads fill it is a write-up (TurnReadingBudget.full ->
+    executive.FULL_NOTE; no tool runs, FULL_EMPTY_REPLY if it writes nothing),
+    so calls that change every round still end once the model is full.
     consult_specialist results neither count nor are cut (they are the
     analysis, not a read); run_script, open_tools and search_tools results
     count but are never cut by the turn (_NEVER_CUT_BY_TURN_BUDGET): one lists
