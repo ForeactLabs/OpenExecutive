@@ -60,6 +60,18 @@ def test_more_than_one_artifact_holds_is_refused_before_it_fills_memory() -> Non
     assert time.monotonic() - started < 10
 
 
+def test_a_sheet_at_what_one_artifact_holds_renders() -> None:
+    cols = 100
+    rows = [[f"=v{r}" if c % 2 else r for c in range(cols)] for r in range(af.MAX_TOTAL_CELLS // cols)]
+    built = af.build_artifact("xlsx", {"sheets": [{"name": "Big", "columns": [f"c{c}" for c in range(cols)], "rows": rows}]})
+    wb = load_workbook(io.BytesIO(af.sheets_to_xlsx(built.stored)), read_only=True)
+    got = list(wb["Big"].iter_rows(values_only=True))
+    assert len(got) == af.MAX_TOTAL_CELLS // cols + 1
+    first = got[1]
+    # Strings stay strings: a cell that starts with '=' is not a formula.
+    assert first[0] == 0 and first[1] == "=v0"
+
+
 def test_unknown_format_rejected() -> None:
     with pytest.raises(af.ArtifactInputError, match="unknown format"):
         af.build_artifact("pdf", {"document": "x"})

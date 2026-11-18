@@ -51,6 +51,7 @@ and the text, nothing else, and not found for anything but a live link.
 """
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 from collections.abc import Callable
@@ -194,7 +195,8 @@ async def download_artifact(
     """The artifact as a file. `?as=docx` exports a Markdown artifact to Word."""
     rec = _load(composite_id, request)
     try:
-        file = render_artifact_file(rec, as_)
+        # Off the event loop: a big sheet or document takes seconds to render.
+        file = await asyncio.to_thread(render_artifact_file, rec, as_)
     except ArtifactNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
