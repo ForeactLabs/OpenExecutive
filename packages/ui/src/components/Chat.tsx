@@ -1590,7 +1590,7 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
               {fileError}
             </p>
           )}
-          <div className="relative flex items-end gap-1.5 sm:gap-2 bg-surface-elevated border border-line-strong rounded-2xl p-1.5 sm:p-2 shadow-sm focus-within:border-accent/60 transition-colors">
+          <div className="ask-box relative flex items-end gap-1.5 sm:gap-2 rounded-2xl p-1.5 sm:p-2 transition-shadow">
             <input
               ref={fileInputRef}
               type="file"

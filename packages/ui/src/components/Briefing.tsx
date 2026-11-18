@@ -728,7 +728,7 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
                 e.preventDefault();
                 submitAsk();
               }}
-              className="mb-6 flex items-center gap-2 rounded-2xl border border-line bg-surface-elevated p-2 pl-4 shadow-sm focus-within:border-accent/60 focus-within:ring-2 focus-within:ring-accent/20"
+              className="ask-box mb-6 flex items-center gap-2 rounded-2xl p-2 pl-4 transition-shadow"
             >
               <input
                 type="text"
