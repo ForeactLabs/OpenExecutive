@@ -306,3 +306,15 @@ def test_a_note_below_an_iphone_forward_stays_the_senders() -> None:
     words = sender_new_text(body)
     assert "call me about this tomorrow" in words and "invoice" not in words
 
+
+def test_a_second_forward_below_a_quoted_one_is_kept() -> None:
+    from openexecutive.integrations.email_poller import split_forward
+
+    body = (
+        "Note\n\n> Begin forwarded message:\n> From: A\n> hi\n\n"
+        "---------- Forwarded message ---------\nFrom: B\nbody B"
+    )
+    own, forwarded = split_forward(body, "Fwd: x")
+    assert own == "Note"
+    assert forwarded.startswith("From: A\nhi") and forwarded.endswith("From: B\nbody B")
+

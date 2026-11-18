@@ -571,9 +571,15 @@ def split_forward(
             if rest[k].strip() and not rest[k].lstrip().startswith(">"):
                 end = k
                 break
+        after = rest[end:]
         rest = [re.sub(r"^(\s*)>\s?", r"\1", ln) for ln in rest[first:end]]
         if rest and _BEGIN_FORWARDED_RE.match(rest[0].strip()):
             rest = rest[1:]
+        # A second forward below it (where the scan stopped) is forwarded too.
+        later = next((k for k, ln in enumerate(after) if _FORWARDED_RE.match(ln.strip())
+                      or _BEGIN_FORWARDED_RE.match(ln.strip())), None)
+        if later is not None:
+            rest += ["", *after[later:]]
     inner = "\n".join(ln.rstrip() for ln in rest).strip()
     cap = forwarded_chars if forwarded_chars is not None else max_chars
     return own, inner[:cap] if cap is not None else inner
