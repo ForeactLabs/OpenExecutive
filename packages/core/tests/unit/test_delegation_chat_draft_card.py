@@ -534,3 +534,112 @@ def test_both_mail_backends_carry_a_bcc() -> None:
     message = MicrosoftMail().build_send_arguments(**common, bcc=["boss@co.example"])["body"]["Message"]
     assert message["bccRecipients"] == [{"emailAddress": {"address": "boss@co.example"}}]
     assert "bcc" not in GoogleMail().build_send_arguments(**common)
+
+
+FORWARDED = "---------- Forwarded message ---------\nFrom: Kyle <kyle@x.example>\n\nThe quote is attached."
+
+
+def _draft_of(owner: Any, subject: str, body: str) -> tuple[FakeInbox, int]:
+    from openexecutive.delegation.gmail import DraftSpec
+
+    mailbox = FakeInbox()
+    made = asyncio.run(mailbox.create_draft(DraftSpec(to=[_send_tests.DANA], subject=subject, body=body)))
+    row = drafts.record(owner.id, source=drafts.SOURCE_CHAT, thread_id=None, draft_id=made.draft_id,
+                        message_id=made.message_id, now=NOW)
+    return mailbox, row
+
+
+def test_a_forward_switched_keeps_the_forwarded_message_as_it_was(
+    db: Path, owner: Any, as_sender: list[str],
+) -> None:
+    mailbox, row = _draft_of(owner, "Fwd: Quote", f"See below.\n\n{FORWARDED}")
+    saved = _switch(owner, row, mailbox, True)
+    assert saved["body"].startswith("Hi Dana,\n\nOlivia asked me")
+    assert saved["body"].endswith(FORWARDED) and saved["body"].count(FORWARDED) == 1
+    assert mailbox.drafts["d1"].message.text == saved["body"]
+
+
+def test_a_rewrite_that_changes_nothing_leaves_the_draft_alone(
+    db: Path, owner: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = f"See below.\n\n{FORWARDED}"
+    mailbox, row = _draft_of(owner, "Fwd: Quote", body)
+    seen: dict[str, Any] = {}
+
+    async def same(person: Any, payload: dict[str, Any], answers: list[Any], **kw: Any) -> Any:
+        seen.update(payload)
+        return payload["draft_body"], {}, []
+
+    monkeypatch.setattr("openexecutive.delegation.answers.rewrite", same)
+    saved, new, _ = asyncio.run(chat_draft_card.change(owner, row, "Shorter.", caller=LOCAL, gmail=mailbox, now=LATER))
+    assert seen["draft_body"] == "See below."  # only the note is the model's
+    assert saved["body"] == body and new == []
+    assert "update:d1" not in mailbox.calls
+
+
+def test_a_reply_quoting_a_forward_is_not_split(db: Path, owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    body = f"Thanks.\n\n{FORWARDED}"
+    mailbox, row = _draft_of(owner, "Re: Quote", body)
+    seen: dict[str, Any] = {}
+
+    async def look(person: Any, payload: dict[str, Any], answers: list[Any], **kw: Any) -> Any:
+        seen.update(payload)
+        return payload["draft_body"], {}, []
+
+    monkeypatch.setattr("openexecutive.delegation.answers.rewrite", look)
+    asyncio.run(chat_draft_card.change(owner, row, "Shorter.", caller=LOCAL, gmail=mailbox, now=LATER))
+    assert seen["draft_body"] == body
+
+
+def test_asking_for_the_sender_it_already_has_says_so(
+    db: Path, owner: Any, as_sender: list[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.delegation.answers import SendFrom
+
+    mailbox, row = _chat_draft(owner)
+
+    async def only_who(*a: Any, **kw: Any) -> Any:
+        raise SendFrom(executive=False)
+
+    monkeypatch.setattr("openexecutive.delegation.answers.rewrite", only_who)
+    saved, _new, note = asyncio.run(chat_draft_card.change(owner, row, "Send it from me.", caller=LOCAL, gmail=mailbox, now=LATER))
+    assert note == "It already goes from you."
+    assert saved["from_executive"] is False and as_sender == []
+
+
+def _with_files(mailbox: FakeInbox, monkeypatch: pytest.MonkeyPatch, *, broken: bool = False) -> None:
+    from openexecutive.delegation.gmail import GmailError, MailAttachment
+
+    mailbox.drafts["d1"].message.has_attachments = True
+
+    async def list_attachments(message_id: str) -> list[MailAttachment]:
+        return [MailAttachment(index=1, name="quote.pdf", mime_type="application/pdf")]
+
+    async def attachment_bytes(message_id: str, index: int) -> tuple[MailAttachment, bytes]:
+        if broken:
+            raise GmailError("boom")
+        return MailAttachment(index=1, name="quote.pdf", mime_type="application/pdf"), b"%PDF"
+
+    monkeypatch.setattr(mailbox, "list_attachments", list_attachments, raising=False)
+    monkeypatch.setattr(mailbox, "attachment_bytes", attachment_bytes, raising=False)
+
+
+def test_the_executive_sends_the_drafts_files(
+    db: Path, owner: Any, as_sender: list[str], exec_sends: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mailbox, row = _chat_draft(owner)
+    _switch(owner, row, mailbox, True)
+    _with_files(mailbox, monkeypatch)
+    asyncio.run(send_chat_draft(owner, row, caller=LOCAL, gmail=mailbox, now=LATER))
+    assert "quote.pdf" in str(exec_sends[0]["input"])
+
+
+def test_files_it_cant_read_send_nothing_and_hand_it_back(
+    db: Path, owner: Any, as_sender: list[str], exec_sends: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mailbox, row = _chat_draft(owner)
+    _switch(owner, row, mailbox, True)
+    _with_files(mailbox, monkeypatch, broken=True)
+    assert _refused(send_chat_draft(owner, row, caller=LOCAL, gmail=mailbox, now=LATER)).code == "gmail_error"
+    assert exec_sends == [] and "d1" in mailbox.drafts
+    assert drafts.count_waiting(owner.id, NOW - timedelta(days=1)) == 1

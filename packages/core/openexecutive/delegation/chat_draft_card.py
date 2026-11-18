@@ -328,7 +328,12 @@ async def change(
         rewrite,
     )
     from openexecutive.delegation.reply_send import SendRefused
-    from openexecutive.delegation.send_from import NOTE_TO_EXECUTIVE, NOTE_TO_YOU, rewritten_for
+    from openexecutive.delegation.send_from import (
+        NOTE_TO_EXECUTIVE,
+        NOTE_TO_YOU,
+        executive_name,
+        rewritten_for,
+    )
 
     new: list[str] = []
 
@@ -350,6 +355,9 @@ async def change(
             words = await rewritten_for(who, {**payload, "draft_body": words}, executive=executive)
             line = NOTE_TO_EXECUTIVE if executive else NOTE_TO_YOU
         else:
+            if executive is not None and words == note and not line:
+                # Asked for the sender it already has: say so, nothing changes.
+                line = f"It already goes from {executive_name() if executive else 'you'}."
             executive = None
         new[:] = changed_sentences(note, words)
         return _rejoined(current, note, words, forwarded), line or "I changed the email.", executive
