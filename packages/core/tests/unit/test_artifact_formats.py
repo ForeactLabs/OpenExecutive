@@ -47,6 +47,19 @@ def test_a_long_document_is_kept_whole() -> None:
     assert "x" * 250_000 in str(built)
 
 
+def test_more_than_one_artifact_holds_is_refused_before_it_fills_memory() -> None:
+    import time
+
+    with pytest.raises(af.ArtifactInputError, match="split it"):
+        af.build_artifact("markdown", {"document": "x" * (af.MAX_DOCUMENT_CHARS + 1)})
+    # A script can hand over one row repeated: it is counted, not expanded.
+    row = ["x"] * 16_000
+    started = time.monotonic()
+    with pytest.raises(af.ArtifactInputError, match="split it"):
+        af.build_artifact("xlsx", {"sheets": [{"columns": ["a"] * 16_000, "rows": [row] * 1_000}] * 20})
+    assert time.monotonic() - started < 10
+
+
 def test_unknown_format_rejected() -> None:
     with pytest.raises(af.ArtifactInputError, match="unknown format"):
         af.build_artifact("pdf", {"document": "x"})

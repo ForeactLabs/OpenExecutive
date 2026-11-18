@@ -38,11 +38,16 @@ from urllib.parse import urlsplit
 ARTIFACT_FORMAT_NAMES: tuple[str, ...] = ("docx", "html", "link", "markdown", "xlsx")
 DEFAULT_FORMAT = "markdown"
 
-# A document (Markdown / HTML) is any length. A sheet holds what Excel
-# holds: its rows below the header row, and its columns.
+# A sheet holds what Excel holds: its rows below the header row, and its
+# columns. What one artifact can hold in all is sized to the server's
+# memory, not to what a model writes: no draft a model writes comes near it,
+# but a script (run_script) can hand draft_artifact a list repeated a million
+# times, which the server would expand cell by cell, store and render.
 MAX_SHEETS = 20
 MAX_ROWS_PER_SHEET = 1_048_575
 MAX_COLUMNS = 16_384
+MAX_TOTAL_CELLS = 5_000_000
+MAX_DOCUMENT_CHARS = 10_000_000
 MAX_URL_CHARS = 2_000
 MAX_LINK_LABEL_CHARS = 60
 # Rows per sheet shown in the on-screen / read-back table preview. The full
@@ -92,6 +97,11 @@ def _document(tool_input: dict[str, Any], *, required: bool = True) -> str:
     doc = str(tool_input.get("document") or "").strip()
     if required and not doc:
         raise ArtifactInputError("document is required for this format")
+    if len(doc) > MAX_DOCUMENT_CHARS:  # input-safety
+        raise ArtifactInputError(
+            f"document is {len(doc):,} characters, more than one artifact holds "
+            f"({MAX_DOCUMENT_CHARS:,}): split it into several"
+        )
     return doc
 
 
@@ -498,6 +508,7 @@ def _normalize_sheets(raw: Any) -> list[dict[str, Any]]:
         raise ArtifactInputError(f"at most {MAX_SHEETS} sheets")
     seen: set[str] = set()
     sheets: list[dict[str, Any]] = []
+    total_cells = 0
     for idx, sheet in enumerate(raw):
         if not isinstance(sheet, dict):
             raise ArtifactInputError(f"sheet {idx + 1} must be an object")
@@ -525,6 +536,13 @@ def _normalize_sheets(raw: Any) -> list[dict[str, Any]]:
                 cells = row if isinstance(row, list) else [row]
             if len(cells) > MAX_COLUMNS:
                 raise ArtifactInputError(f"sheet {idx + 1}: at most {MAX_COLUMNS} columns")
+            # Counted before a row is expanded, so a repeated list is
+            # refused before it fills memory.
+            total_cells += len(cells)
+            if total_cells > MAX_TOTAL_CELLS:  # input-safety
+                raise ArtifactInputError(
+                    f"more than {MAX_TOTAL_CELLS:,} cells in one artifact: split it into several"
+                )
             norm_rows.append([_cell(v) for v in cells])
         sheets.append({
             "name": _sheet_name(sheet.get("name"), idx, seen),
