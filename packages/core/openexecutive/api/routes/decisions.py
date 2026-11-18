@@ -633,25 +633,12 @@ async def _carry_out_lead(
 
     payload = _parse_payload(instance)
     edits = body.edits or {}
-    changed: dict[str, str] = {}
     if edits.get("input") is not None:
         # Changing what the Executive says or books is the principal's: an
         # area approver says yes or no to what it would do, as it stands.
         if not _approver_is_principal(request):
             raise HTTPException(status_code=403, detail="Only the account owner can change this before approving.")
-        from openexecutive.orchestrator import card_details
-
-        if len(card_details.held_steps(payload)) > 1:
-            # One card for several calls: Approve runs each as shown.
-            raise HTTPException(status_code=422, detail="This one can't be changed from its card.")
-        source: dict[str, Any] = payload["input"] if isinstance(payload.get("input"), dict) else {}
-        try:
-            new_input, changed = take_the_lead.apply_edits(
-                str(payload.get("tool") or ""), source, edits["input"], mcp=bool(payload.get("mcp")),
-            )
-        except take_the_lead.EditError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from None
-        payload = _edited(payload, new_input, changed)
+    payload, changed = _with_edits(payload, _input_edits(payload, edits))
     grant = payload.get("allow") if isinstance(payload.get("allow"), dict) else None
     allowing = edits.get("allow") is True
     if allowing:
@@ -866,30 +853,51 @@ async def _carry_out_department_action(
     changes the card's editable fields first (an email's subject and text,
     a message; ``take_the_lead.apply_edits``): the owner's, or the card's
     own approver's."""
-    from openexecutive.orchestrator import card_details, take_the_lead
-
     payload = _parse_payload(instance)
     edits = body.edits or {}
     if edits.get("input") is not None:
         mine = resolver is not None and resolver == instance.approver_person_id
         if not (_approver_is_principal(request) or mine):
             raise HTTPException(status_code=403, detail="Only the person this card waits on can change it before approving.")
-        if len(card_details.held_steps(payload)) > 1:
-            raise HTTPException(status_code=422, detail="This one can't be changed from its card.")
-        source: dict[str, Any] = payload["input"] if isinstance(payload.get("input"), dict) else {}
-        try:
-            new_input, changed = take_the_lead.apply_edits(
-                str(payload.get("tool") or ""), source, edits["input"], mcp=bool(payload.get("mcp")),
-            )
-        except take_the_lead.EditError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from None
-        payload = _edited(payload, new_input, changed)
-        edited = bool(changed)
-    else:
-        edited = False
+    payload, changed = _with_edits(payload, _input_edits(payload, edits))
     return await _run_department_action(
-        instance, resolver, by_principal=_approver_is_principal(request), payload=payload, edited=edited,
+        instance, resolver, by_principal=_approver_is_principal(request), payload=payload, edited=bool(changed),
     )
+
+
+def _input_edits(payload: dict[str, Any], edits: dict[str, Any]) -> dict[str, Any] | None:
+    """The changes to a held step's fields an Approve carries out: the ones
+    sent with it, else what was said on the card (``said_input``), which the
+    card already shows as the step. None when there are none, so no way of
+    approving sends a step other than the one shown."""
+    if edits.get("input") is not None:
+        sent: dict[str, Any] = edits["input"]
+        return sent
+    said = payload.get(SAID_INPUT)
+    return dict(said) if isinstance(said, dict) and said else None
+
+
+def _with_edits(
+    payload: dict[str, Any], input_edits: dict[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, str]]:
+    """A held step's payload with ``input_edits`` put in through
+    ``take_the_lead.apply_edits`` (the step's own rules for a change), and
+    the fields that changed. Raises HTTPException (422)."""
+    from openexecutive.orchestrator import card_details, take_the_lead
+
+    if input_edits is None:
+        return payload, {}
+    if len(card_details.held_steps(payload)) > 1:
+        # One card for several calls: Approve runs each as shown.
+        raise HTTPException(status_code=422, detail="This one can't be changed from its card.")
+    source: dict[str, Any] = payload["input"] if isinstance(payload.get("input"), dict) else {}
+    try:
+        new_input, changed = take_the_lead.apply_edits(
+            str(payload.get("tool") or ""), source, input_edits, mcp=bool(payload.get("mcp")),
+        )
+    except take_the_lead.EditError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    return _edited(payload, new_input, changed), changed
 
 
 def _edited(payload: dict[str, Any], new_input: dict[str, Any], changed: dict[str, str] | None) -> dict[str, Any]:
@@ -1106,6 +1114,7 @@ class StepSayResponse(BaseModel):
 SAID_INPUT = "said_input"
 SAY_MAX_CHARS = 500
 _COULD_NOT_DO = "I couldn't do that. Tap to try again."
+_PICK_TO_GO = "Here it is now. Tap Do it to go ahead."
 
 
 def said_fields(payload: dict[str, Any]) -> list[StepFieldView]:
@@ -1189,10 +1198,13 @@ async def say_on_step(instance_id: int, body: StepSayBody, request: Request) -> 
         try:
             go = await replan.said_go(
                 replan.step_text(step), line, before=replan.step_text(seen) if body.seen else None,
-                caller_key=api_caller.caller(request).email,
+                before_max=replan.STEP_TEXT_MAX, caller_key=api_caller.caller(request).email,
             )
         except replan.ReplanError:
             go = False
+        if not go:
+            # It said it was on it, but the go wasn't sure: the step waits.
+            reply = _PICK_TO_GO
         if go:
             edits = {f.field: f.value for f in fields if f.value != original.get(f.field)}
             fresh = get_decision_instance(instance_id)
@@ -1353,9 +1365,16 @@ async def resolve_in_chat(
                     status_code=409,
                     detail=f"It can learn at most {take_the_lead.ALLOWED_MAX} things. Remove one in Settings first.",
                 )
-        return await _run_lead(instance, payload, person.id, by_principal=is_principal, grant=grant if allow else None)
+        # What was said on the card goes as the chat card showed it.
+        payload, changed = _with_edits(payload, _input_edits(payload, {}))
+        return await _run_lead(
+            instance, payload, person.id, by_principal=is_principal, changed=changed, grant=grant if allow else None,
+        )
     if instance.decision_class == _DEPARTMENT_ACTION.name:
-        return await _run_department_action(instance, person.id, by_principal=is_principal)
+        payload, changed = _with_edits(_parse_payload(instance), _input_edits(_parse_payload(instance), {}))
+        return await _run_department_action(
+            instance, person.id, by_principal=is_principal, payload=payload, edited=bool(changed),
+        )
     try:
         await approve_actions(instance, caller=tap, resolver=person.id, allow=allow)
     except ApproveRefused as refused:

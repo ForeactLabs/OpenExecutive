@@ -442,17 +442,19 @@ def _go_tool() -> dict[str, Any]:
     }
 
 
-def build_go_turn(plan: str, text: str, before: str | None = None) -> str:
+def build_go_turn(plan: str, text: str, before: str | None = None, *, before_max: int = PLAN_MAX_CHARS) -> str:
     blocks = [_block("plan", plan), _block("person_said", text)]
     # The plan they saw comes from the page, so it is cut to a plan's length.
-    seen = (before or "").strip()[:PLAN_MAX_CHARS]
+    seen = (before or "").strip()[:before_max]
     if before is not None and seen != plan.strip():
         # A card that had no plan: every step must come from their words.
         blocks.insert(0, _block("plan_before", seen or "(none)"))
     return "\n\n".join(blocks)
 
 
-async def said_go(plan: str, text: str, *, before: str | None = None, caller_key: str = "") -> bool:
+async def said_go(
+    plan: str, text: str, *, before: str | None = None, before_max: int = PLAN_MAX_CHARS, caller_key: str = "",
+) -> bool:
     """Whether ``text`` tells the Executive to carry out ``plan`` now. Read
     from the person's words and the plans only, never the card. When
     ``plan`` was just rewritten from ``before``, it is a go only if what it
@@ -462,7 +464,7 @@ async def said_go(plan: str, text: str, *, before: str | None = None, caller_key
     ``ReplanError`` when it can't be made or read, so a caller never takes
     "couldn't tell" for "no"."""
     take_call_slot(caller_key)
-    data = await _call_tool(GO_SYSTEM, _go_tool(), build_go_turn(plan, text, before), actor="card_go")
+    data = await _call_tool(GO_SYSTEM, _go_tool(), build_go_turn(plan, text, before, before_max=before_max), actor="card_go")
     return data.get("go") is True
 
 
@@ -474,7 +476,9 @@ async def said_go(plan: str, text: str, *, before: str | None = None, caller_key
 # step's own rules for changes apply there, unchanged.
 
 FIELDS_TOOL_NAME = "rewrite_fields"
-_FIELD_CHARS = 6000
+# The longest field a step takes as a change (``take_the_lead.EDIT_MAX``):
+# a longer one is changed by hand, never cut and rewritten.
+_FIELD_CHARS = 4000
 _FIELDS_MAX_TOKENS = 3000
 
 # Constant: see CLAUDE.md on prompt caching.
@@ -538,6 +542,11 @@ class NewFields(BaseModel):
     go: bool = False
 
 
+# What a step's fields come to as one block, at most: the go check reads
+# the fields the card showed whole, never cut to a plan's length.
+STEP_TEXT_MAX = 8 * (_FIELD_CHARS + 100)
+
+
 def step_text(fields: list[StepField]) -> str:
     """A step's fields as one block of text: what the go check reads."""
     return "\n".join(f"{f.label}: {f.value}" for f in fields)
@@ -548,7 +557,7 @@ def build_fields_turn(summary: str, fields: list[StepField], text: str) -> str:
         [
             _block("step", summary or "(no summary)"),
             _block("fields", "\n\n".join(
-                f"[{f.field}] {f.label}:\n{f.value[:_FIELD_CHARS]}" for f in fields
+                f"[{f.field}] {f.label}:\n{f.value}" for f in fields
             )),
             _block("person_said", text),
         ]
@@ -580,6 +589,8 @@ async def rewrite_fields(
     """Ask the model for the step's fields after ``text``. Raises
     ``ReplanError`` with a message safe to show."""
     line = check_text(text)
+    if any(len(f.value) > _FIELD_CHARS for f in fields):
+        raise ReplanError("too_long", "This one is too long to change by saying it. Change the wording by hand.")
     take_call_slot(caller_key)
     data = await _call_tool(
         FIELDS_SYSTEM, _fields_tool(), build_fields_turn(summary, fields, line),
@@ -622,5 +633,6 @@ __all__ = [
     "parse_fields",
     "rewrite_fields",
     "step_text",
+    "STEP_TEXT_MAX",
     "take_call_slot",
 ]

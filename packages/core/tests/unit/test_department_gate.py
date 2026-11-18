@@ -573,6 +573,56 @@ def test_a_go_that_cant_be_read_leaves_the_step_waiting(
     assert res.json()["approved"] is None and done == []
     instance = ledger.get_decision_instance(decision_id)
     assert instance is not None and instance.status == ledger.STATUS_PROPOSED
+    # It doesn't say it's on it when the step still waits.
+    assert res.json()["reply"] == "Here it is now. Tap Do it to go ahead."
+
+
+def test_an_approve_without_edits_sends_what_was_said(
+    client: TestClient, team: dict[str, Person], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    done = _carry_out(monkeypatch)
+    _model(monkeypatch, {"body": "Short text"})
+    decision_id = _mail_card(team)
+    assert client.post(f"/decisions/{decision_id}/say", json={"text": "make it shorter"}, headers=OWNER).status_code == 200
+    # Any way of approving (another page, a chat app) sends the step the card shows.
+    ok = client.post(f"/decisions/{decision_id}/approve", json={}, headers=OWNER)
+    assert ok.status_code == 200, ok.text
+    assert done[0]["input"]["body"] == "Short text"
+    after = ledger.get_decision_instance(decision_id)
+    assert after is not None and after.status == "approved_with_edit"
+
+
+def test_a_go_on_a_long_email_is_judged_on_all_of_it(
+    client: TestClient, team: dict[str, Person], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    done = _carry_out(monkeypatch)
+    turns = _model(monkeypatch, {}, go=True, said_go=True)
+    body = "Long text. " * 80
+    mail = {"to": "dana@else.example", "subject": "Hi", "body": body}
+    held = levels.hold("google_workspace__send_gmail_message", mail, mcp=True, reason=levels.OWN_MAIL,
+                       session=_ask_as(team["sam"]))
+    decision_id = int(json.loads(held)["decision_instance_id"])
+    seen = {"subject": "Hi", "body": body.strip()}
+    res = client.post(f"/decisions/{decision_id}/say", json={"text": "send it", "seen": seen}, headers=OWNER)
+    assert res.status_code == 200, res.text
+    # What they saw was the step as it goes: no "rewritten, not seen" part.
+    assert "<plan_before>" not in turns[-1]
+    assert res.json()["approved"] is not None and len(done) == 1
+
+
+def test_a_field_too_long_to_rewrite_is_changed_by_hand(
+    client: TestClient, team: dict[str, Person], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.alerts import replan
+
+    turns = _model(monkeypatch, {"body": "cut"})
+    assert replan._FIELD_CHARS == ttl.EDIT_MAX
+    mail = {"to": "dana@else.example", "subject": "Hi", "body": "x" * (ttl.EDIT_MAX + 1)}
+    held = levels.hold("google_workspace__send_gmail_message", mail, mcp=True, reason=levels.OWN_MAIL,
+                       session=_ask_as(team["sam"]))
+    decision_id = int(json.loads(held)["decision_instance_id"])
+    res = client.post(f"/decisions/{decision_id}/say", json={"text": "fix the greeting"}, headers=OWNER)
+    assert res.status_code == 422 and turns == []
 
 
 def test_words_on_a_held_step_are_for_the_person_it_waits_on(
