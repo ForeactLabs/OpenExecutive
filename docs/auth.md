@@ -314,7 +314,7 @@ secret only to what you would let act as you, or set the keys.
 With the keys set:
 
 - **Each assertion covers one request.** It holds only for the method and the exact path
-  and query it was signed for, expires within 30 seconds, and works once.
+  and query it was signed for, expires within 2 minutes, and works once.
 - **No caller header at all is a service.** A script, `curl` with only `x-api-key`, or an
   MCP client can still use the API, but it is **never the owner**. For MCP,
   `ask_executive`, `answer_card` and `run_workflow` ask as no one, and the owner's memory and activity, the
