@@ -9258,6 +9258,37 @@ integrations:
     two-person DM) sends no card,
     and ``propose_actions`` tells the model the card is on Today.
 
+    Or tell me, in a chat app. A Slack or Google Chat card that takes words
+    (channel_cards.takes_words: an email reply, or a Take the lead or
+    department card with fields to change) says so under it (TELL_ME: a
+    Slack context block, a last line in Google Chat). Words that reply to
+    the card's message are said on that card (channel_cards.say), as "Or
+    tell me…" on its page: in Slack a reply in the card's thread in the
+    person's own DM (conversations.open), the thread's first message the
+    bot's own with a card's buttons; in Google Chat a message quoting the
+    card in a DM between the app and its person alone, once Chat itself
+    confirms that message is the person's, quotes that card and says those
+    words (google_chat.said_on: the event's body isn't bound to Google's
+    token), and the quoted message is the app's own card there, buttons
+    still on it (google_chat.quoted_card, the same reads as verify_tap).
+    As a tap, only on the card as that message showed it (its buttons'
+    version; else it is shown again as it is) and only its own person's
+    (chat_card_is_theirs); anything else is an ordinary message. The held
+    step is checked against that version again as it is changed or carried
+    out (channel_cards.shows in say_in_chat and resolve_in_chat), so words
+    said on it meanwhile never ride on a tap of the older card. A held
+    step goes through decisions.say_on_held, the core of POST
+    /decisions/{id}/say (fields rewritten, said_input stored, a go judged
+    by replan.said_go and carried out as a chat tap with those edits,
+    decisions.say_in_chat); an email reply through delegation.answers.take,
+    the core of POST /delegation/replies/{id}/change (a change, or work for
+    the Executive's tools; a go shows the card to send, never sends). The
+    card's message is rewritten as it reads now with its buttons, and what
+    the Executive said back goes in the thread. A held step's chat card
+    shows it with what was said on it (decisions.as_said), which is what
+    its tap carries out. Why: every Needs you card takes words, and a chat
+    card is the same card.
+
     Every card that waits, in the chat app. ``CHAT_CARD_CLASSES`` also holds
     the cards that wait outside any chat: a reply card (Send and Skip; Send
     is ``send_approved_reply`` with the ChatTap, and a second-yes refusal

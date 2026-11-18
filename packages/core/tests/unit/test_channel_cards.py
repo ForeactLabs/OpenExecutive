@@ -276,7 +276,7 @@ def test_a_tap_answers_audits_and_leaves_the_card_without_buttons(
                         lambda chat: person if chat == "4242" else None)
     resolved: list[tuple[int, Any, bool]] = []
 
-    async def resolve(decision_id: int, who: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None) -> str:
+    async def resolve(decision_id: int, who: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None, shown: str | None = None) -> str:
         resolved.append((decision_id, who, approve))
         return "Approved."
 
@@ -313,7 +313,8 @@ def test_a_tap_answers_audits_and_leaves_the_card_without_buttons(
 def test_a_second_tap_while_the_first_is_booking_is_turned_away(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[int] = []
 
-    async def slow(decision_id: int, person: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None) -> None:
+    async def slow(decision_id: int, person: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None,
+                   shown: str | None = None) -> None:
         calls.append(decision_id)
         await asyncio.sleep(0.05)
 
@@ -333,7 +334,7 @@ def test_a_second_tap_while_the_first_is_booking_is_turned_away(monkeypatch: pyt
 def test_a_busy_tap_only_answers(fake_telegram: _FakeTelegram, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("openexecutive.people.store.find_person_by_telegram_chat_id", lambda chat: SimpleNamespace(id=3))
 
-    async def busy(decision_id: int, who: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None) -> str:
+    async def busy(decision_id: int, who: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None, shown: str | None = None) -> str:
         return channel_cards.BUSY
 
     # The card as its message shows it (no ledger in this test).
@@ -374,7 +375,7 @@ def test_a_card_that_can_teach_offers_on_its_own_next_time(monkeypatch: pytest.M
 def test_a_tap_on_on_its_own_approves_and_allows(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[int, bool, bool]] = []
 
-    async def resolve(decision_id: int, who: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None) -> str:
+    async def resolve(decision_id: int, who: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None, shown: str | None = None) -> str:
         calls.append((decision_id, approve, allow))
         return "Approved."
 
@@ -393,7 +394,7 @@ def test_a_tap_on_a_card_that_says_something_else_now_shows_it_again(monkeypatch
     tapped card showed. A Skip is a skip."""
     calls: list[bool] = []
 
-    async def resolve(decision_id: int, who: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None) -> str:
+    async def resolve(decision_id: int, who: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None, shown: str | None = None) -> str:
         calls.append(approve)
         return "Skipped."
 
@@ -462,7 +463,7 @@ def test_a_tap_is_checked_against_when_its_card_was_read(monkeypatch: pytest.Mon
     change saved after it isn't."""
     seen: list[str | None] = []
 
-    async def resolve(decision_id: int, who: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None) -> str:
+    async def resolve(decision_id: int, who: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None, shown: str | None = None) -> str:
         seen.append(shown_at)
         return "Sent."
 
@@ -500,7 +501,7 @@ def test_a_tap_on_a_card_no_chat_shows_whole_does_nothing(monkeypatch: pytest.Mo
 
 
 def test_a_tap_on_a_card_handled_meanwhile_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def resolve(decision_id: int, who: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None) -> str:
+    async def resolve(decision_id: int, who: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None, shown: str | None = None) -> str:
         return "This card was already handled."
 
     monkeypatch.setattr(channel_cards, "card_text", lambda decision_id: None)
@@ -544,3 +545,98 @@ def test_a_switch_holds_its_card_before_it_reads_it(monkeypatch: pytest.MonkeyPa
     tapped = asyncio.run(channel_cards._switch(7, SimpleNamespace(id=3, email=""), executive=True))
     assert held == [True] and tapped.line == "Not done: this card is no longer there."
     assert 7 not in channel_cards._resolving
+
+
+def test_how_to_say_words_on_a_card_goes_once_it_doesnt_wait_for_them(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(channel_cards, "takes_words", lambda decision_id: decision_id == 7)
+    shown = channel_cards.with_tell_me(7, "Reply to Sam")
+    assert shown == f"Reply to Sam\n\n{channel_cards.TELL_ME}"
+    assert channel_cards.with_tell_me(8, "Meeting") == "Meeting"
+    assert channel_cards.with_line(shown, "Sent.") == "Reply to Sam\n\nSent."
+    again = channel_cards.with_tell_me(7, channel_cards.with_line("Reply to Sam", channel_cards.CHANGED))
+    assert channel_cards.with_line(again, "Sent.") == "Reply to Sam\n\nSent."
+
+
+def _reply_card(monkeypatch: pytest.MonkeyPatch, notes: list[str]) -> list[Any]:
+    from openexecutive.delegation import answers
+
+    taken: list[Any] = []
+    card = SimpleNamespace(id=7, decision_class="delegation_reply", proposed_payload_json="{}")
+    monkeypatch.setattr(channel_cards, "_look_said", lambda said, who: (None, True))
+    monkeypatch.setattr("openexecutive.memory.decision_ledger.get_decision_instance", lambda i, **k: card)
+    monkeypatch.setattr(answers, "conversation", lambda payload: [{"kind": "note", "text": n} for n in notes])
+    monkeypatch.setattr(channel_cards, "card_text", lambda i: "Reply to Sam\nThursday works.")
+    monkeypatch.setattr(channel_cards, "card_options", lambda i, shown: (("Send from me", "card:7:a:1111beef"),))
+    return taken
+
+
+def test_words_said_on_a_reply_card_change_it_and_show_it_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.delegation import answers
+
+    notes = ["I made it shorter."]
+    taken = _reply_card(monkeypatch, notes)
+
+    async def take(instance: Any, *, person: Any, caller: Any, resolver: int | None, text: str,
+                   work: bool = False) -> answers.Taken:
+        taken.append((caller, resolver, text, 7 in channel_cards._resolving))
+        notes.append("I offered Thursday instead.")
+        return answers.Taken(["Thursday works."])
+
+    monkeypatch.setattr(answers, "take", take)
+    who = SimpleNamespace(id=3, email="Sam@Co.example")
+    said = asyncio.run(channel_cards.say(channel_cards.Choice(7, "a", "0000beef"), who, "offer Thursday"))
+    assert said == channel_cards.Tapped(
+        "I offered Thursday instead.", "Reply to Sam\nThursday works.", (("Send from me", "card:7:a:1111beef"),),
+    )
+    # As the person, holding the card while it changes.
+    assert taken == [(ChatTap("sam@co.example"), 3, "offer Thursday", True)]
+    assert 7 not in channel_cards._resolving
+
+
+def test_words_a_reply_card_wrote_nothing_for_say_it_changed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The card changed under the words, so nothing was written: an older note isn't their answer."""
+    from openexecutive.delegation import answers
+
+    _reply_card(monkeypatch, ["I made it shorter."])
+
+    async def take(instance: Any, **k: Any) -> answers.Taken:
+        return answers.Taken([], go=True)
+
+    monkeypatch.setattr(answers, "take", take)
+    who = SimpleNamespace(id=3, email="sam@co.example")
+    said = asyncio.run(channel_cards.say(channel_cards.Choice(7, "a", "0000beef"), who, "send it"))
+    assert said == channel_cards.Tapped(
+        "Not done: this card changed meanwhile. Look again.",
+        "Reply to Sam\nThursday works.", (("Send from me", "card:7:a:1111beef"),),
+    )
+
+
+def test_words_for_a_reply_cards_work_point_to_it_in_the_app(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.delegation import answers, card_work
+
+    _reply_card(monkeypatch, [])
+    result = [answers.Taken([], worked=True)]
+
+    async def take(instance: Any, **k: Any) -> answers.Taken:
+        return result[0]
+
+    monkeypatch.setattr(answers, "take", take)
+    who = SimpleNamespace(id=3, email="sam@co.example")
+    said = asyncio.run(channel_cards.say(channel_cards.Choice(7, "a", "0000beef"), who, "make a spreadsheet of it"))
+    assert said is not None and said.line.startswith("I'm on it. Follow along in the app: ")
+    assert said.line.endswith("/cards/7") and said.options
+    # The run going now hasn't let go yet: nothing taken, and it says so.
+    result[0] = answers.Taken([], worked=True, started=False)
+    monkeypatch.setattr(card_work, "running", lambda card_id: True)
+    said = asyncio.run(channel_cards.say(channel_cards.Choice(7, "a", "0000beef"), who, "stop"))
+    assert said == channel_cards.Tapped("Not done: I'm still finishing the last step. Try again in a moment.")
+
+
+def test_words_on_a_card_already_being_decided_are_turned_away(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(channel_cards, "_look_said", lambda said, who: (None, True))
+    channel_cards._resolving.add(7)
+    try:
+        said = asyncio.run(channel_cards.say(channel_cards.Choice(7, "a", "0000beef"), SimpleNamespace(id=3), "hi"))
+    finally:
+        channel_cards._resolving.discard(7)
+    assert said == channel_cards.Tapped(channel_cards.BUSY)

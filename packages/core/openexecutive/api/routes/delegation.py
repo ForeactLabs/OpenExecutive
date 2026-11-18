@@ -1383,26 +1383,16 @@ async def change_delegation_reply(request: Request, decision_id: int, body: Repl
     instance = get_decision_instance(decision_id)
     if instance is None or instance.decision_class != DECISION_CLASS or instance.approver_person_id != person_id:
         raise _refuse(404, "not_found", "That reply isn't waiting for you any more.")
-    changed: list[str] = []
-    go = False
-    caller = api_caller.caller(request)
-    started = True
     try:
-        if body.work or card_work.running(decision_id):
-            # A next step they tapped, or new words while it works ("no, do
-            # it this way"): the work takes them, and the run going now stops.
-            started = await answers.to_work(instance, caller=caller, resolver=person_id, text=body.text)
-        else:
-            _, changed, go = await answers.change(instance, caller=caller, resolver=person_id, text=body.text)
-    except answers.NeedsWork:
-        # Work for the Executive's tools (reading her files, making a
-        # spreadsheet): it does it on the card, as when the email came in.
-        # The change already passed the card's checks and hourly limit.
-        started = await card_work.redirect(person, decision_id, body.text)
+        taken = await answers.take(
+            instance, person=person, caller=api_caller.caller(request), resolver=person_id, text=body.text,
+            work=body.work,
+        )
     except SendRefused as refused:
         raise HTTPException(
             status_code=refused.status, detail={"code": refused.code, "message": refused.message, **refused.extra},
         ) from None
+    changed, go, started = taken.changed, taken.go, taken.started
     if not started and card_work.running(decision_id):
         # The run going now hasn't let go yet: their words weren't taken.
         raise _refuse(409, "busy", "I'm still finishing the last step. Try again in a moment.")

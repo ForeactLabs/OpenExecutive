@@ -472,11 +472,13 @@ _MAX_CARD_TEXT = 2900
 
 
 def _card_blocks(
-    text: str, decision_id: int | None = None, options: tuple[tuple[str, str], ...] = (),
+    text: str, decision_id: int | None = None, options: tuple[tuple[str, str], ...] = (), *, tell_me: bool = False,
 ) -> list[dict[str, Any]]:
     """A card as Slack blocks: its text as plain text (it may quote what
     someone else wrote, so never mrkdwn), with its buttons while it waits,
-    the Executive's pick first (``channel_cards.card_options``)."""
+    the Executive's pick first (``channel_cards.card_options``), and, on one
+    that takes words (``tell_me``, ``channel_cards.takes_words``), how to
+    say them: a reply in its thread (``_say_on_card``)."""
     from openexecutive.integrations import channel_cards
 
     blocks: list[dict[str, Any]] = [
@@ -489,6 +491,10 @@ def _card_blocks(
              **({"style": "primary"} if i == 0 else {})}
             for i, (label, data) in enumerate(options)
         ]})
+        if tell_me:
+            blocks.append({"type": "context", "elements": [
+                {"type": "plain_text", "text": channel_cards.TELL_ME, "emoji": False},
+            ]})
     return blocks
 
 
@@ -503,8 +509,10 @@ async def _send_cards(client: Any, channel: str, cards: list[int]) -> None:
             text = await asyncio.to_thread(channel_cards.card_text, decision_id)
             if text:
                 options = await asyncio.to_thread(channel_cards.card_options, decision_id, text)
+                tell_me = await asyncio.to_thread(channel_cards.takes_words, decision_id)
                 await client.chat_postMessage(
-                    channel=channel, text=text[:_MAX_CARD_TEXT], blocks=_card_blocks(text, decision_id, options),
+                    channel=channel, text=text[:_MAX_CARD_TEXT],
+                    blocks=_card_blocks(text, decision_id, options, tell_me=tell_me),
                     unfurl_links=False, unfurl_media=False,
                 )
         except Exception:
@@ -519,6 +527,7 @@ async def send_dm_card(
     from slack_sdk.web.async_client import AsyncWebClient
 
     from openexecutive.config import get_settings
+    from openexecutive.integrations import channel_cards
 
     token = get_settings().slack_bot_token
     if not token or not slack_user_id:
@@ -528,8 +537,9 @@ async def send_dm_card(
     channel = str(((opened or {}).get("channel") or {}).get("id") or "")
     if not channel:
         raise RuntimeError("slack did not open a DM")
+    tell_me = await asyncio.to_thread(channel_cards.takes_words, decision_id)
     await client.chat_postMessage(
-        channel=channel, text=text[:_MAX_CARD_TEXT], blocks=_card_blocks(text, decision_id, options),
+        channel=channel, text=text[:_MAX_CARD_TEXT], blocks=_card_blocks(text, decision_id, options, tell_me=tell_me),
         unfurl_links=False, unfurl_media=False,
     )
 
@@ -651,7 +661,8 @@ async def handle_card_tap(body: dict[str, Any], client: Any) -> None:
     if tapped.options:
         # Still waiting, with new words: shown again with its buttons.
         text = channel_cards.with_line(tapped.text, tapped.line)
-        blocks = _card_blocks(text, decision_id, tapped.options)
+        tell_me = await asyncio.to_thread(channel_cards.takes_words, decision_id)
+        blocks = _card_blocks(text, decision_id, tapped.options, tell_me=tell_me)
     else:
         # The card keeps what it said, with the outcome under it and no buttons.
         shown = ""
@@ -665,6 +676,81 @@ async def handle_card_tap(body: dict[str, Any], client: Any) -> None:
         await client.chat_update(channel=channel_id, ts=ts, text=text[:_MAX_CARD_TEXT], blocks=blocks)
     except Exception:
         logger.exception("Slack: couldn't update card %d after the tap", decision_id)
+
+
+def _card_of(message: dict[str, Any]) -> Any:
+    """The card a message of the bot's shows (``channel_cards.Choice`` from
+    any of its buttons), or None."""
+    from openexecutive.integrations import channel_cards
+
+    for block in message.get("blocks") or []:
+        if not isinstance(block, dict) or block.get("type") != "actions":
+            continue
+        for element in block.get("elements") or []:
+            parsed = channel_cards.parse_choice(element.get("value") if isinstance(element, dict) else None)
+            if parsed is not None:
+                return parsed
+    return None
+
+
+async def _say_on_card(
+    event: dict[str, Any], words: str, parent: dict[str, Any] | None, say: Any, client: Any,
+) -> bool:
+    """A reply in a DM to one of the bot's cards (``parent``, the thread's
+    first message): words said on that card ("Or tell me…",
+    ``channel_cards.say``), when they are its person's, in their own DM.
+    The card is shown again as it reads now, and what the Executive said
+    back goes in the thread. False when it isn't such a reply: the words are
+    then an ordinary message."""
+    from openexecutive.audit import log_event as audit_log
+    from openexecutive.integrations import channel_cards
+    from openexecutive.people.store import find_person_by_slack_id
+
+    if not parent or not _bot_user_id or parent.get("user") != _bot_user_id or not parent.get("bot_id"):
+        return False
+    card = _card_of(parent)
+    user_id = str(event.get("user") or "")
+    channel_id = str(event.get("channel") or "")
+    if card is None or not words.strip():
+        return False
+    person = await asyncio.to_thread(find_person_by_slack_id, user_id) if user_id else None
+    if person is None or not await _is_own_dm(client, user_id, channel_id):
+        return False
+    said = await channel_cards.say(card, person, words)
+    if said is None:
+        return False
+    decision_id = card.decision_id
+    await asyncio.to_thread(
+        audit_log,
+        "integration_inbound",
+        f"Slack card {decision_id}: said on it: {said.line[:120]}",
+        actor="slack",
+        details={"channel": "slack", "slack_user": user_id, "decision_id": decision_id,
+                 "choice": "say", "outcome": channel_cards.outcome_of(said.line), "person_id": person.id},
+    )
+    thread_ts = str(event.get("thread_ts") or "")
+    text, blocks = "", None
+    if said.options:
+        # It waits: shown again as it reads now, with its buttons.
+        text = said.text
+        tell_me = await asyncio.to_thread(channel_cards.takes_words, decision_id)
+        blocks = _card_blocks(text, decision_id, said.options, tell_me=tell_me)
+    elif said.settled:
+        # Carried out: the card keeps what it said, with the outcome under it.
+        shown = next((str((b.get("text") or {}).get("text") or "") for b in parent.get("blocks") or []
+                      if isinstance(b, dict) and b.get("type") == "section"), "")
+        text = channel_cards.with_line(shown, said.line)
+        blocks = _card_blocks(text)
+    if blocks is not None:
+        try:
+            await client.chat_update(channel=channel_id, ts=thread_ts, text=text[:_MAX_CARD_TEXT], blocks=blocks)
+        except Exception:
+            logger.exception("Slack: couldn't update card %d after words on it", decision_id)
+    try:
+        await say(text=said.line, thread_ts=thread_ts)
+    except Exception:
+        logger.exception("Slack: couldn't answer words on card %d", decision_id)
+    return True
 
 
 async def create_slack_app():
@@ -848,6 +934,12 @@ async def create_slack_app():
                     exc_info=True,
                 )
                 thread_replies = None
+
+        # A reply to one of the bot's cards in its DM: words said on that card.
+        if mode == "dm" and is_threaded_reply and thread_replies and not files:
+            parent = next((m for m in thread_replies if str(m.get("ts") or "") == str(thread_ts)), None)
+            if await _say_on_card(event, cleaned, parent, say, client):
+                return
 
         # Bot-presence guard for thread_continuation mode. If the bot
         # hasn't actually replied in this thread, silently drop — never

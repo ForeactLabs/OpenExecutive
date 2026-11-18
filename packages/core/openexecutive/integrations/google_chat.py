@@ -380,23 +380,170 @@ def verify_tap(
     try:
         creds = _build_credentials(service_account_file, service_account_email)
         service = google_build("chat", "v1", credentials=creds, cache_discovery=False)
-        message = service.spaces().messages().get(name=message_name).execute()
-        sender = message.get("sender") if isinstance(message.get("sender"), dict) else {}
-        if sender.get("type") != "BOT" or json.dumps(data) not in json.dumps(message.get("cardsV2") or []):
-            return None
-        space = service.spaces().get(name=space_name).execute()
-        if space.get("singleUserBotDm") is not True:
-            return None
-        members = service.spaces().members().list(parent=space_name).execute()
-        humans = [
-            str((m.get("member") or {}).get("name") or "")
-            for m in members.get("memberships") or []
-            if isinstance(m, dict) and (m.get("member") or {}).get("type") == "HUMAN"
-        ]
-        return _strip_working(str(message.get("text") or "")) if humans == [user_name] else None
+        message = _own_dm_message(
+            service, space_name, message_name, user_name,
+            carries=lambda m: json.dumps(data) in json.dumps(m.get("cardsV2") or []),
+        )
+        return None if message is None else _strip_working(str(message.get("text") or ""))
     except Exception:
         logger.warning("Google Chat: couldn't check a tap with Chat; it is refused", exc_info=True)
         return None
+
+
+def _own_dm_message(
+    service: Any, space_name: str, message_name: str, user_name: str, *, carries: Any,
+) -> dict[str, Any] | None:
+    """The app's own message ``message_name``, read from Chat as the app,
+    when ``carries`` says it holds what is asked of it, and ``space_name``
+    is a DM between the app and ``user_name`` alone; else None."""
+    message = service.spaces().messages().get(name=message_name).execute()
+    sender = message.get("sender") if isinstance(message.get("sender"), dict) else {}
+    if sender.get("type") != "BOT" or not carries(message):
+        return None
+    space = service.spaces().get(name=space_name).execute()
+    if space.get("singleUserBotDm") is not True:
+        return None
+    members = service.spaces().members().list(parent=space_name).execute()
+    humans = [
+        str((m.get("member") or {}).get("name") or "")
+        for m in members.get("memberships") or []
+        if isinstance(m, dict) and (m.get("member") or {}).get("type") == "HUMAN"
+    ]
+    return message if humans == [user_name] else None
+
+
+def _card_data(cards: Any) -> list[str]:
+    """The data on a message's buttons, as ``_card_buttons`` makes them."""
+    out: list[str] = []
+    for card in cards if isinstance(cards, list) else []:
+        sections = ((card or {}).get("card") or {}).get("sections") if isinstance(card, dict) else None
+        for section in sections if isinstance(sections, list) else []:
+            for widget in (section or {}).get("widgets") or [] if isinstance(section, dict) else []:
+                listed = ((widget or {}).get("buttonList") or {}).get("buttons") if isinstance(widget, dict) else None
+                for button in listed if isinstance(listed, list) else []:
+                    action = ((button or {}).get("onClick") or {}).get("action") if isinstance(button, dict) else None
+                    for param in (action or {}).get("parameters") or [] if isinstance(action, dict) else []:
+                        if isinstance(param, dict) and param.get("key") == _CARD_PARAM:
+                            out.append(str(param.get("value") or ""))
+    return out
+
+
+def said_on(message: dict[str, Any], user_name: str, quoted: str, words: str) -> bool:
+    """Whether ``message``, as Chat has it, is ``user_name``'s, quotes
+    ``quoted`` and says ``words`` (its @mentions left out)."""
+    sender, meta = _obj(message, "sender"), _obj(message, "quotedMessageMetadata")
+    text = re.sub(r"<users/\d+>", "", str(message.get("text") or "")).strip()
+    return bool(user_name) and sender.get("name") == user_name and meta.get("name") == quoted and text == words
+
+
+def quoted_card(
+    space_name: str,
+    message_name: str,
+    user_name: str,
+    said_name: str,
+    words: str,
+    service_account_file: str | None,
+    service_account_email: str | None = None,
+) -> tuple[str, str] | None:
+    """One of the app's cards that a message (``said_name``) quotes
+    (``message_name``), with a tap's checks (``verify_tap``): read from Chat
+    as the app, the quoting message is ``user_name``'s, quotes that card and
+    says ``words`` (``said_on``: the event's body isn't bound to Google's
+    token), and the card is the app's own message in that space, still with
+    a card's buttons, in a DM between the app and ``user_name`` alone. Its
+    buttons' data and its words, or None for a no. Synchronous; call it via
+    asyncio.to_thread(). Never raises: any doubt is a no."""
+    from googleapiclient.discovery import build as google_build
+
+    if not (space_name and user_name and message_name.startswith(f"{space_name}/messages/")
+            and said_name.startswith(f"{space_name}/messages/")):
+        return None
+    try:
+        creds = _build_credentials(service_account_file, service_account_email)
+        service = google_build("chat", "v1", credentials=creds, cache_discovery=False)
+        said = service.spaces().messages().get(name=said_name).execute()
+        if not said_on(said, user_name, message_name, words):
+            return None
+        message = _own_dm_message(
+            service, space_name, message_name, user_name, carries=lambda m: bool(_card_data(m.get("cardsV2"))),
+        )
+        if message is None:
+            return None
+        return _card_data(message.get("cardsV2"))[0], str(message.get("text") or "")
+    except Exception:
+        logger.warning("Google Chat: couldn't check a quoted card with Chat", exc_info=True)
+        return None
+
+
+def _quoted_name(message: dict[str, Any]) -> str:
+    """The message ``message`` replies to by quoting it, or ""."""
+    meta = message.get("quotedMessageMetadata")
+    if not isinstance(meta, dict) or str(meta.get("quoteType") or "REPLY") != "REPLY":
+        return ""
+    return str(meta.get("name") or "")
+
+
+async def _say_on_card(
+    words: str,
+    person: Any,
+    space_name: str,
+    thread_name: str,
+    quoted: str,
+    user_name: str,
+    said_name: str,
+    service_account_file: str | None,
+    service_account_email: str | None,
+) -> bool:
+    """A reply that quotes one of the app's cards (``quoted``), in a DM
+    between the app and its person alone: words said on that card ("Or
+    tell me…", ``channel_cards.say``), once Chat confirms the card is the
+    app's own there (``quoted_card``). The card is shown again as it reads
+    now, and what the Executive said back is posted. False when it isn't
+    such a reply: the words are then an ordinary message."""
+    from openexecutive.audit import log_event as audit_log
+    from openexecutive.integrations import channel_cards
+
+    found = await asyncio.to_thread(
+        quoted_card, space_name, quoted, user_name, said_name, words, service_account_file, service_account_email,
+    )
+    card = channel_cards.parse_choice(found[0]) if found else None
+    if card is None or found is None:
+        return False
+    said = await channel_cards.say(card, person, words)
+    if said is None:
+        return False
+    decision_id = card.decision_id
+    await asyncio.to_thread(
+        audit_log,
+        "integration_inbound",
+        f"Google Chat card {decision_id}: said on it: {said.line[:120]}",
+        actor="google_chat",
+        details={"channel": "google_chat", "decision_id": decision_id, "choice": "say",
+                 "outcome": channel_cards.outcome_of(said.line), "person_id": person.id,
+                 "space_name": space_name, "message_name": quoted, "google_user": user_name},
+    )
+    try:
+        if said.options:
+            # It waits: shown again as it reads now, with its buttons.
+            text = await asyncio.to_thread(channel_cards.with_tell_me, decision_id, said.text)
+            await asyncio.to_thread(
+                update_card, quoted, text, service_account_file, service_account_email, decision_id, said.options,
+            )
+        elif said.settled:
+            # Carried out: the card keeps what it said, with the outcome under it.
+            await asyncio.to_thread(
+                update_card, quoted, channel_cards.with_line(_strip_working(found[1]), said.line),
+                service_account_file, service_account_email,
+            )
+    except Exception:
+        logger.exception("Google Chat: couldn't update card %d after words on it", decision_id)
+    try:
+        await asyncio.to_thread(
+            send_reply, space_name, thread_name, said.line, service_account_file, service_account_email,
+        )
+    except Exception:
+        logger.exception("Google Chat: couldn't answer words on card %d", decision_id)
+    return True
 
 
 async def _confirm_tap(
@@ -483,9 +630,12 @@ async def _decide_tap(
         return
     try:
         if tapped.options:
+            text = await asyncio.to_thread(
+                channel_cards.with_tell_me, decision_id, channel_cards.with_line(tapped.text, line),
+            )
             await asyncio.to_thread(
-                update_card, message_name, channel_cards.with_line(tapped.text, line),
-                service_account_file, service_account_email, decision_id, tapped.options,
+                update_card, message_name, text, service_account_file, service_account_email, decision_id,
+                tapped.options,
             )
         else:
             await asyncio.to_thread(
@@ -725,8 +875,9 @@ async def _send_cards(
             if not text:
                 continue
             options = await asyncio.to_thread(channel_cards.card_options, decision_id, text)
+            shown = await asyncio.to_thread(channel_cards.with_tell_me, decision_id, text)
             await asyncio.to_thread(
-                send_card, space_name, thread_name, decision_id, text, options,
+                send_card, space_name, thread_name, decision_id, shown, options,
                 service_account_file, service_account_email,
             )
         except Exception:
@@ -746,12 +897,17 @@ async def _process_and_reply(
     reply_context: str = "",
     direct: bool = False,
     one_on_one: bool = False,
+    quoted: str = "",
+    user_name: str = "",
 ) -> None:
     """One Chat message's turn. ``reply_context`` is the message it quotes
     (``integrations.reply_context``), put in front of the words. ``direct``:
     a DM with the app, which is one conversation, whatever thread each
     message lands in. ``one_on_one``: a DM between the app and the sender
-    alone (``singleUserBotDm``), the only conversation private to them."""
+    alone (``singleUserBotDm``), the only conversation private to them.
+    ``quoted``: the message it quotes, and ``user_name`` the sender's
+    ``users/{id}``: a quote of one of the app's cards there is words said on
+    that card (``_say_on_card``)."""
     if not space_name:
         logger.error("Google Chat: missing space_name for message %s, cannot reply", message_name)
         return
@@ -774,6 +930,11 @@ async def _process_and_reply(
             sender_person = find_person_by_email(sender_email)
         except Exception:
             logger.exception("Google Chat: failed to look up the sender on People")
+    if one_on_one and quoted and sender_person is not None and not attachments and await _say_on_card(
+        message_text, sender_person, space_name, thread_name, quoted, user_name, message_name,
+        service_account_file, service_account_email,
+    ):
+        return
 
     # The rows written before the turn binds its session (the inbound row,
     # alert triage, retrieval) follow the sender's turn, as on the other chat
@@ -1027,6 +1188,8 @@ async def google_chat_webhook(request: Request, background_tasks: BackgroundTask
         ),
         direct=_is_direct(body.get("space", {})),
         one_on_one=_is_one_on_one(body.get("space", {})),
+        quoted=_quoted_name(message),
+        user_name=str(body.get("user", {}).get("name") or ""),
         service_account_file=settings.google_chat_service_account_file,
         service_account_email=settings.google_chat_service_account_email,
         attachments=attachments,

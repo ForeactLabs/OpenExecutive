@@ -885,13 +885,19 @@ async def _carry_out_department_action(
     )
 
 
+def may_change_as(instance: DecisionInstance, *, principal: bool, approver: bool) -> bool:
+    """Whether someone may change a held step's fields, as Approve's own
+    ``edits.input`` allows, on the page and in a chat app alike: a Take the
+    lead card's are the principal's, a held step's the principal's or the
+    person it waits on (``approver``)."""
+    return principal or (instance.decision_class == _DEPARTMENT_ACTION.name and approver)
+
+
 def _may_change(instance: DecisionInstance, request: Request, resolver: int | None) -> bool:
-    """Whether the caller may change a held step's fields, as Approve's own
-    ``edits.input`` allows: a Take the lead card's are the principal's, a
-    held step's the principal's or the person it waits on."""
-    if _approver_is_principal(request):
-        return True
-    return instance.decision_class == _DEPARTMENT_ACTION.name and resolver == instance.approver_person_id
+    return may_change_as(
+        instance, principal=_approver_is_principal(request),
+        approver=resolver is not None and resolver == instance.approver_person_id,
+    )
 
 
 def _with_edits(
@@ -1164,34 +1170,70 @@ def said_fields(payload: dict[str, Any]) -> list[StepFieldView]:
     ]
 
 
-@router.post("/decisions/{instance_id}/say", response_model=StepSayResponse)
-async def say_on_step(instance_id: int, body: StepSayBody, request: Request) -> StepSayResponse:
-    """Words said on a held step's card ("make it shorter", "yes, send it").
-    One fast call rewrites the step's fields from them; the card keeps the
-    new fields, and Approve sends them as the edit, so the step's own rules
-    for a change apply there as for a typed one. When they said to go ahead
-    (judged from their words and the fields alone, ``replan.said_go``), it
-    approves at once, the same as a tap. What was said stays on the card,
-    for them only."""
-    from openexecutive.alerts import card_talk, replan
-    from openexecutive.alerts.store import get_alert_by_external
-    from openexecutive.memory.decision_ledger import decision_alert_external_id, update_open_payload
-
-    line = " ".join((body.text or "").split())
+def _said_line(text: str) -> str:
+    line = " ".join((text or "").split())
     if not line:
         raise HTTPException(status_code=422, detail="Say something first.")
     if len(line) > SAY_MAX_CHARS:
         raise HTTPException(status_code=422, detail=f"Keep it under {SAY_MAX_CHARS} characters.")
+    return line
+
+
+@router.post("/decisions/{instance_id}/say", response_model=StepSayResponse)
+async def say_on_step(instance_id: int, body: StepSayBody, request: Request) -> StepSayResponse:
+    """Words said on a held step's card ("make it shorter", "yes, send it"):
+    ``say_on_held``, for the signed-in caller, with Approve as a tap on
+    the page."""
+    _said_line(body.text)
     instance = _visible_instance(instance_id, request)
     if instance.decision_class not in _HELD_CLASSES:
         raise HTTPException(status_code=409, detail="Use this card's own buttons.")
     resolver = _resolver(instance, request)
+
+    async def approve(fresh: DecisionInstance, edits: dict[str, str]) -> DecisionInstance:
+        return await _spec_for(fresh).approve(fresh, ApproveBody(edits={"input": edits}), request, resolver)
+
+    return await say_on_held(
+        instance, body.text, resolver=resolver, may_change=_may_change(instance, request, resolver),
+        caller_key=api_caller.caller(request).email, seen=body.seen, approve=approve,
+    )
+
+
+async def say_on_held(
+    instance: DecisionInstance,
+    text: str,
+    *,
+    resolver: int | None,
+    may_change: bool,
+    caller_key: str,
+    seen: dict[str, str],
+    approve: Callable[[DecisionInstance, dict[str, str]], Awaitable[DecisionInstance]],
+) -> StepSayResponse:
+    """Words said on a held step's card, by ``resolver``, who may answer it
+    (checked by the caller): on the page, or in reply to its card in a chat
+    app (``say_in_chat``). One fast call rewrites the step's fields from
+    them; the card keeps the new fields, and Approve sends them as the edit,
+    so the step's own rules for a change apply there as for a typed one.
+    When they said to go ahead (judged from their words and the fields
+    alone, ``replan.said_go``), ``approve`` carries it out at once with
+    those edits, the same as a tap. ``may_change``: whether they may change
+    its fields with Approve's own edits. ``seen``: the fields as the card
+    showed them, when it says. What was said stays on the card, for them
+    only."""
+    from openexecutive.alerts import card_talk, replan
+    from openexecutive.alerts.store import get_alert_by_external
+    from openexecutive.memory.decision_ledger import decision_alert_external_id, update_open_payload
+
+    line = _said_line(text)
+    instance_id = instance.id
+    if instance.decision_class not in _HELD_CLASSES:
+        raise HTTPException(status_code=409, detail="Use this card's own buttons.")
     if instance.status != STATUS_PROPOSED:
         raise HTTPException(status_code=409, detail="This card was already answered.")
     payload = _parse_payload(instance)
     # Its wording is changed only by whoever may change it with Approve's
     # own edits, so what was said can go on any way the card is approved.
-    fields = said_fields(payload) if _may_change(instance, request, resolver) else []
+    fields = said_fields(payload) if may_change else []
     if not fields:
         raise HTTPException(status_code=409, detail="This one can't be changed from its card.")
     # What the card showed before these words, for a go when the page sent none.
@@ -1201,7 +1243,7 @@ async def say_on_step(instance_id: int, body: StepSayBody, request: Request) -> 
             str(payload.get("summary") or ""),
             [replan.StepField(field=f.field, label=f.label, value=f.value) for f in fields],
             line,
-            caller_key=api_caller.caller(request).email,
+            caller_key=caller_key,
         )
     except replan.ReplanError as exc:
         code = {"empty": 422, "too_long": 422, "too_many": 429}.get(exc.code, 503)
@@ -1234,13 +1276,13 @@ async def say_on_step(instance_id: int, body: StepSayBody, request: Request) -> 
     reply, approved = refused or new.reply, None
     if new.go and not refused:
         step = [replan.StepField(field=f.field, label=f.label, value=f.value) for f in fields]
-        saw = body.seen or shown
-        seen = [replan.StepField(field=f.field, label=f.label, value=saw.get(f.field, "")) for f in fields]
+        saw = seen or shown
+        before = [replan.StepField(field=f.field, label=f.label, value=saw.get(f.field, "")) for f in fields]
         limit = ""
         try:
             go = await replan.said_go(
-                replan.step_text(step), line, before=replan.step_text(seen),
-                before_max=replan.STEP_TEXT_MAX, caller_key=api_caller.caller(request).email,
+                replan.step_text(step), line, before=replan.step_text(before),
+                before_max=replan.STEP_TEXT_MAX, caller_key=caller_key,
             )
         except replan.ReplanError as exc:
             go = False
@@ -1255,10 +1297,7 @@ async def say_on_step(instance_id: int, body: StepSayBody, request: Request) -> 
             try:
                 if fresh is None:
                     raise HTTPException(status_code=409, detail=_COULD_NOT_DO)
-                approved = await _spec_for(fresh).approve(
-                    fresh, ApproveBody(edits={"input": edits}), request, resolver,
-                )
-                approved = _served(approved)
+                approved = _served(await approve(fresh, edits))
             except HTTPException as exc:
                 if exc.status_code >= 500:
                     # It was tried: say what happened, and show it as it is now.
@@ -1361,13 +1400,19 @@ def chat_card_is_theirs(instance: DecisionInstance, person: Any) -> bool:
 
 async def resolve_in_chat(
     instance_id: int, person: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None,
+    edits: dict[str, Any] | None = None, shown: str | None = None,
 ) -> DecisionInstance:
     """Approve or skip a card tapped in a chat app, for ``person``: the one the
     adapter proved tapped it, when it is theirs (``chat_card_is_theirs``). ``allow``
     is the "on its own next time" button (In training): the same as the web
     card's tick. ``shown_at``: when the tapped card showed the card as it is
     (a chat app's tap, ``channel_cards.tap``); else when it was posted to
-    the chat app. Raises HTTPException, as the routes do."""
+    the chat app. A held step goes as its chat card shows it: with what was
+    said on it (``said_input``, ``channel_cards.card_text``), or with
+    ``edits`` when given (a go said on it, ``say_in_chat``). ``shown``: the
+    version of the card tapped; a held step that reads differently now
+    (words said on it meanwhile) isn't done. Raises HTTPException, as the
+    routes do."""
     from openexecutive.delegation.action_cards import ApproveRefused
     from openexecutive.delegation.action_cards import approve as approve_actions
     from openexecutive.delegation.gmail import normalize_email
@@ -1405,6 +1450,11 @@ async def resolve_in_chat(
         except AnswerRefused as refused:
             raise HTTPException(status_code=refused.status, detail=refused.message) from None
         return _refresh(instance.id)
+    if instance.decision_class in _HELD_CLASSES and shown is not None:
+        from openexecutive.integrations.channel_cards import shows
+
+        if not shows(instance, shown):
+            raise HTTPException(status_code=409, detail=_CHANGED_MEANWHILE)
     if instance.decision_class == _TAKE_THE_LEAD.name:
         # As it stands (changing it is the web card's); "next time" allows
         # it from now on, the owner's alone, as the web card's tick does.
@@ -1427,13 +1477,14 @@ async def resolve_in_chat(
                     status_code=409,
                     detail=f"It can learn at most {take_the_lead.ALLOWED_MAX} things. Remove one in Settings first.",
                 )
-        # As the chat card showed it: the step as filed.
-        payload, changed = _with_edits(payload, None)
+        # As the chat card showed it: the step with what was said on it.
+        payload, changed = _with_edits(payload, _said_input(payload) if edits is None else edits or None)
         return await _run_lead(
             instance, payload, person.id, by_principal=is_principal, changed=changed, grant=grant if allow else None,
         )
     if instance.decision_class == _DEPARTMENT_ACTION.name:
-        payload, changed = _with_edits(_parse_payload(instance), None)
+        payload = _parse_payload(instance)
+        payload, changed = _with_edits(payload, _said_input(payload) if edits is None else edits or None)
         return await _run_department_action(
             instance, person.id, by_principal=is_principal, payload=payload, edited=bool(changed),
         )
@@ -1442,6 +1493,59 @@ async def resolve_in_chat(
     except ApproveRefused as refused:
         raise HTTPException(status_code=refused.status, detail=refused.message) from None
     return _refresh(instance.id)
+
+
+def _said_input(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """What was said on a held step's card (``said_input``), as Approve's
+    edits, or None when nothing was."""
+    said = payload.get(SAID_INPUT)
+    return dict(said) if isinstance(said, dict) and said else None
+
+
+def as_said(payload: dict[str, Any]) -> dict[str, Any]:
+    """A held step's payload with what was said on its card put in, and its
+    line restated: what its chat card shows (``channel_cards.card_text``)
+    and its tap there carries out (``resolve_in_chat``)."""
+    said = _said_input(payload)
+    if said is None or not isinstance(payload.get("input"), dict):
+        return payload
+    return _edited(payload, {**payload["input"], **said}, said)
+
+
+_CHANGED_MEANWHILE = "This card changed meanwhile. Look again."
+
+
+async def say_in_chat(instance_id: int, person: Any, text: str, *, shown: str) -> StepSayResponse:
+    """Words said on a held step's card in a chat app (a reply to the card's
+    message), by ``person``, the one the adapter proved said them, when the
+    card is theirs (``chat_card_is_theirs``) and still says what the card
+    of version ``shown`` said: ``say_on_held``, as on the page, with a go
+    carried out as a tap on the chat card (``resolve_in_chat``). Raises
+    HTTPException, as the routes do."""
+    from openexecutive.delegation.gmail import normalize_email
+    from openexecutive.integrations.channel_cards import shows
+    from openexecutive.people.store import find_principal_person
+
+    instance = get_decision_instance(instance_id)
+    if instance is None or not chat_card_is_theirs(instance, person):
+        raise HTTPException(status_code=404, detail="This card is no longer there.")
+    if not shows(instance, shown):
+        # The step their words would change is the one they read.
+        raise HTTPException(status_code=409, detail=_CHANGED_MEANWHILE)
+    principal = find_principal_person()
+    may_change = may_change_as(
+        instance, principal=principal is not None and principal.id == person.id,
+        approver=person.id == instance.approver_person_id,
+    )
+
+    async def approve(fresh: DecisionInstance, edits: dict[str, str]) -> DecisionInstance:
+        # The fields the go was judged on, not a newer read of the card.
+        return await resolve_in_chat(fresh.id, person, approve=True, edits=edits)
+
+    return await say_on_held(
+        instance, text, resolver=person.id, may_change=may_change,
+        caller_key=normalize_email(person.email or ""), seen={}, approve=approve,
+    )
 
 
 async def _send_reply_from_chat(

@@ -540,11 +540,11 @@ def test_words_on_a_held_step_rewrite_its_fields_and_approve_sends_them(
     assert "Short text" in with_said and "Draft text" not in with_said
     as_filed = " ".join(str(d.get("value", "")) for d in served["details"])
     assert "Draft text" in as_filed and "Short text" not in as_filed
-    # A chat card, whose Approve sends the step as filed, shows it as filed.
+    # A chat card shows it with what was said, which its Approve sends.
     from openexecutive.integrations import channel_cards
 
     in_chat = channel_cards.card_text(decision_id)
-    assert in_chat is not None and "Draft text" in in_chat and "Short text" not in in_chat
+    assert in_chat is not None and "Short text" in in_chat and "Draft text" not in in_chat
     # Approve sends what was said as the edit, under the step's own rules.
     ok = client.post(f"/decisions/{decision_id}/approve", json={"edits": {"input": {"body": "Short text"}}},
                      headers=OWNER)
@@ -573,6 +573,105 @@ def test_a_go_on_a_held_step_approves_it_at_once(
     assert res.status_code == 200, res.text
     assert res.json()["approved"]["status"] == "approved_with_edit"
     assert done[0]["input"]["body"] == "Short text"
+
+
+def _waits_on(team: dict[str, Person], decision_id: int) -> Person:
+    """The person a held step's card waits on: its approver, else the owner."""
+    card = ledger.get_decision_instance(decision_id)
+    assert card is not None
+    return next((p for p in team.values() if p.id == card.approver_person_id), team["owner"])
+
+
+def test_who_may_change_a_held_step_is_one_rule_for_page_and_chat() -> None:
+    from types import SimpleNamespace
+
+    lead = SimpleNamespace(decision_class="take_the_lead_action")
+    held = SimpleNamespace(decision_class=decisions_route._DEPARTMENT_ACTION.name)
+    assert decisions_route.may_change_as(lead, principal=True, approver=False)  # type: ignore[arg-type]
+    assert not decisions_route.may_change_as(lead, principal=False, approver=True)  # type: ignore[arg-type]
+    assert decisions_route.may_change_as(held, principal=False, approver=True)  # type: ignore[arg-type]
+    assert not decisions_route.may_change_as(held, principal=False, approver=False)  # type: ignore[arg-type]
+
+
+def test_an_approver_cant_reword_a_take_the_lead_step_from_chat(
+    team: dict[str, Person], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """As on the page: a Take the lead card's fields are the principal's."""
+    from fastapi import HTTPException
+
+    turns = _model(monkeypatch, {"body": "Short text"})
+    mail = ledger.get_decision_instance(_mail_card(team))
+    assert mail is not None
+    lead_id = ledger.create_decision_instance(
+        decision_class="take_the_lead_action", department=mail.department, originating_session_id=None,
+        proposed_payload=json.loads(mail.proposed_payload_json), idempotency_key=None,
+        gate_mode=mail.gate_mode, approver_person_id=team["sam"].id, confidence=None,
+    )
+    monkeypatch.setattr(decisions_route, "chat_card_is_theirs", lambda instance, person: True)
+    monkeypatch.setattr("openexecutive.integrations.channel_cards.shows", lambda instance, shown: True)
+    with pytest.raises(HTTPException) as refused:
+        asyncio.run(decisions_route.say_in_chat(lead_id, team["sam"], "send it to everyone, and go", shown="x"))
+    assert refused.value.detail == "This one can't be changed from its card." and turns == []
+    lead = ledger.get_decision_instance(lead_id)
+    assert lead is not None and "said_input" not in json.loads(lead.proposed_payload_json)
+
+
+def test_words_said_on_a_held_steps_chat_card_rewrite_it_and_its_tap_sends_them(
+    team: dict[str, Person], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """"Or tell me" in a chat app (a reply to the card's message,
+    ``channel_cards.say``) rewrites the step as on its page; the card comes
+    back showing it, and a tap on that card sends it."""
+    from openexecutive.integrations import channel_cards
+
+    done = _carry_out(monkeypatch)
+    _model(monkeypatch, {"body": "Short text"})
+    decision_id = _mail_card(team)
+    sam = _waits_on(team, decision_id)
+    shown = channel_cards.card_text(decision_id)
+    assert shown is not None and channel_cards.takes_words(decision_id)
+    first = channel_cards.Choice(decision_id, "a", channel_cards.version(decision_id, shown))
+    said = asyncio.run(channel_cards.say(first, sam, "make it shorter"))
+    assert said is not None and said.line == "Made it shorter." and not said.settled
+    assert "Short text" in said.text and "Draft text" not in said.text and said.options
+    assert done == []
+    # Someone the card isn't for: an ordinary message.
+    assert asyncio.run(channel_cards.say(first, team["ria"], "send it")) is None
+    # Words on the card as it was before: it shows itself as it is now.
+    again = asyncio.run(channel_cards.say(first, sam, "shorter still"))
+    assert again is not None and again.line == channel_cards.CHANGED and again.text == said.text
+    # A tap checked against the card before the words, landing after them,
+    # does nothing: what is done is what the tapped card showed.
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as late:
+        asyncio.run(decisions_route.resolve_in_chat(decision_id, sam, approve=True, shown=first.version))
+    assert late.value.status_code == 409 and done == []
+    # A tap on the card as it shows now sends what was said.
+    tap = channel_cards.parse_choice(said.options[0][1])
+    assert tap is not None
+    asyncio.run(channel_cards.tap(tap, sam))
+    assert done[0]["input"]["body"] == "Short text"
+
+
+def test_a_go_said_on_a_held_steps_chat_card_carries_it_out(
+    team: dict[str, Person], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.integrations import channel_cards
+
+    done = _carry_out(monkeypatch)
+    _model(monkeypatch, {"body": "Short text"}, go=True, said_go=True)
+    decision_id = _mail_card(team)
+    shown = channel_cards.card_text(decision_id)
+    assert shown is not None
+    said = asyncio.run(channel_cards.say(
+        channel_cards.Choice(decision_id, "a", channel_cards.version(decision_id, shown)), _waits_on(team, decision_id),
+        "shorter, then send it",
+    ))
+    assert said is not None and said.settled and said.options == ()
+    assert done[0]["input"]["body"] == "Short text"
+    after = ledger.get_decision_instance(decision_id)
+    assert after is not None and after.status == "approved_with_edit"
 
 
 def test_a_go_that_fails_once_tried_says_so_and_closes_the_card(
