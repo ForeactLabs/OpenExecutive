@@ -533,6 +533,9 @@ def test_words_on_a_held_step_rewrite_its_fields_and_approve_sends_them(
     served = json.loads(client.get(f"/decisions/{decision_id}", headers=OWNER).json()["proposed_payload_json"])
     assert served["input"]["body"] == "Draft text" and served["said_input"] == {"body": "Short text"}
     assert [f["value"] for f in served["fields"]] == ["Hi", "Draft text"]
+    # What the card shows of the step is what its Approve sends.
+    shown = " ".join(str(d.get("value", "")) for d in served["details"])
+    assert "Short text" in shown and "Draft text" not in shown
     # Approve sends what was said as the edit, under the step's own rules.
     ok = client.post(f"/decisions/{decision_id}/approve", json={"edits": {"input": {"body": "Short text"}}},
                      headers=OWNER)

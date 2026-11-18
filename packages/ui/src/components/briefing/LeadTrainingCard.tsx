@@ -80,7 +80,9 @@ export default function LeadTrainingCard({
   // connected app's email.
   // A connected app's email shows who it goes to too: its details, in full.
   const details = card?.details ?? [];
-  const shownFields = details.length > 0 ? details : fields;
+  // Either way, with what was said on the card: what Approve sends.
+  const shownFields =
+    details.length > 0 ? details : fields.map((f) => ({ ...f, value: card?.said[f.field] ?? f.value }));
   const training = card ? card.kind === "training" : (proposal.topic_tags ?? []).includes(LEAD_TRAINING_TAG);
   // Older cards saved only the summary, which quotes the start of the
   // message: with the message shown below, the title keeps just who.
