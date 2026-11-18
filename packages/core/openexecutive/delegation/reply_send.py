@@ -882,7 +882,7 @@ async def _send_chat_draft_from_executive(
         raise SendRefused(502, "gmail_error", "Couldn't read the draft's files in your mailbox. Try again in a moment.") from exc
     step, tool = executive_step(
         person, to=list(message.to), cc=list(message.cc), subject=message.subject,
-        body=message.text, attachments=files,
+        body=message.text, attachments=files, bcc=list(message.bcc),
     )
     try:
         result = await take_the_lead.carry_out(

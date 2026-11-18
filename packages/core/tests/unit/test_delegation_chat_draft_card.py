@@ -513,3 +513,24 @@ def test_a_table_goes_from_the_executive_as_html(db: Path, owner: Any) -> None:
     assert "<table" in str(step["input"])
     plain, _ = executive_step(owner, to=["dana@x.example"], cc=[], subject="S", body="Just words.")
     assert "<table" not in str(plain["input"])
+
+
+def test_a_bcc_on_the_draft_goes_with_the_executive_send(
+    db: Path, owner: Any, as_sender: list[str], exec_sends: list[dict[str, Any]],
+) -> None:
+    mailbox, row = _chat_draft(owner)
+    _switch(owner, row, mailbox, True)
+    mailbox.drafts["d1"].message.bcc = ["boss@co.example"]
+    asyncio.run(send_chat_draft(owner, row, caller=LOCAL, gmail=mailbox, now=LATER))
+    assert exec_sends[0]["input"]["bcc"] == "boss@co.example"
+
+
+def test_both_mail_backends_carry_a_bcc() -> None:
+    from openexecutive.integrations.workspace.google import GoogleMail
+    from openexecutive.integrations.workspace.microsoft import MicrosoftMail
+
+    common = {"mailbox": "exec@co.example", "to": "dana@x.example", "subject": "S", "body": "B"}
+    assert GoogleMail().build_send_arguments(**common, bcc=["boss@co.example"])["bcc"] == "boss@co.example"
+    message = MicrosoftMail().build_send_arguments(**common, bcc=["boss@co.example"])["body"]["Message"]
+    assert message["bccRecipients"] == [{"emailAddress": {"address": "boss@co.example"}}]
+    assert "bcc" not in GoogleMail().build_send_arguments(**common)

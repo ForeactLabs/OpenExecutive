@@ -270,6 +270,7 @@ class MicrosoftMail:
         html: bool = False,
         cc: list[str] | None = None,
         attachments: list[tuple[str, str, bytes]] | None = None,
+        bcc: list[str] | None = None,
     ) -> dict[str, Any]:
         # `mailbox` is implicit (the signed-in account) and Graph's sendMail has
         # no thread parameter — replies thread through reply-mail-message, and
@@ -281,6 +282,8 @@ class MicrosoftMail:
         }
         if cc:
             message["ccRecipients"] = [_recipient(a) for a in cc]
+        if bcc:
+            message["bccRecipients"] = [_recipient(a) for a in bcc]
         if attachments:
             # Graph's fileAttachment, inline in the message.
             message["attachments"] = [

@@ -339,11 +339,12 @@ async def switch_for_work(
 
 def executive_step(
     person: Any, *, to: list[str], cc: list[str], subject: str, body: str,
-    attachments: list[tuple[str, str, bytes]] | None = None,
+    attachments: list[tuple[str, str, bytes]] | None = None, bcc: list[str] | None = None,
 ) -> tuple[dict[str, Any], str]:
     """The step that sends an email from the Executive's own mailbox for
     ``person``, on their tap (``take_the_lead.carry_out`` carries it out):
-    to ``to``, copied to ``cc`` (the person is added: ``copied``), with its
+    to ``to``, copied to ``cc`` (the person is added: ``copied``) and
+    blind-copied to ``bcc``, with its
     tables as tables (``email_html.body_html``), as an email sent as them
     has. Every email the Executive sends for someone's tap is built here:
     a reply card's and a chat draft's. Returns the step and its tool's name."""
@@ -357,7 +358,7 @@ def executive_step(
     arguments = provider.build_send_arguments(
         mailbox=settings.exec_email_address, to=", ".join(to), subject=subject or "(no subject)",
         body=markup if markup is not None else body, html=markup is not None,
-        cc=copied(person, cc), attachments=attachments or None,
+        cc=copied(person, cc), attachments=attachments or None, bcc=list(bcc or []) or None,
     )
     step = {
         "held": True, "mcp": True, "tool": provider.send_tool_name, "input": arguments,
