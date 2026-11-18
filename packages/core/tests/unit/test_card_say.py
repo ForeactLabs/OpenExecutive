@@ -5,6 +5,7 @@ Approve as a tap, an asking card takes them as the answer, and Approve
 carries out exactly the option picked."""
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -911,6 +912,18 @@ async def test_a_card_whose_call_failed_waits_before_the_next_try(
     card_talk.fill_soon([moved], {})
     await asyncio.gather(*card_talk._TASKS)
     assert calls == [1, 2, 2]
+    # Storage that fails after the call waits the same way.
+    async def locked(c: Any) -> None:
+        calls.append(3)
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(card_talk, "fill", locked)
+    monkeypatch.setattr(card_talk, "_MISSED", {})
+    card_talk.fill_soon([moved], {})
+    await asyncio.gather(*card_talk._TASKS)
+    card_talk.fill_soon([moved], {})
+    await asyncio.gather(*card_talk._TASKS)
+    assert calls == [1, 2, 2, 3]
 
 
 def test_options_show_only_for_the_plan_they_were_written_for(db: Path) -> None:

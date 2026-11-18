@@ -445,6 +445,11 @@ def fill_soon(cards: list[Alert], talk: dict[int, CardTalk]) -> None:
                     _MISSED.pop(i, None)
                 else:
                     _MISSED[i] = time.monotonic()
+            except Exception:
+                # Storage that failed after the call waits the same as a
+                # call that failed, so no read pays for it again at once.
+                logger.warning("card options failed for card %s", i, exc_info=True)
+                _MISSED[i] = time.monotonic()
             finally:
                 _FILLING.discard(i)
 
