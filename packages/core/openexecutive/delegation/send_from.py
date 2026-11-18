@@ -194,7 +194,7 @@ def _work_done(payload: dict[str, Any]) -> str:
     )
 
 
-async def _rewritten_for(person: Any, payload: dict[str, Any], *, executive: bool) -> str:
+async def rewritten_for(person: Any, payload: dict[str, Any], *, executive: bool) -> str:
     """The card's words written once for the new sender (``executive``: the
     Executive writing for ``person``; else ``person`` themselves), signed
     for that sender. Raises ``SendRefused``."""
@@ -261,7 +261,7 @@ async def _switch(
             source = {**source, CONVERSATION_KEY: [
                 *conversation(payload), {"kind": "note", "state": "done", "text": done},
             ]}
-        written = await _rewritten_for(person, source, executive=executive)
+        written = await rewritten_for(person, source, executive=executive)
         turns = [*conversation(payload)]
         if asked:
             turns.append({"kind": "asked", "text": asked})
@@ -335,6 +335,35 @@ async def switch_for_work(
         "person_id": person.id, "decision_id": card_id, "from_executive": executive,
     })
     return str(payload.get("draft_body") or "")
+
+
+def executive_step(
+    person: Any, *, to: list[str], cc: list[str], subject: str, body: str,
+    attachments: list[tuple[str, str, bytes]] | None = None,
+) -> tuple[dict[str, Any], str]:
+    """The step that sends an email from the Executive's own mailbox for
+    ``person``, on their tap (``take_the_lead.carry_out`` carries it out):
+    to ``to``, copied to ``cc`` (the person is added: ``copied``), with its
+    tables as tables (``email_html.body_html``), as an email sent as them
+    has. Every email the Executive sends for someone's tap is built here:
+    a reply card's and a chat draft's. Returns the step and its tool's name."""
+    from openexecutive.config import get_settings
+    from openexecutive.delegation.email_html import body_html
+    from openexecutive.integrations.workspace.registry import get_mail_provider
+
+    settings = get_settings()
+    provider = get_mail_provider(settings)
+    markup = body_html(body)
+    arguments = provider.build_send_arguments(
+        mailbox=settings.exec_email_address, to=", ".join(to), subject=subject or "(no subject)",
+        body=markup if markup is not None else body, html=markup is not None,
+        cc=copied(person, cc), attachments=attachments or None,
+    )
+    step = {
+        "held": True, "mcp": True, "tool": provider.send_tool_name, "input": arguments,
+        "requested_by_person_id": person.id,
+    }
+    return step, provider.send_tool_name
 
 
 def _claim_as_checked(instance: Any, resolver: int | None) -> bool:
@@ -425,7 +454,6 @@ async def send(
     )
     from openexecutive.delegation.reply_send import _CONFIRM_TEXT, SendRefused
     from openexecutive.delegation.threads import MAX_RECIPIENTS
-    from openexecutive.integrations.workspace.registry import get_mail_provider
     from openexecutive.memory.decision_ledger import (
         STATUS_APPROVED_UNCHANGED,
         STATUS_FAILED,
@@ -459,15 +487,9 @@ async def send(
             raise SendRefused(409, "executive_recipient", "The reply is addressed to the Executive itself.")
         if instance.id in SENDING or instance.id in card_drafts._EDITING or instance.id in card_drafts._MAKING:
             raise SendRefused(409, "already_handled", "This reply is being changed or sent right now.")
-        provider = get_mail_provider(settings)
-        arguments = provider.build_send_arguments(
-            mailbox=settings.exec_email_address, to=", ".join(to), subject=spec.subject or "(no subject)",
-            body=spec.body, cc=cc, attachments=files_for(instance.id),
+        step, tool = executive_step(
+            person, to=to, cc=cc, subject=spec.subject, body=spec.body, attachments=files_for(instance.id),
         )
-        step = {
-            "held": True, "mcp": True, "tool": provider.send_tool_name, "input": arguments,
-            "requested_by_person_id": person.id,
-        }
         SENDING.add(instance.id)
         try:
             if not _claim_as_checked(instance, resolver):
@@ -491,7 +513,7 @@ async def send(
                 release_claim(instance.id)
                 logger.warning("delegation.send_from: the send failed: %s", result[:300])
                 raise SendRefused(
-                    502, "send_failed", f"It wasn't sent. {take_the_lead.failure_words(provider.send_tool_name, result)}",
+                    502, "send_failed", f"It wasn't sent. {take_the_lead.failure_words(tool, result)}",
                 )
             finish_execution(
                 instance.id, STATUS_APPROVED_UNCHANGED,

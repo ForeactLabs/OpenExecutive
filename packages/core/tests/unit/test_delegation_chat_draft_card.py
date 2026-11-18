@@ -149,6 +149,7 @@ def test_the_routes_read_and_change_the_callers_own_draft(owner: Any, monkeypatc
 
     resp = client.get(f"/delegation/drafts/{row}", headers=headers)
     assert resp.status_code == 200 and resp.json()["status"] == "open"
+    assert resp.json()["from_executive"] is False and resp.json()["executive_name"]
     assert resp.json()["body"] == "Friday at 10 works.\n\nOlivia"
     assert client.get(f"/delegation/drafts/{row + 99}", headers=headers).status_code == 404
     resp = client.put(f"/delegation/drafts/{row}/text", json={"text": "Friday at 11.\n\nOlivia"}, headers=headers)
@@ -166,8 +167,17 @@ def test_the_routes_read_and_change_the_callers_own_draft(owner: Any, monkeypatc
     # Someone else's draft reads the same as none at all.
     theirs = drafts.record(owner.id + 1, source=drafts.SOURCE_CHAT, thread_id=None, draft_id="dz",
                            message_id="mz", now=NOW)
+    async def as_executive(model: str, system: str, turn: str) -> dict[str, Any]:
+        return {"body": "Hi Dana,\n\nOlivia asked me to say Friday at 11 works."}
+
+    monkeypatch.setattr("openexecutive.delegation.answers._call_model", as_executive)
+    resp = client.put(f"/delegation/drafts/{row}/from", json={"executive": True}, headers=headers)
+    assert resp.status_code == 200 and resp.json()["from_executive"] is True
+    assert resp.json()["note"]
+    assert client.put(f"/delegation/drafts/{row}/from", json={}, headers=headers).status_code == 422
     for resp in (
         client.get(f"/delegation/drafts/{theirs}", headers=headers),
+        client.put(f"/delegation/drafts/{theirs}/from", json={"executive": True}, headers=headers),
         client.put(f"/delegation/drafts/{theirs}/text", json={"text": "Mine"}, headers=headers),
         client.post(f"/delegation/drafts/{theirs}/change", json={"text": "Shorter"}, headers=headers),
     ):
@@ -359,3 +369,147 @@ def test_send_it_on_a_chat_draft_leaves_its_words(db: Path, owner: Any, monkeypa
     ))
     assert new == [] and mailbox.drafts["d1"].message.text.strip() == before.strip()
     assert mailbox.sent == []
+
+
+# ── who it goes from ──────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def as_sender(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """The model's rewrite for the new sender: which prompt it was given."""
+    from openexecutive.delegation import answers, send_from
+
+    seen: list[str] = []
+
+    async def fake(model: str, system: str, turn: str) -> dict[str, Any]:
+        seen.append(system)
+        if system == send_from.AS_EXECUTIVE_PROMPT:
+            return {"body": "Hi Dana,\n\nOlivia asked me to say Friday at 10 works."}
+        return {"body": "Hi Dana,\n\nFriday at 10 works."}
+
+    monkeypatch.setattr(answers, "_call_model", fake)
+    return seen
+
+
+@pytest.fixture
+def exec_sends(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    from openexecutive.orchestrator import take_the_lead
+
+    out: list[dict[str, Any]] = []
+
+    async def fake(payload: dict[str, Any], *, by_principal: bool, own_card: bool = False) -> str:
+        out.append({**payload, "own_card": own_card})
+        return '{"status": "sent"}'
+
+    monkeypatch.setattr(take_the_lead, "carry_out", fake)
+    return out
+
+
+def _switch(owner: Any, row: int, mailbox: FakeInbox, executive: bool) -> dict[str, Any]:
+    return asyncio.run(chat_draft_card.switch(
+        owner, row, executive=executive, caller=LOCAL, gmail=mailbox, now=LATER,
+    ))
+
+
+def test_switching_to_the_executive_and_back_rewrites_it_in_their_drafts(
+    db: Path, owner: Any, as_sender: list[str],
+) -> None:
+    from openexecutive.delegation import send_from
+
+    mailbox, row = _chat_draft(owner)
+    assert _state(owner, row, mailbox)["from_executive"] is False
+    saved = _switch(owner, row, mailbox, True)
+    assert as_sender == [send_from.AS_EXECUTIVE_PROMPT]
+    assert saved["from_executive"] is True
+    assert saved["note"] == send_from.NOTE_TO_EXECUTIVE
+    assert saved["body"].startswith("Hi Dana,\n\nOlivia asked me")
+    # One version: the words in their Drafts are the ones that go.
+    assert mailbox.drafts["d1"].message.text == saved["body"]
+    assert drafts.get_row(row).from_executive is True
+    assert _state(owner, row, mailbox)["from_executive"] is True
+    # Switching to where it already is changes nothing.
+    assert _switch(owner, row, mailbox, True)["body"] == saved["body"]
+    assert len(as_sender) == 1
+    back = _switch(owner, row, mailbox, False)
+    assert as_sender[-1] == send_from.AS_YOU_PROMPT
+    assert back["from_executive"] is False and back["note"] == send_from.NOTE_TO_YOU
+    assert drafts.get_row(row).from_executive is False
+    assert mailbox.sent == []
+
+
+def test_asking_for_it_from_the_executive_switches_it_on_the_card(
+    db: Path, owner: Any, as_sender: list[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.delegation import send_from
+    from openexecutive.delegation.answers import SendFrom
+
+    mailbox, row = _chat_draft(owner)
+
+    async def only_who(*a: Any, **kw: Any) -> Any:
+        raise SendFrom(executive=True)
+
+    monkeypatch.setattr("openexecutive.delegation.answers.rewrite", only_who)
+    saved, _new, note = asyncio.run(chat_draft_card.change(
+        owner, row, "Send it from the Executive.", caller=LOCAL, gmail=mailbox, now=LATER,
+    ))
+    assert saved["from_executive"] is True and note == send_from.NOTE_TO_EXECUTIVE
+    assert as_sender == [send_from.AS_EXECUTIVE_PROMPT]
+    assert mailbox.drafts["d1"].message.text == saved["body"]
+    assert mailbox.sent == []
+
+
+def test_a_switched_draft_goes_from_the_executive_with_them_on_cc(
+    db: Path, owner: Any, as_sender: list[str], exec_sends: list[dict[str, Any]],
+) -> None:
+    from openexecutive.delegation.reply_send import SENT_BY_EXECUTIVE
+    from openexecutive.delegation.send_from import executive_step
+
+    mailbox, row = _chat_draft(owner)
+    saved = _switch(owner, row, mailbox, True)
+    assert asyncio.run(send_chat_draft(owner, row, caller=LOCAL, gmail=mailbox, now=LATER)) == ""
+    # Nothing went from their own mailbox, and their draft of it is gone.
+    assert mailbox.sent == []
+    assert "d1" in mailbox.deleted
+    assert len(exec_sends) == 1
+    step = exec_sends[0]
+    assert step["held"] is True and step["own_card"] is True
+    assert step["requested_by_person_id"] == owner.id
+    assert step["input"]["cc"] == _send_tests.OWNER
+    assert step["input"]["body"] == saved["body"]
+    assert drafts.sent_message_ids(owner.id) == {SENT_BY_EXECUTIVE}
+    # Sent once: a second tap sends nothing.
+    assert _refused(send_chat_draft(owner, row, caller=LOCAL, gmail=mailbox, now=LATER)).code in (
+        "already_sent", "draft_gone",
+    )
+    assert len(exec_sends) == 1
+    # The same step a reply card switched to the Executive sends.
+    same, _tool = executive_step(owner, to=[_send_tests.DANA], cc=[], subject="Friday", body=saved["body"])
+    assert same["input"] == step["input"]
+
+
+def test_a_failed_executive_send_hands_it_back(
+    db: Path, owner: Any, as_sender: list[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.orchestrator import take_the_lead
+
+    mailbox, row = _chat_draft(owner)
+    _switch(owner, row, mailbox, True)
+
+    async def refused(payload: dict[str, Any], **kw: Any) -> str:
+        return '{"error": "quota"}'
+
+    monkeypatch.setattr(take_the_lead, "carry_out", refused)
+    assert _refused(send_chat_draft(owner, row, caller=LOCAL, gmail=mailbox, now=LATER)).code == "send_failed"
+    # Handed back: still in their Drafts, waiting for them.
+    assert "d1" in mailbox.drafts
+    assert drafts.count_waiting(owner.id, NOW - timedelta(days=1)) == 1
+
+
+def test_a_table_goes_from_the_executive_as_html(db: Path, owner: Any) -> None:
+    from openexecutive.delegation.send_from import executive_step
+
+    table = "Here:\n\n| Item | Cost |\n| --- | --- |\n| Rent | 10 |\n"
+    step, _ = executive_step(owner, to=["dana@x.example"], cc=[], subject="S", body=table)
+    assert "<table" in str(step["input"])
+    plain, _ = executive_step(owner, to=["dana@x.example"], cc=[], subject="S", body="Just words.")
+    assert "<table" not in str(plain["input"])

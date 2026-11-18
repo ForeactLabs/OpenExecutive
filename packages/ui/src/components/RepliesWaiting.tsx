@@ -22,7 +22,6 @@ import { Spinner } from "@/components/ui/Spinner";
 import { formatRelativeTime } from "@/lib/relativeTime";
 import {
   cardGist,
-  highlightPieces,
   questionsLeft,
   replyFlagLines,
   replyToChoice,
@@ -35,6 +34,8 @@ import {
   recipientNames,
   firstNames,
 } from "@/lib/replyCards";
+import EmailWords from "@/components/EmailWords";
+import FromSwitch from "@/components/FromSwitch";
 import FeatureName from "@/components/FeatureName";
 import { SayBox, Section } from "@/components/briefing/CardTalk";
 import GoOnItsOwnOffer from "@/components/briefing/GoOnItsOwnOffer";
@@ -824,33 +825,12 @@ export function ReplyCardItem({
           )}
         </div>
         {!followUp && !unconfirmed && (
-          <div className="mt-2 flex items-center gap-2">
-            <span className="w-9 text-xs text-fg-subtle">From</span>
-            <div
-              role="radiogroup"
-              aria-label="From"
-              className="inline-flex overflow-hidden rounded-full border border-line-strong"
-            >
-              {([false, true] as const).map((executive) => {
-                const on = executive === Boolean(card.from_executive);
-                return (
-                  <button
-                    key={String(executive)}
-                    type="button"
-                    role="radio"
-                    aria-checked={on}
-                    disabled={busy || confirming || editing !== null || Boolean(card.working)}
-                    onClick={() => void pickFrom(executive)}
-                    className={`min-h-9 px-3 text-[13px] disabled:opacity-60 ${
-                      on ? "bg-accent/20 font-semibold text-fg" : "text-fg-muted hover:bg-surface-overlay/60"
-                    }`}
-                  >
-                    {executive ? executiveName : "You"}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          <FromSwitch
+            fromExecutive={Boolean(card.from_executive)}
+            executiveName={executiveName}
+            disabled={busy || confirming || editing !== null || Boolean(card.working)}
+            onPick={(executive) => void pickFrom(executive)}
+          />
         )}
         {running(FROM_RUNNING) && (
           <p className="mt-1 text-xs text-fg-subtle" aria-live="polite">{FROM_RUNNING}</p>
@@ -887,19 +867,7 @@ export function ReplyCardItem({
           </div>
         ) : (
           <>
-            <p className="mt-1.5 whitespace-pre-wrap break-words text-[15px] text-fg">
-              {changed.length > 0
-                ? highlightPieces(card.draft_body, changed).map((piece, i) =>
-                    piece.changed ? (
-                      <mark key={i} className="rounded bg-accent/15 px-0.5 text-fg">
-                        {piece.text}
-                      </mark>
-                    ) : (
-                      <span key={i}>{piece.text}</span>
-                    ),
-                  )
-                : card.draft_body}
-            </p>
+            <EmailWords text={card.draft_body} changed={changed} className="mt-1.5 text-[15px]" />
             {(card.files ?? []).length > 0 && (
               <ul className="mt-2 flex flex-wrap gap-2" aria-label="Attached">
                 {(card.files ?? []).map((name, i) => (

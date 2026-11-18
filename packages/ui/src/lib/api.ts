@@ -57,6 +57,10 @@ export interface ChatDraftState {
   // After a change: the sentences that are new, and a line on what changed.
   changed_sentences: string[];
   note: string;
+  // Who it goes from: you, or (switched on its card) the Executive, with you
+  // on cc; and the Executive's name for the card's From.
+  from_executive?: boolean;
+  executive_name?: string;
 }
 
 // Names the round of tool calls currently in flight, so the progress line can
@@ -2908,6 +2912,19 @@ export async function setChatDraftText(row: number, text: string): Promise<ChatD
     body: JSON.stringify({ text }),
   });
   if (!res.ok) throw await chatDraftError(res, "Couldn't save your change.");
+  return (await res.json()) as ChatDraftState;
+}
+
+// Who the draft goes from: the Executive (with you on cc) or you. Its words
+// are written once for the new sender, here and in your Drafts. Sends
+// nothing.
+export async function setChatDraftFrom(row: number, executive: boolean): Promise<ChatDraftState> {
+  const res = await fetch(`${API_BASE}/delegation/drafts/${row}/from`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ executive }),
+  });
+  if (!res.ok) throw await chatDraftError(res, "Couldn't change who it's from.");
   return (await res.json()) as ChatDraftState;
 }
 

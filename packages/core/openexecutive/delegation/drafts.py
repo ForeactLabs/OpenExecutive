@@ -160,6 +160,8 @@ class DraftRow:
     created_at: str
     gone_at: str
     replaced_by: int | None = None
+    # Switched on its card to go from the Executive (``chat_draft_card.switch``).
+    from_executive: bool = False
 
 
 def get_row(row_id: int, *, db_path: Path | None = None) -> DraftRow | None:
@@ -168,7 +170,7 @@ def get_row(row_id: int, *, db_path: Path | None = None) -> DraftRow | None:
     try:
         row = conn.execute(
             "SELECT id, person_id, source, thread_id, draft_id, message_id, sent_message_id, "
-            f"created_at, gone_at, replaced_by FROM {DRAFTS_TABLE} WHERE id = ?",  # noqa: S608 — constant table name
+            f"created_at, gone_at, replaced_by, from_executive FROM {DRAFTS_TABLE} WHERE id = ?",  # noqa: S608 — constant table name
             (row_id,),
         ).fetchone()
     finally:
@@ -180,6 +182,7 @@ def get_row(row_id: int, *, db_path: Path | None = None) -> DraftRow | None:
         draft_id=str(row[4] or ""), message_id=str(row[5] or ""), sent_message_id=str(row[6] or ""),
         created_at=str(row[7] or ""), gone_at=str(row[8] or ""),
         replaced_by=int(row[9]) if row[9] is not None else None,
+        from_executive=bool(row[10]),
     )
 
 
@@ -424,17 +427,25 @@ def latest_waiting(person_id: int, since: datetime, *, db_path: Path | None = No
     return waiting[0][0] if waiting else None
 
 
-def set_version(row_id: int, old: str, new: str, *, db_path: Path | None = None) -> bool:
+def set_version(
+    row_id: int, old: str, new: str, *, executive: bool | None = None, db_path: Path | None = None,
+) -> bool:
     """The chat draft ``row_id`` was rewritten from its card on the person's
     tap: it is now the version ``new`` (Gmail's message id for the edited
-    draft, or Outlook's change key), so Send under the chat sends it. Only
-    while it is still ``old`` and waiting (compare-and-set); False otherwise."""
+    draft, or Outlook's change key), so Send under the chat sends it, and
+    when ``executive`` is given, it now goes from the Executive (True) or
+    from its person (False). Only while it is still ``old`` and waiting
+    (compare-and-set); False otherwise."""
     conn = _connect(db_path)
     try:
+        sets = "message_id = ?"
+        params: list[object] = [new]
+        if executive is not None:
+            sets, params = sets + ", from_executive = ?", [*params, 1 if executive else 0]
         cur = conn.execute(
-            f"UPDATE {DRAFTS_TABLE} SET message_id = ? "  # noqa: S608 — constant table name
+            f"UPDATE {DRAFTS_TABLE} SET {sets} "  # noqa: S608 — constant table name and columns
             "WHERE id = ? AND message_id = ? AND gone_at IS NULL AND sent_message_id IS NULL",
-            (new, row_id, old),
+            (*params, row_id, old),
         )
         conn.commit()
         return cur.rowcount > 0

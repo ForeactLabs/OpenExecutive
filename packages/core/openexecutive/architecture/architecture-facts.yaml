@@ -11188,7 +11188,14 @@ delegation:
     tap (delegation.chat_draft_card: their own words, a tone pill or "Tell
     me what to change", rewritten in their mailbox only while it is the
     version chat recorded), and a draft written again in the same reply
-    keeps one card (action_chips.drop_replaced). The principal may turn
+    keeps one card (action_chips.drop_replaced). Its From switches it to go
+    from the Executive with the person on cc, as a reply card's does
+    (chat_draft_card.switch, PUT /delegation/drafts/{row}/from): the words
+    rewritten once in their Drafts (send_from.rewritten_for), the row's
+    from_executive flag set with the version, and Send then sends those
+    words and files from the Executive's mailbox (send_from.executive_step,
+    shared with reply cards; HTML when the email has a table) and deletes
+    their draft. The principal may turn
     it on, and each team member once the owner lets them. Off by default; off changes nothing —
     prompts, tool lists and prompt caches are byte-identical to an install
     without it.
