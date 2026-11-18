@@ -24,7 +24,7 @@ def chat_apps(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, Any, bool]]:
     monkeypatch.setattr("openexecutive.audit.log_event", lambda *_a, **_k: None)
     resolved: list[tuple[int, Any, bool]] = []
 
-    async def resolve(decision_id: int, person: Any, *, approve: bool, allow: bool = False) -> str:
+    async def resolve(decision_id: int, person: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None) -> str:
         resolved.append((decision_id, person, approve))
         return "Approved." if approve else "Skipped."
 
@@ -91,7 +91,7 @@ class FakeSlack:
         self.ephemeral.append(kwargs)
 
 
-def _slack_tap(channel: str = "D1", value: str = "card:7:a") -> dict[str, Any]:
+def _slack_tap(channel: str = "D1", value: str = "card:7:a:0000beef") -> dict[str, Any]:
     return {
         "user": {"id": "U1"}, "channel": {"id": channel},
         "container": {"message_ts": "111.2"},
@@ -131,7 +131,8 @@ def test_slack_cards_go_out_as_plain_text_with_buttons(monkeypatch: pytest.Monke
     asyncio.run(slack_bot._send_cards(client, "D1", [3]))
     blocks = client.posts[0]["blocks"]
     assert blocks[0]["text"]["type"] == "plain_text"
-    assert [e["value"] for e in blocks[1]["elements"]] == ["card:3:a", "card:3:s"]
+    shown = channel_cards.version("*card* 3")
+    assert [e["value"] for e in blocks[1]["elements"]] == [f"card:3:a:{shown}", f"card:3:s:{shown}"]
 
 
 class FakeResponse:
@@ -146,7 +147,7 @@ class FakeResponse:
         self.deferred = True
 
 
-def _discord_tap(dm: bool = True, recipient: str = "42", custom_id: str = "card:7:s",
+def _discord_tap(dm: bool = True, recipient: str = "42", custom_id: str = "card:7:s:0000beef",
                  partial: Any = None, guild_id: int | None = None) -> Any:
     import discord
 

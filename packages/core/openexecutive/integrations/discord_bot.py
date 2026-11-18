@@ -673,27 +673,24 @@ def _find_discord_sender(discord_user_id: str) -> object:
 _MAX_CARD_TEXT = 1900
 
 
-def _card_style(index: int, choice: str) -> int:
+def _card_style(index: int, data: str) -> int:
     """A button's style: the Executive's pick green, Skip grey, the rest blue."""
     from openexecutive.integrations import channel_cards
 
-    return 3 if index == 0 else 2 if choice == channel_cards.SKIP else 1
+    return 3 if index == 0 else 2 if channel_cards.choice_of(data) == channel_cards.SKIP else 1
 
 
-def _card_view(decision_id: int, options: tuple[tuple[str, str], ...]) -> Any:
+def _card_view(options: tuple[tuple[str, str], ...]) -> Any:
     """A card's buttons, the Executive's pick first and Skip last
     (``channel_cards.card_options``). Their custom ids carry the card
     (``channel_cards.callback_data``); ``on_interaction`` takes the tap, so it
     still works after a restart."""
     import discord
 
-    from openexecutive.integrations import channel_cards
-
     view = discord.ui.View(timeout=None)
-    for index, (label, choice) in enumerate(options):
+    for index, (label, data) in enumerate(options):
         view.add_item(discord.ui.Button(
-            label=label, style=discord.ButtonStyle(_card_style(index, choice)),
-            custom_id=channel_cards.callback_data(decision_id, choice),
+            label=label, style=discord.ButtonStyle(_card_style(index, data)), custom_id=data,
         ))
     return view
 
@@ -740,12 +737,12 @@ async def handle_card_tap(interaction: Any) -> None:
     if person is None:
         await interaction.response.send_message("This card is no longer there.", ephemeral=True)
         return
-    decision_id, choice = parsed
+    decision_id = parsed.decision_id
     # Deciding can take longer than Discord's three seconds.
     await interaction.response.defer()
-    tapped = await channel_cards.tap(decision_id, choice, person)
+    tapped = await channel_cards.tap(parsed, person)
     line = tapped.line
-    name = channel_cards.CHOICE_NAMES[choice]
+    name = channel_cards.CHOICE_NAMES[parsed.choice]
     await asyncio.to_thread(
         audit_log,
         "integration_inbound",
@@ -762,7 +759,7 @@ async def handle_card_tap(interaction: Any) -> None:
             # Still waiting, with new words: shown again with its buttons.
             text = f"{tapped.text}\n\n{line}"
             await interaction.edit_original_response(
-                content=text[:_MAX_CARD_TEXT], view=_card_view(decision_id, tapped.options),
+                content=text[:_MAX_CARD_TEXT], view=_card_view(tapped.options),
             )
             return
         # The card keeps what it said, with the outcome under it and no buttons.
@@ -1644,8 +1641,8 @@ def create_discord_bot():
             async def send_card(decision_id: int, text: str) -> None:
                 from openexecutive.integrations import channel_cards
 
-                options = await asyncio.to_thread(channel_cards.card_options, decision_id)
-                await message.channel.send(text, view=_card_view(decision_id, options), suppress_embeds=True)
+                options = await asyncio.to_thread(channel_cards.card_options, decision_id, text)
+                await message.channel.send(text, view=_card_view(options), suppress_embeds=True)
 
         # Use the channel id as thread_id so WaitForHuman resolution can match
         # replies that arrive in the same DM or thread channel.
@@ -1761,7 +1758,6 @@ async def send_dm_card(
     the bot, with its buttons (``channel_cards.push_waiting``); the
     bot's ``on_interaction`` takes the tap. Raises when it couldn't."""
     from openexecutive.config import get_settings
-    from openexecutive.integrations import channel_cards
 
     settings = get_settings()
     if not settings.discord_bot_token or not discord_user_id:
@@ -1784,9 +1780,8 @@ async def send_dm_card(
                 "content": text[:_MAX_CARD_TEXT],
                 "flags": _SUPPRESS_EMBEDS,
                 "components": [{"type": 1, "components": [
-                    {"type": 2, "style": _card_style(index, choice), "label": label,
-                     "custom_id": channel_cards.callback_data(decision_id, choice)}
-                    for index, (label, choice) in enumerate(options)
+                    {"type": 2, "style": _card_style(index, data), "label": label, "custom_id": data}
+                    for index, (label, data) in enumerate(options)
                 ]}],
             },
         )

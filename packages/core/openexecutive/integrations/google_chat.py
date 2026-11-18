@@ -256,17 +256,15 @@ _TAP_CHECK_S = 20.0
 def _card_buttons(decision_id: int, options: tuple[tuple[str, str], ...]) -> list[dict[str, Any]]:
     """A card's buttons as one Chat ``cardsV2`` card, the Executive's pick
     first and Skip last (``channel_cards.card_options``)."""
-    from openexecutive.integrations import channel_cards
-
     buttons = [
         {
             "text": card_safe(label),
             "onClick": {"action": {
                 "function": _CARD_FUNCTION,
-                "parameters": [{"key": _CARD_PARAM, "value": channel_cards.callback_data(decision_id, choice)}],
+                "parameters": [{"key": _CARD_PARAM, "value": data}],
             }},
         }
-        for label, choice in options
+        for label, data in options
     ]
     return [{"cardId": f"oe-card-{decision_id}", "card": {"sections": [{"widgets": [{"buttonList": {"buttons": buttons}}]}]}}]
 
@@ -421,7 +419,7 @@ async def _confirm_tap(
     parsed = channel_cards.parse_choice(data)
     if parsed is None:
         return None
-    decision_id = parsed[0]
+    decision_id = parsed.decision_id
     try:
         person = await asyncio.to_thread(find_person_by_email, sender_email) if sender_email else None
     except Exception:
@@ -468,11 +466,11 @@ async def _decide_tap(
     parsed = channel_cards.parse_choice(data)
     if parsed is None:
         return
-    decision_id, choice = parsed
+    decision_id = parsed.decision_id
     where = {"space_name": space_name, "message_name": message_name, "google_user": user_name}
-    tapped = await channel_cards.tap(decision_id, choice, person)
+    tapped = await channel_cards.tap(parsed, person)
     line = tapped.line
-    name = channel_cards.CHOICE_NAMES[choice]
+    name = channel_cards.CHOICE_NAMES[parsed.choice]
     await asyncio.to_thread(
         audit_log,
         "integration_inbound",
@@ -726,7 +724,7 @@ async def _send_cards(
             text = await asyncio.to_thread(channel_cards.card_text, decision_id)
             if not text:
                 continue
-            options = await asyncio.to_thread(channel_cards.card_options, decision_id)
+            options = await asyncio.to_thread(channel_cards.card_options, decision_id, text)
             await asyncio.to_thread(
                 send_card, space_name, thread_name, decision_id, text, options,
                 service_account_file, service_account_email,

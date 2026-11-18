@@ -96,6 +96,14 @@ def pushed(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, int, str, Any]]:
 REPLY_OPTIONS = (("Send from me", "a"), ("Send from Open Executive, cc me", "x"), ("Skip", "s"))
 
 
+def _options(card: int) -> tuple[tuple[str, str], ...]:
+    """A card's buttons as (label, choice), each carrying its card's words."""
+    text = channel_cards.card_text(card) or ""
+    options = channel_cards.card_options(card, text)
+    assert {data.rsplit(":", 1)[1] for _, data in options} == {channel_cards.version(text)}
+    return tuple((label, channel_cards.choice_of(data)) for label, data in options)
+
+
 def test_a_reply_card_says_what_happened_and_what_it_will_do(owner: int) -> None:
     card = _reply(owner)
     assert channel_cards.card_text(card) == (
@@ -104,7 +112,7 @@ def test_a_reply_card_says_what_happened_and_what_it_will_do(owner: int) -> None
         "Tuesday works for us."
     )
     # Its pick first, then the other sender, then Skip.
-    assert channel_cards.card_options(card) == REPLY_OPTIONS
+    assert _options(card) == REPLY_OPTIONS
 
 
 def test_an_invite_card_has_accept() -> None:
@@ -115,7 +123,7 @@ def test_an_invite_card_has_accept() -> None:
     }, owner_id)
     text = channel_cards.card_text(card)
     assert text == "Meeting invite\nPilot review\nFri 30 Oct, 10:00-10:30\nFrom Dana"
-    assert channel_cards.card_options(card) == (("Accept", "a"), ("Skip", "s"))
+    assert _options(card) == (("Accept", "a"), ("Skip", "s"))
 
 
 def test_send_in_a_chat_app_sends_the_draft_as_its_person(owner: int, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -195,7 +203,8 @@ def test_a_skipped_card_does_nothing(owner: int) -> None:
 def test_a_card_made_outside_any_chat_goes_to_their_chat_app_once(owner: int, pushed: list[Any]) -> None:
     card = _reply(owner)
     assert asyncio.run(channel_cards.push_waiting(NOW)) == 1
-    assert pushed == [("telegram", card, channel_cards.card_text(card), REPLY_OPTIONS)]
+    text = channel_cards.card_text(card) or ""
+    assert pushed == [("telegram", card, text, channel_cards.card_options(card, text))]
     assert asyncio.run(channel_cards.push_waiting(NOW + timedelta(minutes=1))) == 0
     assert len(pushed) == 1
 
@@ -303,10 +312,12 @@ def test_the_chat_app_is_the_first_one_that_proves_taps(owner: int, monkeypatch:
 def test_a_slack_dm_card_has_the_cards_labels(monkeypatch: pytest.MonkeyPatch) -> None:
     from openexecutive.integrations import slack_bot
 
-    blocks = slack_bot._card_blocks("Reply ready to send", 7, REPLY_OPTIONS)
+    options = tuple((label, channel_cards.callback_data(7, choice, "Reply ready to send")) for label, choice in REPLY_OPTIONS)
+    blocks = slack_bot._card_blocks("Reply ready to send", 7, options)
     elements = blocks[1]["elements"]
     assert [e["text"]["text"] for e in elements] == ["Send from me", "Send from Open Executive, cc me", "Skip"]
-    assert [e["value"] for e in elements] == ["card:7:a", "card:7:x", "card:7:s"]
+    assert [e["value"] for e in elements] == [data for _, data in options]
+    assert [e["action_id"] for e in elements] == ["oe_card_approve", "oe_card_switch", "oe_card_skip"]
     # Only the pick stands out.
     assert [e.get("style") for e in elements] == ["primary", None, None]
 

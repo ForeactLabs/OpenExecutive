@@ -1337,14 +1337,16 @@ class _ChatTapRequest:
 
 
 async def resolve_in_chat(
-    instance_id: int, person: Any, *, approve: bool, allow: bool = False,
+    instance_id: int, person: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None,
 ) -> DecisionInstance:
     """Approve or skip a card tapped in a chat app, for ``person``: the one the
     adapter proved tapped it. The rule is the web chat's (``_resolver``): a
     card of actions is its person's alone; a meeting is the principal's, or
     its approver's unless it is the principal's private booking. ``allow``
     is the "on its own next time" button (In training): the same as the web
-    card's tick. Raises HTTPException, as the routes do."""
+    card's tick. ``shown_at``: when the tapped card showed the card as it is
+    (a chat app's tap, ``channel_cards.tap``); else when it was posted to
+    the chat app. Raises HTTPException, as the routes do."""
     from openexecutive.delegation.action_cards import ApproveRefused
     from openexecutive.delegation.action_cards import approve as approve_actions
     from openexecutive.delegation.gmail import normalize_email
@@ -1384,7 +1386,7 @@ async def resolve_in_chat(
     if instance.decision_class == _APP_ACTION.name:
         return await _carry_out_app_action(instance, ApproveBody(), _ChatTapRequest(tap), person.id)  # type: ignore[arg-type]
     if instance.decision_class == _DELEGATED_REPLY.name:
-        return await _send_reply_from_chat(instance, tap, person.id, allow=allow)
+        return await _send_reply_from_chat(instance, tap, person.id, allow=allow, shown_at=shown_at)
     if instance.decision_class == _DELEGATED_INVITE.name:
         from openexecutive.delegation.invites import AnswerRefused, answer
 
@@ -1433,7 +1435,7 @@ async def resolve_in_chat(
 
 
 async def _send_reply_from_chat(
-    instance: DecisionInstance, tap: Any, resolver: int, *, allow: bool = False,
+    instance: DecisionInstance, tap: Any, resolver: int, *, allow: bool = False, shown_at: str | None = None,
 ) -> DecisionInstance:
     """Send a reply card's draft on a tap in a chat app, as written. What
     would ask a second yes on the web card (recipients changed, newer mail,
@@ -1441,11 +1443,13 @@ async def _send_reply_from_chat(
     here with what to do instead. ``allow``: the "next time"
     button."""
     from openexecutive.delegation.reply_send import SendRefused, send_approved_reply
-    from openexecutive.integrations.channel_cards import shown_at
+    from openexecutive.integrations import channel_cards
 
+    if shown_at is None:
+        shown_at = channel_cards.shown_at(instance.id)
     try:
         await send_approved_reply(
-            instance, caller=tap, resolver=resolver, confirm={}, allow=allow, shown_at=shown_at(instance.id),
+            instance, caller=tap, resolver=resolver, confirm={}, allow=allow, shown_at=shown_at,
         )
     except SendRefused as refused:
         message = refused.message

@@ -140,7 +140,7 @@ async def send_card(
             "chat_id": chat_id,
             "text": text[:_MAX_MSG_LEN],
             "link_preview_options": {"is_disabled": True},
-            "reply_markup": _keyboard(decision_id, options),
+            "reply_markup": _keyboard(options),
         },
     )
     if resp.is_error:
@@ -149,13 +149,8 @@ async def send_card(
             raise RuntimeError(f"telegram sendMessage failed: {resp.status_code}")
 
 
-def _keyboard(decision_id: int, options: tuple[tuple[str, str], ...]) -> dict[str, Any]:
-    from openexecutive.integrations import channel_cards
-
-    return {"inline_keyboard": [
-        [{"text": label, "callback_data": channel_cards.callback_data(decision_id, choice)}]
-        for label, choice in options
-    ]}
+def _keyboard(options: tuple[tuple[str, str], ...]) -> dict[str, Any]:
+    return {"inline_keyboard": [[{"text": label, "callback_data": data}] for label, data in options]}
 
 
 async def _send_cards(token: str, chat_id: int, cards: list[int]) -> None:
@@ -165,7 +160,7 @@ async def _send_cards(token: str, chat_id: int, cards: list[int]) -> None:
         try:
             text = await asyncio.to_thread(channel_cards.card_text, decision_id)
             if text:
-                options = await asyncio.to_thread(channel_cards.card_options, decision_id)
+                options = await asyncio.to_thread(channel_cards.card_options, decision_id, text)
                 await send_card(token, chat_id, decision_id, text, options=options)
         except Exception:
             logger.exception("Telegram: couldn't send card %d", decision_id)
@@ -194,10 +189,10 @@ async def _handle_card_tap(
         except Exception:
             logger.exception("Telegram: couldn't answer a tap on chat %s", chat_id)
         return
-    decision_id, choice = parsed
-    tapped = await channel_cards.tap(decision_id, choice, person)
+    decision_id = parsed.decision_id
+    tapped = await channel_cards.tap(parsed, person)
     line = tapped.line
-    name = channel_cards.CHOICE_NAMES[choice]
+    name = channel_cards.CHOICE_NAMES[parsed.choice]
     await asyncio.to_thread(
         audit_log,
         "integration_inbound",
@@ -220,7 +215,7 @@ async def _handle_card_tap(
         if tapped.options:
             # Still waiting, with new words: shown again with its buttons.
             edit["text"] = f"{tapped.text}\n\n{line}"[:_MAX_MSG_LEN]
-            edit["reply_markup"] = _keyboard(decision_id, tapped.options)
+            edit["reply_markup"] = _keyboard(tapped.options)
         else:
             # The card keeps what it said, with the outcome under it and no buttons.
             edit["text"] = f"{card_text}\n\n{line}"[:_MAX_MSG_LEN]

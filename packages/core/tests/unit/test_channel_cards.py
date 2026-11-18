@@ -52,9 +52,15 @@ def _tg_session(chat: str = "4242", person_id: int | None = 1) -> Session:
 
 
 def test_buttons_round_trip_and_junk_is_ignored() -> None:
+    shown = channel_cards.version("Meeting to book")
     for choice in (channel_cards.APPROVE, channel_cards.SKIP, channel_cards.ALLOW, channel_cards.SWITCH):
-        assert channel_cards.parse_choice(channel_cards.callback_data(7, choice)) == (7, choice)
-    for junk in (None, "", "card:7", "card:x:a", "card:7:z", "other:7:a", "card:-7:a", "card:" + "9" * 20 + ":a"):
+        data = channel_cards.callback_data(7, choice, "Meeting to book")
+        assert channel_cards.parse_choice(data) == channel_cards.Choice(7, choice, shown)
+    for junk in (
+        None, "", "card:7", "card:x:a", "card:7:z", "other:7:a", "card:-7:a", "card:" + "9" * 20 + ":a",
+        # Every button carries the version of the card it is on.
+        "card:7:a", "card:7:a:", "card:7:a:XYZ", "card:7:a:0000beef:1",
+    ):
         assert channel_cards.parse_choice(junk) is None
 
 
@@ -80,12 +86,12 @@ def test_a_chat_tap_is_only_the_person_it_names() -> None:
 
 def test_only_the_chats_own_person_can_tap() -> None:
     def tap(chat: dict[str, Any], sender: int) -> dict[str, Any]:
-        return {"id": "q1", "from": {"id": sender}, "data": "card:3:a",
+        return {"id": "q1", "from": {"id": sender}, "data": "card:3:a:0000beef",
                 "message": {"message_id": 9, "chat": chat, "text": "Meeting to book"}}
 
     found = telegram_bot._card_tap(tap({"id": 4242, "type": "private"}, 4242))
     assert found == {"callback_id": "q1", "chat_id": 4242, "message_id": 9,
-                     "card_text": "Meeting to book", "data": "card:3:a"}
+                     "card_text": "Meeting to book", "data": "card:3:a:0000beef"}
     assert telegram_bot._card_tap(tap({"id": 4242, "type": "private"}, 999)) is None
     assert telegram_bot._card_tap(tap({"id": -100, "type": "group"}, -100)) is None
     assert telegram_bot._card_tap(tap({"id": 4242, "type": "supergroup"}, 4242)) is None
@@ -103,7 +109,7 @@ def test_a_tap_is_taken_only_on_a_webhook_only_telegram_can_call(
         taken.append(kwargs)
 
     monkeypatch.setattr(telegram_bot, "_handle_card_tap", handle)
-    update = {"callback_query": {"id": "q1", "from": {"id": 4242}, "data": "card:3:a",
+    update = {"callback_query": {"id": "q1", "from": {"id": 4242}, "data": "card:3:a:0000beef",
                                  "message": {"message_id": 9, "chat": {"id": 4242, "type": "private"}}}}
     client = TestClient(create_app())
     headers = {"X-Telegram-Bot-Api-Secret-Token": "hook-secret"}
@@ -249,14 +255,15 @@ def fake_telegram(monkeypatch: pytest.MonkeyPatch) -> _FakeTelegram:
 
 def test_a_card_goes_out_with_approve_and_skip(fake_telegram: _FakeTelegram) -> None:
     asyncio.run(telegram_bot.send_card(
-        TOKEN, 4242, 7, "Meeting to book\nPilot review", options=(("Approve", "a"), ("Skip", "s")),
+        TOKEN, 4242, 7, "Meeting to book\nPilot review",
+        options=(("Approve", "card:7:a:0000beef"), ("Skip", "card:7:s:0000beef")),
     ))
     [(method, body)] = fake_telegram.posts
     assert method == "sendMessage" and body["chat_id"] == 4242
     assert body["text"] == "Meeting to book\nPilot review" and "parse_mode" not in body
     assert body["reply_markup"] == {"inline_keyboard": [
-        [{"text": "Approve", "callback_data": "card:7:a"}],
-        [{"text": "Skip", "callback_data": "card:7:s"}],
+        [{"text": "Approve", "callback_data": "card:7:a:0000beef"}],
+        [{"text": "Skip", "callback_data": "card:7:s:0000beef"}],
     ]}
 
 
@@ -268,7 +275,7 @@ def test_a_tap_answers_audits_and_leaves_the_card_without_buttons(
                         lambda chat: person if chat == "4242" else None)
     resolved: list[tuple[int, Any, bool]] = []
 
-    async def resolve(decision_id: int, who: Any, *, approve: bool, allow: bool = False) -> str:
+    async def resolve(decision_id: int, who: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None) -> str:
         resolved.append((decision_id, who, approve))
         return "Approved."
 
@@ -281,7 +288,7 @@ def test_a_tap_answers_audits_and_leaves_the_card_without_buttons(
             callback_id="q1", chat_id=chat_id, message_id=9, card_text="Meeting to book", data=data, token=TOKEN,
         ))
 
-    tap(4242, "card:7:a")
+    tap(4242, "card:7:a:0000beef")
     assert resolved == [(7, person, True)]
     assert audited == [{"channel": "telegram", "chat_id": 4242, "decision_id": 7, "choice": "approve", "outcome": "done", "person_id": 3}]
     assert [m for m, _ in fake_telegram.posts] == ["answerCallbackQuery", "editMessageText"]
@@ -290,7 +297,7 @@ def test_a_tap_answers_audits_and_leaves_the_card_without_buttons(
 
     # Off the roster, or data that isn't a card's: answered, never resolved.
     fake_telegram.posts.clear()
-    tap(999, "card:7:a")
+    tap(999, "card:7:a:0000beef")
     tap(4242, "something:else")
     assert len(resolved) == 1 and len(audited) == 1
     assert [(m, b["text"]) for m, b in fake_telegram.posts] == [
@@ -302,7 +309,7 @@ def test_a_tap_answers_audits_and_leaves_the_card_without_buttons(
 def test_a_second_tap_while_the_first_is_booking_is_turned_away(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[int] = []
 
-    async def slow(decision_id: int, person: Any, *, approve: bool, allow: bool = False) -> None:
+    async def slow(decision_id: int, person: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None) -> None:
         calls.append(decision_id)
         await asyncio.sleep(0.05)
 
@@ -322,13 +329,13 @@ def test_a_second_tap_while_the_first_is_booking_is_turned_away(monkeypatch: pyt
 def test_a_busy_tap_only_answers(fake_telegram: _FakeTelegram, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("openexecutive.people.store.find_person_by_telegram_chat_id", lambda chat: SimpleNamespace(id=3))
 
-    async def busy(decision_id: int, who: Any, *, approve: bool, allow: bool = False) -> str:
+    async def busy(decision_id: int, who: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None) -> str:
         return channel_cards.BUSY
 
     monkeypatch.setattr(channel_cards, "resolve", busy)
     monkeypatch.setattr("openexecutive.audit.log_event", lambda *a, **k: None)
     asyncio.run(telegram_bot._handle_card_tap(
-        callback_id="q1", chat_id=4242, message_id=9, card_text="Meeting to book", data="card:7:a", token=TOKEN,
+        callback_id="q1", chat_id=4242, message_id=9, card_text="Meeting to book", data="card:7:a:0000beef", token=TOKEN,
     ))
     assert [(m, b["text"]) for m, b in fake_telegram.posts] == [("answerCallbackQuery", "Already on it.")]
 
@@ -349,23 +356,50 @@ def test_a_card_that_can_teach_offers_on_its_own_next_time(monkeypatch: pytest.M
                proposed_payload_json=json.dumps({"kind": "level"}))
     cards = {7: teaching, 8: plain}
     monkeypatch.setattr("openexecutive.memory.decision_ledger.get_decision_instance", lambda i, **k: cards.get(i))
-    assert channel_cards.card_options(7) == (
-        ("Do it", "a"), ("Do it, and do this on its own next time", "n"), ("Skip", "s"),
-    )
-    assert channel_cards.card_options(8) == (("Do it", "a"), ("Skip", "s"))
+    def labelled(card: int) -> tuple[tuple[str, str], ...]:
+        return tuple((label, channel_cards.choice_of(data)) for label, data in channel_cards.card_options(card, ""))
+
+    assert labelled(7) == (("Do it", "a"), ("Do it, and do this on its own next time", "n"), ("Skip", "s"))
+    assert labelled(8) == (("Do it", "a"), ("Skip", "s"))
 
 
 def test_a_tap_on_on_its_own_approves_and_allows(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[int, bool, bool]] = []
 
-    async def resolve(decision_id: int, who: Any, *, approve: bool, allow: bool = False) -> str:
+    async def resolve(decision_id: int, who: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None) -> str:
         calls.append((decision_id, approve, allow))
         return "Approved."
 
     monkeypatch.setattr(channel_cards, "resolve", resolve)
+    monkeypatch.setattr(channel_cards, "card_text", lambda i: "Message Sam")
+    shown = channel_cards.version("Message Sam")
     for choice in ("a", "n", "s"):
-        assert asyncio.run(channel_cards.tap(7, choice, SimpleNamespace(id=3))) == channel_cards.Tapped("Approved.")
+        tapped = channel_cards.Choice(7, choice, shown)
+        assert asyncio.run(channel_cards.tap(tapped, SimpleNamespace(id=3))) == channel_cards.Tapped("Approved.")
     assert calls == [(7, True, False), (7, True, True), (7, False, False)]
+
+
+def test_a_tap_on_a_card_that_says_something_else_now_shows_it_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An older copy of a card (switched since, changed in the app) does
+    nothing but show the card as it is now: what is done is always what the
+    tapped card showed. A Skip is a skip."""
+    calls: list[bool] = []
+
+    async def resolve(decision_id: int, who: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None) -> str:
+        calls.append(approve)
+        return "Skipped."
+
+    monkeypatch.setattr(channel_cards, "resolve", resolve)
+    monkeypatch.setattr(channel_cards, "card_text", lambda i: "Reply ready to send\nfrom Ada now")
+    monkeypatch.setattr(channel_cards, "card_options", lambda i, shown: (("Send from Ada, cc me", "new"),))
+    old = channel_cards.version("Reply ready to send\nfrom you")
+    for choice in ("a", "n", "x"):
+        assert asyncio.run(channel_cards.tap(channel_cards.Choice(7, choice, old), SimpleNamespace(id=3))) == (
+            channel_cards.Tapped(channel_cards.CHANGED, "Reply ready to send\nfrom Ada now", (("Send from Ada, cc me", "new"),))
+        )
+    assert calls == []
+    assert asyncio.run(channel_cards.tap(channel_cards.Choice(7, "s", old), SimpleNamespace(id=3))).line == "Skipped."
+    assert calls == [False]
 
 
 def test_switching_who_a_reply_goes_from_shows_the_card_again(
@@ -375,19 +409,20 @@ def test_switching_who_a_reply_goes_from_shows_the_card_again(
     monkeypatch.setattr("openexecutive.audit.log_event", lambda *a, **k: None)
     again = channel_cards.Tapped(
         "Changed who it goes from. Check it, then send it.", "Reply ready to send\nFrom Ada now",
-        (("Send from Ada, cc me", "a"), ("Send from me", "x"), ("Skip", "s")),
+        (("Send from Ada, cc me", "card:7:a:1234abcd"), ("Send from me", "card:7:x:1234abcd"),
+         ("Skip", "card:7:s:1234abcd")),
     )
 
-    async def tap(decision_id: int, choice: str, who: Any) -> channel_cards.Tapped:
-        assert (decision_id, choice) == (7, "x")
+    async def tap(tapped: channel_cards.Choice, who: Any) -> channel_cards.Tapped:
+        assert tapped == channel_cards.Choice(7, "x", "0000beef")
         return again
 
     monkeypatch.setattr(channel_cards, "tap", tap)
     asyncio.run(telegram_bot._handle_card_tap(
-        callback_id="q1", chat_id=4242, message_id=9, card_text="Reply ready to send", data="card:7:x", token=TOKEN,
+        callback_id="q1", chat_id=4242, message_id=9, card_text="Reply ready to send", data="card:7:x:0000beef", token=TOKEN,
     ))
     edited = fake_telegram.posts[1][1]
     assert edited["text"] == "Reply ready to send\nFrom Ada now\n\nChanged who it goes from. Check it, then send it."
     assert [row[0]["callback_data"] for row in edited["reply_markup"]["inline_keyboard"]] == [
-        "card:7:a", "card:7:x", "card:7:s",
+        "card:7:a:1234abcd", "card:7:x:1234abcd", "card:7:s:1234abcd",
     ]

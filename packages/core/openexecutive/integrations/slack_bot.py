@@ -484,11 +484,10 @@ def _card_blocks(
     ]
     if decision_id is not None and options:
         blocks.append({"type": "actions", "elements": [
-            {"type": "button", "action_id": _CARD_ACTIONS[choice],
-             "text": {"type": "plain_text", "text": label},
-             "value": channel_cards.callback_data(decision_id, choice),
+            {"type": "button", "action_id": _CARD_ACTIONS[channel_cards.choice_of(data)],
+             "text": {"type": "plain_text", "text": label}, "value": data,
              **({"style": "primary"} if i == 0 else {})}
-            for i, (label, choice) in enumerate(options)
+            for i, (label, data) in enumerate(options)
         ]})
     return blocks
 
@@ -503,7 +502,7 @@ async def _send_cards(client: Any, channel: str, cards: list[int]) -> None:
         try:
             text = await asyncio.to_thread(channel_cards.card_text, decision_id)
             if text:
-                options = await asyncio.to_thread(channel_cards.card_options, decision_id)
+                options = await asyncio.to_thread(channel_cards.card_options, decision_id, text)
                 await client.chat_postMessage(
                     channel=channel, text=text[:_MAX_CARD_TEXT], blocks=_card_blocks(text, decision_id, options),
                     unfurl_links=False, unfurl_media=False,
@@ -636,9 +635,9 @@ async def handle_card_tap(body: dict[str, Any], client: Any) -> None:
             except Exception:
                 logger.warning("Slack: couldn't answer an ignored card tap", exc_info=True)
         return
-    decision_id, choice = parsed
-    tapped = await channel_cards.tap(decision_id, choice, person)
-    name = channel_cards.CHOICE_NAMES[choice]
+    decision_id = parsed.decision_id
+    tapped = await channel_cards.tap(parsed, person)
+    name = channel_cards.CHOICE_NAMES[parsed.choice]
     await asyncio.to_thread(
         audit_log,
         "integration_inbound",

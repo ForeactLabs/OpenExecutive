@@ -40,8 +40,10 @@ has Send and Skip, an invite Accept and Skip.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
+import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -64,6 +66,7 @@ SWITCH = "x"
 _CHOICES = (APPROVE, SKIP, ALLOW, SWITCH)
 # Each choice in a word, for a tap's audit row.
 CHOICE_NAMES = {APPROVE: "approve", SKIP: "skip", ALLOW: "allow", SWITCH: "switch"}
+_VERSION = re.compile(r"^[0-9a-f]{8}$")
 # The card's two parts, as on the app's cards.
 HAPPENED = "What happened"
 WILL_DO = "What I'll do"
@@ -154,20 +157,40 @@ def card_here(session: Any) -> bool:
     return bool(getattr(session, "from_web_chat", False)) or shows_cards(session)
 
 
-def callback_data(decision_id: int, choice: str) -> str:
-    return f"{_PREFIX}:{decision_id}:{choice}"
+def version(text: str) -> str:
+    """What a card said, in short: a tap carries the version of the card it
+    was on, so it does only what that card showed (``tap``)."""
+    return hashlib.sha256(text.encode()).hexdigest()[:8]
 
 
-def parse_choice(data: Any) -> tuple[int, str] | None:
-    """(decision id, choice) from a button's callback data, or None."""
+def callback_data(decision_id: int, choice: str, shown: str) -> str:
+    """A button's data: the card, the choice, and the version of ``shown``,
+    the card's words as the button's message shows them."""
+    return f"{_PREFIX}:{decision_id}:{choice}:{version(shown)}"
+
+
+@dataclass(frozen=True)
+class Choice:
+    decision_id: int
+    choice: str
+    version: str
+
+
+def choice_of(data: str) -> str:
+    """The choice in one of ``card_options``' callback data."""
+    return data.split(":")[2]
+
+
+def parse_choice(data: Any) -> Choice | None:
+    """The card, choice and version from a button's callback data, or None."""
     if not isinstance(data, str):
         return None
     parts = data.split(":")
-    if len(parts) != 3 or parts[0] != _PREFIX or parts[2] not in _CHOICES:
+    if len(parts) != 4 or parts[0] != _PREFIX or parts[2] not in _CHOICES:
         return None
-    if not parts[1].isdigit() or len(parts[1]) > 12:
+    if not parts[1].isdigit() or len(parts[1]) > 12 or not _VERSION.fullmatch(parts[3]):
         return None
-    return int(parts[1]), parts[2]
+    return Choice(int(parts[1]), parts[2], parts[3])
 
 
 def _when(start: Any, end: Any) -> str:
@@ -279,8 +302,9 @@ def card_text(decision_id: int) -> str | None:
 LABEL_MAX = 75
 
 
-def card_options(decision_id: int) -> tuple[tuple[str, str], ...]:
-    """A card's buttons as (label, choice), the Executive's pick first and
+def card_options(decision_id: int, shown: str) -> tuple[tuple[str, str], ...]:
+    """A card's buttons as (label, callback data) for the card's words
+    ``shown`` (``card_text``), the Executive's pick first and
     Skip last, as on the app's card: Do it on a held step, Send from me or
     from the Executive (and the other sender, ``SWITCH``) on a reply,
     Accept on an invite, Approve on the rest; and, on a card that can teach
@@ -307,7 +331,7 @@ def card_options(decision_id: int) -> tuple[tuple[str, str], ...]:
     if other is not None:
         options.append(other)
     options.append(("Skip", SKIP))
-    return tuple((text[:LABEL_MAX], choice) for text, choice in options)
+    return tuple((text[:LABEL_MAX], callback_data(decision_id, choice, shown)) for text, choice in options)
 
 
 def _from_executive(instance: Any) -> bool:
@@ -391,14 +415,29 @@ class Tapped:
     options: tuple[tuple[str, str], ...] = ()
 
 
-async def tap(decision_id: int, choice: str, person: Any) -> Tapped:
+CHANGED = "This card changed. Here it is now."
+
+
+async def tap(tapped: Choice, person: Any) -> Tapped:
     """A tap on one of a card's buttons (``card_options``) by ``person``,
     the proven tapper: approve, approve and allow from now on, skip, or
     (a reply) switch who it goes from, which sends nothing and shows the
-    card again with its new words."""
+    card again with its new words. A tap on a card that says something
+    else now (switched meanwhile, changed in the app, an older copy of it)
+    does nothing but show the card as it is now, so what is done is always
+    what the tapped card showed. Skip is a skip, whatever it showed."""
+    decision_id, choice = tapped.decision_id, tapped.choice
+    if choice != SKIP:
+        current = card_text(decision_id)
+        if current is not None and version(current) != tapped.version:
+            return Tapped(CHANGED, current, card_options(decision_id, current))
     if choice == SWITCH:
         return await _switch(decision_id, person)
-    line = await resolve(decision_id, person, approve=choice != SKIP, allow=choice == ALLOW)
+    line = await resolve(
+        decision_id, person, approve=choice != SKIP, allow=choice == ALLOW,
+        # It showed the card as it is now.
+        shown_at=datetime.now(UTC).isoformat(),
+    )
     return Tapped(line)
 
 
@@ -431,15 +470,16 @@ async def _switch(decision_id: int, person: Any) -> Tapped:
 
         link = f"{get_settings().ui_base_url.rstrip('/')}/cards/{decision_id}"
         return Tapped(f"Changed who it goes from. It waits for your OK in the app: {link}")
-    # What a Send on it is checked against: the card as shown now.
-    mark_shown(decision_id)
-    return Tapped("Changed who it goes from. Check it, then send it.", text, card_options(decision_id))
+    return Tapped("Changed who it goes from. Check it, then send it.", text, card_options(decision_id, text))
 
 
-async def resolve(decision_id: int, person: Any, *, approve: bool, allow: bool = False) -> str:
+async def resolve(
+    decision_id: int, person: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None,
+) -> str:
     """Approve or skip a card for ``person``, the proven tapper; ``allow``
-    is the "next time" button (approve, and allow it from now on). Returns
-    the line to show under the card."""
+    is the "next time" button (approve, and allow it from now on);
+    ``shown_at``: when the tapped card showed what it is now. Returns the
+    line to show under the card."""
     from fastapi import HTTPException
 
     from openexecutive.api.routes.decisions import resolve_in_chat
@@ -458,7 +498,7 @@ async def resolve(decision_id: int, person: Any, *, approve: bool, allow: bool =
     kind = instance.decision_class if instance is not None else ""
     _resolving.add(decision_id)
     try:
-        await resolve_in_chat(decision_id, person, approve=approve, allow=allow)
+        await resolve_in_chat(decision_id, person, approve=approve, allow=allow, shown_at=shown_at)
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else "it couldn't be done."
         return outcome_text(approve, detail)
@@ -567,24 +607,6 @@ def shown_at(decision_id: int, db_path: Path | None = None) -> str:
     return str(row[0]) if row else ""
 
 
-def mark_shown(decision_id: int, now: datetime | None = None, db_path: Path | None = None) -> None:
-    """Card ``decision_id``, posted to its person's chat app, was shown
-    again (with new words) at ``now``: a tap on it is checked against that
-    (``shown_at``). Nothing when it wasn't posted."""
-    try:
-        conn = _connect(db_path)
-        try:
-            conn.execute(
-                "UPDATE chat_card_pushes SET pushed_at = ? WHERE decision_id = ? AND state = 'sent'",
-                ((now or datetime.now(UTC)).isoformat(), decision_id),
-            )
-            conn.commit()
-        finally:
-            conn.close()
-    except Exception:
-        logger.warning("channel_cards: couldn't note card %d shown again", decision_id, exc_info=True)
-
-
 def _mark_sent(decision_id: int, sent: bool, db_path: Path | None) -> None:
     conn = _connect(db_path)
     try:
@@ -691,7 +713,7 @@ async def push_waiting(now: datetime | None = None, *, db_path: Path | None = No
         if not text or not _mark_pushed(card.id, person.id, channel, now, db_path):
             continue
         try:
-            await _send(channel, person, card.id, text, card_options(card.id))
+            await _send(channel, person, card.id, text, card_options(card.id, text))
         except Exception:
             logger.warning("channel_cards: couldn't send card %d to %s", card.id, channel, exc_info=True)
             _settle(card.id, False, db_path)
@@ -748,7 +770,9 @@ __all__ = [
     "card_options",
     "card_text",
     "chat_for",
-    "mark_shown",
+    "Choice",
+    "choice_of",
+    "version",
     "maybe_push",
     "parse_choice",
     "push_waiting",

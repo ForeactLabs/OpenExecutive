@@ -336,12 +336,16 @@ def test_chat_app_card_names_the_executive(
 ) -> None:
     from openexecutive.integrations import channel_cards
 
+    def labelled() -> tuple[tuple[str, str], ...]:
+        options = channel_cards.card_options(card.id, "")
+        return tuple((label, channel_cards.choice_of(data)) for label, data in options)
+
     mailbox, card = _card(owner)
-    assert channel_cards.card_options(card.id) == (
+    assert labelled() == (
         ("Send from me", "a"), ("Send from Open Executive, cc me", "x"), ("Skip", "s"),
     )
     _switch(card, mailbox, owner, True)
-    assert channel_cards.card_options(card.id) == (
+    assert labelled() == (
         ("Send from Open Executive, cc me", "a"), ("Send from me", "x"), ("Skip", "s"),
     )
 
@@ -359,10 +363,18 @@ def test_a_chat_tap_switches_the_sender_and_shows_the_new_card(
         return await switch(card_id, person, executive=executive, gmail=mailbox)
 
     monkeypatch.setattr(send_from, "switch_for_work", in_this_mailbox)
-    tapped = asyncio.run(channel_cards.tap(card.id, channel_cards.SWITCH, owner))
+    shown = channel_cards.card_text(card.id) or ""
+    tapped = asyncio.run(channel_cards.tap(
+        channel_cards.Choice(card.id, channel_cards.SWITCH, channel_cards.version(shown)), owner,
+    ))
     assert tapped.line == "Changed who it goes from. Check it, then send it."
     assert "this reply from Open Executive, with you on cc." in tapped.text
-    assert tapped.options[0] == ("Send from Open Executive, cc me", "a")
+    assert tapped.options[0] == (
+        "Send from Open Executive, cc me", channel_cards.callback_data(card.id, "a", tapped.text),
+    )
+    # The old card's Send from me now only shows the card as it is.
+    stale = channel_cards.Choice(card.id, channel_cards.APPROVE, channel_cards.version(shown))
+    assert asyncio.run(channel_cards.tap(stale, owner)).line == channel_cards.CHANGED
     # A switch sends nothing.
     assert sends == [] and _fresh(card).status == "proposed"
 

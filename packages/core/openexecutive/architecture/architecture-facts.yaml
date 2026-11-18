@@ -9215,7 +9215,10 @@ integrations:
     last; on an email reply the other sender too, which switches it and
     shows the card again without sending; on a card In training the pick
     and on its own next time), its text saying What happened and What
-    I'll do as the app's card does, and its ``<channel>`` block
+    I'll do as the app's card does. Each button's data carries the
+    version of the words it was posted with (``channel_cards.version``):
+    a tap on a card that reads differently now only shows it again as it
+    is, so a tap does only what its card showed. Its ``<channel>`` block
     says so (``cards_here``). A tap is taken only when ``from.id`` is the
     private chat's id on the verified webhook, and
     ``decisions.resolve_in_chat`` applies the web chat's who-may-decide
