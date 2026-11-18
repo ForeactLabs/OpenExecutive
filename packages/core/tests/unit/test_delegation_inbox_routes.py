@@ -444,3 +444,28 @@ def test_stop_ends_the_work_and_keeps_its_steps(
     # Someone else's card, or none: not found.
     assert client.post(url, headers=TEAMMATE).status_code in (403, 404)
     assert client.post("/delegation/replies/999999/stop", headers=OWNER).status_code == 404
+
+
+def test_undo_puts_back_the_words_from_before_a_change(
+    client: TestClient, ids: dict[str, int], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openexecutive.delegation import card_drafts
+    from openexecutive.memory.decision_ledger import get_decision_instance, update_open_payload
+
+    mailbox, card_id = _card(ids["principal"], monkeypatch)
+    monkeypatch.setattr("openexecutive.delegation.gmail.gmail_for", lambda email: mailbox)
+    monkeypatch.setenv("OE_LOCAL_LOGIN", "1")
+    card = get_decision_instance(card_id)
+    payload = inbox.card_payload(card)
+    first = payload["draft_body"]
+    # A change asked for on the card, as answers.change leaves it.
+    changed = {**payload, "draft_body": "Hi Dana,\n\nFriday works.\n\nOlivia",
+               card_drafts.UNDO_KEY: card_drafts.undo_point(payload)}
+    assert update_open_payload(card_id, changed, expected_json=card.proposed_payload_json)
+    assert client.get("/delegation/replies", headers=OWNER).json()["cards"][0]["can_undo"] is True
+    resp = client.post(f"/delegation/replies/{card_id}/undo", headers=OWNER)
+    assert resp.status_code == 200, resp.json()
+    back = resp.json()
+    assert back["draft_body"] == first and back["can_undo"] is False
+    assert back["conversation"][-1]["text"] == card_drafts.NOTE_UNDONE
+    assert mailbox.drafts[payload["draft_id"]].message.text == first
