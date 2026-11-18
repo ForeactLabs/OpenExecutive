@@ -1846,6 +1846,7 @@ def test_handled_overnight_rows_are_structured_and_track_current_status(
     survivor_id = _alert("Payout delay")
     dup_id = _alert("Payout delay (duplicate)")
     acked_id = _alert("SOC2 evidence request")
+    suggested_id = _alert("Competitor cut prices")
     alert_store.set_status(closed_id, "resolved")
     alert_store.set_status(acked_id, "ack")
     alert_store.set_status(undone_id, "dismissed")
@@ -1867,6 +1868,10 @@ def test_handled_overnight_rows_are_structured_and_track_current_status(
     al.log("alert_review_escalated", "Escalated 'SOC2 evidence request' to high (sent)", actor="executive",
            details={"alert_id": acked_id, "headline": "SOC2 evidence request", "new_severity": "high",
                     "evidence": "auditor deadline Friday"})
+    al.log("alert_review_suggested_workflow", "Suggested Pricing Review for 'Competitor cut prices'",
+           actor="executive",
+           details={"alert_id": suggested_id, "headline": "Competitor cut prices",
+                    "workflow_name": "pricing_review", "workflow_title": "Pricing Review"})
     al.log("watchlist_research_added", "Started watching stock-acme — competitor ticker", actor="executive",
            details={"slug": "stock-acme", "rationale": "competitor ticker named on Sales"})
     al.log("alert_review_changed", "Updated 'Something' — rewritten", actor="executive",
@@ -1891,6 +1896,9 @@ def test_handled_overnight_rows_are_structured_and_track_current_status(
     routed = rows["Q3 pricing page copy stale"]
     assert routed["target"] == "Dana Kim" and routed["outcome"] == "proposed"
     assert routed["status"] == "open"
+
+    # A suggested workflow is named by its title, never its key.
+    assert rows["Competitor cut prices"]["target"] == "Pricing Review"
 
     merged = rows["Payout delay (duplicate)"]
     assert merged["target"] == "Payout delay" and merged["superseded_by_alert_id"] == survivor_id
