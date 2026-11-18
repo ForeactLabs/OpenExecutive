@@ -940,7 +940,7 @@
       "status": null,
       "surfaced": "",
       "tags": [],
-      "tell_me": false,
+      "tell_me": true,
       "turns": [],
       "waiting_because": ""
     },
@@ -1101,7 +1101,7 @@
       "status": null,
       "surfaced": "",
       "tags": [],
-      "tell_me": false,
+      "tell_me": true,
       "turns": [],
       "waiting_because": ""
     },

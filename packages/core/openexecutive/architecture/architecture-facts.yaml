@@ -4133,6 +4133,16 @@ departments:
     person's words, never the card, and approves at once through the same
     Approve as a tap (Approvals still decide) only when both say go;
     otherwise the reply is "Here's the plan now. Pick it to go ahead."
+    A held step's card (take_the_lead_action, department_action) has the
+    same Or tell me at POST /decisions/{id}/say: replan.rewrite_fields
+    (tool rewrite_fields, actor card_fields, constant FIELDS_SYSTEM, the
+    same hourly budget) returns only the step's editable fields that
+    changed, kept as said_input on the decision's payload
+    (update_open_payload, compare-and-set); card_details.served shows the
+    step with it put in, and Approve sends it as edits.input, so the
+    step's own rules for a change (take_the_lead.apply_edits) apply there.
+    A go is judged by replan.said_go against the fields the card showed
+    and approves through the class's own approve, as a tap.
     Both what the person said and the reply are kept as the card's
     conversation (alert_card_turns), each line with the person it is
     between (person_id); /today and the say response show a reader only

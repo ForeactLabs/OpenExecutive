@@ -469,3 +469,134 @@ def test_a_replaced_reply_whose_card_was_opened_closes_with_it(team: dict[str, P
     assert [f"decision_instance:{second}" in a.topic_tags for a in live] == [True]
 
 
+
+
+# ── words said on the card ────────────────────────────────────────────────────
+
+
+def _model(monkeypatch: pytest.MonkeyPatch, fields: dict[str, str], *, go: bool = False,
+           said_go: bool | None = None) -> list[str]:
+    from openexecutive.alerts import replan
+
+    replan._CALLS.clear()
+    replan._CALLER_CALLS.clear()
+    turns: list[str] = []
+
+    async def call(system: str, tool: dict[str, Any], turn: str, *, actor: str, max_tokens: int = 0) -> dict[str, Any]:
+        turns.append(turn)
+        if actor == "card_go":
+            if said_go is None:
+                raise replan.ReplanError("unavailable", "Couldn't read that just now. Try again.")
+            return {"go": said_go}
+        return {"fields": [{"field": k, "value": v} for k, v in fields.items()], "go": go, "reply": "Made it shorter."}
+
+    monkeypatch.setattr(replan, "_call_tool", call)
+    return turns
+
+
+def _mail_card(team: dict[str, Person]) -> int:
+    mail = {"to": "dana@else.example", "subject": "Hi", "body": "Draft text"}
+    held = levels.hold("google_workspace__send_gmail_message", mail, mcp=True, reason=levels.OWN_MAIL,
+                       session=_ask_as(team["sam"]))
+    return int(json.loads(held)["decision_instance_id"])
+
+
+def _carry_out(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    done: list[dict[str, Any]] = []
+
+    async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bool = False) -> str:
+        done.append(payload)
+        return json.dumps({"status": "sent"})
+
+    monkeypatch.setattr(ttl, "carry_out", carry_out)
+    return done
+
+
+OWNER = {"x-caller-email": "olivia@co.example"}
+
+
+def test_words_on_a_held_step_rewrite_its_fields_and_approve_sends_them(
+    client: TestClient, team: dict[str, Person], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    done = _carry_out(monkeypatch)
+    turns = _model(monkeypatch, {"body": "Short text", "to": "x@else.example"})
+    decision_id = _mail_card(team)
+    res = client.post(f"/decisions/{decision_id}/say", json={"text": "make it shorter"}, headers=OWNER)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["reply"] == "Made it shorter." and body["approved"] is None
+    # Only the step's own editable fields change: who it goes to never does.
+    assert {f["field"]: f["value"] for f in body["fields"]} == {"subject": "Hi", "body": "Short text"}
+    assert "<person_said>\nmake it shorter" in turns[0]
+    # The card shows the step as it will go.
+    served = json.loads(client.get(f"/decisions/{decision_id}", headers=OWNER).json()["proposed_payload_json"])
+    assert served["input"]["body"] == "Short text" and served["said_input"] == {"body": "Short text"}
+    assert [f["value"] for f in served["fields"]] == ["Hi", "Draft text"]
+    # Approve sends what was said as the edit, under the step's own rules.
+    ok = client.post(f"/decisions/{decision_id}/approve", json={"edits": {"input": {"body": "Short text"}}},
+                     headers=OWNER)
+    assert ok.status_code == 200, ok.text
+    assert done[0]["input"]["body"] == "Short text"
+    after = ledger.get_decision_instance(decision_id)
+    assert after is not None and after.status == "approved_with_edit"
+    # What was said stays on the card, for them.
+    from openexecutive.alerts import card_talk
+
+    card = alerts_store.get_alert_by_external(ledger.DECISION_ALERT_SOURCE, f"decision:{decision_id}")
+    assert card is not None
+    talk = card_talk.read([card])[card.id]  # type: ignore[index]
+    assert [(t.who, t.text) for t in talk.turns] == [("you", "make it shorter"), ("me", "Made it shorter.")]
+
+
+def test_a_go_on_a_held_step_approves_it_at_once(
+    client: TestClient, team: dict[str, Person], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    done = _carry_out(monkeypatch)
+    _model(monkeypatch, {"body": "Short text"}, go=True, said_go=True)
+    decision_id = _mail_card(team)
+    seen = {"subject": "Hi", "body": "Draft text"}
+    res = client.post(f"/decisions/{decision_id}/say", json={"text": "shorter, then send it", "seen": seen},
+                      headers=OWNER)
+    assert res.status_code == 200, res.text
+    assert res.json()["approved"]["status"] == "approved_with_edit"
+    assert done[0]["input"]["body"] == "Short text"
+
+
+def test_a_go_that_cant_be_read_leaves_the_step_waiting(
+    client: TestClient, team: dict[str, Person], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    done = _carry_out(monkeypatch)
+    _model(monkeypatch, {"body": "Short text"}, go=True, said_go=None)
+    decision_id = _mail_card(team)
+    res = client.post(f"/decisions/{decision_id}/say", json={"text": "shorter, then send it"}, headers=OWNER)
+    assert res.status_code == 200, res.text
+    assert res.json()["approved"] is None and done == []
+    instance = ledger.get_decision_instance(decision_id)
+    assert instance is not None and instance.status == ledger.STATUS_PROPOSED
+
+
+def test_words_on_a_held_step_are_for_the_person_it_waits_on(
+    client: TestClient, team: dict[str, Person], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _model(monkeypatch, {"text": "Hi there"})
+    decision_id = _hold(team)
+    assert client.post(f"/decisions/{decision_id}/say", json={"text": "say hi"},
+                       headers={"x-caller-email": RIA}).status_code == 404
+    res = client.post(f"/decisions/{decision_id}/say", json={"text": "say hi"}, headers={"x-caller-email": SAM})
+    assert res.status_code == 200, res.text
+
+
+def test_a_card_for_several_calls_takes_no_words(
+    client: TestClient, team: dict[str, Person], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.orchestrator.department_gate import Verdict
+
+    turns = _model(monkeypatch, {})
+    verdict = Verdict(run=False, approver_person_id=team["owner"].id, reason="it read your own mail first")
+    steps = [_rename(n) for n in range(1, 4)]
+    decision_id = gate.hold(
+        team["owner"], "google_workspace__update_drive_file", steps[0], verdict,
+        mcp=True, held=True, more=steps[1:],
+    )
+    res = client.post(f"/decisions/{decision_id}/say", json={"text": "rename it"}, headers=OWNER)
+    assert res.status_code == 409 and turns == []

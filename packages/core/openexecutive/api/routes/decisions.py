@@ -1078,6 +1078,138 @@ async def approve_decision(
     return _served(await spec.approve(instance, body, request, resolver))
 
 
+class StepSayBody(BaseModel):
+    """Words said on a held step's card (Take the lead, a teammate's held
+    send): ``text``, and ``seen`` the fields as the card showed them, so a
+    go is judged against what they read."""
+
+    text: str = ""
+    seen: dict[str, str] = {}
+
+
+class StepFieldView(BaseModel):
+    field: str
+    label: str
+    value: str
+    long: bool = False
+
+
+class StepSayResponse(BaseModel):
+    # What the Executive said back.
+    reply: str
+    # The step's fields as they read now, with what was said put in.
+    fields: list[StepFieldView]
+    # The card once a go carried it out; None while it still waits.
+    approved: DecisionInstance | None = None
+
+
+SAID_INPUT = "said_input"
+SAY_MAX_CHARS = 500
+_COULD_NOT_DO = "I couldn't do that. Tap to try again."
+
+
+def said_fields(payload: dict[str, Any]) -> list[StepFieldView]:
+    """A held step's editable fields as they read now: as filed, with what
+    was said on the card put in (``said_input``)."""
+    from openexecutive.orchestrator import card_details, take_the_lead
+
+    if len(card_details.held_steps(payload)) > 1:
+        return []
+    source: dict[str, Any] = payload["input"] if isinstance(payload.get("input"), dict) else {}
+    said_raw = payload.get(SAID_INPUT)
+    said: dict[str, Any] = said_raw if isinstance(said_raw, dict) else {}
+    return [
+        StepFieldView(
+            field=str(f["field"]), label=str(f["label"]), long=bool(f.get("long")),
+            value=str(said.get(f["field"], f["value"])),
+        )
+        for f in take_the_lead.editable_fields(str(payload.get("tool") or ""), source, mcp=bool(payload.get("mcp")))
+    ]
+
+
+@router.post("/decisions/{instance_id}/say", response_model=StepSayResponse)
+async def say_on_step(instance_id: int, body: StepSayBody, request: Request) -> StepSayResponse:
+    """Words said on a held step's card ("make it shorter", "yes, send it").
+    One fast call rewrites the step's fields from them; the card keeps the
+    new fields, and Approve sends them as the edit, so the step's own rules
+    for a change apply there as for a typed one. When they said to go ahead
+    (judged from their words and the fields alone, ``replan.said_go``), it
+    approves at once, the same as a tap. What was said stays on the card,
+    for them only."""
+    from openexecutive.alerts import card_talk, replan
+    from openexecutive.alerts.store import get_alert_by_external
+    from openexecutive.memory.decision_ledger import decision_alert_external_id, update_open_payload
+
+    line = " ".join((body.text or "").split())
+    if not line:
+        raise HTTPException(status_code=422, detail="Say something first.")
+    if len(line) > SAY_MAX_CHARS:
+        raise HTTPException(status_code=422, detail=f"Keep it under {SAY_MAX_CHARS} characters.")
+    instance = _visible_instance(instance_id, request)
+    if instance.decision_class not in _HELD_CLASSES:
+        raise HTTPException(status_code=409, detail="Use this card's own buttons.")
+    resolver = _resolver(instance, request)
+    if instance.status != STATUS_PROPOSED:
+        raise HTTPException(status_code=409, detail="This card was already answered.")
+    payload = _parse_payload(instance)
+    fields = said_fields(payload)
+    if not fields:
+        raise HTTPException(status_code=409, detail="This one can't be changed from its card.")
+    try:
+        new = await replan.rewrite_fields(
+            str(payload.get("summary") or ""),
+            [replan.StepField(field=f.field, label=f.label, value=f.value) for f in fields],
+            line,
+            caller_key=api_caller.caller(request).email,
+        )
+    except replan.ReplanError as exc:
+        code = {"empty": 422, "too_long": 422, "too_many": 429}.get(exc.code, 503)
+        raise HTTPException(status_code=code, detail=exc.message) from exc
+
+    # The fields as filed: what was said is kept as the change from these.
+    original = {f.field: f.value for f in said_fields({**payload, SAID_INPUT: {}})}
+    now = {**{f.field: f.value for f in fields}, **new.values}
+    if new.values:
+        said = {k: v for k, v in now.items() if v != original.get(k)}
+        changed = {**payload, SAID_INPUT: said}
+        if not update_open_payload(instance_id, changed, expected_json=instance.proposed_payload_json):
+            raise HTTPException(status_code=409, detail="This card changed meanwhile. Look again.")
+        payload = changed
+        fields = said_fields(payload)
+
+    alert = get_alert_by_external(DECISION_ALERT_SOURCE, decision_alert_external_id(instance_id))
+    talk_id = alert.id if alert is not None else None
+    if talk_id is not None:
+        card_talk.add_turn(talk_id, "you", line, person_id=resolver)
+
+    reply, approved = new.reply, None
+    if new.go:
+        step = [replan.StepField(field=f.field, label=f.label, value=f.value) for f in fields]
+        seen = [replan.StepField(field=f.field, label=f.label, value=body.seen.get(f.field, "")) for f in fields]
+        try:
+            go = await replan.said_go(
+                replan.step_text(step), line, before=replan.step_text(seen) if body.seen else None,
+                caller_key=api_caller.caller(request).email,
+            )
+        except replan.ReplanError:
+            go = False
+        if go:
+            edits = {f.field: f.value for f in fields if f.value != original.get(f.field)}
+            fresh = get_decision_instance(instance_id)
+            try:
+                if fresh is None:
+                    raise HTTPException(status_code=409, detail=_COULD_NOT_DO)
+                approved = await _spec_for(fresh).approve(
+                    fresh, ApproveBody(edits={"input": edits} if edits else None), request, resolver,
+                )
+                approved = _served(approved)
+            except HTTPException:
+                reply = _COULD_NOT_DO
+    if talk_id is not None:
+        card_talk.add_turn(talk_id, "me", reply, person_id=resolver)
+    return StepSayResponse(reply=reply, fields=fields, approved=approved)
+
+
 @router.post("/decisions/{instance_id}/reject", response_model=DecisionInstance)
 async def reject_decision(instance_id: int, body: RejectBody, request: Request) -> DecisionInstance:
     instance = _visible_instance(instance_id, request)

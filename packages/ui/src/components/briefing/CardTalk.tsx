@@ -20,7 +20,7 @@ import { buttonClass } from "@/components/ui/Button";
 const FIELD =
   "min-w-0 flex-1 resize-none [field-sizing:content] max-h-40 bg-transparent px-1 py-1 text-[15px] leading-snug text-fg placeholder:text-fg-subtle focus:outline-none disabled:opacity-50";
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+export function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="mt-3">
       <div className="mb-0.5 text-xs font-semibold uppercase tracking-wide text-fg-subtle">{title}</div>
@@ -29,30 +29,27 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-// "Or tell me…": a line said on a card. Also the whole of a watch row's
-// "Correct it" (AwarenessPanels).
-export function TellMe({
-  alertId,
-  seenPlan = "",
+// "Or tell me…": a line said on a card. ``say`` takes it where it goes and
+// throws with a message to show when it couldn't.
+export function SayBox({
+  id,
   disabled = false,
   autoFocus = false,
   onSending,
-  onSaid,
+  say,
   onFailed,
 }: {
-  alertId: number;
-  // The plan the card shows as they speak.
-  seenPlan?: string;
+  id: string;
   disabled?: boolean;
   autoFocus?: boolean;
   onSending?: (text: string) => void;
-  onSaid: (result: SayResult, said: string) => void;
+  say: (text: string) => Promise<void>;
   onFailed?: () => void;
 }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const fieldId = `card-say-${alertId}`;
+  const fieldId = `card-say-${id}`;
 
   const send = async () => {
     const value = text.trim();
@@ -61,9 +58,8 @@ export function TellMe({
     setError(null);
     onSending?.(value);
     try {
-      const r = await sayOnCard(alertId, value, seenPlan);
+      await say(value);
       setText("");
-      onSaid(r, value);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't send that. Try again.");
       onFailed?.();
@@ -120,6 +116,74 @@ export function TellMe({
         </p>
       )}
     </form>
+  );
+}
+
+// "Or tell me…" on a Needs you card (POST /alerts/{id}/say). Also the whole
+// of a watch row's "Correct it" (AwarenessPanels).
+export function TellMe({
+  alertId,
+  seenPlan = "",
+  disabled = false,
+  autoFocus = false,
+  onSending,
+  onSaid,
+  onFailed,
+}: {
+  alertId: number;
+  // The plan the card shows as they speak.
+  seenPlan?: string;
+  disabled?: boolean;
+  autoFocus?: boolean;
+  onSending?: (text: string) => void;
+  onSaid: (result: SayResult, said: string) => void;
+  onFailed?: () => void;
+}) {
+  return (
+    <SayBox
+      id={String(alertId)}
+      disabled={disabled}
+      autoFocus={autoFocus}
+      onSending={onSending}
+      onFailed={onFailed}
+      say={async (text) => onSaid(await sayOnCard(alertId, text, seenPlan), text)}
+    />
+  );
+}
+
+// What was said on a card, and what the Executive said back; their words
+// just sent show with "On it…" until the answer comes.
+export function Turns({
+  turns,
+  sending = null,
+  children,
+}: {
+  turns: { who: "you" | "me"; text: string }[];
+  sending?: string | null;
+  children?: React.ReactNode;
+}) {
+  if (turns.length === 0 && !sending && !children) return null;
+  return (
+    <div className="mt-3 space-y-2 border-t border-line/60 pt-3" aria-live="polite">
+      {turns.map((t, i) =>
+        t.who === "you" ? (
+          <div key={i} className="ml-8 rounded-xl bg-accent/10 px-3 py-2 text-[15px] leading-snug text-fg break-words">
+            {t.text}
+          </div>
+        ) : (
+          <p key={i} className="text-[15px] leading-snug text-fg break-words">
+            {t.text}
+          </p>
+        ),
+      )}
+      {sending && (
+        <>
+          <div className="ml-8 rounded-xl bg-accent/10 px-3 py-2 text-[15px] leading-snug text-fg break-words">{sending}</div>
+          <p className="text-[15px] text-fg-muted">On it…</p>
+        </>
+      )}
+      {children}
+    </div>
   );
 }
 
@@ -192,28 +256,9 @@ export default function CardTalk({
     <div>
       {view.plan && view.plan_title && <Section title={view.plan_title}>{view.plan}</Section>}
 
-      {(turns.length > 0 || sending || approval) && (
-        <div className="mt-3 space-y-2 border-t border-line/60 pt-3" aria-live="polite">
-          {turns.map((t, i) =>
-            t.who === "you" ? (
-              <div key={i} className="ml-8 rounded-xl bg-accent/10 px-3 py-2 text-[15px] leading-snug text-fg break-words">
-                {t.text}
-              </div>
-            ) : (
-              <p key={i} className="text-[15px] leading-snug text-fg break-words">
-                {t.text}
-              </p>
-            ),
-          )}
-          {sending && (
-            <>
-              <div className="ml-8 rounded-xl bg-accent/10 px-3 py-2 text-[15px] leading-snug text-fg break-words">{sending}</div>
-              <p className="text-[15px] text-fg-muted">On it…</p>
-            </>
-          )}
-          {approval && <Working approval={approval} />}
-        </div>
-      )}
+      <Turns turns={turns} sending={sending}>
+        {approval && <Working approval={approval} />}
+      </Turns>
 
       {options.length > 0 && onPick && !going && (
         <div className="mt-3 flex flex-col gap-2" role="group" aria-label="Options">

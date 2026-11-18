@@ -7413,6 +7413,15 @@ export interface LeadCardPayload {
   kind: string;
   fields: LeadCardField[];
   allow?: { key: string; label: string };
+  // What was said on the card, put into its fields (by field): Approve
+  // sends it as the edit.
+  said: Record<string, string>;
+}
+
+function saidInput(payload: { said_input?: unknown }): Record<string, string> {
+  const said = payload.said_input;
+  if (!said || typeof said !== "object") return {};
+  return Object.fromEntries(Object.entries(said).filter(([, v]) => typeof v === "string")) as Record<string, string>;
 }
 
 // The page reads a card's details in plain words (``card_details.served``):
@@ -7456,6 +7465,7 @@ export async function getLeadCard(id: number, signal?: AbortSignal): Promise<Lea
     kind: String(payload.kind ?? ""),
     fields: Array.isArray(payload.fields) ? payload.fields : [],
     allow: payload.allow && typeof payload.allow.key === "string" ? payload.allow : undefined,
+    said: saidInput(payload),
   };
 }
 
@@ -7469,6 +7479,8 @@ export interface HeldActionPayload {
   details: CardDetail[];
   // What Edit may change before Approve (an email's subject and text).
   fields: LeadCardField[];
+  // What was said on the card, put into its fields: Approve sends it.
+  said: Record<string, string>;
 }
 
 export async function getHeldAction(id: number, signal?: AbortSignal): Promise<HeldActionPayload> {
@@ -7485,7 +7497,27 @@ export async function getHeldAction(id: number, signal?: AbortSignal): Promise<H
     fields: (Array.isArray(payload.fields) ? payload.fields : []).filter(
       (f: { field?: unknown; value?: unknown }) => typeof f?.field === "string" && typeof f?.value === "string",
     ),
+    said: saidInput(payload),
   };
+}
+
+// Words said on a held step's card (Take the lead, a teammate's held send):
+// its fields as they read now, what the Executive said back, and the card
+// once a go carried it out.
+export interface StepSayResult {
+  reply: string;
+  fields: LeadCardField[];
+  approved: DecisionInstance | null;
+}
+
+export async function sayOnStep(id: number, text: string, seen: Record<string, string>): Promise<StepSayResult> {
+  const res = await fetch(`${API_BASE}/decisions/${id}/say`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, seen }),
+  });
+  if (!res.ok) throw await leadError(res, "Couldn't send that. Try again.");
+  return res.json();
 }
 
 // Approve a Take the lead card: ``input`` changes its editable fields first,

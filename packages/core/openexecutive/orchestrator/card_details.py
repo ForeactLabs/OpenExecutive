@@ -546,6 +546,12 @@ def served(payload: dict[str, Any]) -> dict[str, Any]:
     tool_input = payload.get("input")
     if not isinstance(tool_input, dict):
         return payload
+    said = payload.get("said_input")
+    if isinstance(said, dict) and said:
+        # What was said on the card (api/routes/decisions.say_on_step): the
+        # page shows the step as it will go once approved with it.
+        tool_input = {**tool_input, **{k: v for k, v in said.items() if isinstance(v, str)}}
+        payload = {**payload, "input": tool_input}
     out = dict(payload)
     steps = held_steps(payload)
     out["details"] = plain_steps(str(payload.get("tool") or ""), steps) + _why(payload, steps)
