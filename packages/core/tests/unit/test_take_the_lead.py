@@ -189,6 +189,14 @@ def test_a_team_files_name_and_who_it_reaches_still_count(owner: Any) -> None:
     shared = {"document_id": "d" * 30, "text": "Pay $4,000", "share_with": "stranger@far.example"}
     hit = ttl.check("google_workspace__modify_doc_text", shared, lead=_lead(), rules=[], mcp=True)
     assert hit is not None and hit.kind == "money"
+    # A share reaches whoever it names, nested too (Microsoft 365 puts them in ``body``).
+    share = {"driveId": "d1", "driveItemId": "i1", "body": {"recipients": [{"email": "bob@far.example"}],
+                                                          "roles": ["read"]}}
+    for tool in ("microsoft_365__share-drive-item", "microsoft_365__update-drive-item"):
+        assert "bob@far.example" in ttl._reach_addresses(tool, share), tool
+        assert not ttl._team_only(tool, share), tool
+    hit = ttl.check("microsoft_365__share-drive-item", share, lead=_lead(), rules=[], mcp=True)
+    assert hit is not None
 
 
 def test_a_team_files_known_name_counts_when_the_step_gives_only_an_id(

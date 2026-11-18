@@ -629,12 +629,25 @@ def _reach_addresses(tool: str, tool_input: dict[str, Any]) -> list[str]:
     ``_MCP_RECIPIENT_KEYS``)."""
     addresses, _ = _targets(tool, tool_input)
     named: Any = tool_input
-    if _file_tool(tool) and not _MAIL_TOOL_RE.search(tool):
-        named = {
-            k: v for k, v in tool_input.items()
-            if _MCP_REACH_ARG_RE.search(str(k)) or k in _MCP_PEOPLE_KEYS or k in _MCP_RECIPIENT_KEYS
-        }
+    # A share, permission or delete step reaches whoever it names anywhere.
+    if _file_tool(tool) and not _MAIL_TOOL_RE.search(tool) and not _mcp_deletes(tool, tool_input):
+        named = list(_reach_args(tool_input))
     return [*_EMAIL_RE.findall("\n".join(_strings(named))), *addresses]
+
+
+def _reach_args(value: Any) -> Iterator[Any]:
+    """The values of every argument, at any depth, whose name says it
+    reaches or opens to someone (Microsoft 365 puts a share's recipients
+    inside ``body``)."""
+    if isinstance(value, dict):
+        for k, v in value.items():
+            if _MCP_REACH_ARG_RE.search(str(k)) or k in _MCP_PEOPLE_KEYS or k in _MCP_RECIPIENT_KEYS:
+                yield v
+            else:
+                yield from _reach_args(v)
+    elif isinstance(value, (list, tuple)):
+        for v in value:
+            yield from _reach_args(v)
 
 
 # Tools that name who they reach by an id rather than an address.
