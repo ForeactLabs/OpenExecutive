@@ -699,7 +699,7 @@ def _pinned_turn(mode: str, **pin: Any) -> tuple[Any, Any, Any]:
 
     session = Session(from_web_chat=True)
     session.turn_delegation = TurnDelegation(  # type: ignore[attr-defined]
-        enabled=True, offered=True, touched_mail=True, read_mail=True, session_id=session.session_id, **pin,
+        enabled=True, offered=True, touched_mail=True, session_id=session.session_id, **{"read_mail": True, **pin},
     )
     token = current_session.set(session)
     state = outside_content.begin_turn(session, user_message="hi")
@@ -791,11 +791,14 @@ def test_a_turn_with_no_safety_state_holds_after_any_mail_read() -> None:
 @pytest.mark.parametrize(
     ("mode", "pin", "reading_now", "waits"),
     [
-        # Balanced: the read is still being checked, in this round or an
-        # earlier one, and the page opens anyway.
-        ("outsiders", {}, True, False),
-        ("outsiders", {}, False, False),
+        # Balanced: a read in this round, not yet seen by the model, lets
+        # the page open; once the check cleared every read, too.
+        ("outsiders", {"read_mail": False}, True, False),
+        ("outsiders", {"mail_vetted": True}, True, False),
         ("outsiders", {"mail_vetted": True}, False, False),
+        # A read from an earlier round no check cleared (a script ran beside
+        # it) holds it: the model has seen that mail.
+        ("outsiders", {}, False, True),
         # A read the check flagged, or couldn't check, still holds it.
         ("outsiders", {"mail_vetted": True, "mail_held": True}, False, True),
         ("outsiders", {"unchecked_mail": True}, False, True),
@@ -816,7 +819,7 @@ def test_opening_a_page_waits_only_for_flagged_mail_on_balanced(
             assert lockdown.mail_turn_withholds(
                 tool, {"url": "https://example.com"}, reading_now=reading_now
             ) is waits, tool
-        if mode == "outsiders" and not pin:
+        if mode == "outsiders" and pin == {"read_mail": False}:
             # A click or typing on the page still waits for the check.
             assert lockdown.mail_turn_withholds("run_script", {}, reading_now=reading_now)
     finally:

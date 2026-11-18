@@ -407,7 +407,7 @@ def mail_lock_holds(pinned: Any, *, reading_now: bool = False) -> bool:
 
 
 # Opening a page in the person's own browser: on Balanced it waits after a
-# mail read only when the read was flagged or couldn't be checked
+# mail read only until every read the model has seen was checked clean
 # (``_page_open_waits``). A page opened in the same round as the read was
 # asked for before the model saw what the mail said, so it carries none of it.
 PAGE_OPENS: frozenset[str] = frozenset({"browser_navigate", "browser_open_tab"})
@@ -415,8 +415,10 @@ PAGE_OPENS: frozenset[str] = frozenset({"browser_navigate", "browser_open_tab"})
 
 def _page_open_waits(pinned: Any) -> bool:
     """Whether opening a page waits for the mail this turn read: at Careful,
-    on a turn with no safety state (a workflow, a script outside chat), or
-    once a read was flagged or too big to check. Never raises; fails closed."""
+    on a turn with no safety state (a workflow, a script outside chat), once
+    a read was flagged or too big to check, or while a read from an earlier
+    round is still unvetted (a script ran beside it). Only this round's own
+    read, not yet seen by the model, lets it go. Never raises; fails closed."""
     from openexecutive.orchestrator import outside_content, outside_mode
 
     try:
@@ -425,7 +427,10 @@ def _page_open_waits(pinned: Any) -> bool:
             return True
         if state.mode == outside_mode.ASK and not outside_content.go_turn(state):
             return True
-        return getattr(pinned, "mail_held", False) is True or getattr(pinned, "unchecked_mail", False) is True
+        if getattr(pinned, "mail_held", False) is True or getattr(pinned, "unchecked_mail", False) is True:
+            return True
+        # A read from an earlier round the model has seen but no check cleared.
+        return getattr(pinned, "read_mail", False) is True and getattr(pinned, "mail_vetted", False) is not True
     except Exception:
         return True
 
