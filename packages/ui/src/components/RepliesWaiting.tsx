@@ -33,6 +33,7 @@ import {
   sendQuestion,
   senderLine,
   recipientNames,
+  firstNames,
 } from "@/lib/replyCards";
 import FeatureName from "@/components/FeatureName";
 import { SayBox, Section } from "@/components/briefing/CardTalk";
@@ -43,7 +44,7 @@ import NextTimeTick from "@/components/NextTimeTick";
 // (Delegate → Act as me → Draft replies to my inbox), shown as cards in
 // "Needs you". Each card starts closed, the way every Needs you card reads:
 // what happened (the Executive's line on what they asked), what I'll do
-// with "See the reply", the options (Send from me, or from the Executive
+// with "See reply to <name>" on its own line, the options (Send from me, or from the Executive
 // with you on cc; with something left to decide, its answers to tap), "Or
 // tell me…" and Skip. A go said in the box ("send it") brings up the same
 // confirm a tap on Send does. Open, top to bottom: what they wrote and the
@@ -467,6 +468,8 @@ export function ReplyCardItem({
   // Who the reply goes to, by name; a follow-up says nobody answered yet.
   const toNames = recipientNames(card.draft_to?.length ? card.draft_to : [who]);
   const toLine = followUp ? `Nobody answered your email to ${toNames}` : `To ${toNames}`;
+  // The closed card's way in to the reply, named for who it goes to.
+  const seeReply = followUp ? "See your follow-up" : `See reply to ${firstNames([who])}`;
   const tappable = questions.some((q) => q.choices.length > 0);
   // Open, everything shows at once, as a conversation: what they wrote, the
   // Executive's word on the reply with what's left to decide, anything that
@@ -707,19 +710,18 @@ export function ReplyCardItem({
             <>
               {/* Plain text: the summary is written from a stranger's email too. */}
               {gist && <Section title="What happened">{gist}</Section>}
-              <Section title="What I'll do">
-                {willDo}{" "}
-                <button
-                  type="button"
-                  onClick={() => setOpen(true)}
-                  disabled={busy}
-                  className="cursor-pointer text-accent underline underline-offset-2 disabled:opacity-50"
-                >
-                  See the reply
-                </button>
-              </Section>
+              <Section title="What I'll do">{willDo}</Section>
+              {/* On its own line, well clear of Send, so a tap to look never sends. */}
+              <button
+                type="button"
+                onClick={() => setOpen(true)}
+                disabled={busy}
+                className="mt-2 block cursor-pointer text-left text-[15px] font-medium text-accent underline underline-offset-2 disabled:opacity-50"
+              >
+                {seeReply}
+              </button>
               {options.length > 0 && (
-                <div className="mt-3 flex flex-col gap-2" role="group" aria-label="Options">
+                <div className="mt-5 flex flex-col gap-2" role="group" aria-label="Options">
                   {options.map((o, i) => (
                     <button
                       key={o.label}

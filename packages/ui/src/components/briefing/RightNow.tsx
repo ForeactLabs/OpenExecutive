@@ -16,7 +16,7 @@ import {
 } from "@/lib/api";
 import { clockLabel, draftRowId, rowTarget, rowWhen, type PointTarget } from "@/lib/rightNow";
 import FeatureName from "@/components/FeatureName";
-import { mailboxName, namesFromLine, safeGmailLink } from "@/lib/replyCards";
+import { firstNamesFromLine, mailboxName, namesFromLine, safeGmailLink } from "@/lib/replyCards";
 
 import { buildNarrativeSeed, type ContinueHandler } from "./shared";
 
@@ -27,7 +27,7 @@ import { buildNarrativeSeed, type ContinueHandler } from "./shared";
 // something. Built from the records on every load, never written by a
 // model, so a row reads the same each time. An email row has View email and
 // Reply (GET /delegation/mail, POST /delegation/mail/reply), a draft row has
-// Send, Open (the same card as under the chat, to change it first) and
+// Send, See draft to <name> (the same card as under the chat, to change it first) and
 // Don't send, which deletes it (/delegation/drafts/{row}), a chat row
 // opens the message in its app, and every row has a ✕ (POST
 // /today/right-now/dismiss) that keeps it gone until something newer lands
@@ -236,7 +236,9 @@ function DraftActions({
         <Button variant="primary" disabled={busy !== null} onClick={() => void run("send")}>
           {busy === "send" ? "Sending…" : "Send"}
         </Button>
-        <Button variant="secondary" disabled={busy !== null} onClick={() => setOpen(true)}>Open</Button>
+        <Button variant="secondary" disabled={busy !== null} onClick={() => setOpen(true)}>
+          See draft to {firstNamesFromLine(row.who)}
+        </Button>
         <Button variant="ghost" className="ml-auto" disabled={busy !== null} onClick={() => void run("delete")}>
           {busy === "delete" ? "Removing…" : "Don't send"}
         </Button>

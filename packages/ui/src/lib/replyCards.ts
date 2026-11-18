@@ -215,8 +215,30 @@ export function recipientNames(list: readonly string[]): string {
   return `${names.slice(0, 2).join(", ")} and ${names.length - 2} more`;
 }
 
+// Right now's draft rows name who they go to as one line, "Name (address),
+// Name (address)": its entries, one per person.
+function lineEntries(line: string): string[] {
+  return line.match(/[^,(]+\([^)]*\)?|[^,]+/g) ?? [];
+}
+
 /** Right now's draft rows name who they go to as one line, "Name (address),
  * Name (address)": the same as recipientNames, from that line. */
 export function namesFromLine(line: string): string {
-  return recipientNames(line.match(/[^,(]+\([^)]*\)?|[^,]+/g) ?? []);
+  return recipientNames(lineEntries(line));
+}
+
+/** Who an email goes to, for a button: first names ("Kyle", "Kyle and
+ * Annamarie"), or the address for someone with no name. */
+export function firstNames(list: readonly string[]): string {
+  return recipientNames(
+    list.map((entry) => {
+      const name = recipientNames([entry]);
+      return name.includes("@") ? name : (name.split(/\s+/)[0] ?? name);
+    }),
+  );
+}
+
+/** firstNames, from a draft row's one line of who it goes to. */
+export function firstNamesFromLine(line: string): string {
+  return firstNames(lineEntries(line));
 }
