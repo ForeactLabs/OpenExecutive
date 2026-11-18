@@ -549,11 +549,15 @@ def _apply_loop_cache_marker(
     return bool(markable)
 
 
-# Ids and times in a result (a request id, a timestamp) don't make it a
-# different answer: they are left out of _call_key. Other numbers stay, so a
-# status read whose progress moves (20, 40, 60) is getting somewhere.
+# Ids and times in a result (a request id, a timestamp, a clock, time
+# elapsed or left) don't make it a different answer: they are left out of
+# _call_key. Other numbers stay, so a status read whose progress moves
+# (20, 40, 60) is getting somewhere, and one whose only change is "42s
+# elapsed" is not.
 _VARYING_IN_A_RESULT = re.compile(
     r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?"
+    r"|(?<![0-9A-Za-z:])\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?![0-9A-Za-z:])"
+    r"|(?<![0-9A-Za-z.])\d+(?:\.\d+)?\s?(?:ms|s|secs?|seconds?|mins?|minutes?|h|hrs?|hours?)(?![0-9A-Za-z])"
     r"|(?<![0-9A-Za-z])[0-9a-fA-F]{8,}(?:-[0-9a-fA-F]{4,})*(?![0-9A-Za-z])"
     r"|(?<![0-9A-Za-z])(?=[0-9A-Za-z_-]*\d)(?=[0-9A-Za-z_-]*[A-Za-z])[0-9A-Za-z_-]{12,}(?![0-9A-Za-z])"
 )

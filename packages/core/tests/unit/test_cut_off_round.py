@@ -470,6 +470,28 @@ def test_a_status_read_whose_progress_moves_is_not_a_repeat() -> None:
     assert all(REPEATING_NOTE not in str(c["messages"][-1]["content"]) for c in provider.calls)
 
 
+def test_a_status_read_whose_only_change_is_time_elapsed_is_a_repeat() -> None:
+    """A job polled with the same call, whose result only counts the time
+    passing ("42s elapsed", "00:47"), is not getting anywhere."""
+    from openexecutive.orchestrator.executive import REPEAT_LIMIT, REPEATING_NOTE
+
+    reads: list[int] = []
+
+    async def _status(*_a: Any, **_k: Any) -> str:
+        reads.append(1)
+        n = 37 + 5 * len(reads)
+        return f"running, {n}s elapsed (clock 00:{n:02d}, about 3 min left)"
+
+    provider = _ScriptedProvider(
+        [_FinalMsg([_ToolUseBlock(f"g{i}", "get_export_status", {"id": "x"})], "tool_use") for i in range(REPEAT_LIMIT)]
+        + [_FinalMsg([_TextBlock("Still running.")], "end_turn")]
+    )
+    asyncio.run(_run(provider, {"get_export_status": _status}))
+
+    assert len(reads) == REPEAT_LIMIT
+    assert REPEATING_NOTE in str(provider.calls[-1]["messages"][-1]["content"])
+
+
 def test_a_turn_that_keeps_writing_the_same_thing_until_cut_ends() -> None:
     """A model stuck repeating itself, cut every round in its text, gets
     nowhere: after MAX_EMPTY_CUT_ROUNDS of those the turn ends."""
