@@ -354,6 +354,8 @@ def card_view(
         artifact or monitoring or failed_run or handed_over or decision
         or item.recommended_move in ("nudge", "suggest_workflow")
     )
+    # A signal from outside is for them to know until it waits for an OK
+    # (it was filed that way, or someone asked it for a step).
     no_approve = asks or needs == "fyi" or (signal and needs != "ok") or stepless
     got_it = needs == "fyi" or (signal and not needs) or stepless
     first = assignee_name.split(" ")[0] if assignee_name else ""
@@ -391,7 +393,7 @@ def card_view(
     label = (getattr(item, "action_label", "") or "").strip()
     approve = (
         ("Done" if handed_over else label or "Approve")
-        if not no_approve and not monitoring and not artifact and not failed_run
+        if not no_approve and not artifact and not failed_run
         else None
     )
     # Every card that takes words says what to change in "Or tell me…";

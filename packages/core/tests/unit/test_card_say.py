@@ -272,9 +272,10 @@ def test_a_for_you_to_know_card_shows_its_plan_before_it_runs(
 def test_a_signal_card_judges_a_go_against_no_plan(
     client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch, turns: _Turns,
 ) -> None:
-    """A signal from outside never showed its plan either, whatever its
-    needs: a go is judged against no plan, and nothing runs unseen."""
-    aid = _card(db, source="query", severity="low", topic_tags=["external:news-acme"], needs="ok")
+    """A signal from outside doesn't show its plan either: a go is judged
+    against no plan, nothing runs unseen, and the card then shows the plan
+    with its option to pick."""
+    aid = _card(db, source="query", severity="low", topic_tags=["external:news-acme"])
     _model(monkeypatch, {"plan": OLD, "go": True, "reply": "On it."})
     asked = _go(monkeypatch, False)
     res = _say(client, aid, "yes, go ahead")
@@ -283,6 +284,8 @@ def test_a_signal_card_judges_a_go_against_no_plan(
     assert res.json()["approval"] is None and turns.calls == []
     card = alert_store.get_alert(aid)
     assert card is not None and card.needs == "ok" and card.suggested_action == OLD
+    view = res.json()["card"]["view"]
+    assert view["plan"] == OLD and [o["plan"] for o in view["options"]][:1] == [OLD]
 
 
 def test_a_go_that_cant_start_says_so_on_the_card(
