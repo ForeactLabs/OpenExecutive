@@ -167,8 +167,8 @@ def _turn_result_limit(name: str, *, per_result: int, turn_budget: int, used: in
     holds) bounds what a turn's results add together: once ``used`` reaches
     it, a further result is cut to ``_TURN_BUDGET_FLOOR``. Returns (limit,
     whether the budget rather than ``per_result`` set it). A specialist's
-    analysis is the answer itself, not a read, so it neither counts nor is
-    cut by the budget. A built tool's result counts but is never cut below
+    analysis is the answer itself, not a read, so the budget never cuts it;
+    it fills the window like a read, so it counts (``TurnReadingBudget.cap``). A built tool's result counts but is never cut below
     ``per_result``: it is already bounded (step_script), and it lists the
     writes that already ran, which a short cut would hide and the model would
     then repeat. Tool discovery (``open_tools``, ``search_tools``) is treated
@@ -311,6 +311,8 @@ class TurnReadingBudget:
                 self._parts[self._key(name, tool_input)] = (text[len(notice):], start - len(notice), notice, reads)
             else:
                 self._parts[self._key(name, tool_input)] = (text, start, "", reads)
-        if name != "consult_specialist" and isinstance(content, str):
+        if isinstance(content, str):
+            # A specialist's analysis is never cut, but it fills the window
+            # like any read, so it counts toward ``full``.
             self.used += int(len(content) * weight)
         return content

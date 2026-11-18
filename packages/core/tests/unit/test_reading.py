@@ -529,3 +529,25 @@ def test_a_turn_that_has_read_all_it_holds_writes_up(monkeypatch: pytest.MonkeyP
     assert noted, "the turn was never told to write up"
     assert len(provider.calls) == noted[0] + 1
     assert len(ran) == noted[0]
+
+
+def test_a_turn_that_only_consults_specialists_still_fills_and_writes_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A specialist's analysis is never cut, but it fills the window like a
+    read: a turn that keeps consulting, each time reworded, writes up once full."""
+    from openexecutive.orchestrator.executive import FULL_NOTE
+
+    monkeypatch.setattr("openexecutive.orchestrator.executive.reading_limits_for", _limits(20_000, 40_000))
+    ids = [f"s{i}" for i in range(6)]
+    provider = _ScriptedProvider(
+        [
+            _FinalMsg([_ToolUseBlock(i, "consult_specialist", {"specialist": "cfo", "query": f"and also {i}"})],
+                      "tool_use")
+            for i in ids
+        ]
+        + [_FinalMsg([_TextBlock("never reached")], "end_turn")]
+    )
+    _run(provider, {}, specialists=["a" * 15_000])  # one analysis a round
+
+    noted = [n for n, c in enumerate(provider.calls) if FULL_NOTE in str(c["messages"][-1]["content"])]
+    assert noted == [3]  # 45,000 characters of analysis after three
+    assert len(provider.calls) == 4
