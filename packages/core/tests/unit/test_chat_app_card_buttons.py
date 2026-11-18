@@ -24,7 +24,7 @@ def chat_apps(monkeypatch: pytest.MonkeyPatch) -> list[tuple[int, Any, bool]]:
     monkeypatch.setattr("openexecutive.audit.log_event", lambda *_a, **_k: None)
     resolved: list[tuple[int, Any, bool]] = []
 
-    async def resolve(decision_id: int, person: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None) -> str:
+    async def resolve(decision_id: int, person: Any, *, approve: bool, allow: bool = False, shown_at: str | None = None, shown: str | None = None) -> str:
         resolved.append((decision_id, person, approve))
         return "Approved." if approve else "Skipped."
 
@@ -259,3 +259,86 @@ def test_a_long_discord_card_gets_buttons_for_all_of_its_words(monkeypatch: pyte
     # The buttons carry the version of the whole card, as a tap checks it;
     # only the message cuts it short.
     assert sent == [long]
+
+
+def _card_message(user: str = "UBOT", value: str = "card:7:a:0000beef") -> dict[str, Any]:
+    return {"ts": "111.2", "user": user, "bot_id": "B1",
+            "blocks": slack_bot._card_blocks("Reply to Ada", 7, (("Send from me", value), ("Skip", "card:7:s:0000beef")))}
+
+
+_SAID = channel_cards.Tapped(
+    "I made it shorter.", "Reply to Ada\nShort", (("Send from me", "card:7:a:1111beef"), ("Skip", "card:7:s:1111beef")),
+)
+
+
+@pytest.fixture
+def slack_say(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    monkeypatch.setattr(slack_bot, "_bot_user_id", "UBOT")
+    monkeypatch.setattr("openexecutive.people.store.find_person_by_slack_id", lambda uid: PERSON)
+    monkeypatch.setattr(channel_cards, "takes_words", lambda decision_id: True)
+    said: list[Any] = []
+
+    async def say(card: Any, who: Any, text: str) -> channel_cards.Tapped | None:
+        said.append((card, who, text))
+        return _SAID
+
+    monkeypatch.setattr(channel_cards, "say", say)
+    return said
+
+
+def _slack_reply(event_said: list[dict[str, Any]]) -> Any:
+    async def reply(**kwargs: Any) -> None:
+        event_said.append(kwargs)
+
+    return reply
+
+
+_REPLY = {"user": "U1", "channel": "D1", "ts": "112.0", "thread_ts": "111.2"}
+
+
+def test_a_reply_to_a_slack_card_in_its_own_dm_is_said_on_it(slack_say: list[Any]) -> None:
+    client, answers = FakeSlack(), []
+    assert asyncio.run(slack_bot._say_on_card(_REPLY, "make it shorter", _card_message(), _slack_reply(answers), client))
+    assert slack_say == [(channel_cards.Choice(7, "a", "0000beef"), PERSON, "make it shorter")]
+    # The card as it reads now, with its new buttons and how to say more.
+    update = client.updates[0]
+    assert update["ts"] == "111.2" and update["text"] == "Reply to Ada\nShort"
+    assert [e["value"] for e in update["blocks"][1]["elements"]] == ["card:7:a:1111beef", "card:7:s:1111beef"]
+    assert update["blocks"][2]["elements"][0]["text"] == channel_cards.TELL_ME
+    # What the Executive said back goes in the thread.
+    assert answers == [{"text": "I made it shorter.", "thread_ts": "111.2"}]
+
+
+def test_a_go_said_on_a_slack_card_leaves_it_with_its_outcome(
+    slack_say: list[Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def say(card: Any, who: Any, text: str) -> channel_cards.Tapped:
+        return channel_cards.Tapped("Done. I sent it.", settled=True)
+
+    monkeypatch.setattr(channel_cards, "say", say)
+    client, answers = FakeSlack(), []
+    assert asyncio.run(slack_bot._say_on_card(_REPLY, "send it", _card_message(), _slack_reply(answers), client))
+    update = client.updates[0]
+    assert update["text"] == "Reply to Ada\n\nDone. I sent it."
+    assert [b["type"] for b in update["blocks"]] == ["section"]
+    assert answers[0]["text"] == "Done. I sent it."
+
+
+def test_a_reply_that_isnt_on_a_slack_card_of_its_own_dm_is_an_ordinary_message(
+    slack_say: list[Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    answers: list[dict[str, Any]] = []
+    # Someone else's message, one with no card's buttons, or no parent read.
+    for parent in (_card_message(user="U2"), {**_card_message(), "blocks": slack_bot._card_blocks("Hi")}, None):
+        assert not asyncio.run(slack_bot._say_on_card(_REPLY, "hi", parent, _slack_reply(answers), FakeSlack()))
+    # A DM that isn't this person's with the bot.
+    assert not asyncio.run(slack_bot._say_on_card(_REPLY, "hi", _card_message(), _slack_reply(answers), FakeSlack(dm="D9")))
+    assert slack_say == [] and answers == []
+    # A card that takes no words, or isn't theirs, leaves them to the turn.
+    async def no(card: Any, who: Any, text: str) -> None:
+        return None
+
+    monkeypatch.setattr(channel_cards, "say", no)
+    client = FakeSlack()
+    assert not asyncio.run(slack_bot._say_on_card(_REPLY, "hi", _card_message(), _slack_reply(answers), client))
+    assert client.updates == [] and answers == []

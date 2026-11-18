@@ -863,6 +863,47 @@ async def to_work(
     return await card_work.redirect(person, instance.id, text)
 
 
+@dataclass(frozen=True)
+class Taken:
+    """What the person's words on their reply card did (``take``): the
+    sentences that are new and whether they said to send it (a change of
+    words), or that they went to the card's work (``worked``). ``started``
+    is False when they weren't taken: the card isn't waiting, or the run
+    going now hasn't let go yet."""
+
+    changed: list[str]
+    go: bool = False
+    worked: bool = False
+    started: bool = True
+
+
+async def take(
+    instance: Any, *, person: Any, caller: Any, resolver: int | None, text: str, work: bool = False,
+) -> Taken:
+    """The person's words on their own reply card, taken the card's way, one
+    place for the card on a page and its card in a chat app: to the work
+    while it runs or when they tapped one of its next steps (``work``,
+    ``to_work``); else as a change of the reply (``change``), or as work
+    for the Executive's tools when that is what they ask
+    (``card_work.redirect``, after the change's checks and hourly limit).
+    Raises ``SendRefused``. Sends nothing."""
+    from openexecutive.delegation import card_work
+
+    try:
+        if work or card_work.running(instance.id):
+            # A next step they tapped, or new words while it works ("no, do
+            # it this way"): the work takes them, and the run going now stops.
+            started = await to_work(instance, caller=caller, resolver=resolver, text=text)
+            return Taken([], worked=True, started=started)
+        _, changed, go = await change(instance, caller=caller, resolver=resolver, text=text)
+        return Taken(changed, go=go)
+    except NeedsWork:
+        # Work for the Executive's tools (reading her files, making a
+        # spreadsheet): it does it on the card, as when the email came in.
+        # The change already passed the card's checks and hourly limit.
+        return Taken([], worked=True, started=await card_work.redirect(person, instance.id, text))
+
+
 def news_of(messages: list[Any]) -> list[dict[str, Any]]:
     """Newer email as turns of a card's conversation ("news"): who, when,
     their new words and their files' names."""
