@@ -355,10 +355,17 @@ def executive_step(
     settings = get_settings()
     provider = get_mail_provider(settings)
     markup = body_html(body)
+    if not to:
+        # Only Cc or Bcc on it: the person goes in To instead of on cc, so
+        # the email still names someone there and everyone else stays as written.
+        to = [str(getattr(person, "email", "") or "")]
+    else:
+        cc = copied(person, cc)
     arguments = provider.build_send_arguments(
         mailbox=settings.exec_email_address, to=", ".join(to), subject=subject or "(no subject)",
         body=markup if markup is not None else body, html=markup is not None,
-        cc=copied(person, cc), attachments=attachments or None, bcc=list(bcc or []) or None,
+        cc=[a for a in cc if a], attachments=attachments or None,
+        bcc=list(bcc or []) or None,
     )
     step = {
         "held": True, "mcp": True, "tool": provider.send_tool_name, "input": arguments,

@@ -643,3 +643,15 @@ def test_files_it_cant_read_send_nothing_and_hand_it_back(
     assert _refused(send_chat_draft(owner, row, caller=LOCAL, gmail=mailbox, now=LATER)).code == "gmail_error"
     assert exec_sends == [] and "d1" in mailbox.drafts
     assert drafts.count_waiting(owner.id, NOW - timedelta(days=1)) == 1
+
+
+def test_a_draft_with_no_one_in_to_goes_to_them_with_the_rest_as_written(
+    db: Path, owner: Any, as_sender: list[str], exec_sends: list[dict[str, Any]],
+) -> None:
+    mailbox, row = _chat_draft(owner)
+    _switch(owner, row, mailbox, True)
+    message = mailbox.drafts["d1"].message
+    message.cc, message.to = list(message.to), []
+    asyncio.run(send_chat_draft(owner, row, caller=LOCAL, gmail=mailbox, now=LATER))
+    args = exec_sends[0]["input"]
+    assert args["to"] == _send_tests.OWNER and args["cc"] == _send_tests.DANA
