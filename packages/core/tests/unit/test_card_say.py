@@ -384,7 +384,7 @@ def test_an_asking_card_takes_words_as_the_answer(
 
 
 def test_a_picked_option_is_what_runs(
-    client: TestClient, db: Path, turns: _Turns,
+    client: TestClient, db: Path, turns: _Turns, events: list[str],
 ) -> None:
     aid = _card(db)
     other = "Ask Sam which files Alex needs."
@@ -398,6 +398,8 @@ def test_a_picked_option_is_what_runs(
     assert f"Action to perform:\n{other}" in turns.calls[0]
     card = alert_store.get_alert(aid)
     assert card is not None and card.suggested_action == other and card.action_label == "Ask Sam"
+    # The pick is in the audit log as a change to the card's plan.
+    assert "card_plan_changed" in events
 
 
 def test_a_changed_plan_never_keeps_the_old_buttons_words(

@@ -187,7 +187,20 @@ class ApproveBody(BaseModel):
     plan: str | None = Field(default=None, max_length=approvals.EDITED_BODY_MAX)
 
 
-def _pick_option(alert: Alert, plan: str, person_id: int | None) -> None:
+def _log_plan_change(alert_id: int, change_id: int, by: str, *, via: str) -> None:
+    """Every change to a card's plan goes in the audit log, whether it came
+    from their words on the card or from picking another option."""
+    from openexecutive.audit import log_event as audit_log
+
+    audit_log(
+        "card_plan_changed",
+        f"Changed the plan on alert {alert_id} from the card",
+        actor="user",
+        details={"alert_id": alert_id, "change_id": change_id, "by": by, "via": via},
+    )
+
+
+def _pick_option(alert: Alert, plan: str, person_id: int | None, by: str) -> None:
     """Make ``plan`` the card's plan when it is another of the options the
     card offers (its own plan is already there). Anything else is left for
     the claim, which refuses a plan the card doesn't show."""
@@ -209,6 +222,7 @@ def _pick_option(alert: Alert, plan: str, person_id: int | None) -> None:
         raise HTTPException(
             status_code=409, detail="The plan on this card just changed. Read it and approve again.",
         )
+    _log_plan_change(alert.id, change.id, by, via="option")
 
 
 # The turn an approved proposal runs on the server, as the person who
@@ -450,7 +464,9 @@ async def _approve(
         raise HTTPException(status_code=403, detail="Only the person it's waiting on can press Done.")
 
     if body.plan is not None and body.edited_body is None:
-        _pick_option(alert, body.plan, approver)
+        from openexecutive.api import caller as api_caller
+
+        _pick_option(alert, body.plan, approver, api_caller.actor(request))
 
     try:
         approval = approvals.claim(
@@ -1002,14 +1018,7 @@ async def say_on_card(alert_id: int, body: SayBody, request: Request) -> SayResp
         )
         if change is None:
             raise HTTPException(status_code=409, detail="This card just changed. Try again.")
-        from openexecutive.audit import log_event as audit_log
-
-        audit_log(
-            "card_plan_changed",
-            f"Changed the plan on alert {alert_id} from what was said on it",
-            actor="user",
-            details={"alert_id": alert_id, "change_id": change.id, "by": api_caller.actor(request)},
-        )
+        _log_plan_change(alert_id, change.id, api_caller.actor(request), via="words")
     # Words that ask for no step keep the card's options as they are.
     if plan.strip() and new.plan.strip():
         had = card_talk.read([existing]).get(alert_id)
