@@ -650,7 +650,7 @@ async def handle_card_tap(body: dict[str, Any], client: Any) -> None:
         return
     if tapped.options:
         # Still waiting, with new words: shown again with its buttons.
-        text = f"{tapped.text}\n\n{tapped.line}"
+        text = channel_cards.with_line(tapped.text, tapped.line)
         blocks = _card_blocks(text, decision_id, tapped.options)
     else:
         # The card keeps what it said, with the outcome under it and no buttons.
@@ -659,7 +659,7 @@ async def handle_card_tap(body: dict[str, Any], client: Any) -> None:
             if block.get("type") == "section":
                 shown = str((block.get("text") or {}).get("text") or "")
                 break
-        text = f"{shown}\n\n{tapped.line}" if shown else tapped.line
+        text = channel_cards.with_line(shown, tapped.line)
         blocks = _card_blocks(text)
     try:
         await client.chat_update(channel=channel_id, ts=ts, text=text[:_MAX_CARD_TEXT], blocks=blocks)

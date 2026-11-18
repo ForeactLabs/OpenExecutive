@@ -519,3 +519,12 @@ def test_a_switch_goes_to_the_sender_its_card_showed(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(channel_cards, "_switch", switch)
     asyncio.run(channel_cards.tap(channel_cards.Choice(7, "x", "0000beef"), SimpleNamespace(id=3)))
     assert switched == [True]
+
+
+def test_a_card_never_says_two_outcomes() -> None:
+    shown_again = channel_cards.with_line("Reply to Sam\nHi Sam", channel_cards.SWITCHED)
+    assert shown_again == f"Reply to Sam\nHi Sam\n\n{channel_cards.SWITCHED}"
+    # Tapped again: the outcome takes the earlier line's place.
+    assert channel_cards.with_line(shown_again, "Sent.") == "Reply to Sam\nHi Sam\n\nSent."
+    assert channel_cards.with_line(channel_cards.CHANGED, "Sent.") == "Sent."
+    assert channel_cards.with_line("", "Sent.") == "Sent."

@@ -759,14 +759,14 @@ async def handle_card_tap(interaction: Any) -> None:
             return
         if tapped.options:
             # Still waiting, with new words: shown again with its buttons.
-            text = f"{tapped.text}\n\n{line}"
+            text = channel_cards.with_line(tapped.text, line)
             await interaction.edit_original_response(
                 content=text[:_MAX_CARD_TEXT], view=_card_view(tapped.options),
             )
             return
         # The card keeps what it said, with the outcome under it and no buttons.
         shown = str(getattr(getattr(interaction, "message", None), "content", "") or "")
-        text = f"{shown}\n\n{line}" if shown else line
+        text = channel_cards.with_line(shown, line)
         await interaction.edit_original_response(content=text[:2000], view=None)
     except Exception:
         logger.exception("Discord: couldn't update card %d after the tap", decision_id)

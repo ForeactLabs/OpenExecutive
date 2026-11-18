@@ -484,12 +484,12 @@ async def _decide_tap(
     try:
         if tapped.options:
             await asyncio.to_thread(
-                update_card, message_name, f"{tapped.text}\n\n{line}",
+                update_card, message_name, channel_cards.with_line(tapped.text, line),
                 service_account_file, service_account_email, decision_id, tapped.options,
             )
         else:
             await asyncio.to_thread(
-                update_card, message_name, f"{shown}\n\n{line}" if shown else line,
+                update_card, message_name, channel_cards.with_line(shown, line),
                 service_account_file, service_account_email,
             )
     except Exception:

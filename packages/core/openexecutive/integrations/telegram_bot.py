@@ -214,11 +214,11 @@ async def _handle_card_tap(
         }
         if tapped.options:
             # Still waiting, with new words: shown again with its buttons.
-            edit["text"] = f"{tapped.text}\n\n{line}"[:_MAX_MSG_LEN]
+            edit["text"] = channel_cards.with_line(tapped.text, line)[:_MAX_MSG_LEN]
             edit["reply_markup"] = _keyboard(tapped.options)
         else:
             # The card keeps what it said, with the outcome under it and no buttons.
-            edit["text"] = f"{card_text}\n\n{line}"[:_MAX_MSG_LEN]
+            edit["text"] = channel_cards.with_line(card_text, line)[:_MAX_MSG_LEN]
         await client.post(_tg_url(token, "editMessageText"), json=edit)
     except Exception:
         logger.exception("Telegram: couldn't update card %d after the tap", decision_id)

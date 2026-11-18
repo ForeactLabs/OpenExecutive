@@ -434,6 +434,19 @@ class Tapped:
 
 
 CHANGED = "This card changed. Here it is now."
+SWITCHED = "Changed who it goes from. Check it, then send it."
+
+
+def with_line(shown: str, line: str) -> str:
+    """A card's message after a tap: what it shows, then ``line``. A line an
+    earlier tap left when it showed the card again gives way to the new
+    one, so a card never says two outcomes."""
+    body = shown or ""
+    for earlier in (CHANGED, SWITCHED):
+        if body == earlier or body.endswith(f"\n\n{earlier}"):
+            body = body[: -len(earlier)].rstrip("\n")
+            break
+    return f"{body}\n\n{line}" if body else line
 
 
 async def tap(tapped: Choice, person: Any) -> Tapped:
@@ -533,7 +546,7 @@ def _switched(decision_id: int) -> Tapped:
     text = card_text(decision_id)
     if text is None:
         return Tapped(f"Changed who it goes from. It waits for your OK in the app: {_app_link(decision_id)}")
-    return Tapped("Changed who it goes from. Check it, then send it.", text, card_options(decision_id, text))
+    return Tapped(SWITCHED, text, card_options(decision_id, text))
 
 
 def _waits(decision_id: int) -> bool:
@@ -849,6 +862,7 @@ __all__ = [
     "Choice",
     "choice_of",
     "version",
+    "with_line",
     "maybe_push",
     "parse_choice",
     "push_waiting",
