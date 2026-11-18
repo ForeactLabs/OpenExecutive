@@ -4017,7 +4017,9 @@ class Executive:
                     results_by_id[tu["id"]] = checked
                     if notice:
                         results_by_id[tu["id"]] = _with_notice(results_by_id.get(tu["id"], ""), notice)
-                        read_notices[tu["id"]] = notice
+                        # Before the content check's notice, as _with_notice
+                        # put them, so every later part carries both.
+                        read_notices[tu["id"]] = notice + read_notices.get(tu["id"], "")
                 # A script that ran beside the read may have read mail the
                 # loop never checks: the turn stays unvetted.
                 ran_script = any(
