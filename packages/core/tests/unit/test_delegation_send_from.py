@@ -754,3 +754,30 @@ def test_words_the_work_wrote_with_a_switch_are_written_for_the_new_sender(
     assert saved["conversation"][-1]["changed"] == ["I attached the deck.", "Olivia will call you Thursday."]
     # A switch can't be undone.
     assert not card_drafts.can_undo(saved)
+
+
+def test_a_send_from_it_already_has_keeps_the_words_the_work_wrote(
+    db: Path, owner: Any, models: dict[str, Any], rewrites: list[str], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.delegation import card_work
+    from openexecutive.orchestrator import reply_card_tools
+    from openexecutive.orchestrator.schedule_tools import current_session
+    from openexecutive.orchestrator.session import Session
+
+    mailbox, card = _card(owner)
+    _switch(card, mailbox, owner, True)
+    asked = len(rewrites)
+    monkeypatch.setattr(card_work, "still_working", lambda c: True)
+    monkeypatch.setattr(card_work, "keep", lambda coro: coro.close())
+    writer = type("W", (), {"person": owner, "mailbox": mailbox})()
+    monkeypatch.setattr("openexecutive.orchestrator.delegation_tools._writer", lambda name: writer)
+    token = current_session.set(Session(reply_card_work=card.id))
+    try:
+        out = json.loads(asyncio.run(reply_card_tools.handle_update_reply_card({
+            "body": "Hi Dana,\n\nI split the taxes 50/50.", "note": "Split them.", "send_from": "executive",
+        })))
+    finally:
+        current_session.reset(token)
+    assert out["status"] == "ok" and len(rewrites) == asked
+    saved = inbox.card_payload(_fresh(card))
+    assert saved["draft_body"] == f"Hi Dana,\n\nI split the taxes 50/50.\n\n{send_from.sign_off(owner)}"
