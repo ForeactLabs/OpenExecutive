@@ -1134,7 +1134,12 @@ async def approve_in_chat(instance_id: int, request: Request, input_edits: dict[
         body = ApproveBody(edits={"input": input_edits} if input_edits else None)
         instance = await approve_decision(instance_id, body, request)
     except HTTPException as exc:
-        detail = exc.detail if isinstance(exc.detail, str) else "it couldn't be done"
+        detail = exc.detail
+        if isinstance(detail, dict):
+            # A refusal says why in its `message` (department_gate).
+            detail = detail.get("message")
+        if not isinstance(detail, str) or not detail.strip():
+            detail = "it couldn't be done"
         # Quoted: a failed step's words can carry the outside service's text.
         return (
             f"They tapped Approve on a card in this chat, but it didn't go through: {json.dumps(detail[:300])}. "
@@ -1158,7 +1163,8 @@ async def approve_in_chat(instance_id: int, request: Request, input_edits: dict[
         "Carry on with what they asked in this chat, using what it gave back; "
         "don't ask them to approve it again."
     )
-    result = final.get("result") if isinstance(final, dict) else None
+    # A held step says what it gave back in `result`; an app action in `did`.
+    result = (final.get("result") or final.get("did")) if isinstance(final, dict) else None
     if isinstance(result, str) and result.strip():
         from openexecutive.orchestrator.content_trust import wrap_untrusted
 

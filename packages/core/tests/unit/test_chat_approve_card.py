@@ -5,6 +5,7 @@ instead of stopping at the card (decisions.approve_in_chat)."""
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -106,7 +107,8 @@ def test_approve_on_a_chat_card_approves_it_and_the_turn_carries_on(
         "/chat", json={"message": "Approved", "approve_card": 43, "approve_input": {"url": "https://example.com"}},
     )
     assert resp.status_code == 200
-    _ = resp.text
+    # The turn shows it's doing the step while it runs.
+    assert json.dumps(chat_route.APPROVING_LABEL) in resp.text
     assert approved == [(43, {"input": {"url": "https://example.com"}})]
     block = captured["stream_chat"]["page_context_block"]
     assert "THE CARD THEY JUST APPROVED" in block
@@ -180,3 +182,103 @@ def test_a_page_in_another_app_never_approves_a_card(
     _ = resp.text
     block = captured["stream_chat"]["page_context_block"]
     assert decisions.HOST_APPROVE_NOTE in block
+
+
+class _Page:
+    async def is_disconnected(self) -> bool:
+        return False
+
+
+async def _drain(gen: AsyncIterator[Any]) -> list[Any]:
+    return [evt async for evt in gen]
+
+
+@pytest.mark.asyncio
+async def test_stop_while_the_step_runs_ends_the_wait_and_the_step_finishes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stop doesn't wait for the approved step, and doesn't cut it off:
+    the step runs to its end on its own."""
+    import asyncio
+
+    release = asyncio.Event()
+    finished: list[int] = []
+
+    async def slow(instance_id: int, *_a: Any, **_kw: Any) -> str:
+        await release.wait()
+        finished.append(instance_id)
+        return "done"
+
+    monkeypatch.setattr(decisions, "approve_in_chat", slow)
+    stop = asyncio.Event()
+    gen = chat_route._approve_card_in_turn(
+        43, None, _Page(), SimpleNamespace(from_host=False),
+        stop_event=stop, deadline=time.monotonic() + 60, keepalive_s=0.01,
+    )
+    first = await gen.__anext__()
+    assert json.dumps(chat_route.APPROVING_LABEL) in first
+    stop.set()
+    rest = await _drain(gen)
+    assert not any(isinstance(e, chat_route._ApprovedNote) for e in rest)
+    release.set()
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert finished == [43]
+
+
+@pytest.mark.asyncio
+async def test_a_turn_stopped_before_it_began_approves_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    async def never(*_a: Any, **_kw: Any) -> str:
+        raise AssertionError("a stopped turn must not approve")
+
+    monkeypatch.setattr(decisions, "approve_in_chat", never)
+    stop = asyncio.Event()
+    stop.set()
+    gen = chat_route._approve_card_in_turn(
+        43, None, _Page(), SimpleNamespace(from_host=False),
+        stop_event=stop, deadline=time.monotonic() + 60, keepalive_s=0.01,
+    )
+    assert await _drain(gen) == []
+
+
+@pytest.mark.asyncio
+async def test_the_turn_deadline_holds_while_the_step_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    async def slow(*_a: Any, **_kw: Any) -> str:
+        await asyncio.sleep(5)
+        return "done"
+
+    monkeypatch.setattr(decisions, "approve_in_chat", slow)
+    gen = chat_route._approve_card_in_turn(
+        43, None, _Page(), SimpleNamespace(from_host=False),
+        stop_event=None, deadline=time.monotonic() + 0.05, keepalive_s=0.01,
+    )
+    events = await asyncio.wait_for(_drain(gen), timeout=2)
+    assert not any(isinstance(e, chat_route._ApprovedNote) for e in events)
+    for task in list(chat_route._approving_tasks):
+        task.cancel()
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_with_a_reason_says_the_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def refused(*_a: Any, **_kw: Any) -> Any:
+        raise HTTPException(status_code=409, detail={"code": "gone", "message": "That card was already answered."})
+
+    monkeypatch.setattr(decisions, "approve_decision", refused)
+    note = await decisions.approve_in_chat(43, SimpleNamespace())
+    assert "That card was already answered." in note and "and it was done" not in note
+
+
+@pytest.mark.asyncio
+async def test_an_app_step_says_what_it_did(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def ok(*_a: Any, **_kw: Any) -> Any:
+        inst = _instance(result=None)
+        inst.final_payload_json = json.dumps({"did": "Opened the waitlist."})
+        return inst
+
+    monkeypatch.setattr(decisions, "approve_decision", ok)
+    note = await decisions.approve_in_chat(43, SimpleNamespace())
+    assert "Opened the waitlist." in note and "<untrusted_content" in note
