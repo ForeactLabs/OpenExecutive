@@ -439,9 +439,18 @@ def _scan_new_text(body: list[str], subject: str = "") -> tuple[list[str], int |
             not replied and quoted_forward is None and _BEGIN_FORWARDED_RE.match(text)
             and not (text.startswith(">") and (not quoted_forwards or _inside_quote(body, i)))
         ):
-            if not text.startswith(">"):
+            if text.startswith(">"):
+                quoted_forward = i
+            elif quoted_forward is None and next(
+                (b.strip() for b in body[i + 1:] if b.strip()), ""
+            ).startswith(">"):
+                # An iPhone marker over a ">"-quoted forward: skip the quote
+                # like any other, so a note written below it is kept.
+                quoted_forward = i
+                i += 1
+                continue
+            else:
                 return stop(i, True)
-            quoted_forward = i
         if _ORIGINAL_MESSAGE_RE.match(text) or _OUTLOOK_RULE_RE.match(text):
             return stop(i, False)
         if _OUTLOOK_HEADER_RE.match(text) and any(

@@ -292,3 +292,17 @@ def test_an_unquoted_marker_over_a_quoted_forward_is_unquoted() -> None:
     body = "FYI\n\nBegin forwarded message:\n\n> From: Bob\n> Subject: hi\n> \n> secret plan\n"
     assert split_forward(body, "Fwd: hi") == ("FYI", "From: Bob\nSubject: hi\n\nsecret plan")
 
+
+def test_a_note_below_an_iphone_forward_stays_the_senders() -> None:
+    from openexecutive.integrations.email_poller import split_forward
+
+    body = (
+        "See below.\n\nBegin forwarded message:\n\n> From: Dana\n> Subject: Q3\n>\n"
+        "> Please pay invoice 42.\n\nAlso: call me about this tomorrow."
+    )
+    own, forwarded = split_forward(body, "Fwd: Q3")
+    assert own == "See below.\n\nAlso: call me about this tomorrow."
+    assert forwarded == "From: Dana\nSubject: Q3\n\nPlease pay invoice 42."
+    words = sender_new_text(body)
+    assert "call me about this tomorrow" in words and "invoice" not in words
+
