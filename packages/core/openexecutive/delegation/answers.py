@@ -823,7 +823,9 @@ async def change(
                 note = NOTE_CONFIRM_SEND if go else NOTE_TAP_SEND
             except replan.ReplanError as exc:
                 note = exc.message if exc.code == "too_many" else NOTE_TAP_SEND
-        return send_from.say(instance, note, asked=text) or payload, [], go
+        noted = send_from.say(instance, note, asked=text)
+        # A card that changed meanwhile isn't the one they said it of: no go.
+        return noted or payload, [], go and noted is not None
     if asked:
         current = get_decision_instance(instance.id) or instance
         try:

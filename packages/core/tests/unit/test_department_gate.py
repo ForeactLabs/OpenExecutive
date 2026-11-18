@@ -622,6 +622,19 @@ def test_a_go_past_the_hours_limit_says_so(
     assert res.json()["reply"] == "That's a lot of changes this hour. Try again later." and done == []
 
 
+def test_someone_the_held_step_doesnt_wait_on_cant_reword_it(
+    client: TestClient, team: dict[str, Person], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    turns = _model(monkeypatch, {"body": "Short text"})
+    decision_id = _mail_card(team)
+    # Ria is a teammate the card doesn't wait on: nothing is rewritten or kept.
+    res = client.post(f"/decisions/{decision_id}/say", json={"text": "change the body"},
+                      headers={"x-caller-email": RIA})
+    assert res.status_code in (403, 404, 409) and turns == []
+    instance = ledger.get_decision_instance(decision_id)
+    assert instance is not None and "said_input" not in json.loads(instance.proposed_payload_json)
+
+
 def test_a_go_that_cant_be_read_leaves_the_step_waiting(
     client: TestClient, team: dict[str, Person], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
