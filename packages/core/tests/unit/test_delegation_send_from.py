@@ -314,6 +314,33 @@ def test_their_mailbox_draft_waits_while_it_goes_from_the_executive(
     assert back["draft_message_id"] == made.message.id
 
 
+@pytest.mark.parametrize("there", ["changed", "gone"])
+def test_back_from_them_never_replaces_a_draft_changed_in_their_mailbox(
+    db: Path, owner: Any, models: dict[str, Any], rewrites: list[str], there: str,
+) -> None:
+    from dataclasses import replace
+
+    inbox.set_mailbox_drafts(owner.id, True, updated_by="test")
+    mailbox, card = _card(owner)
+    draft_id = inbox.card_payload(_fresh(card))["draft_id"]
+    _switch(card, mailbox, owner, True)
+    if there == "gone":
+        asyncio.run(mailbox.delete_draft(draft_id))
+    else:
+        info = mailbox.drafts[draft_id]
+        mailbox.drafts[draft_id] = replace(info, message=replace(info.message, id="edited-in-gmail"))
+    made = len(mailbox.specs)
+    with pytest.raises(SendRefused) as err:
+        _switch(card, mailbox, owner, False)
+    assert err.value.code == ("draft_changed" if there == "changed" else "draft_gone")
+    # No second draft made, and theirs is left as it is.
+    assert len(mailbox.specs) == made
+    if there == "changed":
+        assert draft_id in mailbox.drafts and _fresh(card).status == "proposed"
+    else:
+        assert _fresh(card).status != "proposed"
+
+
 def test_a_chat_app_card_shows_who_it_goes_from_when_posted() -> None:
     t1, t2, t3, t4 = (f"2026-11-17T1{h}:00:00+00:00" for h in range(4))
     switched = {send_from.FROM_EXECUTIVE: True, send_from.SWITCHED_AT: t2}

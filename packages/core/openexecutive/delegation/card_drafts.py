@@ -375,13 +375,38 @@ async def _remade(
 
     from openexecutive.delegation import drafts
     from openexecutive.delegation.card_work import files_for
-    from openexecutive.delegation.gmail import GmailError, gmail_for, normalize_email
-    from openexecutive.delegation.inbox import _audit
+    from openexecutive.delegation.gmail import (
+        BLOCKING_CODES,
+        STATUS_MESSAGES,
+        GmailError,
+        gmail_for,
+        gmail_status,
+        normalize_email,
+    )
+    from openexecutive.delegation.inbox import CLOSED, _audit, _close_card
     from openexecutive.delegation.reply_send import SendRefused
     from openexecutive.memory.decision_ledger import update_open_payload
 
     old = str(payload.get("draft_id") or "")
-    client = gmail if gmail is not None else gmail_for(normalize_email(person.email))
+    email = normalize_email(person.email)
+    client = gmail if gmail is not None else gmail_for(email)
+    status = await gmail_status(email, gmail=client)
+    if status != "connected":
+        raise SendRefused(409, BLOCKING_CODES.get(status, "gmail_error"), STATUS_MESSAGES[status])
+    # The same checks as a change to it (``_edit``): never over a draft they
+    # changed, sent or deleted in their mailbox meanwhile.
+    try:
+        there = await client.get_draft(old)
+    except GmailError as exc:
+        raise SendRefused(502, "gmail_error", "Couldn't save your change in your mailbox. Try again in a moment.") from exc
+    if there is None:
+        _close_card(person.id, instance.id, str(payload.get("message_id") or ""), "draft_gone", CLOSED)
+        raise SendRefused(409, "draft_gone", "That draft isn't in your mailbox any more: it was sent or deleted there.")
+    if there.message.id != str(payload.get(EDITED_VERSION) or payload.get("draft_message_id") or ""):
+        raise SendRefused(
+            409, "draft_changed",
+            "This draft was changed in your mailbox, so it wasn't changed here. Change it there, or dismiss it.",
+        )
     spec = spec_for(changed, files_for(instance.id))
     if recipients is not None:
         spec = replace(spec, to=list(recipients[0]), cc=list(recipients[1]))
