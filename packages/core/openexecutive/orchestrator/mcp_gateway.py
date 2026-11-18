@@ -3953,6 +3953,13 @@ class MCPGateway:
             return False
         if found:
             return True
+        from openexecutive.prompts.connected_systems import PINNED_GOOGLE_TOOLS
+
+        if tool_name not in PINNED_GOOGLE_TOOLS:
+            # An approved step's tool (``approved_step_call``): not a Google
+            # setting, so no hint about one.
+            logger.warning("MCPGateway: tool %s not found by search", tool_name)
+            return False
         if settings is None:
             settings = get_settings()
         # Both causes, because the old text named only the rename and sent the
