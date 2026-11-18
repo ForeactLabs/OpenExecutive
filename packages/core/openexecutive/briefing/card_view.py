@@ -516,13 +516,9 @@ def card_view(
         need=need,
         as_me=not source,
         source=source,
-        # Every watch's change says it, a big one pulled into the action
-        # lane included.
-        noticed=(
-            noticed_line(getattr(item, "watch_title", None))
-            if kind == "signal" or getattr(item, "watch_slug", None)
-            else ""
-        ),
+        # Every change a watch raised says it, a big one pulled into the
+        # action lane included; nothing else claims a watch.
+        noticed=noticed_line(getattr(item, "watch_title", None)) if getattr(item, "watch_slug", None) else "",
         status=None if monitoring else status_chip(item, now),
         description=description,
         long=len(description) > LONG_BODY_CHARS,
