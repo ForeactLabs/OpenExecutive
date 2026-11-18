@@ -255,9 +255,6 @@ def test_undo_puts_back_the_words_the_answers_and_their_mailbox_draft(
 
     saved = asyncio.run(card_drafts.edit(_fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, rewrite=write))
     assert saved[answers.ANSWERED_KEY] == {"0": "Friday"} and card_drafts.can_undo(saved)
-    asked = asyncio.run(card_drafts.edit(_fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, rewrite=write))
-    # The change before the question can still be taken back.
-    assert asked[card_drafts.UNDO_KEY] == saved[card_drafts.UNDO_KEY]
     undone = asyncio.run(card_drafts.undo(_fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox))
     assert undone["draft_body"] == first["draft_body"]
     assert undone[answers.ANSWERED_KEY] == {} and not card_drafts.can_undo(undone)
@@ -266,6 +263,13 @@ def test_undo_puts_back_the_words_the_answers_and_their_mailbox_draft(
     # Their mailbox's draft says the same as the card again.
     assert mailbox.drafts[undone["draft_id"]].message.text == first["draft_body"]
     assert replies.cards(owner)[0].can_undo is False
+    # A question asked after a change: Undo would show under its answer, so
+    # the change before it can't be taken back from there.
+    calls.clear()
+    changed = asyncio.run(card_drafts.edit(_fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, rewrite=write))
+    assert card_drafts.can_undo(changed)
+    asked = asyncio.run(card_drafts.edit(_fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, rewrite=write))
+    assert not card_drafts.can_undo(asked)
 
 
 def test_a_switched_card_keeps_its_sign_off_when_its_words_lost_it(

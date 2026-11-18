@@ -358,11 +358,10 @@ async def edit(
                 words = _check_words(written)
                 before = str(payload.get("draft_body") or "")
                 if words != before:
-                    # Their change can be taken back (``undo``).
+                    # Their change can be taken back (``undo``). A question
+                    # answered after it can't: Undo shows under the last
+                    # note, so it only ever takes back what that note says.
                     extra[UNDO_KEY] = undo_point(payload)
-                elif can_undo(payload):
-                    # A question answered: the change before it still can.
-                    extra[UNDO_KEY] = payload[UNDO_KEY]
             return await _edit(instance, person, payload, words, gmail, extra, recipients)
         finally:
             _EDITING.discard(instance.id)
