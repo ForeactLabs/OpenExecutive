@@ -788,6 +788,18 @@ def test_a_go_on_a_watch_card_runs_its_step(
     assert res.json()["approval"] is not None and len(turns.calls) == 1
 
 
+def test_a_watch_card_past_the_hours_budget_pays_for_no_go_call(
+    client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    watch = dict(source="query", topic_tags=["external:news-acme"], dedup_key="watch:news-acme", needs="ok")
+    aid = _card(db, **watch)  # type: ignore[arg-type]
+    monkeypatch.setattr(replan, "REWRITES_PER_HOUR", 0)
+    asked = _go(monkeypatch, True)
+    res = _say(client, aid, "yes, go ahead")
+    assert res.status_code == 429, res.text
+    assert asked == []
+
+
 def test_a_question_echoing_the_plan_leaves_a_for_you_to_know_card_as_it_is(
     client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -393,6 +393,12 @@ def _take_call_slot(now: float, caller_key: str = "") -> None:
         del _CALLER_CALLS[key]
 
 
+def take_call_slot(caller_key: str = "") -> None:
+    """One model call's place in the hour's budget, taken before the call so a
+    caller past it pays for none. Raises ``ReplanError`` ("too_many")."""
+    _take_call_slot(time.monotonic(), caller_key)
+
+
 def check_text(text: str | None) -> str:
     """The person's line, trimmed; raises ``ReplanError`` when it is empty or
     too long. Cheap, so the route runs it before any lookup."""
@@ -460,7 +466,7 @@ async def rewrite_plan(card: Alert, text: str, *, caller_key: str = "") -> NewPl
     """Ask the model for the card's new plan. Raises ``ReplanError`` with a
     message safe to show."""
     line = check_text(text)
-    _take_call_slot(time.monotonic(), caller_key)
+    take_call_slot(caller_key)
     return parse_plan(await _call_model(build_turn(card, line)))
 
 

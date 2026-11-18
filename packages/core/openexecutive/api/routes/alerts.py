@@ -994,13 +994,22 @@ async def say_on_card(alert_id: int, body: SayBody, request: Request) -> SayResp
         except HTTPException:
             return COULD_NOT_START, None
 
+    def _refuse(exc: replan.ReplanError) -> HTTPException:
+        code = {"empty": 422, "too_long": 422, "too_many": 429}.get(exc.code, 503)
+        return HTTPException(status_code=code, detail=exc.message)
+
     if kind == "watch":
         # A go on a watch's card that shows its step runs it, as a tap does;
-        # anything else corrects the watch.
+        # anything else corrects the watch. Reading for a go is a model call,
+        # so it takes its place in the hour's budget first.
         shown = (existing.suggested_action or "").strip()
-        if shown and not hidden and _may_approve(existing, request) and await replan.said_go(
-            shown, line, before=seen,
-        ):
+        reads_go = bool(shown) and not hidden and _may_approve(existing, request)
+        if reads_go:
+            try:
+                replan.take_call_slot(api_caller.caller(request).email)
+            except replan.ReplanError as exc:
+                raise _refuse(exc) from exc
+        if reads_go and await replan.said_go(shown, line, before=seen):
             card_talk.add_turn(alert_id, "you", line, person_id=person)
             reply, approval = await _start(shown, "On it.")
             card_talk.add_turn(alert_id, "me", reply, person_id=person)
@@ -1012,10 +1021,6 @@ async def say_on_card(alert_id: int, body: SayBody, request: Request) -> SayResp
             reply=steered.reply, card=_card(),
             closed_alert_ids=[i for i in steered.closed_alert_ids if i != alert_id],
         )
-
-    def _refuse(exc: replan.ReplanError) -> HTTPException:
-        code = {"empty": 422, "too_long": 422, "too_many": 429}.get(exc.code, 503)
-        return HTTPException(status_code=code, detail=exc.message)
 
     if not _may_approve(existing, request):
         raise HTTPException(status_code=403, detail="This one is for someone else to approve.")  # input-safety
