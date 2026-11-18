@@ -797,17 +797,18 @@ async def change(
             )
         except replan.ReplanError:
             go = False
-        if not go:
-            # Couldn't be sure it was a go: the send stays theirs to tap.
-            return send_from.say(instance, NOTE_TAP_SEND, asked=text) or payload, [], False
-        if ask.executive is not None and ask.executive != send_from.is_from_executive(payload):
-            # "Send it from you": who it goes from switches first, and says so.
+        switched = ask.executive is not None and ask.executive != send_from.is_from_executive(payload)
+        if switched:
+            # "Send it from you": who it goes from switches first, go or not,
+            # and says so.
             payload = await send_from.switch(
-                instance, caller=caller, resolver=resolver, executive=ask.executive, gmail=gmail, asked=text,
+                instance, caller=caller, resolver=resolver, executive=bool(ask.executive), gmail=gmail, asked=text,
             )
-        else:
-            payload = send_from.say(instance, NOTE_CONFIRM_SEND, asked=text) or payload
-        return payload, [], True
+        if not switched:
+            # A go opens the send to check; unsure, it stays theirs to tap.
+            note = NOTE_CONFIRM_SEND if go else NOTE_TAP_SEND
+            payload = send_from.say(instance, note, asked=text) or payload
+        return payload, [], go
     if asked:
         current = get_decision_instance(instance.id) or instance
         try:

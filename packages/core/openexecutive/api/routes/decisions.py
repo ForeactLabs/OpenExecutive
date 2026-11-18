@@ -1175,6 +1175,8 @@ async def say_on_step(instance_id: int, body: StepSayBody, request: Request) -> 
     fields = said_fields(payload) if _may_change(instance, request, resolver) else []
     if not fields:
         raise HTTPException(status_code=409, detail="This one can't be changed from its card.")
+    # What the card showed before these words, for a go when the page sent none.
+    shown = {f.field: f.value for f in fields}
     try:
         new = await replan.rewrite_fields(
             str(payload.get("summary") or ""),
@@ -1213,10 +1215,11 @@ async def say_on_step(instance_id: int, body: StepSayBody, request: Request) -> 
     reply, approved = refused or new.reply, None
     if new.go and not refused:
         step = [replan.StepField(field=f.field, label=f.label, value=f.value) for f in fields]
-        seen = [replan.StepField(field=f.field, label=f.label, value=body.seen.get(f.field, "")) for f in fields]
+        saw = body.seen or shown
+        seen = [replan.StepField(field=f.field, label=f.label, value=saw.get(f.field, "")) for f in fields]
         try:
             go = await replan.said_go(
-                replan.step_text(step), line, before=replan.step_text(seen) if body.seen else None,
+                replan.step_text(step), line, before=replan.step_text(seen),
                 before_max=replan.STEP_TEXT_MAX, caller_key=api_caller.caller(request).email,
             )
         except replan.ReplanError:
@@ -1240,7 +1243,8 @@ async def say_on_step(instance_id: int, body: StepSayBody, request: Request) -> 
                     reply = str(exc.detail)
                     approved = _served(_refresh(instance_id))
                 else:
-                    reply = _COULD_NOT_DO
+                    # Not tried: why, in its own words when it has them.
+                    reply = exc.detail if isinstance(exc.detail, str) else _COULD_NOT_DO
     if talk_id is not None:
         card_talk.add_turn(talk_id, "me", reply, person_id=resolver)
     return StepSayResponse(reply=reply, fields=fields, approved=approved)

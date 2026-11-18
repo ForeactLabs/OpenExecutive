@@ -580,6 +580,18 @@ def test_a_go_that_fails_once_tried_says_so_and_closes_the_card(
     assert body["approved"]["status"] == ledger.STATUS_FAILED
 
 
+def test_a_go_without_what_the_page_showed_is_judged_against_the_card(
+    client: TestClient, team: dict[str, Person], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _carry_out(monkeypatch)
+    turns = _model(monkeypatch, {"body": "Short text"}, go=True, said_go=True)
+    decision_id = _mail_card(team)
+    res = client.post(f"/decisions/{decision_id}/say", json={"text": "shorter, then send it"}, headers=OWNER)
+    assert res.status_code == 200, res.text
+    # The step as the card showed it is what the rewrite is checked against.
+    assert "<plan_before>" in turns[-1] and "Draft text" in turns[-1]
+
+
 def test_a_go_that_cant_be_read_leaves_the_step_waiting(
     client: TestClient, team: dict[str, Person], monkeypatch: pytest.MonkeyPatch,
 ) -> None:

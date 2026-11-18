@@ -168,6 +168,35 @@ def test_saying_it_on_the_card_switches_the_same_card(
     assert len(inbox.open_cards(owner.id)) == 1
 
 
+@pytest.mark.parametrize("go", [True, False])
+def test_send_it_from_you_switches_the_sender_go_or_not(
+    db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch, go: bool,
+) -> None:
+    from openexecutive.alerts import replan
+
+    async def fake(model: str, system: str, turn: str) -> dict[str, Any]:
+        if system == send_from.AS_EXECUTIVE_PROMPT:
+            return {"body": "Hi Dana,\n\nOlivia asked me to reply."}
+        main = turn.split("<draft>\n", 1)[1].split("\n</draft>", 1)[0]
+        return {"body": main, "send_now": True, "send_from": "executive"}
+
+    async def judged(system: str, tool: dict[str, Any], turn: str, **kw: Any) -> dict[str, Any]:
+        return {"go": go}
+
+    monkeypatch.setattr(answers, "_call_model", fake)
+    monkeypatch.setattr(replan, "_call_tool", judged)
+    replan._CALLS.clear()
+    replan._CALLER_CALLS.clear()
+    mailbox, card = _card(owner)
+    saved, changed, send_now = asyncio.run(answers.change(
+        _fresh(card), caller=LOCAL, resolver=owner.id, text="send it from you", gmail=mailbox,
+    ))
+    # Who it goes from switches either way; only a go opens the send.
+    assert changed == [] and send_now is go
+    assert saved[send_from.FROM_EXECUTIVE] is True
+    assert saved["conversation"][-1]["text"] == send_from.NOTE_TO_EXECUTIVE
+
+
 def test_a_rewrite_on_a_switched_card_keeps_it_from_the_executive(
     db: Path, owner: Any, models: dict[str, Any], rewrites: list[str],
 ) -> None:
