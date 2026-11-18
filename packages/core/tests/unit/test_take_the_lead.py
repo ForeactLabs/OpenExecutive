@@ -197,6 +197,9 @@ def test_a_team_files_name_and_who_it_reaches_still_count(owner: Any) -> None:
         assert not ttl._team_only(tool, share), tool
     hit = ttl.check("microsoft_365__share-drive-item", share, lead=_lead(), rules=[], mcp=True)
     assert hit is not None
+    # An address in a comment is a mention, which emails that person.
+    comment = {"document_id": "d" * 30, "comment_content": "+bob@far.example please look"}
+    assert not ttl._team_only("google_workspace__create_doc_comment", comment)
 
 
 def test_a_team_files_known_name_counts_when_the_step_gives_only_an_id(

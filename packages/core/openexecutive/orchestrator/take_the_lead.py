@@ -629,8 +629,12 @@ def _reach_addresses(tool: str, tool_input: dict[str, Any]) -> list[str]:
     ``_MCP_RECIPIENT_KEYS``)."""
     addresses, _ = _targets(tool, tool_input)
     named: Any = tool_input
-    # A share, permission or delete step reaches whoever it names anywhere.
-    if _file_tool(tool) and not _MAIL_TOOL_RE.search(tool) and not _mcp_deletes(tool, tool_input):
+    # A share, permission or delete step reaches whoever it names anywhere,
+    # and so does a comment (an address in it is a mention that emails them).
+    if (
+        _file_tool(tool) and not _MAIL_TOOL_RE.search(tool) and not _COMMENT_TOOL_RE.search(tool)
+        and not _mcp_deletes(tool, tool_input)
+    ):
         named = list(_reach_args(tool_input))
     return [*_EMAIL_RE.findall("\n".join(_strings(named))), *addresses]
 
@@ -1735,6 +1739,7 @@ _FILE_WORD_RE = re.compile(
     r"|excel|workbooks?|worksheets?|onedrive|word)(?=$|[_-])", re.I,
 )
 _MAIL_TOOL_RE = re.compile(r"mail|message|calendar|event", re.I)
+_COMMENT_TOOL_RE = re.compile(r"comment|mention", re.I)
 
 
 def _file_tool(tool: str) -> bool:
