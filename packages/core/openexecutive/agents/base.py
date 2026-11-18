@@ -7,7 +7,7 @@ from typing import Any, Literal
 from openexecutive.audit.usage import log_model_usage
 from openexecutive.config import get_settings
 from openexecutive.providers import get_provider, model_supports_deep_reasoning
-from openexecutive.providers.feature_gate import MAX_OUTPUT_TOKENS
+from openexecutive.providers.feature_gate import SPECIALIST_MAX_TOKENS
 
 _SPECIALIST_TIMEOUT = 180.0
 # The slowest a specialist's answer is taken to be written, in tokens a
@@ -173,12 +173,12 @@ class BaseAgent(ABC):
 
         create_kwargs: dict = {
             "model": model,
-            # What the Executive's own answers may write (feature_gate).
-            "max_tokens": MAX_OUTPUT_TOKENS,
+            # What a specialist's analysis may write (feature_gate).
+            "max_tokens": SPECIALIST_MAX_TOKENS,
             # Per-request timeout — keeps cancellation semantics aligned with
             # the previous per-client timeout, but the provider singleton no
             # longer needs to recreate the SDK client to set it.
-            "timeout": specialist_timeout(MAX_OUTPUT_TOKENS),
+            "timeout": specialist_timeout(SPECIALIST_MAX_TOKENS),
             "system": [
                 {
                     "type": "text",
@@ -227,7 +227,7 @@ class BaseAgent(ABC):
         *,
         tools: list[dict[str, Any]],
         system_addendum: str = "",
-        max_tokens: int = MAX_OUTPUT_TOKENS,
+        max_tokens: int = SPECIALIST_MAX_TOKENS,
         timeout_seconds: float | None = None,
         model_override: str | None = None,
         deep_reasoning_override: bool | None = None,

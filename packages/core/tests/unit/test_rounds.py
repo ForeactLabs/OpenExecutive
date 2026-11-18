@@ -1,8 +1,9 @@
 """The one loop a background pass runs its tool calls in (orchestrator.rounds).
 
-No count of rounds: it ends when the model answers, and writes up (one more
-call with no tools) when a call keeps coming back the same, when its reads
-fill what the model holds, or when the pass says it has had enough. A long
+It ends when the model answers, and writes up (one more call with no tools)
+when a call keeps coming back the same, when its reads fill what the turn
+may read, when it has run its ``max_rounds`` rounds, or when the pass says
+it has had enough. A long
 result comes back in parts, as in a chat turn.
 """
 from __future__ import annotations
@@ -21,6 +22,7 @@ from openexecutive.orchestrator.reading import (
     MAX_EMPTY_CUT_ROUNDS,
     REPEAT_LIMIT,
     REPEATING_NOTE,
+    STEPS_NOTE,
 )
 from openexecutive.providers import feature_gate, registry
 
@@ -58,10 +60,11 @@ class _Model:
         return self.reply(len(self.requests), kw)
 
 
-async def _run(model: _Model, run_call: Any, **kw: Any) -> rounds.Rounds:
+async def _run(model: _Model, run_call: Any, *, max_rounds: int = 100, **kw: Any) -> rounds.Rounds:
     return await rounds.run_rounds(
         model, model="claude-opus-5", max_tokens=1000, system="s", tools=[],
-        messages=[{"role": "user", "content": "go"}], run_call=run_call, actor="a pass", **kw,
+        messages=[{"role": "user", "content": "go"}], run_call=run_call, actor="a pass",
+        max_rounds=max_rounds, **kw,
     )
 
 
@@ -78,6 +81,27 @@ async def test_a_pass_keeps_going_until_its_work_is_done() -> None:
     assert len(ran) == 40 and done.text == "All 40 read." and done.ended == "done"
     assert done.rounds == 41
     assert all("tool_choice" not in r for r in model.requests)
+
+
+@pytest.mark.asyncio
+async def test_a_pass_writes_up_after_its_rounds() -> None:
+    ran: list[int] = []
+
+    async def run_call(use: dict[str, Any]) -> str:
+        ran.append(use["input"]["n"])
+        return f"row {use['input']['n']}"
+
+    def reply(n: int, kw: dict[str, Any]) -> Any:
+        if kw.get("tool_choice") == {"type": "none"}:
+            return _answer("Read 5; the rest is left.")
+        return _calls(_use("read", {"n": n}, f"t{n}"))
+
+    model = _Model(reply)
+    done = await _run(model, run_call, max_rounds=5)
+    assert done.ended == "steps" and done.text == "Read 5; the rest is left."
+    assert ran == [1, 2, 3, 4, 5]
+    assert len(model.requests) == 6
+    assert model.requests[-1]["messages"][-1]["content"][-1] == {"type": "text", "text": STEPS_NOTE}
 
 
 @pytest.mark.asyncio
@@ -201,7 +225,7 @@ async def test_each_response_is_recorded_and_seen_and_only_what_is_sent_goes(
     messages: list[dict[str, Any]] = [{"role": "user", "content": "old"}, {"role": "user", "content": "go"}]
     await rounds.run_rounds(
         model, model="m", max_tokens=10, system="s", tools=[], messages=messages, run_call=run_call,
-        actor="admin_chat", session_id="c1", on_response=lambda _r, i: seen.append(i), sent=lambda m: m[1:],
+        actor="admin_chat", max_rounds=8, session_id="c1", on_response=lambda _r, i: seen.append(i), sent=lambda m: m[1:],
     )
     assert seen == [1, 2, 3]
     assert [(u["actor"], u["iteration"], u["session_id"]) for u in _usage] == [("admin_chat", i, "c1") for i in (1, 2, 3)]

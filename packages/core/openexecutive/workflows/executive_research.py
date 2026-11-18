@@ -66,6 +66,11 @@ from openexecutive.workflows.base import (
 
 logger = logging.getLogger(__name__)
 
+# The most rounds of tool calls research's routing and watch passes run
+# (the owner's choice, 11-18: background passes keep their old counts).
+_MAX_SYNTHESIS_ITERATIONS = 3
+_MAX_WATCHLIST_ITERATIONS = 2
+
 # Specialists the workflow fans out to. Kept module-scoped so tests can
 # patch / shrink without monkeypatching half the workflow internals.
 RESEARCH_SPECIALISTS: tuple[str, ...] = (
@@ -929,6 +934,7 @@ async def _executive_synthesis_loop(
             messages=messages,
             run_call=_run,
             actor="research_synthesis",
+            max_rounds=_MAX_SYNTHESIS_ITERATIONS,
             enough=_routed_enough,
         )
         final_text = done.text
@@ -1044,6 +1050,7 @@ async def _watchlist_analysis_loop(
             messages=messages,
             run_call=_run,
             actor="research_watchlist",
+            max_rounds=_MAX_WATCHLIST_ITERATIONS,
             enough=_proposed_enough,
         )
     except Exception:

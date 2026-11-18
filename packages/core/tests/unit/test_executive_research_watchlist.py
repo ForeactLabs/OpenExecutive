@@ -216,7 +216,7 @@ async def test_watchlist_pass_skips_already_watched(
 
 
 @pytest.mark.asyncio
-async def test_watchlist_pass_stops_at_its_proposals_even_when_each_is_refused(
+async def test_watchlist_pass_stops_at_its_rounds_even_when_each_is_refused(
     db: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     n = er._MAX_WATCHLIST_PROPOSALS_PER_RUN + 3
@@ -228,7 +228,8 @@ async def test_watchlist_pass_stops_at_its_proposals_even_when_each_is_refused(
         [_finding()], existing_watchlist=monitoring_store.list_watchlist(db_path=db),
         profile=_profile(), initiatives=[],
     )
-    assert len(calls) == er._MAX_WATCHLIST_PROPOSALS_PER_RUN and not any(c["ok"] for c in calls)
+    # One proposal a round: the pass's own rounds end it first.
+    assert len(calls) == er._MAX_WATCHLIST_ITERATIONS and not any(c["ok"] for c in calls)
 
 
 @pytest.mark.asyncio

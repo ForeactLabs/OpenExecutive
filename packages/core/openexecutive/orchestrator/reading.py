@@ -38,6 +38,14 @@ REPEATING_NOTE = (
 # Once a turn has read all its model holds (TurnReadingBudget.full), more
 # reads would push the prompt past the window: it writes its answer from
 # what it has read and offers to carry on, the same way a repeat ends.
+# The most rounds of tool calls a chat turn runs (the owner's choice,
+# 11-18). At the last one it writes its answer from what it has.
+MAX_STEPS = 40
+STEPS_NOTE = (
+    "This question has used all the steps one message gets. Do not call any "
+    "more tools. Write your answer now from what you have, say plainly what "
+    "is still left to do, and offer to carry on with it in a new message."
+)
 FULL_NOTE = (
     "This question has now read all it can hold at once. Do not call any "
     "more tools. Write your answer now from what you have read, say plainly "

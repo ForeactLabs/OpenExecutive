@@ -316,10 +316,11 @@ caching:
     Read sizes come from the turn's model, not from settings
     (providers.registry.reading_limits_for, which reads
     providers.feature_gate.context_tokens and reading_limits): a turn's reads
-    may fill 40% of the model's window at 3 characters a token
-    (ReadingLimits.per_turn: 1,200,000 characters for a 1M-token Claude,
-    240,000 for Haiku 4.5, a share of LOCAL_CONTEXT_TOKENS for a self-hosted
-    model), and one part of one read is half that (per_read). So an ordinary
+    may fill 40% of the model's window at 3 characters a token, capped at
+    MAX_TURN_READ_CHARS (200,000; the owner's cost limit, 11-18)
+    (ReadingLimits.per_turn: 200,000 for a 1M-token Claude or Haiku 4.5, a
+    share of LOCAL_CONTEXT_TOKENS for a small self-hosted model), and one
+    part of one read is half that (per_read). So an ordinary
     long document fits whole. orchestrator/reading.py holds it for the
     Executive's loop, a workflow action step and the background passes alike
     (TurnReadingBudget; the passes through orchestrator/rounds.py). A
@@ -456,9 +457,10 @@ caching:
     The passes that run with nobody watching (executive_reflection and Take
     the lead, executive_research's routing and watch passes, the chat review)
     run their tool calls through one loop,
-    orchestrator/rounds.py run_rounds, with no count of rounds: each ended at
-    a fixed number of iterations (3 to 10), so a long job stopped half done.
-    A pass ends when the model answers without a call. Its results go
+    orchestrator/rounds.py run_rounds. A pass ends when the model answers
+    without a call, or writes up after its max_rounds (the owner kept each
+    pass's own count, 11-18: reflection 5, Take the lead 10, research
+    synthesis 3, watchlist 2, chat review 5; STEPS_NOTE). Its results go
     through TurnReadingBudget, sized from the pass's model (whole, or in
     parts with replay), not a preview of 160 or 4,000 characters. It writes
     up, with one more call offering no tools (tool_choice none), when a call
@@ -5518,7 +5520,7 @@ today:
 chat:
   round_cut_off: |
     Each Executive round (and the committee revision) may write
-    MAX_OUTPUT_TOKENS (32,000; was 8192) in providers/feature_gate.py; a specialist's analysis takes the same (agents/base.py, was 4,096). A
+    MAX_OUTPUT_TOKENS (32,000; was 8192) in providers/feature_gate.py; a specialist's analysis takes SPECIALIST_MAX_TOKENS (8,000; agents/base.py, was 4,096). A
     round that reaches it (stop_reason max_tokens) no longer ends the turn:
     the tool call it was still writing (the last one) is answered with
     CUT_OFF_RESULT and never runs, since its input is unfinished; with no
@@ -5527,9 +5529,11 @@ chat:
     CUT_OFF_LABEL ("Writing it in shorter parts…"), so a card's step list
     names the real stop. Why: a reply card writing a long spreadsheet as one
     draft_artifact call was cut at 8192 twice and showed "couldn't finish"
-    with the mark on the read before it. A turn has no step limit: it runs
-    rounds, cut ones included, until the model answers (Stop ends it), so a
-    big job is never stopped at a count. The one exception is a cut round that
+    with the mark on the read before it. A turn runs at most MAX_STEPS (40)
+    rounds, cut ones included (orchestrator/reading.py, the owner's cost
+    limit, 11-18): at the 40th its results end with STEPS_NOTE and the next
+    call writes the answer, saying what is left (Stop ends it sooner). The
+    other exception is a cut round that
     got nowhere: one that wrote nothing at all (a model spending its whole
     answer thinking), or one cut while writing its only call (a document too
     long for one call, asked for again just as long), whose call never runs.

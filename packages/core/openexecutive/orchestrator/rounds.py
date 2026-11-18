@@ -9,11 +9,11 @@ way a chat turn reads them (orchestrator.reading): sizes come from the
 model, and a long result comes back in parts, a repeat of the same call
 bringing the next part without running the tool again.
 
-There is no count of rounds. A pass ends when the model answers without a
-call. It writes up from what it has, with one more call that offers no
-tools, when the same call came back the same ``REPEAT_LIMIT`` times, when
-its reads fill what its model holds, or when the pass itself says it has
-had enough (``enough``).
+A pass ends when the model answers without a call. It writes up from what
+it has, with one more call that offers no tools, when the same call came
+back the same ``REPEAT_LIMIT`` times, when its reads fill what its model
+holds, when it has run the most rounds its caller gives it (``max_rounds``),
+or when the pass itself says it has had enough (``enough``).
 
 A round cut off at the model's output limit carries on, as a chat turn
 does: the call it was still writing never runs and is answered with
@@ -40,6 +40,7 @@ from openexecutive.orchestrator.reading import (
     FULL_NOTE,
     MAX_EMPTY_CUT_ROUNDS,
     REPEATING_NOTE,
+    STEPS_NOTE,
     TurnReadingBudget,
     apply_loop_cache_marker,
     last_written_block,
@@ -48,7 +49,7 @@ from openexecutive.orchestrator.reading import (
 
 logger = logging.getLogger(__name__)
 
-Ended = Literal["done", "repeating", "full", "enough", "cut"]
+Ended = Literal["done", "repeating", "full", "steps", "enough", "cut"]
 
 
 @dataclass
@@ -117,6 +118,7 @@ async def run_rounds(
     messages: list[dict[str, Any]],
     run_call: Callable[[dict[str, Any]], Awaitable[Any]],
     actor: str,
+    max_rounds: int,
     session_id: str | None = None,
     on_response: Callable[[Any, int], Any] | None = None,
     enough: Callable[[], str | None] | None = None,
@@ -133,7 +135,8 @@ async def run_rounds(
     write-up). ``sent`` picks what of ``messages`` each request sends (a chat
     that keeps only its newest turns). ``on_result`` sees each call's result
     as the model was sent it: a part of a long one, never what it has not
-    read. ``messages`` grows with each round. A
+    read. After ``max_rounds`` rounds of calls it writes up. ``messages``
+    grows with each round. A
     provider error is raised to the caller.
     """
     from openexecutive.audit.usage import log_model_usage
@@ -239,6 +242,9 @@ async def run_rounds(
         elif reading.full:
             logger.info("%s: the pass has read all its model holds; writing up", model)
             note, ending = FULL_NOTE, "full"
+        elif rounds >= max_rounds:
+            logger.info("%s: the pass has run its %d rounds; writing up", model, max_rounds)
+            note, ending = STEPS_NOTE, "steps"
         if note:
             results.append({"type": "text", "text": note})
         messages.append({"role": "user", "content": results})

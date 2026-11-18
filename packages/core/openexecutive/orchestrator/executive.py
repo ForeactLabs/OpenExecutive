@@ -169,8 +169,10 @@ from openexecutive.orchestrator.reading import (
     CUT_OFF_RESULT,
     FULL_NOTE,
     MAX_EMPTY_CUT_ROUNDS,
+    MAX_STEPS,
     REPEAT_LIMIT,
     REPEATING_NOTE,
+    STEPS_NOTE,
     TurnReadingBudget,
     apply_loop_cache_marker,
     last_written_block,
@@ -978,6 +980,10 @@ CUT_OFF_LABEL = "Writing it in shorter parts…"
 REPEATING_EMPTY_REPLY = (
     "I stopped because the same step kept coming back the same way, and "
     "nothing was ready to show yet."
+)
+STEPS_EMPTY_REPLY = (
+    "I've used all the steps I get for one message. Ask me to carry on and "
+    "I'll pick up the rest."
 )
 FULL_EMPTY_REPLY = (
     "I've read all I can hold for this one question. Ask me to carry on and "
@@ -3955,6 +3961,11 @@ class Executive:
                 tool_results.append({"type": "text", "text": FULL_NOTE})
                 repeating = True
                 write_up_empty = FULL_EMPTY_REPLY
+            elif not handing_over and not repeating and iteration >= MAX_STEPS:
+                logger.info("round %d: the turn has run its %d steps; writing up", iteration, MAX_STEPS)
+                tool_results.append({"type": "text", "text": STEPS_NOTE})
+                repeating = True
+                write_up_empty = STEPS_EMPTY_REPLY
             if sees:
                 # Only the newest screenshots ride along: older ones would be
                 # sent again every round.

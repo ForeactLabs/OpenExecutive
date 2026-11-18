@@ -30,7 +30,12 @@ from openexecutive.orchestrator.reading import (
     _turn_result_limit,
     text_weight,
 )
-from openexecutive.providers.feature_gate import ReadingLimits, context_tokens, reading_limits
+from openexecutive.providers.feature_gate import (
+    MAX_TURN_READ_CHARS,
+    ReadingLimits,
+    context_tokens,
+    reading_limits,
+)
 
 
 def _limits(per_read: int, per_turn: int) -> Any:
@@ -65,11 +70,11 @@ def test_a_local_model_holds_what_its_server_says() -> None:
     assert context_tokens("qwen", local_models=["qwen"], local_context_tokens=32_768) == 32_768
 
 
-def test_reading_limits_are_a_share_of_the_window() -> None:
+def test_reading_limits_are_a_share_of_the_window_up_to_the_turn_budget() -> None:
     big = reading_limits(1_000_000)
-    # About 40% of the window, at 3 characters a token: a whole long
-    # document (the 56-body wording guide is ~150,000 characters) fits.
-    assert big.per_turn == 1_200_000 and big.per_read == 600_000
+    # 40% of a big window would be 1,200,000 characters; a turn reads at
+    # most MAX_TURN_READ_CHARS, half of it in one part.
+    assert big.per_turn == MAX_TURN_READ_CHARS == 200_000 and big.per_read == 100_000
     small = reading_limits(32_768)
     assert small.per_read < small.per_turn < 32_768 * 3
 
@@ -660,3 +665,45 @@ def test_a_long_write_up_after_reading_a_lot_carries_on_while_the_window_has_roo
     assert budget.full and not budget.window_full
     budget.prompt_was(810_000)
     assert budget.window_full
+
+
+def test_a_chat_turn_writes_up_after_its_steps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A turn whose calls change every round (so nothing repeats and the
+    reads never fill) still ends at MAX_STEPS: it answers from what it has."""
+    from openexecutive.orchestrator.reading import STEPS_NOTE
+
+    monkeypatch.setattr("openexecutive.orchestrator.executive.MAX_STEPS", 3)
+    ran: list[str] = []
+
+    async def _search(tool_input: dict[str, Any], *_a: Any, **_k: Any) -> str:
+        ran.append(tool_input["query"])
+        return "hit"
+
+    provider = _ScriptedProvider(
+        [_FinalMsg([_ToolUseBlock(f"s{i}", "search_mail", {"query": f"X {i}"})], "tool_use") for i in range(3)]
+        + [_FinalMsg([_TextBlock("Here is what I found.")], "end_turn")]
+    )
+    _run(provider, {"search_mail": _search})
+
+    assert ran == ["X 0", "X 1", "X 2"]
+    assert len(provider.calls) == 4
+    assert STEPS_NOTE in str(provider.calls[3]["messages"][-1]["content"])
+
+
+def test_a_call_written_after_the_last_step_runs_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.orchestrator.executive import STEPS_EMPTY_REPLY
+
+    monkeypatch.setattr("openexecutive.orchestrator.executive.MAX_STEPS", 2)
+    ran: list[str] = []
+
+    async def _search(tool_input: dict[str, Any], *_a: Any, **_k: Any) -> str:
+        ran.append(tool_input["query"])
+        return "hit"
+
+    provider = _ScriptedProvider(
+        [_FinalMsg([_ToolUseBlock(f"s{i}", "search_mail", {"query": f"X {i}"})], "tool_use") for i in range(3)]
+    )
+    items = _run(provider, {"search_mail": _search})
+
+    assert ran == ["X 0", "X 1"]
+    assert STEPS_EMPTY_REPLY in items
