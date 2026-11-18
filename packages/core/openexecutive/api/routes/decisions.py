@@ -633,7 +633,7 @@ async def _carry_out_lead(
 
     payload = _parse_payload(instance)
     edits = body.edits or {}
-    if edits.get("input") is not None:
+    if edits.get("input") is not None:  # noqa: SIM102 - what was said goes on without this check
         # Changing what the Executive says or books is the principal's: an
         # area approver says yes or no to what it would do, as it stands.
         if not _approver_is_principal(request):
