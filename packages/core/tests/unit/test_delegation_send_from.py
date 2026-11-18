@@ -337,9 +337,34 @@ def test_chat_app_card_names_the_executive(
     from openexecutive.integrations import channel_cards
 
     mailbox, card = _card(owner)
-    assert channel_cards.card_buttons(card.id)[0] == "Send"
+    assert channel_cards.card_options(card.id) == (
+        ("Send from me", "a"), ("Send from Open Executive, cc me", "x"), ("Skip", "s"),
+    )
     _switch(card, mailbox, owner, True)
-    assert channel_cards.card_buttons(card.id)[0] == "Send from Executive"
+    assert channel_cards.card_options(card.id) == (
+        ("Send from Open Executive, cc me", "a"), ("Send from me", "x"), ("Skip", "s"),
+    )
+
+
+def test_a_chat_tap_switches_the_sender_and_shows_the_new_card(
+    db: Path, owner: Any, models: dict[str, Any], rewrites: list[str], sends: list[dict[str, Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.integrations import channel_cards
+
+    mailbox, card = _card(owner)
+    switch = send_from.switch_for_work
+
+    async def in_this_mailbox(card_id: int, person: Any, *, executive: bool) -> dict[str, Any]:
+        return await switch(card_id, person, executive=executive, gmail=mailbox)
+
+    monkeypatch.setattr(send_from, "switch_for_work", in_this_mailbox)
+    tapped = asyncio.run(channel_cards.tap(card.id, channel_cards.SWITCH, owner))
+    assert tapped.line == "Changed who it goes from. Check it, then send it."
+    assert "this reply from Open Executive, with you on cc." in tapped.text
+    assert tapped.options[0] == ("Send from Open Executive, cc me", "a")
+    # A switch sends nothing.
+    assert sends == [] and _fresh(card).status == "proposed"
 
 
 def test_not_on_a_card_going_on_its_own(db: Path, owner: Any, models: dict[str, Any], rewrites: list[str]) -> None:

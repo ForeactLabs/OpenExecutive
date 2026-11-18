@@ -43,6 +43,7 @@ import asyncio
 import json
 import logging
 import sqlite3
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -57,6 +58,15 @@ _PREFIX = "card"
 APPROVE = "a"
 SKIP = "s"
 ALLOW = "n"
+# A reply card's other sender: switch who it goes from, and show it again
+# to send (``send_from``). It sends nothing.
+SWITCH = "x"
+_CHOICES = (APPROVE, SKIP, ALLOW, SWITCH)
+# Each choice in a word, for a tap's audit row.
+CHOICE_NAMES = {APPROVE: "approve", SKIP: "skip", ALLOW: "allow", SWITCH: "switch"}
+# The card's two parts, as on the app's cards.
+HAPPENED = "What happened"
+WILL_DO = "What I'll do"
 # A reply leaves at most this many cards (action_cards.CARDS_PER_TURN plus a meeting).
 MAX_CARDS = 4
 
@@ -77,7 +87,9 @@ _CLASS_LABEL = {
 }
 # The approve button's label and what the card says once it is done, where
 # they aren't Approve and Approved.
-_APPROVE_LABEL = {"delegation_reply": "Send", "delegation_invite": "Accept"}
+_APPROVE_LABEL = {
+    "delegation_invite": "Accept", "take_the_lead_action": "Do it", "department_action": "Do it",
+}
 _DONE_TEXT = {"delegation_reply": "Sent.", "delegation_invite": "Accepted."}
 # A card waiting outside any chat is shown whole or not at all: its tap
 # sends or does exactly what is stored, so a card cut short would approve
@@ -146,17 +158,16 @@ def callback_data(decision_id: int, choice: str) -> str:
     return f"{_PREFIX}:{decision_id}:{choice}"
 
 
-def parse_callback(data: Any) -> tuple[int, bool] | None:
-    """(decision id, approve) from a button's callback data, or None. The
-    "next time" button approves too; ``tapped_allow`` tells it apart."""
+def parse_choice(data: Any) -> tuple[int, str] | None:
+    """(decision id, choice) from a button's callback data, or None."""
     if not isinstance(data, str):
         return None
     parts = data.split(":")
-    if len(parts) != 3 or parts[0] != _PREFIX or parts[2] not in (APPROVE, SKIP, ALLOW):
+    if len(parts) != 3 or parts[0] != _PREFIX or parts[2] not in _CHOICES:
         return None
     if not parts[1].isdigit() or len(parts[1]) > 12:
         return None
-    return int(parts[1]), parts[2] != SKIP
+    return int(parts[1]), parts[2]
 
 
 def _when(start: Any, end: Any) -> str:
@@ -200,13 +211,15 @@ def card_text(decision_id: int) -> str | None:
         from openexecutive.delegation import send_from
 
         sender = str(payload.get("from_name") or payload.get("from_email") or "").strip()[:120]
-        if sender:
-            lines.append(f"To {sender}")
-        if send_from.is_from_executive(payload):
-            lines.append(f"From {send_from.executive_name()}, with you on cc")
+        gist = str(payload.get("gist") or "").strip()[:400]
+        lines += ["", HAPPENED, gist or (f"{sender} wrote to you." if sender else "An email came in.")]
         to = [str(a) for a in payload.get("draft_to") or [] if a][:10]
-        if to:
-            lines.append("Goes to " + ", ".join(to))
+        to_whom = ", ".join(to) or sender or "them"
+        lines += ["", WILL_DO]
+        if send_from.is_from_executive(payload):
+            lines.append(f"Send {to_whom} this reply from {send_from.executive_name()}, with you on cc.")
+        else:
+            lines.append(f"Send {to_whom} this reply from you.")
         subject = str(payload.get("draft_subject") or payload.get("subject") or "").strip()[:200]
         if subject:
             lines.append(subject)
@@ -232,13 +245,13 @@ def card_text(decision_id: int) -> str | None:
         if not card_details.held_steps(payload):
             return None
         shown = card_details.served(payload)
-        if payload.get("requested_by"):
-            lines.append(f"{str(payload['requested_by'])[:120]} asked for this.")
         lines.append(str(shown.get("summary") or payload.get("tool") or "").strip()[:400])
+        happened = []
+        if payload.get("requested_by"):
+            happened.append(f"{str(payload['requested_by'])[:120]} asked for this.")
         reason = str(payload.get("reason") or "").strip()[:300]
-        if reason:
-            lines.append(f"It waited because {reason.removesuffix('.')}.")
-        lines.append("")
+        happened.append(f"It waited because {reason.removesuffix('.')}." if reason else "It waited for your OK.")
+        lines += ["", HAPPENED, " ".join(happened), "", WILL_DO]
         for detail in shown.get("details") or []:
             value = str(detail.get("value") or "")
             if detail.get("href"):
@@ -262,24 +275,39 @@ def card_text(decision_id: int) -> str | None:
     return text
 
 
-def tapped_allow(data: Any) -> bool:
-    """Whether a button's callback data is the "next time" button."""
-    return isinstance(data, str) and data.split(":")[-1] == ALLOW and parse_callback(data) is not None
+# A button's label is cut to this (Slack's limit for a button's text).
+LABEL_MAX = 75
 
 
-def card_buttons(decision_id: int) -> tuple[str, ...]:
-    """The labels of a card's buttons: Send, Accept or Approve, and Skip,
-    and, on a card that can teach (In training, ``allow_label``), a third:
-    the same and on its own next time."""
+def card_options(decision_id: int) -> tuple[tuple[str, str], ...]:
+    """A card's buttons as (label, choice), the Executive's pick first and
+    Skip last, as on the app's card: Do it on a held step, Send from me or
+    from the Executive (and the other sender, ``SWITCH``) on a reply,
+    Accept on an invite, Approve on the rest; and, on a card that can teach
+    (In training, ``allow_label``), the pick and on its own next time."""
+    from openexecutive.delegation import send_from
     from openexecutive.memory.decision_ledger import get_decision_instance
 
     instance = get_decision_instance(decision_id)
-    label = _APPROVE_LABEL.get(instance.decision_class, "Approve") if instance is not None else "Approve"
-    if instance is not None and instance.decision_class == "delegation_reply" and _from_executive(instance):
-        label = "Send from Executive"
+    kind = instance.decision_class if instance is not None else ""
+    label = _APPROVE_LABEL.get(kind, "Approve")
+    other: tuple[str, str] | None = None
+    if kind == "delegation_reply" and instance is not None:
+        from openexecutive.delegation.inbox import card_payload
+
+        me, executive = "Send from me", f"Send from {send_from.executive_name()}, cc me"
+        from_executive = _from_executive(instance)
+        label = executive if from_executive else me
+        # A follow-up goes from them alone, as on the app's card.
+        if card_payload(instance).get("source") != "follow_up":
+            other = (me if from_executive else executive, SWITCH)
+    options = [(label, APPROVE)]
     if instance is not None and allow_label(instance):
-        return label, "Skip", f"{label} + on its own next time"
-    return label, "Skip"
+        options.append((f"{label}, and do this on its own next time", ALLOW))
+    if other is not None:
+        options.append(other)
+    options.append(("Skip", SKIP))
+    return tuple((text[:LABEL_MAX], choice) for text, choice in options)
 
 
 def _from_executive(instance: Any) -> bool:
@@ -350,6 +378,62 @@ def outcome_of(line: str) -> str:
     if line == BUSY:
         return "busy"
     return "refused" if line.startswith("Not done") else "done"
+
+
+@dataclass(frozen=True)
+class Tapped:
+    """What a tap on a card's button did. ``line`` goes under the card; a
+    card that still waits (``options``) is shown again as ``text`` with
+    those buttons, else it keeps what it said, with ``line`` under it."""
+
+    line: str
+    text: str = ""
+    options: tuple[tuple[str, str], ...] = ()
+
+
+async def tap(decision_id: int, choice: str, person: Any) -> Tapped:
+    """A tap on one of a card's buttons (``card_options``) by ``person``,
+    the proven tapper: approve, approve and allow from now on, skip, or
+    (a reply) switch who it goes from, which sends nothing and shows the
+    card again with its new words."""
+    if choice == SWITCH:
+        return await _switch(decision_id, person)
+    line = await resolve(decision_id, person, approve=choice != SKIP, allow=choice == ALLOW)
+    return Tapped(line)
+
+
+async def _switch(decision_id: int, person: Any) -> Tapped:
+    from openexecutive.delegation import send_from
+    from openexecutive.delegation.inbox import card_payload
+    from openexecutive.delegation.reply_send import SendRefused
+    from openexecutive.memory.decision_ledger import get_decision_instance
+
+    if decision_id in _resolving:
+        return Tapped(BUSY)
+    instance = get_decision_instance(decision_id)
+    if instance is None or instance.decision_class != "delegation_reply":
+        return Tapped("Not done: this card is no longer there.")
+    _resolving.add(decision_id)
+    try:
+        await send_from.switch_for_work(
+            decision_id, person, executive=not send_from.is_from_executive(card_payload(instance)),
+        )
+    except SendRefused as refused:
+        return Tapped(f"Not done: {refused.message}")
+    except Exception:
+        logger.exception("channel_cards: switching who card %d goes from failed", decision_id)
+        return Tapped("Not done: something went wrong. Check Today before trying again.")
+    finally:
+        _resolving.discard(decision_id)
+    text = card_text(decision_id)
+    if text is None:
+        from openexecutive.config import get_settings
+
+        link = f"{get_settings().ui_base_url.rstrip('/')}/cards/{decision_id}"
+        return Tapped(f"Changed who it goes from. It waits for your OK in the app: {link}")
+    # What a Send on it is checked against: the card as shown now.
+    mark_shown(decision_id)
+    return Tapped("Changed who it goes from. Check it, then send it.", text, card_options(decision_id))
 
 
 async def resolve(decision_id: int, person: Any, *, approve: bool, allow: bool = False) -> str:
@@ -483,6 +567,24 @@ def shown_at(decision_id: int, db_path: Path | None = None) -> str:
     return str(row[0]) if row else ""
 
 
+def mark_shown(decision_id: int, now: datetime | None = None, db_path: Path | None = None) -> None:
+    """Card ``decision_id``, posted to its person's chat app, was shown
+    again (with new words) at ``now``: a tap on it is checked against that
+    (``shown_at``). Nothing when it wasn't posted."""
+    try:
+        conn = _connect(db_path)
+        try:
+            conn.execute(
+                "UPDATE chat_card_pushes SET pushed_at = ? WHERE decision_id = ? AND state = 'sent'",
+                ((now or datetime.now(UTC)).isoformat(), decision_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        logger.warning("channel_cards: couldn't note card %d shown again", decision_id, exc_info=True)
+
+
 def _mark_sent(decision_id: int, sent: bool, db_path: Path | None) -> None:
     conn = _connect(db_path)
     try:
@@ -535,7 +637,9 @@ def _waiting(now: datetime) -> list[Any]:
     return sorted(cards, key=lambda c: c.id)
 
 
-async def _send(channel: str, person: Any, decision_id: int, text: str, labels: tuple[str, ...]) -> None:
+async def _send(
+    channel: str, person: Any, decision_id: int, text: str, options: tuple[tuple[str, str], ...],
+) -> None:
     from openexecutive.config import get_settings
 
     if channel == "telegram":
@@ -543,16 +647,16 @@ async def _send(channel: str, person: Any, decision_id: int, text: str, labels: 
 
         await send_card(
             str(get_settings().telegram_bot_token or ""), int(person.telegram_chat_id), decision_id, text,
-            labels=labels, raise_on_error=True,
+            options=options, raise_on_error=True,
         )
     elif channel == "slack":
         from openexecutive.integrations.slack_bot import send_dm_card
 
-        await send_dm_card(str(person.slack_user_id), decision_id, text, labels)
+        await send_dm_card(str(person.slack_user_id), decision_id, text, options)
     elif channel == "discord":
         from openexecutive.integrations.discord_bot import send_dm_card as discord_card
 
-        await discord_card(str(person.discord_user_id), decision_id, text, labels)
+        await discord_card(str(person.discord_user_id), decision_id, text, options)
 
 
 async def push_waiting(now: datetime | None = None, *, db_path: Path | None = None) -> int:
@@ -587,7 +691,7 @@ async def push_waiting(now: datetime | None = None, *, db_path: Path | None = No
         if not text or not _mark_pushed(card.id, person.id, channel, now, db_path):
             continue
         try:
-            await _send(channel, person, card.id, text, card_buttons(card.id))
+            await _send(channel, person, card.id, text, card_options(card.id))
         except Exception:
             logger.warning("channel_cards: couldn't send card %d to %s", card.id, channel, exc_info=True)
             _settle(card.id, False, db_path)
@@ -633,17 +737,23 @@ def maybe_push(now: datetime) -> bool:
 __all__ = [
     "MAX_CARDS",
     "ALLOW",
+    "APPROVE",
+    "CHOICE_NAMES",
+    "SKIP",
+    "SWITCH",
+    "Tapped",
     "allow_label",
     "callback_data",
-    "card_buttons",
     "card_here",
+    "card_options",
     "card_text",
     "chat_for",
+    "mark_shown",
     "maybe_push",
-    "parse_callback",
-    "tapped_allow",
+    "parse_choice",
     "push_waiting",
     "resolve",
     "shows_cards",
+    "tap",
     "telegram_proves_taps",
 ]

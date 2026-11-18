@@ -979,7 +979,7 @@ class _FakeChat:
 _OUR_CARD = {
     "sender": {"type": "BOT"},
     "text": "Meeting to book\n\nWorking on it…",
-    "cardsV2": gc_module._card_buttons(12, ("Approve", "Skip")),
+    "cardsV2": gc_module._card_buttons(12, (("Approve", "a"), ("Skip", "s"))),
 }
 _PAT = [{"member": {"name": "users/111", "type": "HUMAN"}}, {"member": {"name": "users/app", "type": "BOT"}}]
 
@@ -989,7 +989,7 @@ _PAT = [{"member": {"name": "users/111", "type": "HUMAN"}}, {"member": {"name": 
     [
         (_OUR_CARD, {"singleUserBotDm": True}, _PAT, "spaces/DM1/messages/C1", "Meeting to book"),
         ({**_OUR_CARD, "sender": {"type": "HUMAN"}}, {"singleUserBotDm": True}, _PAT, "spaces/DM1/messages/C1", None),
-        ({**_OUR_CARD, "cardsV2": gc_module._card_buttons(13, ("Approve", "Skip"))}, {"singleUserBotDm": True},
+        ({**_OUR_CARD, "cardsV2": gc_module._card_buttons(13, (("Approve", "a"), ("Skip", "s")))}, {"singleUserBotDm": True},
          _PAT, "spaces/DM1/messages/C1", None),
         (_OUR_CARD, {"singleUserBotDm": False}, _PAT, "spaces/DM1/messages/C1", None),
         (_OUR_CARD, {"singleUserBotDm": True}, [{"member": {"name": "users/222", "type": "HUMAN"}}],
@@ -1025,7 +1025,7 @@ def test_a_card_is_sent_with_its_buttons() -> None:
         patch.object(gc_module, "_build_credentials", return_value="creds"),
         patch("googleapiclient.discovery.build", return_value=service),
     ):
-        gc_module.send_card("spaces/DM1", "spaces/DM1/threads/T", 12, "Meeting to book", ("Approve", "Skip"), None)
+        gc_module.send_card("spaces/DM1", "spaces/DM1/threads/T", 12, "Meeting to book", (("Approve", "a"), ("Skip", "s")), None)
 
     kwargs = service.spaces.return_value.messages.return_value.create.call_args.kwargs
     assert kwargs["parent"] == "spaces/DM1"
@@ -1048,7 +1048,7 @@ def test_the_replys_cards_follow_it_only_in_the_apps_own_dm(
         "openexecutive.integrations.channel_cards._dm_proves_taps", lambda channel: channel == "google_chat"
     )
     monkeypatch.setattr("openexecutive.integrations.channel_cards.card_text", lambda _i: "Meeting to book")
-    monkeypatch.setattr("openexecutive.integrations.channel_cards.card_buttons", lambda _i: ("Approve", "Skip"))
+    monkeypatch.setattr("openexecutive.integrations.channel_cards.card_options", lambda _i: (("Approve", "a"), ("Skip", "s")))
     sent: list[tuple] = []
     monkeypatch.setattr(gc_module, "send_card", lambda *a: sent.append(a))
     monkeypatch.setattr("openexecutive.alerts.pipeline.schedule_evaluation", lambda _e: None)
@@ -1088,7 +1088,7 @@ def test_the_replys_cards_follow_it_only_in_the_apps_own_dm(
 
     assert (seen["cards"] is not None) is one_on_one
     assert ("Approve and Skip buttons" in seen["channel_context_block"]) is one_on_one
-    assert sent == ([("spaces/DM1", "spaces/DM1/threads/T", 12, "Meeting to book", ("Approve", "Skip"), None, None)]
+    assert sent == ([("spaces/DM1", "spaces/DM1/threads/T", 12, "Meeting to book", (("Approve", "a"), ("Skip", "s")), None, None)]
                     if one_on_one else [])
 
 
