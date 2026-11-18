@@ -770,6 +770,43 @@ def test_failure_words_name_the_app_and_never_quote_it(tool: str, result: str, w
     assert ttl.failure_words(tool, result) == words
 
 
+def test_a_held_cards_top_is_read_by_who_opens_it(client: TestClient, owner: Any) -> None:
+    """GET /decisions/{id} opens the card as its reader sees it: the owner
+    sees whose OK it waits for, the teammate it waits on sees it's theirs."""
+    sam = people_store.upsert_person(full_name="Sam Team", email=SAM)
+    people_registry.invalidate()
+    decision_id = ledger.create_decision_instance(
+        decision_class=ttl.DECISION_CLASS, department="executive", originating_session_id=None,
+        proposed_payload={
+            "held": True, "tool": "assign_open_loop", "input": {"person_id": owner.id, "task": "Check the list"},
+            "mcp": False, "kind": "level", "reason": "Approvals is on Careful", "summary": "Assign a task",
+            "source": "chat", "requested_by_person_id": sam, "requested_by": "Sam Team",
+        },
+        idempotency_key="top-by-reader", gate_mode="propose", approver_person_id=sam, confidence=None,
+    )
+    def top(email: str) -> dict[str, str]:
+        response = client.get(f"/decisions/{decision_id}", headers={"x-caller-email": email})
+        assert response.status_code == 200, response.text
+        return json.loads(response.json()["proposed_payload_json"])["top"]
+
+    as_sam = top(SAM)
+    assert as_sam["waiting_on"] == "" and as_sam["started"] == "You asked"
+    assert as_sam["waits"] == "It waits because Approvals is on Careful."
+    as_owner = top(OWNER)
+    assert as_owner["waiting_on"] == "Sam" and as_owner["started"] == "Sam asked"
+    assert as_owner["waits"] == "It waits because Approvals is on Careful. It's on Sam's list."
+
+
+@pytest.mark.parametrize(("tool_input", "words"), [
+    ({"document_id": "d" * 30, "end_of_segment": True, "text": "Post 3"}, "Add to the end of a document (Google Docs)"),
+    ({"document_id": "d" * 30, "end_of_segment": "true", "text": "Post 3"}, "Add to the end of a document (Google Docs)"),
+    ({"document_id": "d" * 30, "title": "Post drafts", "end_of_segment": True, "text": "Post 3"},
+     "Add to the end of Post drafts (Google Docs)"),
+])
+def test_an_append_to_a_doc_is_titled_by_its_job(owner: Any, tool_input: dict[str, Any], words: str) -> None:
+    assert ttl.title("google_workspace__modify_doc_text", tool_input, mcp=True) == words
+
+
 def test_a_teammates_own_held_card_reaches_carry_out_as_theirs(
     client: TestClient, owner: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:

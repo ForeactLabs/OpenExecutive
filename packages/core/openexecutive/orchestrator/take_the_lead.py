@@ -1846,7 +1846,7 @@ def _file_job(tool: str, tool_input: dict[str, Any]) -> str:
     values = tool_input.get("values")
     if isinstance(values, list) and values and all(isinstance(r, list) for r in values):
         return f"Write {len(values)} {'row' if len(values) == 1 else 'rows'} to {where}"
-    if tool_input.get("end_of_segment") is True and isinstance(tool_input.get("text"), str):
+    if tool_input.get("end_of_segment") in (True, "true") and isinstance(tool_input.get("text"), str):
         return f"Add to the end of {where}"
     return ""
 

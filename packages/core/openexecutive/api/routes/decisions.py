@@ -448,8 +448,8 @@ def get_decision(instance_id: int, request: Request) -> DecisionInstance:
     from openexecutive.orchestrator import card_details
 
     proposed = json.loads(served.proposed_payload_json)
-    # The card's opening lines (who it waits on, who started it, why, why
-    # it waits), as every app shows them.
+    # The card's opening lines (who it waits on, who started it, why it
+    # waits), as every app shows them.
     top = card_details.top(
         proposed, approver_id=instance.approver_person_id, viewer_id=_resolve_caller_person_id(request),
     )
