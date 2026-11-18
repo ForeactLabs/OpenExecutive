@@ -1050,10 +1050,13 @@ CUT_OFF_NOTE = (
 # What the person sees for a round that was cut off: the step it was on was
 # writing something long, not the read before it.
 CUT_OFF_LABEL = "Writing it in shorter parts…"
-# Cut rounds in a row that wrote nothing at all (no text, no call: a model
-# that spends its whole answer thinking) after which a turn ends. Such a round
-# is no step of the work, so this never stops a job that is getting written;
-# without it the loop would bill a full answer each round, forever.
+# Cut rounds in a row that got nowhere after which a turn ends: a round that
+# wrote nothing at all (a model spending its whole answer thinking), or one
+# cut while writing its only call (a document too long for one call, asked
+# for again just as long), which never runs. A round whose cut fell in text,
+# or that closed a call before the cut, is a step of the work, so this never
+# stops a job that is getting written; without it the loop would bill a full
+# answer each round, forever.
 MAX_EMPTY_CUT_ROUNDS = 3
 # The same call with the same result this many times in a turn is no step
 # of the work (a write that keeps failing the same way, a retry that finds
@@ -1072,7 +1075,7 @@ REPEATING_EMPTY_REPLY = (
 )
 # Said when it ends that way.
 EMPTY_CUTS_REPLY = (
-    "I kept running out of room before I could write anything for this. "
+    "I kept running out of room before I could finish a step of this. "
     "Ask me to carry on, or to do it in smaller steps."
 )
 
@@ -2732,11 +2735,27 @@ class Executive:
             # end the turn on half a step. A cut tool call is answered with
             # CUT_OFF_RESULT below and never runs; cut text gets CUT_OFF_NOTE.
             cut_off = final_msg.stop_reason == "max_tokens"
-            wrote = any(
-                b.get("type") == "tool_use" or (b.get("type") == "text" and str(b.get("text", "")).strip())
-                for b in response_content
+            # The call the round was still writing when it was cut off is the
+            # last one; its input is unfinished, so nothing reads or runs it.
+            # Only text and calls count as written: a reasoning block that a
+            # translated provider (OpenRouter, OpenAI) puts last is skipped.
+            # A call followed by text or by a call the provider dropped closed
+            # before the cut and runs. A translated provider lists text first,
+            # so its last call always counts as cut and is asked for again.
+            last_written = next(
+                (b for b in reversed(response_content) if b.get("type") in ("text", "tool_use")),
+                None,
             )
-            empty_cuts = empty_cuts + 1 if cut_off and not wrote else 0
+            # A cut round got somewhere when its cut fell in text (shown, and
+            # carried on) or a call closed before the cut (it runs). A round
+            # cut while writing its only call got nowhere, however much it
+            # wrote before it: that call never runs.
+            cut_in_call = last_written is not None and last_written.get("type") == "tool_use"
+            closed_calls = sum(b.get("type") == "tool_use" for b in response_content) - int(cut_in_call)
+            got_somewhere = closed_calls > 0 or (
+                last_written is not None and not cut_in_call and str(last_written.get("text", "")).strip() != ""
+            )
+            empty_cuts = empty_cuts + 1 if cut_off and not got_somewhere else 0
             if empty_cuts > MAX_EMPTY_CUT_ROUNDS:
                 logger.warning("round %d: %d cut rounds in a row wrote nothing; ending the turn", iteration, empty_cuts)
                 yield ("\n\n" if streamed_tail else "") + EMPTY_CUTS_REPLY
@@ -2838,17 +2857,6 @@ class Executive:
             # show_progress is answered here too: nothing runs, and the chat
             # gets it before this round's activity label.
             group_results: dict[str, str] = {}
-            # The call the round was still writing when it was cut off is the
-            # last one; its input is unfinished, so nothing reads or runs it.
-            # Only text and calls count as written: a reasoning block that a
-            # translated provider (OpenRouter, OpenAI) puts last is skipped.
-            # A call followed by text or by a call the provider dropped closed
-            # before the cut and runs. A translated provider lists text first,
-            # so its last call always counts as cut and is asked for again.
-            last_written = next(
-                (b for b in reversed(response_content) if b.get("type") in ("text", "tool_use")),
-                None,
-            )
             cut_id = (
                 tool_uses[-1]["id"]
                 if cut_off and tool_uses and last_written is not None

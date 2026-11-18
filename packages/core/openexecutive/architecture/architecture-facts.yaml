@@ -5406,10 +5406,13 @@ chat:
     draft_artifact call was cut at 8192 twice and showed "couldn't finish"
     with the mark on the read before it. A turn has no step limit: it runs
     rounds, cut ones included, until the model answers (Stop ends it), so a
-    big job is never stopped at a count. The one exception is a cut round that wrote
-    nothing at all (no text, no call: a model spending its whole answer
-    thinking), which is no step of the work: after MAX_EMPTY_CUT_ROUNDS (3)
-    of those in a row the turn ends with EMPTY_CUTS_REPLY. The other is a
+    big job is never stopped at a count. The one exception is a cut round that
+    got nowhere: one that wrote nothing at all (a model spending its whole
+    answer thinking), or one cut while writing its only call (a document too
+    long for one call, asked for again just as long), whose call never runs.
+    A round whose cut fell in text, or that closed a call before the cut, is
+    a step of the work. After MAX_EMPTY_CUT_ROUNDS (3) cut rounds in a row
+    that got nowhere, the turn ends with EMPTY_CUTS_REPLY. The other is a
     call that keeps coming back the same: once the same call (name and
     input) has returned the same result REPEAT_LIMIT (4) times in a turn
     (a write failing on an expired sign-in, a retry finding nothing new),

@@ -254,13 +254,13 @@ def test_the_cut_call_is_not_counted_as_a_call_made() -> None:
 
 
 def test_a_turn_carries_on_through_every_cut_until_it_is_done() -> None:
-    """No count of cut rounds ends a turn: it keeps going until the model
-    finishes (Stop stays)."""
+    """No count of cut rounds ends a turn that is getting written: it keeps
+    going until the model finishes (Stop stays)."""
     provider = _ScriptedProvider(
-        [_FinalMsg([_ToolUseBlock(f"c{i}", "draft_artifact", {})], "max_tokens") for i in range(6)]
+        [_FinalMsg([_TextBlock(f"Part {i} of the report…")], "max_tokens") for i in range(6)]
         + [_FinalMsg([_TextBlock("Done.")], "end_turn")]
     )
-    asyncio.run(_run(provider, {"draft_artifact": lambda *_a, **_k: "published"}))
+    asyncio.run(_run(provider))
 
     assert len(provider.calls) == 7
 
@@ -371,3 +371,60 @@ def test_two_calls_taking_turns_with_the_same_errors_still_end() -> None:
 
     assert len(ran) <= rounds
     assert len(provider.calls) <= rounds + 1
+
+
+def test_a_turn_always_cut_while_writing_its_call_ends_and_says_so() -> None:
+    """A call too long for one round, asked for again just as long, never
+    runs: text before it doesn't make the round a step of the work."""
+    from openexecutive.orchestrator.executive import EMPTY_CUTS_REPLY, MAX_EMPTY_CUT_ROUNDS
+
+    ran: list[dict[str, Any]] = []
+
+    async def _write(tool_input: dict[str, Any], *_a: Any, **_k: Any) -> str:
+        ran.append(tool_input)
+        return "written"
+
+    provider = _ScriptedProvider(
+        [
+            _FinalMsg(
+                [_TextBlock("Writing the report now."), _ToolUseBlock(f"d{i}", "draft_artifact", {"title": "Report"})],
+                "max_tokens",
+            )
+            for i in range(MAX_EMPTY_CUT_ROUNDS + 1)
+        ]
+        + [_FinalMsg([_TextBlock("never reached")], "end_turn")]
+    )
+    items = asyncio.run(_run(provider, {"draft_artifact": _write}))
+
+    assert ran == []
+    assert len(provider.calls) == MAX_EMPTY_CUT_ROUNDS + 1
+    assert EMPTY_CUTS_REPLY in "".join(i for i in items if isinstance(i, str))
+
+
+def test_a_cut_round_that_closed_a_call_first_is_a_step() -> None:
+    from openexecutive.orchestrator.executive import MAX_EMPTY_CUT_ROUNDS
+
+    ran: list[dict[str, Any]] = []
+
+    async def _write(tool_input: dict[str, Any], *_a: Any, **_k: Any) -> str:
+        ran.append(tool_input)
+        return "written"
+
+    rounds = MAX_EMPTY_CUT_ROUNDS + 2
+    provider = _ScriptedProvider(
+        [
+            _FinalMsg(
+                [
+                    _ToolUseBlock(f"p{i}", "draft_artifact", {"title": f"Part {i}"}),
+                    _ToolUseBlock(f"d{i}", "draft_artifact", {"title": "Rest"}),
+                ],
+                "max_tokens",
+            )
+            for i in range(rounds)
+        ]
+        + [_FinalMsg([_TextBlock("Done.")], "end_turn")]
+    )
+    asyncio.run(_run(provider, {"draft_artifact": _write}))
+
+    assert len(ran) == rounds
+    assert len(provider.calls) == rounds + 1
