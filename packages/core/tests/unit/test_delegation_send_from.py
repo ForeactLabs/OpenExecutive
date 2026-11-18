@@ -300,10 +300,18 @@ def test_their_mailbox_draft_waits_while_it_goes_from_the_executive(
     asyncio.run(card_drafts.edit(_fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, rewrite=write))
     # It never goes from their mailbox in the Executive's words.
     assert mailbox.drafts[draft_id].message.text == theirs
-    # From them again: their draft gets the card's words.
+    # A file the work put on the card meanwhile.
+    from openexecutive.delegation import card_work
+
+    card_work._store(card.id, [("sheet.xlsx", "application/octet-stream", b"PK")])
+    # From them again: their draft is made again from the card, words and files.
     back = _switch(card, mailbox, owner, False)
-    assert mailbox.drafts[draft_id].message.text == back["draft_body"]
+    assert back["draft_id"] != draft_id and draft_id not in mailbox.drafts
+    made = mailbox.drafts[back["draft_id"]]
+    assert made.message.text == back["draft_body"]
     assert "I'll get back to you shortly." in back["draft_body"]
+    assert mailbox.specs[-1].attachments == [("sheet.xlsx", "application/octet-stream", b"PK")]
+    assert back["draft_message_id"] == made.message.id
 
 
 def test_a_chat_app_card_shows_who_it_goes_from_when_posted() -> None:

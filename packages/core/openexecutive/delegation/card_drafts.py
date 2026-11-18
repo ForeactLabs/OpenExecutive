@@ -364,6 +364,47 @@ async def edit(
             _EDITING.discard(instance.id)
 
 
+async def _remade(
+    instance: Any, person: Any, payload: dict[str, Any], changed: dict[str, Any], gmail: Any,
+    recipients: tuple[list[str], list[str]] | None,
+) -> dict[str, Any]:
+    """``changed`` saved, with the draft in their mailbox made again from it:
+    its words, who it goes to and the card's files, the old draft taken out.
+    Raises ``SendRefused``."""
+    from dataclasses import replace
+
+    from openexecutive.delegation import drafts
+    from openexecutive.delegation.card_work import files_for
+    from openexecutive.delegation.gmail import GmailError, gmail_for, normalize_email
+    from openexecutive.delegation.inbox import _audit
+    from openexecutive.delegation.reply_send import SendRefused
+    from openexecutive.memory.decision_ledger import update_open_payload
+
+    old = str(payload.get("draft_id") or "")
+    client = gmail if gmail is not None else gmail_for(normalize_email(person.email))
+    spec = spec_for(changed, files_for(instance.id))
+    if recipients is not None:
+        spec = replace(spec, to=list(recipients[0]), cc=list(recipients[1]))
+    try:
+        created = await client.create_draft(spec)
+    except GmailError as exc:
+        raise SendRefused(502, "gmail_error", "Couldn't save your change in your mailbox. Try again in a moment.") from exc
+    changed["draft_id"], changed["draft_message_id"] = created.draft_id, created.message_id
+    changed.pop(EDITED_VERSION, None)
+    if not update_open_payload(instance.id, changed, expected_json=instance.proposed_payload_json):
+        await _delete_quietly(client, created.draft_id)
+        raise SendRefused(409, "already_handled", "This reply changed or was sent meanwhile. Look at it again.")
+    await _delete_quietly(client, old)
+    try:
+        drafts.rename(person.id, old, created.draft_id, created.message_id)
+    except Exception:
+        logger.warning("delegation.card_drafts: couldn't record the new draft", exc_info=True)
+    _audit("delegation_reply_edited", f"Person {person.id} changed a reply on its card", {
+        "person_id": person.id, "decision_id": instance.id, "in_mailbox": True,
+    })
+    return changed
+
+
 def can_undo(payload: dict[str, Any]) -> bool:
     return bool(str(payload.get(UNDO_KEY) or "").strip())
 
@@ -566,6 +607,10 @@ async def _edit(
             changed[DRAFT_SPEC] = {**spec, "to": to, "cc": cc}
     # Their mailbox's draft goes from them: it never holds the Executive's words.
     draft_id = "" if send_from.is_from_executive(changed) else str(payload.get("draft_id") or "")
+    if draft_id and send_from.is_from_executive(payload):
+        # From them again: the draft waited unchanged while it went from the
+        # Executive, so it is made again from the card, words and files.
+        return await _remade(instance, person, payload, changed, gmail, recipients)
     if draft_id:
         email = normalize_email(person.email)
         client = gmail if gmail is not None else gmail_for(email)
