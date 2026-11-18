@@ -405,8 +405,8 @@ _TASKS: set[asyncio.Task[None]] = set()
 
 def fill_soon(cards: list[Alert], talk: dict[int, CardTalk]) -> None:
     """Start writing options for the cards that take them and have none for
-    their plan yet, in the background; each one tells the open pages when
-    it is done, so they read the card again. Never raises."""
+    their plan yet, in the background; a page shows them the next time it
+    reads the card. Never raises."""
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -430,9 +430,6 @@ def fill_soon(cards: list[Alert], talk: dict[int, CardTalk]) -> None:
                     _MISSED[i] = time.monotonic()
                 else:
                     _MISSED.pop(i, None)
-                    from openexecutive.alerts import sse_bus
-
-                    sse_bus.publish({"type": "card_options", "alert_id": i})
             finally:
                 _FILLING.discard(i)
 

@@ -4167,8 +4167,8 @@ departments:
     fenced in the user turn) writes the What happened line and the options;
     an asking card's options are its own choices or likely answers. /today
     starts it in the background for a card not yet written for its plan
-    (fill_soon) and publishes SSE {"type": "card_options", "alert_id"} when
-    done; options show only while written for the plan the card shows now.
+    (fill_soon); a page shows them the next time it reads the card, and
+    options show only while written for the plan the card shows now.
     A call that came back empty is kept as written for that plan
     (CardTalk.written), so the card isn't asked again on every read.
     briefing/card_view's CardView carries happened, options (CardOption:
