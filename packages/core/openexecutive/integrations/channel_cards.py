@@ -157,9 +157,10 @@ def card_here(session: Any) -> bool:
     return bool(getattr(session, "from_web_chat", False)) or shows_cards(session)
 
 
-# What a card shows only in part (``card_text`` lists the first ten): all
-# of it goes into its version, so a change there reads as a change.
-_SHOWN_IN_PART = ("draft_to", "attendee_emails")
+# What a card shows only in part (``card_text`` lists the first ten, and
+# not who is To and who Cc): all of it goes into its version, so a change
+# there reads as a change.
+_SHOWN_IN_PART = ("draft_to", "draft_spec", "attendee_emails")
 
 
 def version(decision_id: int, text: str) -> str:
@@ -446,11 +447,11 @@ async def tap(tapped: Choice, person: Any) -> Tapped:
     decision_id, choice = tapped.decision_id, tapped.choice
     # Taken before the card is read: a change saved after it isn't shown.
     read_at = datetime.now(UTC).isoformat()
-    answer, shown = await asyncio.to_thread(_look, tapped, person)
+    answer, shown, executive = await asyncio.to_thread(_look, tapped, person)
     if answer is not None:
         return answer
     if choice == SWITCH:
-        return await _switch(decision_id, person)
+        return await _switch(decision_id, person, executive=bool(executive))
     line = await resolve(
         decision_id, person, approve=choice != SKIP, allow=choice == ALLOW,
         # It showed the card as it was read.
@@ -459,25 +460,35 @@ async def tap(tapped: Choice, person: Any) -> Tapped:
     return Tapped(line)
 
 
-def _look(tapped: Choice, person: Any) -> tuple[Tapped | None, bool]:
+def _look(tapped: Choice, person: Any) -> tuple[Tapped | None, bool, bool | None]:
     """The card ``tapped`` is on, read once (off the chat app's loop): an
-    answer when the tap is to do nothing, and whether it showed the card as
-    it is now. Skip is a skip, whatever it showed."""
+    answer when the tap is to do nothing, whether it showed the card as it
+    is now, and (a Switch) whether the card it showed goes from the
+    Executive next. Skip is a skip, whatever it showed."""
     decision_id = tapped.decision_id
     if tapped.choice == SKIP:
-        return None, False
+        return None, False, None
     current = card_text(decision_id)
     if current is None:
         if _waits(decision_id):
             # Its words no longer fit a chat: nothing to check the tap against.
-            return Tapped(f"Not done: this card changed. Open it in the app: {_app_link(decision_id)}"), False
-        return None, False  # waits no more: answered as handled
+            return Tapped(f"Not done: this card changed. Open it in the app: {_app_link(decision_id)}"), False, None
+        return None, False, None  # waits no more: answered as handled
     if version(decision_id, current) == tapped.version:
-        return None, True
+        return None, True, _switches_to_executive(decision_id) if tapped.choice == SWITCH else None
     if not _theirs(decision_id, person):
         # As anywhere else: a card that isn't theirs is not there.
-        return Tapped("Not done: this card is no longer there."), False
-    return Tapped(CHANGED, current, card_options(decision_id, current)), False
+        return Tapped("Not done: this card is no longer there."), False, None
+    return Tapped(CHANGED, current, card_options(decision_id, current)), False, None
+
+
+def _switches_to_executive(decision_id: int) -> bool:
+    from openexecutive.delegation import send_from
+    from openexecutive.delegation.inbox import card_payload
+    from openexecutive.memory.decision_ledger import get_decision_instance
+
+    instance = get_decision_instance(decision_id)
+    return instance is not None and not send_from.is_from_executive(card_payload(instance))
 
 
 def _theirs(decision_id: int, person: Any) -> bool:
@@ -488,10 +499,9 @@ def _theirs(decision_id: int, person: Any) -> bool:
     return instance is not None and chat_card_is_theirs(instance, person)
 
 
-async def _switch(decision_id: int, person: Any) -> Tapped:
+async def _switch(decision_id: int, person: Any, *, executive: bool) -> Tapped:
     from openexecutive.delegation import send_from
     from openexecutive.delegation.gmail import normalize_email
-    from openexecutive.delegation.inbox import card_payload
     from openexecutive.delegation.reply_send import SendRefused
     from openexecutive.delegation.verified import ChatTap
     from openexecutive.memory.decision_ledger import get_decision_instance
@@ -506,7 +516,8 @@ async def _switch(decision_id: int, person: Any) -> Tapped:
         # As a tap on the web card: its checks, and its rows kept to the person.
         await send_from.switch(
             instance, caller=ChatTap(normalize_email(person.email or "")), resolver=person.id,
-            executive=not send_from.is_from_executive(card_payload(instance)),
+            # Who the tapped card said it would go from next, not a new read.
+            executive=executive,
         )
     except SendRefused as refused:
         return Tapped(f"Not done: {refused.message}")

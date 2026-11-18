@@ -449,6 +449,12 @@ def test_a_card_shown_only_in_part_changes_its_version_where_it_isnt_shown(monke
     before = channel_cards.version(7, "Reply ready to send")
     card.proposed_payload_json = json.dumps({"draft_to": [f"p{i}@x.example" for i in range(11)]})
     assert channel_cards.version(7, "Reply ready to send") != before
+    # Who is To and who Cc, which the card doesn't say, likewise.
+    spec = {"draft_to": ["a@x.example", "b@x.example"], "draft_spec": {"to": ["a@x.example"], "cc": ["b@x.example"]}}
+    card.proposed_payload_json = json.dumps(spec)
+    before = channel_cards.version(7, "Reply ready to send")
+    card.proposed_payload_json = json.dumps({**spec, "draft_spec": {"to": ["b@x.example"], "cc": ["a@x.example"]}})
+    assert channel_cards.version(7, "Reply ready to send") != before
 
 
 def test_a_tap_is_checked_against_when_its_card_was_read(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -498,3 +504,18 @@ def test_a_tap_on_a_card_handled_meanwhile_says_so(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(channel_cards, "resolve", resolve)
     tapped = asyncio.run(channel_cards.tap(channel_cards.Choice(7, "a", "0000beef"), SimpleNamespace(id=3)))
     assert tapped.line == "This card was already handled."
+
+
+def test_a_switch_goes_to_the_sender_its_card_showed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Whatever the card says by the time the switch runs (another tab
+    switched it meanwhile), the switch does what the tapped button said."""
+    switched: list[bool] = []
+
+    async def switch(decision_id: int, who: Any, *, executive: bool) -> channel_cards.Tapped:
+        switched.append(executive)
+        return channel_cards.Tapped("Changed who it goes from.")
+
+    monkeypatch.setattr(channel_cards, "_look", lambda tapped, who: (None, True, True))
+    monkeypatch.setattr(channel_cards, "_switch", switch)
+    asyncio.run(channel_cards.tap(channel_cards.Choice(7, "x", "0000beef"), SimpleNamespace(id=3)))
+    assert switched == [True]
