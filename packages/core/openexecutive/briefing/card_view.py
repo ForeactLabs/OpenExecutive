@@ -334,10 +334,14 @@ def card_view(
         return CardView(kind="new_sender", need="Who is this?", buttons=[
             CardButton(action="dismiss", label="Dismiss", place="side"),
         ])
+    # A held step's card (Take the lead, a teammate's held send) carries out
+    # one exact step: its panel shows the step, its options and "Or tell
+    # me…" (POST /decisions/{id}/say), and what was said on it.
+    said = [CardLine(who=t.who, text=t.text) for t in (getattr(talk, "turns", None) or [])]
     if decision and (LEAD_TRAINING_TAG in tags or LEAD_ACTION_TAG in tags):
-        return CardView(kind="lead", panel="lead", need="Needs your OK", as_me=True)
+        return CardView(kind="lead", panel="lead", need="Needs your OK", as_me=True, tell_me=True, turns=said)
     if decision and HELD_ACTION_TAG in tags:
-        return CardView(kind="held", panel="held", need="Needs your OK")
+        return CardView(kind="held", panel="held", need="Needs your OK", tell_me=True, turns=said)
 
     artifact = ARTIFACT_TAG in tags
     monitoring = item.category == "monitoring"

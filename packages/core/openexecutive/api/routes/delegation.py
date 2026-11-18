@@ -413,6 +413,9 @@ class ReplyCardOut(BaseModel):
     questions_settled: bool = False
     # POST .../answer only: the sentences its rewrite added or changed.
     changed_sentences: list[str] = Field(default_factory=list)
+    # Answering what was said on the card: they said to send it, so the
+    # card asks to confirm the send, as a tap on Send does.
+    send_now: bool = False
     # Everyone else the email went to: Reply to: Everyone adds them. Empty
     # when there is no choice to make.
     reply_others: list[str] = Field(default_factory=list)
@@ -1381,6 +1384,7 @@ async def change_delegation_reply(request: Request, decision_id: int, body: Repl
     if instance is None or instance.decision_class != DECISION_CLASS or instance.approver_person_id != person_id:
         raise _refuse(404, "not_found", "That reply isn't waiting for you any more.")
     changed: list[str] = []
+    go = False
     caller = api_caller.caller(request)
     started = True
     try:
@@ -1389,7 +1393,7 @@ async def change_delegation_reply(request: Request, decision_id: int, body: Repl
             # it this way"): the work takes them, and the run going now stops.
             started = await answers.to_work(instance, caller=caller, resolver=person_id, text=body.text)
         else:
-            _, changed = await answers.change(instance, caller=caller, resolver=person_id, text=body.text)
+            _, changed, go = await answers.change(instance, caller=caller, resolver=person_id, text=body.text)
     except answers.NeedsWork:
         # Work for the Executive's tools (reading her files, making a
         # spreadsheet): it does it on the card, as when the email came in.
@@ -1408,7 +1412,7 @@ async def change_delegation_reply(request: Request, decision_id: int, body: Repl
     if card is None:
         raise _refuse(404, "not_found", "That reply isn't waiting for you any more.")
     out = ReplyCardOut(**{k: v for k, v in asdict(card).items() if k in ReplyCardOut.model_fields})
-    return out.model_copy(update={"changed_sentences": changed})
+    return out.model_copy(update={"changed_sentences": changed, "send_now": go})
 
 
 @router.post("/delegation/replies/{decision_id}/stop", response_model=ReplyCardOut)

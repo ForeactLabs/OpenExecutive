@@ -341,3 +341,21 @@ def test_an_ask_that_needs_looking_up_is_refused_and_leaves_the_draft(
     assert "Ask me in the chat" in refused.message
     assert "update:d1" not in mailbox.calls
     assert row not in chat_draft_card._CHANGING
+
+
+def test_send_it_on_a_chat_draft_leaves_its_words(db: Path, owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.delegation import answers
+
+    async def call(model: str, system: str, turn: str) -> dict[str, Any]:
+        main = turn.split("<draft>\n", 1)[1].split("\n</draft>", 1)[0]
+        return {"body": main, "send_now": True, "note": "It's ready."}
+
+    monkeypatch.setattr(answers, "_call_model", call)
+    mailbox, row = _chat_draft(owner)
+    before = mailbox.drafts["d1"].message.text
+    # A card with no send confirm of its own: "send it" changes nothing.
+    saved, new, _ = asyncio.run(chat_draft_card.change(
+        owner, row, "looks good, send it", caller=LOCAL, gmail=mailbox, now=LATER,
+    ))
+    assert new == [] and mailbox.drafts["d1"].message.text.strip() == before.strip()
+    assert mailbox.sent == []

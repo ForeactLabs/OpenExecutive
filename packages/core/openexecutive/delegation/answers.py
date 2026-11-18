@@ -146,6 +146,11 @@ set send_from to "executive"; back from them ("send it as me"), set it to \
 "me". Return the draft as it was: the card switches who sends it and \
 rewrites it. When it asks for that and a change of words, do only the words \
 and still set send_from.
+14. When <change> only tells you to go ahead and send the reply as it is \
+("send it", "yes, looks good, send"), set send_now true and return the \
+draft as it was: the card asks them to confirm the send. That is never \
+needs_tools. With who it goes from too ("send it from you"), also set \
+send_from. A change of words with it is not send_now: do the change.
 
 Return the new body (and gist, note, questions) through rewrite_reply."""
 
@@ -161,6 +166,7 @@ _REWRITE_TOOL: dict[str, Any] = {
             "needs_tools": {"type": "boolean"},
             "question": {"type": "boolean"},
             "send_from": {"type": "string", "enum": ["executive", "me"]},
+            "send_now": {"type": "boolean"},
             "questions": {
                 "type": "array",
                 "items": {
@@ -198,6 +204,16 @@ class SendFrom(Exception):
 
     def __init__(self, *, executive: bool) -> None:
         super().__init__("send_from")
+        self.executive = executive
+
+
+class SendNow(Exception):
+    """What the person typed on the card only says to send it as it is
+    ("send it"), from the Executive when ``executive`` is True, from them
+    when False, as it is set when None."""
+
+    def __init__(self, *, executive: bool | None) -> None:
+        super().__init__("send_now")
         self.executive = executive
 
 
@@ -348,6 +364,17 @@ def _slot_text(at: datetime) -> str:
 # --------------------------------------------------------------------------- #
 # Reading them back for the card
 # --------------------------------------------------------------------------- #
+
+
+def questions_left(payload: dict[str, Any]) -> int:
+    """How many questions with answers to tap are still open: Send waits for
+    them, unless the words were changed by hand (``QUESTIONS_SETTLED``). A
+    question with no choices never holds Send back."""
+    from openexecutive.delegation.card_drafts import QUESTIONS_SETTLED
+
+    if payload.get(QUESTIONS_SETTLED) is True:
+        return 0
+    return sum(1 for q in questions_for(payload) if q["choices"] and not q["answer"].strip())
 
 
 def questions_for(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -505,13 +532,15 @@ async def _call_model(model: str, system: str, turn: str) -> dict[str, Any]:
 
 async def rewrite(
     person: Any, payload: dict[str, Any], answers: list[Answer], *, now: datetime | None = None,
-    change: str = "", news: list[dict[str, Any]] | None = None,
+    change: str = "", news: list[dict[str, Any]] | None = None, send_now: bool = False,
 ) -> tuple[str, dict[str, Any], list[str]]:
     """The card's draft rewritten with ``answers``, with what the person
     asked to ``change``, or with ``news`` (newer email in the conversation,
     ``catch_up``): the new body, the payload fields to keep with it, and the
     sentences that are new. A ``change`` that is a question gets its answer
-    in the conversation and the body back unchanged. Raises ``SendRefused``."""
+    in the conversation and the body back unchanged. ``send_now``: a card
+    that can confirm a send takes "send it" as a go (``SendNow``); anywhere
+    else it leaves the words as they are. Raises ``SendRefused``."""
     from openexecutive.config import get_settings
     from openexecutive.delegation.ghostwriter import (
         _drop_name_before_signature,
@@ -569,6 +598,11 @@ async def rewrite(
         written = {}
     asked_only = bool(change and not pairs and not news and written.get("question") is True)
     sender = written.get("send_from") if change and not pairs and not news else None
+    if send_now and change and not pairs and not news and written.get("send_now") is True and not asked_only:
+        raw_words = written.get("body")
+        if not isinstance(raw_words, str) or raw_words.strip() == main.strip():
+            # Only a go: the words stay, and the card asks to confirm the send.
+            raise SendNow(executive=sender == "executive" if sender in ("executive", "me") else None)
     if sender in ("executive", "me") and not asked_only:
         # Who it goes from is the card's to switch (it rewrites the words
         # itself), after any change of words asked with it.
@@ -726,14 +760,22 @@ async def answer(
     return saved, changed
 
 
+NOTE_TAP_SEND = "Tap Send when it looks right."
+NOTE_CONFIRM_SEND = "Here it is. Check who it goes to, then send it."
+NOTE_ANSWER_FIRST = "Answer the question above first, then send it."
+
+
 async def change(
     instance: Any, *, caller: Any, resolver: int | None, text: str, gmail: Any = None, now: datetime | None = None,
-) -> tuple[dict[str, Any], list[str]]:
+) -> tuple[dict[str, Any], list[str], bool]:
     """Rewrite the reply on ``instance`` the way the person asked in their
     own words ("make it shorter", "offer Thursday instead"), on their tap:
-    the card's payload as it now is, and the sentences that are new. Their
-    words and the Executive's line on what it changed join the card's
-    conversation. Raises ``SendRefused``. Sends nothing."""
+    the card's payload as it now is, the sentences that are new, and
+    whether they said to send it (a go, ``replan.said_go``, the same as for
+    every card: the card then asks to confirm the send, as a tap on Send
+    does). Their words and the Executive's line on what it changed join the
+    card's conversation. Raises ``SendRefused``. Sends nothing."""
+    from openexecutive.alerts import replan
     from openexecutive.delegation import card_drafts, send_from
     from openexecutive.delegation.reply_send import SendRefused
     from openexecutive.memory.decision_ledger import get_decision_instance
@@ -742,7 +784,7 @@ async def change(
     asked: list[str] = []
 
     async def write(person: Any, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-        body, extra, new = await rewrite(person, payload, [], change=text, now=now)
+        body, extra, new = await rewrite(person, payload, [], change=text, now=now, send_now=True)
         changed[:] = new
         sender = extra.pop(_SEND_FROM_ASKED, None)
         if isinstance(sender, str):
@@ -756,7 +798,34 @@ async def change(
         saved = await send_from.switch(
             instance, caller=caller, resolver=resolver, executive=ask.executive, gmail=gmail, asked=text,
         )
-        return saved, []
+        return saved, [], False
+    except SendNow as ask:
+        from openexecutive.delegation.inbox import card_payload
+
+        payload = card_payload(instance)
+        if ask.executive is not None and ask.executive != send_from.is_from_executive(payload):
+            # "Send it from you": who it goes from switches, and says so. The
+            # send waits: the new wording is theirs to read first.
+            saved = await send_from.switch(
+                instance, caller=caller, resolver=resolver, executive=bool(ask.executive), gmail=gmail, asked=text,
+            )
+            return saved, [], False
+        go = False
+        if questions_left(payload):
+            # Send waits for the card's open questions, whatever was said.
+            note = NOTE_ANSWER_FIRST
+        else:
+            try:
+                go = await replan.said_go(
+                    str(payload.get("draft_body") or ""), text, caller_key=str(getattr(caller, "email", "") or ""),
+                )
+                # A go opens the send to check; unsure, it stays theirs to tap.
+                note = NOTE_CONFIRM_SEND if go else NOTE_TAP_SEND
+            except replan.ReplanError as exc:
+                note = exc.message if exc.code == "too_many" else NOTE_TAP_SEND
+        noted = send_from.say(instance, note, asked=text)
+        # A card that changed meanwhile isn't the one they said it of: no go.
+        return noted or payload, [], go and noted is not None
     if asked:
         current = get_decision_instance(instance.id) or instance
         try:
@@ -766,7 +835,7 @@ async def change(
         except SendRefused:
             # The words changed and were saved; only who it goes from didn't.
             saved = send_from.say(get_decision_instance(instance.id) or current, send_from.NOTE_NOT_SWITCHED) or saved
-    return saved, changed
+    return saved, changed, False
 
 
 async def to_work(

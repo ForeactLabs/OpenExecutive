@@ -2266,6 +2266,9 @@ export interface ReplyCard {
   questions_settled?: boolean;
   // Only from answering: the sentences the rewrite added or changed.
   changed_sentences?: string[];
+  // Answering words said on the card: they said to send it, so the card
+  // asks to confirm the send, as a tap on Send does.
+  send_now?: boolean;
   // Everyone else the email went to: Reply to: Everyone adds them. Empty or
   // absent when there is no choice to make.
   reply_others?: string[];
@@ -7409,10 +7412,23 @@ export interface LeadCardPayload {
   where: string;
   // What a connected app's call would send, read-only (to, subject, message).
   details: LeadCardField[];
+  // The same with what was said on the card, which its Approve sends.
+  saidDetails: LeadCardField[];
   reason: string;
   kind: string;
   fields: LeadCardField[];
   allow?: { key: string; label: string };
+  // What was said on the card, put into its fields (by field): Approve
+  // sends it as the edit.
+  said: Record<string, string>;
+  // Whether this reader may change it (Edit, Or tell me).
+  mayChange: boolean;
+}
+
+function saidInput(payload: { said_input?: unknown }): Record<string, string> {
+  const said = payload.said_input;
+  if (!said || typeof said !== "object") return {};
+  return Object.fromEntries(Object.entries(said).filter(([, v]) => typeof v === "string")) as Record<string, string>;
 }
 
 // The page reads a card's details in plain words (``card_details.served``):
@@ -7452,10 +7468,13 @@ export async function getLeadCard(id: number, signal?: AbortSignal): Promise<Lea
     headline: String(payload.headline ?? ""),
     where: String(payload.where ?? ""),
     details: Array.isArray(payload.details) ? payload.details.map(leadDetail) : [],
+    saidDetails: Array.isArray(payload.said_details) ? payload.said_details.map(leadDetail) : [],
     reason: String(payload.reason ?? ""),
     kind: String(payload.kind ?? ""),
     fields: Array.isArray(payload.fields) ? payload.fields : [],
     allow: payload.allow && typeof payload.allow.key === "string" ? payload.allow : undefined,
+    said: saidInput(payload),
+    mayChange: payload.may_change !== false,
   };
 }
 
@@ -7467,8 +7486,15 @@ export interface HeldActionPayload {
   reason: string;
   requestedBy: string;
   details: CardDetail[];
+  // The step with what was said on the card: what an Approve that sends
+  // `said` carries out. Empty when nothing was said.
+  saidDetails: CardDetail[];
   // What Edit may change before Approve (an email's subject and text).
   fields: LeadCardField[];
+  // What was said on the card, put into its fields: Approve sends it.
+  said: Record<string, string>;
+  // Whether this reader may change it (Edit, Or tell me).
+  mayChange: boolean;
 }
 
 export async function getHeldAction(id: number, signal?: AbortSignal): Promise<HeldActionPayload> {
@@ -7482,10 +7508,32 @@ export async function getHeldAction(id: number, signal?: AbortSignal): Promise<H
     reason: String(payload.reason ?? ""),
     requestedBy: String(payload.requested_by ?? ""),
     details: cardDetails(details),
+    saidDetails: cardDetails(Array.isArray(payload.said_details) ? payload.said_details : []),
     fields: (Array.isArray(payload.fields) ? payload.fields : []).filter(
       (f: { field?: unknown; value?: unknown }) => typeof f?.field === "string" && typeof f?.value === "string",
     ),
+    said: saidInput(payload),
+    mayChange: payload.may_change !== false,
   };
+}
+
+// Words said on a held step's card (Take the lead, a teammate's held send):
+// its fields as they read now, what the Executive said back, and the card
+// once a go carried it out.
+export interface StepSayResult {
+  reply: string;
+  fields: LeadCardField[];
+  approved: DecisionInstance | null;
+}
+
+export async function sayOnStep(id: number, text: string, seen: Record<string, string>): Promise<StepSayResult> {
+  const res = await fetch(`${API_BASE}/decisions/${id}/say`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, seen }),
+  });
+  if (!res.ok) throw await leadError(res, "Couldn't send that. Try again.");
+  return res.json();
 }
 
 // Approve a Take the lead card: ``input`` changes its editable fields first,

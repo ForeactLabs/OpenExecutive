@@ -673,27 +673,24 @@ def _find_discord_sender(discord_user_id: str) -> object:
 _MAX_CARD_TEXT = 1900
 
 
-def _card_view(decision_id: int, labels: tuple[str, ...] = ("Approve", "Skip")) -> Any:
-    """A card's Approve and Skip buttons. Their custom ids carry the card
+def _card_style(index: int, data: str) -> int:
+    """A button's style: the Executive's pick green, Skip grey, the rest blue."""
+    from openexecutive.integrations import channel_cards
+
+    return 3 if index == 0 else 2 if channel_cards.choice_of(data) == channel_cards.SKIP else 1
+
+
+def _card_view(options: tuple[tuple[str, str], ...]) -> Any:
+    """A card's buttons, the Executive's pick first and Skip last
+    (``channel_cards.card_options``). Their custom ids carry the card
     (``channel_cards.callback_data``); ``on_interaction`` takes the tap, so it
     still works after a restart."""
     import discord
 
-    from openexecutive.integrations import channel_cards
-
     view = discord.ui.View(timeout=None)
-    view.add_item(discord.ui.Button(
-        label=labels[0], style=discord.ButtonStyle.success,
-        custom_id=channel_cards.callback_data(decision_id, channel_cards.APPROVE),
-    ))
-    view.add_item(discord.ui.Button(
-        label=labels[1], style=discord.ButtonStyle.secondary,
-        custom_id=channel_cards.callback_data(decision_id, channel_cards.SKIP),
-    ))
-    if len(labels) > 2:
+    for index, (label, data) in enumerate(options):
         view.add_item(discord.ui.Button(
-            label=labels[2], style=discord.ButtonStyle.primary,
-            custom_id=channel_cards.callback_data(decision_id, channel_cards.ALLOW),
+            label=label, style=discord.ButtonStyle(_card_style(index, data)), custom_id=data,
         ))
     return view
 
@@ -705,13 +702,13 @@ async def _send_cards(send_card: Callable[[int, str], Awaitable[None]], cards: l
         try:
             text = await asyncio.to_thread(channel_cards.card_text, decision_id)
             if text:
-                await send_card(decision_id, text[:_MAX_CARD_TEXT])
+                await send_card(decision_id, text)
         except Exception:
             logger.exception("Discord: couldn't send card %d", decision_id)
 
 
 async def handle_card_tap(interaction: Any) -> None:
-    """A tap on a card's Approve or Skip button (``channel_cards``). It came
+    """A tap on one of a card's buttons (``channel_cards``). It came
     over the bot's own gateway connection; it counts only in the tapper's own
     DM with the bot, from someone on the roster, and
     ``decisions.resolve_in_chat`` decides whether the card is theirs."""
@@ -722,9 +719,11 @@ async def handle_card_tap(interaction: Any) -> None:
     from openexecutive.people.store import find_person_by_discord_id
 
     data = getattr(interaction, "data", None) or {}
-    parsed = channel_cards.parse_callback(data.get("custom_id") if isinstance(data, dict) else None)
+    parsed = channel_cards.parse_choice(data.get("custom_id") if isinstance(data, dict) else None)
     if parsed is None:
-        return  # not one of ours
+        # The bot's only buttons are cards': answer, or Discord shows the tap failed.
+        await interaction.response.send_message("This card is no longer there.", ephemeral=True)
+        return
     user_id = str(getattr(getattr(interaction, "user", None), "id", "") or "")
     channel = getattr(interaction, "channel", None)
     recipient = getattr(channel, "recipient", None)
@@ -740,27 +739,34 @@ async def handle_card_tap(interaction: Any) -> None:
     if person is None:
         await interaction.response.send_message("This card is no longer there.", ephemeral=True)
         return
-    decision_id, approve = parsed
-    allow = channel_cards.tapped_allow(data.get("custom_id") if isinstance(data, dict) else None)
+    decision_id = parsed.decision_id
     # Deciding can take longer than Discord's three seconds.
     await interaction.response.defer()
-    line = await channel_cards.resolve(decision_id, person, approve=approve, allow=allow)
-    choice = "allow" if allow else "approve" if approve else "skip"
+    tapped = await channel_cards.tap(parsed, person)
+    line = tapped.line
+    name = channel_cards.CHOICE_NAMES[parsed.choice]
     await asyncio.to_thread(
         audit_log,
         "integration_inbound",
-        f"Discord card {decision_id}: tapped {choice.capitalize()}: {line[:120]}",
+        f"Discord card {decision_id}: tapped {name.capitalize()}: {line[:120]}",
         actor="discord",
         details={"channel": "discord", "discord_user": user_id, "decision_id": decision_id,
-                 "choice": choice, "outcome": channel_cards.outcome_of(line), "person_id": person.id},
+                 "choice": name, "outcome": channel_cards.outcome_of(line), "person_id": person.id},
     )
     try:
         if line == channel_cards.BUSY:
             await interaction.followup.send(line, ephemeral=True)
             return
+        if tapped.options:
+            # Still waiting, with new words: shown again with its buttons.
+            text = channel_cards.with_line(tapped.text, line)
+            await interaction.edit_original_response(
+                content=text[:_MAX_CARD_TEXT], view=_card_view(tapped.options),
+            )
+            return
         # The card keeps what it said, with the outcome under it and no buttons.
         shown = str(getattr(getattr(interaction, "message", None), "content", "") or "")
-        text = f"{shown}\n\n{line}" if shown else line
+        text = channel_cards.with_line(shown, line)
         await interaction.edit_original_response(content=text[:2000], view=None)
     except Exception:
         logger.exception("Discord: couldn't update card %d after the tap", decision_id)
@@ -1637,8 +1643,8 @@ def create_discord_bot():
             async def send_card(decision_id: int, text: str) -> None:
                 from openexecutive.integrations import channel_cards
 
-                labels = await asyncio.to_thread(channel_cards.card_buttons, decision_id)
-                await message.channel.send(text, view=_card_view(decision_id, labels), suppress_embeds=True)
+                options = await asyncio.to_thread(channel_cards.card_options, decision_id, text)
+                await message.channel.send(text[:_MAX_CARD_TEXT], view=_card_view(options), suppress_embeds=True)
 
         # Use the channel id as thread_id so WaitForHuman resolution can match
         # replies that arrive in the same DM or thread channel.
@@ -1747,12 +1753,13 @@ async def send_dm(discord_user_id: str, text: str) -> str | None:
     return last_message_id
 
 
-async def send_dm_card(discord_user_id: str, decision_id: int, text: str, labels: tuple[str, ...]) -> None:
+async def send_dm_card(
+    discord_user_id: str, decision_id: int, text: str, options: tuple[tuple[str, str], ...],
+) -> None:
     """Send a card waiting outside any chat to ``discord_user_id``'s DM with
-    the bot, with its two buttons (``channel_cards.push_waiting``); the
+    the bot, with its buttons (``channel_cards.push_waiting``); the
     bot's ``on_interaction`` takes the tap. Raises when it couldn't."""
     from openexecutive.config import get_settings
-    from openexecutive.integrations import channel_cards
 
     settings = get_settings()
     if not settings.discord_bot_token or not discord_user_id:
@@ -1775,13 +1782,8 @@ async def send_dm_card(discord_user_id: str, decision_id: int, text: str, labels
                 "content": text[:_MAX_CARD_TEXT],
                 "flags": _SUPPRESS_EMBEDS,
                 "components": [{"type": 1, "components": [
-                    {"type": 2, "style": 3, "label": labels[0],
-                     "custom_id": channel_cards.callback_data(decision_id, channel_cards.APPROVE)},
-                    {"type": 2, "style": 2, "label": labels[1],
-                     "custom_id": channel_cards.callback_data(decision_id, channel_cards.SKIP)},
-                    *([{"type": 2, "style": 1, "label": labels[2],
-                        "custom_id": channel_cards.callback_data(decision_id, channel_cards.ALLOW)}]
-                      if len(labels) > 2 else []),
+                    {"type": 2, "style": _card_style(index, data), "label": label, "custom_id": data}
+                    for index, (label, data) in enumerate(options)
                 ]}],
             },
         )

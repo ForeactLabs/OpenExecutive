@@ -206,7 +206,7 @@ def test_typed_work_on_the_card_goes_to_the_executive(
     # Nothing was rewritten and the card isn't held.
     assert inbox.card_payload(_fresh(card))["draft_body"].startswith("Hi Dana")
     models["rewritten"] = {"body": "Hi Dana,\n\nShorter.", "needs_tools": False}
-    saved, _ = asyncio.run(answers.change(
+    saved, _, _ = asyncio.run(answers.change(
         _fresh(card), caller=_card_tests.LOCAL, resolver=owner.id, text="Make it shorter", gmail=mailbox,
     ))
     assert "Shorter." in saved["draft_body"]

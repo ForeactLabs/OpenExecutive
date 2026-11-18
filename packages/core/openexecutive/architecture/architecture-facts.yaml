@@ -4166,6 +4166,25 @@ departments:
     person's words, never the card, and approves at once through the same
     Approve as a tap (Approvals still decide) only when both say go;
     otherwise the reply is "Here's the plan now. Pick it to go ahead."
+    A held step's card (take_the_lead_action, department_action) has the
+    same Or tell me at POST /decisions/{id}/say: replan.rewrite_fields
+    (tool rewrite_fields, actor card_fields, constant FIELDS_SYSTEM, the
+    same hourly budget) returns only the step's editable fields that
+    changed, kept as said_input on the decision's payload
+    (update_open_payload, compare-and-set) once the step's own rules for a
+    change (take_the_lead.apply_edits) take it; words they turn down change
+    nothing. The card that shows it puts it in and sends it as edits.input;
+    an Approve without edits (another page, a chat app's tap, which show
+    the step as filed) sends the step as filed, so nothing goes out with
+    wording said after it was shown. A go approves with the edits it judged. A field longer than EDIT_MAX is
+    not rewritten (422: changed by hand), never cut. A go is judged by
+    replan.said_go against the fields the card showed, whole
+    (STEP_TEXT_MAX, not a plan's 600), and approves through the class's
+    own approve, as a tap; when it isn't sure, the reply says to tap Do it.
+    Only someone who may change the step with Approve's own edits says it
+    (decisions._may_change: a Take the lead card's principal, a held
+    step's principal or approver; anyone else gets 409), and the carried
+    out payload drops said_input, so the final record shows what was sent.
     Both what the person said and the reply are kept as the card's
     conversation (alert_card_turns), each line with the person it is
     between (person_id); /today and the say response show a reader only
@@ -9191,14 +9210,22 @@ integrations:
     cards a reply leaves (a meeting to book, a ``propose_actions`` card, a
     workflow change card: ``decisions.CHAT_APP_ACTIONS`` of the app_action
     cards, whose action checks the tapper itself)
-    as messages with Approve and Skip buttons, and its ``<channel>`` block
+    as messages with the card's options as buttons
+    (``channel_cards.card_options``: the Executive's pick first, Skip
+    last; on an email reply the other sender too, which switches it and
+    shows the card again without sending; on a card In training the pick
+    and on its own next time), its text saying What happened and What
+    I'll do as the app's card does. Each button's data carries the
+    version of the words it was posted with (``channel_cards.version``):
+    a tap on a card that reads differently now only shows it again as it
+    is, so a tap does only what its card showed. Its ``<channel>`` block
     says so (``cards_here``). A tap is taken only when ``from.id`` is the
     private chat's id on the verified webhook, and
     ``decisions.resolve_in_chat`` applies the web chat's who-may-decide
     rule, with ``delegation.verified.ChatTap`` standing in for the
     signed-in caller. A Slack DM (with SLACK_CARD_BUTTONS on, which needs
     Interactivity in the Slack app and the im:write scope) and a Discord DM do the same: Slack
-    sends Block Kit buttons (action ids oe_card_approve / oe_card_skip, the
+    sends Block Kit buttons (action ids oe_card_approve / _skip / _allow / _switch, the
     callback data as the value; text as plain_text), and a tap counts only
     when conversations.open for the tapper returns that very channel; a
     Discord View's buttons carry the callback data as custom_id and
@@ -12190,8 +12217,8 @@ delegation:
     sent; training.all_allowed(person, reply_goes_to(payload)) gates the
     reply (everyone in draft_to, else the sender), invites by sender,
     action cards by every address. Chat-app cards carry the same as a
-    third button "<Send|Accept|Approve> + on its own next time"
-    (channel_cards.allow_label / tapped_allow). Listed on Delegate as
+    button "<the pick>, and do this on its own next time"
+    (channel_cards.allow_label, choice "n"). Listed on Delegate as
     What it's learned as you (training.learned, setting training), removed
     with DELETE /delegation/learned/{id}.
     Below Hands-off a reply to someone they don't know is refused
@@ -12335,7 +12362,11 @@ delegation:
     /delegation/replies/{id}/change {text} (answers.change) rewrites it the
     way the person said, through the same rewrite as <change>, and adds
     their words and the Executive's note to the card's conversation (shown
-    by ReplyCardOut.conversation). POST
+    by ReplyCardOut.conversation). When the words only say to send it
+    (the rewrite's send_now, then replan.said_go on the draft and their
+    words, the same go check as every card), nothing is rewritten: it
+    answers send_now true and the card brings up the send's confirm, as a
+    tap on Send does; unsure, the card says to tap Send. POST
     /delegation/replies/{id}/answer {answers: [{question_index,
     answer_text}]} (delegation.answers) answers what the reply left open:
     one composer-model call (REWRITE_PROMPT + the person's voice block, no

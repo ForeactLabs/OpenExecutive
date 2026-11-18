@@ -127,13 +127,12 @@ async def send_message(token: str, chat_id: int, text: str) -> str | None:
 
 async def send_card(
     token: str, chat_id: int, decision_id: int, text: str, *,
-    labels: tuple[str, ...] = ("Approve", "Skip"), raise_on_error: bool = False,
+    options: tuple[tuple[str, str], ...], raise_on_error: bool = False,
 ) -> None:
-    """Send an approval card as a message with its two buttons, Approve (or
-    Send, Accept) and Skip (``integrations.channel_cards``). Plain text: the
-    card quotes what the Executive proposed, which may come from someone's
-    mail."""
-    from openexecutive.integrations import channel_cards
+    """Send an approval card as a message with its buttons, one to a row,
+    the Executive's pick first and Skip last (``channel_cards.card_options``).
+    Plain text: the card quotes what the Executive proposed, which may come
+    from someone's mail."""
 
     resp = await _get_http_client().post(
         _tg_url(token, "sendMessage"),
@@ -141,21 +140,17 @@ async def send_card(
             "chat_id": chat_id,
             "text": text[:_MAX_MSG_LEN],
             "link_preview_options": {"is_disabled": True},
-            "reply_markup": {"inline_keyboard": [
-                [
-                    {"text": labels[0], "callback_data": channel_cards.callback_data(decision_id, channel_cards.APPROVE)},
-                    {"text": labels[1], "callback_data": channel_cards.callback_data(decision_id, channel_cards.SKIP)},
-                ],
-                *([[{"text": labels[2],
-                     "callback_data": channel_cards.callback_data(decision_id, channel_cards.ALLOW)}]]
-                  if len(labels) > 2 else []),
-            ]},
+            "reply_markup": _keyboard(options),
         },
     )
     if resp.is_error:
         logger.error("Telegram: sending card %d failed: %s %s", decision_id, resp.status_code, resp.text)
         if raise_on_error:
             raise RuntimeError(f"telegram sendMessage failed: {resp.status_code}")
+
+
+def _keyboard(options: tuple[tuple[str, str], ...]) -> dict[str, Any]:
+    return {"inline_keyboard": [[{"text": label, "callback_data": data}] for label, data in options]}
 
 
 async def _send_cards(token: str, chat_id: int, cards: list[int]) -> None:
@@ -165,8 +160,8 @@ async def _send_cards(token: str, chat_id: int, cards: list[int]) -> None:
         try:
             text = await asyncio.to_thread(channel_cards.card_text, decision_id)
             if text:
-                labels = await asyncio.to_thread(channel_cards.card_buttons, decision_id)
-                await send_card(token, chat_id, decision_id, text, labels=labels)
+                options = await asyncio.to_thread(channel_cards.card_options, decision_id, text)
+                await send_card(token, chat_id, decision_id, text, options=options)
         except Exception:
             logger.exception("Telegram: couldn't send card %d", decision_id)
 
@@ -174,7 +169,7 @@ async def _send_cards(token: str, chat_id: int, cards: list[int]) -> None:
 async def _handle_card_tap(
     *, callback_id: str, chat_id: int, message_id: int, card_text: str, data: str, token: str,
 ) -> None:
-    """A tap on a card's Approve or Skip button. The webhook checked that
+    """A tap on one of a card's buttons. The webhook checked that
     only Telegram can call it and that the tapper is the private chat's own
     person; the chat must be someone on the roster, and
     ``decisions.resolve_in_chat`` decides whether the card is theirs."""
@@ -183,7 +178,7 @@ async def _handle_card_tap(
     from openexecutive.people.store import find_person_by_telegram_chat_id
 
     client = _get_http_client()
-    parsed = channel_cards.parse_callback(data)
+    parsed = channel_cards.parse_choice(data)
     person = await asyncio.to_thread(find_person_by_telegram_chat_id, str(chat_id))
     if parsed is None or person is None:
         try:
@@ -194,17 +189,17 @@ async def _handle_card_tap(
         except Exception:
             logger.exception("Telegram: couldn't answer a tap on chat %s", chat_id)
         return
-    decision_id, approve = parsed
-    allow = channel_cards.tapped_allow(data)
-    line = await channel_cards.resolve(decision_id, person, approve=approve, allow=allow)
-    choice = "allow" if allow else "approve" if approve else "skip"
+    decision_id = parsed.decision_id
+    tapped = await channel_cards.tap(parsed, person)
+    line = tapped.line
+    name = channel_cards.CHOICE_NAMES[parsed.choice]
     await asyncio.to_thread(
         audit_log,
         "integration_inbound",
-        f"Telegram card {decision_id}: tapped {choice.capitalize()}: {line[:120]}",
+        f"Telegram card {decision_id}: tapped {name.capitalize()}: {line[:120]}",
         actor="telegram",
         details={"channel": "telegram", "chat_id": chat_id, "decision_id": decision_id,
-                 "choice": choice, "outcome": channel_cards.outcome_of(line), "person_id": person.id},
+                 "choice": name, "outcome": channel_cards.outcome_of(line), "person_id": person.id},
     )
     try:
         await client.post(
@@ -214,16 +209,17 @@ async def _handle_card_tap(
         if line == channel_cards.BUSY:
             # The tap still deciding it updates the card.
             return
-        # The card keeps what it said, with the outcome under it and no buttons.
-        await client.post(
-            _tg_url(token, "editMessageText"),
-            json={
-                "chat_id": chat_id,
-                "message_id": message_id,
-                "text": f"{card_text}\n\n{line}"[:_MAX_MSG_LEN],
-                "link_preview_options": {"is_disabled": True},
-            },
-        )
+        edit: dict[str, Any] = {
+            "chat_id": chat_id, "message_id": message_id, "link_preview_options": {"is_disabled": True},
+        }
+        if tapped.options:
+            # Still waiting, with new words: shown again with its buttons.
+            edit["text"] = channel_cards.with_line(tapped.text, line)[:_MAX_MSG_LEN]
+            edit["reply_markup"] = _keyboard(tapped.options)
+        else:
+            # The card keeps what it said, with the outcome under it and no buttons.
+            edit["text"] = channel_cards.with_line(card_text, line)[:_MAX_MSG_LEN]
+        await client.post(_tg_url(token, "editMessageText"), json=edit)
     except Exception:
         logger.exception("Telegram: couldn't update card %d after the tap", decision_id)
 

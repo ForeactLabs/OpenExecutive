@@ -12,18 +12,21 @@ import type { LeadCardField } from "@/lib/api";
 export default function HeldFieldsEdit({
   id,
   fields,
+  said = {},
   busy,
   onApprove,
   onCancel,
 }: {
   id: number;
   fields: LeadCardField[];
+  // What was said on the card, already put in: it starts from that.
+  said?: Record<string, string>;
   busy: boolean;
   onApprove: (changed: Record<string, string>) => void;
   onCancel: () => void;
 }) {
   const [values, setValues] = useState<Record<string, string>>(
-    () => Object.fromEntries(fields.map((f) => [f.field, f.value])),
+    () => ({ ...Object.fromEntries(fields.map((f) => [f.field, f.value])), ...said }),
   );
   const changed = Object.fromEntries(
     fields.filter((f) => (values[f.field] ?? "") !== f.value).map((f) => [f.field, values[f.field] ?? ""]),

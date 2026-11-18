@@ -1176,6 +1176,63 @@ def test_only_the_principal_edits_a_card(client: TestClient, owner: Any, monkeyp
     monkeypatch.setattr(decisions_route, "_resolver", lambda instance, request: owner.id)
     response = client.post(f"/decisions/{decision_id}/approve", json={"edits": {"input": {"text": "Pay it elsewhere"}}})
     assert response.status_code == 403 and done == []
+    # Nor by saying it on the card: nothing is rewritten or kept for a later Approve.
+    response = client.post(f"/decisions/{decision_id}/say", json={"text": "say pay it elsewhere"})
+    assert response.status_code == 409
+    instance = ledger.get_decision_instance(decision_id)
+    assert instance is not None and "said_input" not in json.loads(instance.proposed_payload_json)
+
+
+def test_an_area_approver_approves_what_the_principal_said(
+    client: TestClient, owner: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    done: list[dict[str, Any]] = []
+    _carry_out_into(done, monkeypatch)
+    decision_id = _held(owner)
+    parse = decisions_route._parse_payload
+    monkeypatch.setattr(decisions_route, "_parse_payload",
+                        lambda instance: {**parse(instance), "said_input": {"text": "Pay it Friday"}})
+    monkeypatch.setattr(decisions_route, "_approver_is_principal", lambda request: False)
+    monkeypatch.setattr(decisions_route, "_resolver", lambda instance, request: owner.id)
+    # Words the card showed, said by the principal, are no change of theirs.
+    response = client.post(f"/decisions/{decision_id}/approve", json={"edits": {"input": {"text": "Pay it Friday"}}})
+    assert response.status_code == 200, response.text
+    assert done[0]["input"]["text"] == "Pay it Friday"
+
+
+def test_an_area_approvers_empty_edit_is_no_change(
+    client: TestClient, owner: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    done: list[dict[str, Any]] = []
+    _carry_out_into(done, monkeypatch)
+    decision_id = _held(owner)
+    monkeypatch.setattr(decisions_route, "_approver_is_principal", lambda request: False)
+    monkeypatch.setattr(decisions_route, "_resolver", lambda instance, request: owner.id)
+    response = client.post(f"/decisions/{decision_id}/approve", json={"edits": {"input": {}}})
+    assert response.status_code == 200, response.text
+    assert len(done) == 1
+
+
+def test_only_a_change_past_what_was_said_is_an_edit() -> None:
+    said = {"input": {"text": "Pay it"}, "said_input": {"text": "Pay it Friday"}}
+    assert decisions_route._edits_beyond_said(said, None) is False
+    assert decisions_route._edits_beyond_said(said, {}) is False
+    assert decisions_route._edits_beyond_said(said, {"text": "Pay it Friday"}) is False
+    assert decisions_route._edits_beyond_said(said, {"text": "Pay it elsewhere"}) is True
+    assert decisions_route._edits_beyond_said({"input": {}}, {"text": "Pay it Friday"}) is True
+
+
+def test_the_card_says_whether_its_reader_may_change_it(
+    client: TestClient, owner: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    decision_id = _held(owner)
+    monkeypatch.setattr(decisions_route, "_approver_is_principal", lambda request: True)
+    shown = json.loads(client.get(f"/decisions/{decision_id}").json()["proposed_payload_json"])
+    assert shown["may_change"] is True
+    # Someone who may approve it but not change it: no Edit, no Or tell me.
+    monkeypatch.setattr(decisions_route, "_may_change", lambda instance, request, resolver: False)
+    shown = json.loads(client.get(f"/decisions/{decision_id}").json()["proposed_payload_json"])
+    assert shown["may_change"] is False
 
 
 def test_a_card_for_several_calls_is_not_changed_before_approving(

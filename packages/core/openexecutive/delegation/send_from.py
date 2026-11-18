@@ -102,15 +102,17 @@ async def restyled(person: Any, changed: dict[str, Any], words: str) -> dict[str
     return {**changed, WORDS_AS_YOU: words, "draft_body": mine, CHANGED_AS_EXECUTIVE: False}
 
 
-def say(instance: Any, text: str) -> dict[str, Any] | None:
-    """Add the Executive's ``text`` to the card's conversation. The card's
-    payload as it now is, or None when it changed or went meanwhile."""
+def say(instance: Any, text: str, *, asked: str = "") -> dict[str, Any] | None:
+    """Add the Executive's ``text`` to the card's conversation, after what
+    the person ``asked`` when given. The card's payload as it now is, or
+    None when it changed or went meanwhile."""
     from openexecutive.delegation.answers import CONVERSATION_KEY, CONVERSATION_MAX, conversation
     from openexecutive.delegation.inbox import card_payload
     from openexecutive.memory.decision_ledger import update_open_payload
 
     payload = card_payload(instance)
-    turns = [*conversation(payload), {"kind": "note", "text": text, "at": datetime.now(UTC).isoformat()}]
+    said = [{"kind": "asked", "text": asked}] if asked else []
+    turns = [*conversation(payload), *said, {"kind": "note", "text": text, "at": datetime.now(UTC).isoformat()}]
     changed = {**payload, CONVERSATION_KEY: turns[-CONVERSATION_MAX:]}
     return changed if update_open_payload(instance.id, changed, expected_json=instance.proposed_payload_json) else None
 

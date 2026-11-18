@@ -9,7 +9,6 @@ import { CardDetailValue } from "@/components/CardDetailValue";
 import { useEffect, useState } from "react";
 
 import HeldFieldsEdit from "@/components/HeldFieldsEdit";
-import Button from "@/components/ui/Button";
 import {
   approveDecision,
   approveLeadCard,
@@ -19,7 +18,9 @@ import {
   type ProposalItem,
 } from "@/lib/api";
 
+import { Section } from "./CardTalk";
 import CardTopRow from "./CardTopRow";
+import StepTalk from "./StepTalk";
 
 // The tag such a card carries (department_gate.DECISION_CLASS).
 export const HELD_ACTION_TAG = "decision_class:department_action";
@@ -65,6 +66,12 @@ export default function HeldActionCard({
     }
   }
 
+  // What was said on the card, and the step's fields as it shows them.
+  const said = held?.said ?? {};
+  // Its Do it sends what was said, so the step shows with it.
+  const shownDetails = held && held.saidDetails.length > 0 ? held.saidDetails : held?.details ?? [];
+  const seen = { ...Object.fromEntries((held?.fields ?? []).map((f) => [f.field, f.value])), ...said };
+
   return (
     <div
       id={`alert-${proposal.alert_id}`}
@@ -76,13 +83,14 @@ export default function HeldActionCard({
       <div className="min-w-0 text-base sm:text-[17px] font-semibold leading-snug text-fg break-words">
         {proposal.headline}
       </div>
-      {held?.reason && (
-        <p className="mt-1.5 text-[15px] leading-relaxed text-fg-muted">It waited because {held.reason}.</p>
-      )}
+      <Section title="What happened">
+        {held?.reason ? `It waited because ${held.reason}.` : "It waited for your OK."}
+      </Section>
       {editing && held ? (
         <HeldFieldsEdit
           id={decisionId}
           fields={held.fields}
+          said={held.said}
           busy={busy}
           onCancel={() => setEditing(false)}
           onApprove={(changed) =>
@@ -93,33 +101,46 @@ export default function HeldActionCard({
         />
       ) : (
       <>
-      {held && held.details.length > 0 && (
-        <dl className="mt-3 flex flex-col gap-2 rounded-xl border border-line bg-surface p-3">
-          {held.details.map((d) => (
-            <div key={d.field} className="min-w-0">
-              <dt className="text-xs font-semibold uppercase tracking-wide text-fg-muted">{d.field}</dt>
-              <dd className="whitespace-pre-wrap break-words text-[15px] leading-snug text-fg"><CardDetailValue detail={d} /></dd>
-            </div>
-          ))}
-        </dl>
+      {held && shownDetails.length > 0 && (
+        <div className="mt-3">
+          <div className="mb-0.5 text-xs font-semibold uppercase tracking-wide text-fg-subtle">What I&apos;ll do</div>
+          <dl className="flex flex-col gap-2 rounded-xl border border-line bg-surface p-3">
+            {shownDetails.map((d) => (
+              <div key={d.field} className="min-w-0">
+                <dt className="text-xs font-semibold uppercase tracking-wide text-fg-muted">{d.field}</dt>
+                <dd className="whitespace-pre-wrap break-words text-[15px] leading-snug text-fg"><CardDetailValue detail={d} /></dd>
+              </div>
+            ))}
+          </dl>
+          {held.fields.length > 0 && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setEditing(true)}
+              className="mt-1 text-sm text-accent hover:underline disabled:opacity-50"
+            >
+              Change the wording
+            </button>
+          )}
+        </div>
       )}
-      <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-        <Button
-          variant="primary"
-          disabled={busy || held == null}
-          onClick={() => void run(() => approveDecision(decisionId))}
-        >
-          Approve
-        </Button>
-        {held && held.fields.length > 0 && (
-          <Button variant="secondary" disabled={busy} onClick={() => setEditing(true)}>
-            Edit
-          </Button>
-        )}
-        <Button variant="ghost" disabled={busy} onClick={() => void run(() => rejectDecision(decisionId))}>
-          Decline
-        </Button>
-      </div>
+      <StepTalk
+        decisionId={decisionId}
+        disabled={busy || held == null}
+        seen={seen}
+        turns={proposal.view?.turns ?? []}
+        canSay={Boolean(proposal.view?.tell_me) && Boolean(held?.mayChange) && (held?.fields.length ?? 0) > 0}
+        options={[{
+          label: "Do it",
+          // What was said on the card goes as the edit.
+          run: () => (Object.keys(said).length > 0 ? approveLeadCard(decisionId, { input: said }) : approveDecision(decisionId)),
+        }]}
+        onSaid={() => {
+          void getHeldAction(decisionId).then(setHeld).catch(() => setError("Couldn't load what it would do."));
+        }}
+        onResolved={onResolved}
+        onSkip={() => rejectDecision(decisionId)}
+      />
       </>
       )}
       {error && <p className="mt-2 text-sm text-red-500">{error}</p>}

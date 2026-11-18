@@ -253,21 +253,18 @@ _UNCONFIRMED = "That tap couldn't be checked, so nothing was done. The card is s
 _TAP_CHECK_S = 20.0
 
 
-def _card_buttons(decision_id: int, labels: tuple[str, ...]) -> list[dict[str, Any]]:
-    """A card's Approve and Skip (and, on a card that can teach, the "on its
-    own next time") buttons, as one Chat ``cardsV2`` card."""
-    from openexecutive.integrations import channel_cards
-
-    choices = (channel_cards.APPROVE, channel_cards.SKIP, channel_cards.ALLOW)
+def _card_buttons(decision_id: int, options: tuple[tuple[str, str], ...]) -> list[dict[str, Any]]:
+    """A card's buttons as one Chat ``cardsV2`` card, the Executive's pick
+    first and Skip last (``channel_cards.card_options``)."""
     buttons = [
         {
-            "text": label,
+            "text": card_safe(label),
             "onClick": {"action": {
                 "function": _CARD_FUNCTION,
-                "parameters": [{"key": _CARD_PARAM, "value": channel_cards.callback_data(decision_id, choice)}],
+                "parameters": [{"key": _CARD_PARAM, "value": data}],
             }},
         }
-        for label, choice in zip(labels, choices, strict=False)
+        for label, data in options
     ]
     return [{"cardId": f"oe-card-{decision_id}", "card": {"sections": [{"widgets": [{"buttonList": {"buttons": buttons}}]}]}}]
 
@@ -285,7 +282,7 @@ def send_card(
     thread_name: str,
     decision_id: int,
     text: str,
-    labels: tuple[str, ...],
+    options: tuple[tuple[str, str], ...],
     service_account_file: str | None,
     service_account_email: str | None = None,
 ) -> None:
@@ -295,7 +292,7 @@ def send_card(
 
     creds = _build_credentials(service_account_file, service_account_email)
     service = google_build("chat", "v1", credentials=creds, cache_discovery=False)
-    body: dict[str, Any] = {"text": card_safe(text), "cardsV2": _card_buttons(decision_id, labels)}
+    body: dict[str, Any] = {"text": card_safe(text), "cardsV2": _card_buttons(decision_id, options)}
     if thread_name:
         body["thread"] = {"name": thread_name}
     service.spaces().messages().create(
@@ -310,16 +307,20 @@ def update_card(
     text: str,
     service_account_file: str | None,
     service_account_email: str | None = None,
+    decision_id: int | None = None,
+    options: tuple[tuple[str, str], ...] = (),
 ) -> None:
     """Rewrite a card's message once its tap is decided: what it said with
-    the outcome under it, and no buttons. The app may edit only its own
-    messages. Synchronous; call it via asyncio.to_thread()."""
+    the outcome under it, and no buttons; or, a card that still waits with
+    new words, those words and its ``options``. The app may edit only its
+    own messages. Synchronous; call it via asyncio.to_thread()."""
     from googleapiclient.discovery import build as google_build
 
     creds = _build_credentials(service_account_file, service_account_email)
     service = google_build("chat", "v1", credentials=creds, cache_discovery=False)
+    cards = _card_buttons(decision_id, options) if decision_id is not None and options else []
     service.spaces().messages().patch(
-        name=message_name, updateMask="text,cardsV2", body={"text": card_safe(text), "cardsV2": []},
+        name=message_name, updateMask="text,cardsV2", body={"text": card_safe(text), "cardsV2": cards},
     ).execute()
 
 
@@ -415,10 +416,10 @@ async def _confirm_tap(
     from openexecutive.integrations import channel_cards
     from openexecutive.people.store import find_person_by_email
 
-    parsed = channel_cards.parse_callback(data)
+    parsed = channel_cards.parse_choice(data)
     if parsed is None:
         return None
-    decision_id = parsed[0]
+    decision_id = parsed.decision_id
     try:
         person = await asyncio.to_thread(find_person_by_email, sender_email) if sender_email else None
     except Exception:
@@ -455,35 +456,42 @@ async def _decide_tap(
     service_account_file: str | None,
     service_account_email: str | None,
 ) -> None:
-    """Decide a tap Chat confirmed (``_confirm_tap``): approve or skip the
-    card for ``person``, whose DM with the app it is, then rewrite the card
-    from its confirmed words (``shown``) with the outcome under them."""
+    """Decide a tap Chat confirmed (``_confirm_tap``) for ``person``, whose
+    DM with the app it is (``channel_cards.tap``), then rewrite the card:
+    from its confirmed words (``shown``) with the outcome under them, or,
+    a card that still waits with new words, those and its buttons."""
     from openexecutive.audit import log_event as audit_log
     from openexecutive.integrations import channel_cards
 
-    parsed = channel_cards.parse_callback(data)
+    parsed = channel_cards.parse_choice(data)
     if parsed is None:
         return
-    decision_id, approve = parsed
-    allow = channel_cards.tapped_allow(data)
+    decision_id = parsed.decision_id
     where = {"space_name": space_name, "message_name": message_name, "google_user": user_name}
-    line = await channel_cards.resolve(decision_id, person, approve=approve, allow=allow)
-    choice = "allow" if allow else "approve" if approve else "skip"
+    tapped = await channel_cards.tap(parsed, person)
+    line = tapped.line
+    name = channel_cards.CHOICE_NAMES[parsed.choice]
     await asyncio.to_thread(
         audit_log,
         "integration_inbound",
-        f"Google Chat card {decision_id}: tapped {choice.capitalize()}: {line[:120]}",
+        f"Google Chat card {decision_id}: tapped {name.capitalize()}: {line[:120]}",
         actor="google_chat",
-        details={"channel": "google_chat", "decision_id": decision_id, "choice": choice,
+        details={"channel": "google_chat", "decision_id": decision_id, "choice": name,
                  "outcome": channel_cards.outcome_of(line), "person_id": person.id, **where},
     )
     if line == channel_cards.BUSY:
         return
     try:
-        await asyncio.to_thread(
-            update_card, message_name, f"{shown}\n\n{line}" if shown else line,
-            service_account_file, service_account_email,
-        )
+        if tapped.options:
+            await asyncio.to_thread(
+                update_card, message_name, channel_cards.with_line(tapped.text, line),
+                service_account_file, service_account_email, decision_id, tapped.options,
+            )
+        else:
+            await asyncio.to_thread(
+                update_card, message_name, channel_cards.with_line(shown, line),
+                service_account_file, service_account_email,
+            )
     except Exception:
         logger.exception("Google Chat: couldn't update card %d after the tap", decision_id)
 
@@ -716,9 +724,9 @@ async def _send_cards(
             text = await asyncio.to_thread(channel_cards.card_text, decision_id)
             if not text:
                 continue
-            labels = await asyncio.to_thread(channel_cards.card_buttons, decision_id)
+            options = await asyncio.to_thread(channel_cards.card_options, decision_id, text)
             await asyncio.to_thread(
-                send_card, space_name, thread_name, decision_id, text, labels,
+                send_card, space_name, thread_name, decision_id, text, options,
                 service_account_file, service_account_email,
             )
         except Exception:
