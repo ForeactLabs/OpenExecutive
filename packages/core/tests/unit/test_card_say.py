@@ -293,6 +293,10 @@ def test_what_one_person_says_on_a_card_shows_only_to_them(
     assert lines(Viewer(person_id=4)) == []
     # Nobody signed in as a person sees anyone's lines either.
     assert lines(Viewer(person_id=None)) == []
+    # Lines from a caller with no person record show only to the owner.
+    card_talk.add_turn(aid, "you", "from nobody", person_id=None)
+    assert lines(Viewer(person_id=None)) == []
+    assert lines(Viewer(person_id=None, is_principal=True)) == ["from nobody"]
     assert today.card_talks([alert], Viewer(person_id=1))[aid].turns == []
 
 
@@ -737,3 +741,20 @@ def test_deleting_a_card_drops_what_was_said_on_it(db: Path) -> None:
     with sqlite3.connect(db) as conn:
         assert conn.execute("SELECT COUNT(*) FROM alert_card_turns").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM alert_card_options").fetchone()[0] == 0
+
+
+async def test_only_a_few_fills_run_at_once(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    cards = [alert_store.get_alert(_card(db, f"card {i}")) for i in range(card_talk.FILL_AT_ONCE + 3)]
+    started: list[int] = []
+
+    async def slow(c: Any) -> None:
+        started.append(c.id)
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr(card_talk, "fill", slow)
+    monkeypatch.setattr(card_talk, "_MISSED", {})
+    card_talk.fill_soon([c for c in cards if c is not None], {})
+    await asyncio.gather(*card_talk._TASKS)
+    assert len(started) == card_talk.FILL_AT_ONCE

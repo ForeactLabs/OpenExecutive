@@ -391,6 +391,8 @@ _FILLING: set[int] = set()
 # A card whose call came to nothing waits this long before the next try, so
 # an outage doesn't cost a call per card on every page load.
 RETRY_AFTER_S = 600.0
+# At most this many calls run at once; the rest start on a later read.
+FILL_AT_ONCE = 4
 _MISSED: dict[int, float] = {}
 _TASKS: set[asyncio.Task[None]] = set()
 
@@ -404,6 +406,8 @@ def fill_soon(cards: list[Alert], talk: dict[int, CardTalk]) -> None:
     except RuntimeError:
         return
     for card in cards:
+        if len(_FILLING) >= FILL_AT_ONCE:
+            return
         cid = card.id
         if cid is None or cid in _FILLING or kind_of(card) == "none":
             continue

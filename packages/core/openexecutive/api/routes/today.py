@@ -527,9 +527,12 @@ def card_talks(alerts: list[Alert], viewer: Any = None) -> dict[int, Any]:
     # What someone said on a card, and what was said back, is theirs: it
     # shows only to them. Everyone else sees the plan as it stands, with who
     # changed it.
+    # A reader with no person record sees lines with none only when they
+    # are the owner, so two callers nobody knows never see each other's.
     reader = getattr(viewer, "person_id", None)
+    owner = bool(getattr(viewer, "is_principal", False))
     for t in talk.values():
-        t.turns = [line for line in t.turns if line.person_id == reader]
+        t.turns = [line for line in t.turns if line.person_id == reader and (reader is not None or owner)]
     return talk
 
 
