@@ -253,6 +253,31 @@ def test_a_full_inbox_comes_back_a_page_at_a_time(roster: SimpleNamespace) -> No
     assert "next_page" not in rest
 
 
+def test_busy_threads_never_hide_the_next_page(roster: SimpleNamespace) -> None:
+    from openexecutive.delegation.gmail import THREADS_PER_PAGE
+
+    mailbox = Mailbox()
+    busy, quiet = 20, 30
+    # Each busy thread's three newest messages list first, then the quiet ones.
+    mailbox.inbox = [(f"b{i}-{k}", f"tb{i}") for i in range(busy) for k in range(3)]
+    mailbox.inbox += [(f"q{i}", f"tq{i}") for i in range(quiet)]
+    mailbox.messages = {
+        mid: replace(_msg(n, DANA, f"Mail {mid}", received_at=_ago(hours=1)), thread_id=tid)
+        for n, (mid, tid) in enumerate(mailbox.inbox)
+    }
+    session = _session(mailbox)
+    seen: list[str] = []
+    page: dict[str, Any] = {}
+    while True:
+        result = _search(session, page)
+        seen += [t["thread_id"] for t in result["threads"]]
+        if "next_page" not in result:
+            break
+        page = {"page": result["next_page"]}
+    assert len(seen) == busy + quiet == len(set(seen))
+    assert len(seen) > THREADS_PER_PAGE
+
+
 def test_an_empty_inbox_says_so(roster: SimpleNamespace) -> None:
     result = _search(_session(Mailbox()), {"days": 99})
     assert result["status"] == "not_found"

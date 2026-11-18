@@ -373,18 +373,22 @@ async def _recent_inbox(mailbox: Any, days: int, page: str) -> tuple[list[tuple[
 
     skip = int(page) if page.isdigit() else 0
     end = skip + THREADS_PER_PAGE
-    # A thread's messages each count, so twice the threads, and one more to
-    # tell whether a page follows.
-    listed = await mailbox.inbox_message_ids(
-        after=datetime.now(UTC) - timedelta(days=days), max_results=end * 2 + 1
-    )
-    picked: list[str] = []
-    seen: set[str] = set()
-    for message_id, thread_id in listed:
-        if thread_id in seen:
-            continue
-        seen.add(thread_id)
-        picked.append(message_id)
+    after = datetime.now(UTC) - timedelta(days=days)
+    # A thread's messages each count, so list more until one thread past the
+    # page shows up (a page follows) or the inbox runs out.
+    want = end * 2 + 1
+    while True:
+        listed = await mailbox.inbox_message_ids(after=after, max_results=want)
+        picked: list[str] = []
+        seen: set[str] = set()
+        for message_id, thread_id in listed:
+            if thread_id in seen:
+                continue
+            seen.add(thread_id)
+            picked.append(message_id)
+        if len(picked) > end or len(listed) < want:
+            break
+        want *= 2
     more = len(picked) > end
     gate = asyncio.Semaphore(_FETCH_CONCURRENCY)
 
