@@ -66,6 +66,7 @@
       "kind": "ask",
       "long": false,
       "need": "Needs your answer",
+      "noticed": "",
       "options": [],
       "panel": "",
       "plan": "Which vendor?",
@@ -86,6 +87,7 @@
     "waiting_because": "",
     "waiting_on": "",
     "watch_slug": null,
+    "watch_title": null,
     "why_now": ""
   },
   "booking": {
@@ -155,6 +157,7 @@
       "kind": "decision",
       "long": false,
       "need": "Needs your OK",
+      "noticed": "",
       "options": [
         {
           "action": "approve",
@@ -181,6 +184,7 @@
     "waiting_because": "Bookings wait for your OK.",
     "waiting_on": "",
     "watch_slug": null,
+    "watch_title": null,
     "why_now": ""
   },
   "choice": {
@@ -253,6 +257,7 @@
       "kind": "ask",
       "long": false,
       "need": "Pick one",
+      "noticed": "",
       "options": [
         {
           "action": "answer",
@@ -284,6 +289,7 @@
     "waiting_because": "",
     "waiting_on": "",
     "watch_slug": null,
+    "watch_title": null,
     "why_now": ""
   },
   "document": {
@@ -355,6 +361,7 @@
       "kind": "document",
       "long": false,
       "need": "Word doc",
+      "noticed": "",
       "options": [],
       "panel": "",
       "plan": "",
@@ -375,6 +382,7 @@
     "waiting_because": "",
     "waiting_on": "",
     "watch_slug": null,
+    "watch_title": null,
     "why_now": ""
   },
   "due": {
@@ -450,6 +458,7 @@
       "kind": "proposal",
       "long": false,
       "need": "Needs your OK",
+      "noticed": "",
       "options": [
         {
           "action": "approve",
@@ -480,6 +489,7 @@
     "waiting_because": "",
     "waiting_on": "",
     "watch_slug": null,
+    "watch_title": null,
     "why_now": ""
   },
   "failed_run": {
@@ -571,6 +581,7 @@
       "kind": "rerun",
       "long": false,
       "need": "Didn't finish",
+      "noticed": "",
       "options": [],
       "panel": "",
       "plan": "",
@@ -591,6 +602,7 @@
     "waiting_because": "",
     "waiting_on": "",
     "watch_slug": null,
+    "watch_title": null,
     "why_now": ""
   },
   "fixed": {
@@ -671,6 +683,7 @@
       "kind": "proposal",
       "long": false,
       "need": "Needs your OK",
+      "noticed": "",
       "options": [
         {
           "action": "approve",
@@ -697,6 +710,7 @@
     "waiting_because": "",
     "waiting_on": "",
     "watch_slug": null,
+    "watch_title": null,
     "why_now": ""
   },
   "fyi": {
@@ -766,6 +780,7 @@
       "kind": "proposal",
       "long": false,
       "need": "For you to know",
+      "noticed": "",
       "options": [],
       "panel": "",
       "plan": "",
@@ -786,6 +801,7 @@
     "waiting_because": "",
     "waiting_on": "",
     "watch_slug": null,
+    "watch_title": null,
     "why_now": ""
   },
   "handover": {
@@ -857,6 +873,7 @@
       "kind": "proposal",
       "long": false,
       "need": "Needs your OK",
+      "noticed": "",
       "options": [
         {
           "action": "approve",
@@ -889,6 +906,7 @@
     "waiting_because": "",
     "waiting_on": "",
     "watch_slug": null,
+    "watch_title": null,
     "why_now": ""
   },
   "held": {
@@ -937,6 +955,7 @@
       "kind": "held",
       "long": false,
       "need": "Needs your OK",
+      "noticed": "",
       "options": [],
       "panel": "held",
       "plan": "",
@@ -957,6 +976,7 @@
     "waiting_because": "",
     "waiting_on": "",
     "watch_slug": null,
+    "watch_title": null,
     "why_now": ""
   },
   "labelled": {
@@ -1026,6 +1046,7 @@
       "kind": "proposal",
       "long": false,
       "need": "Needs your OK",
+      "noticed": "",
       "options": [
         {
           "action": "approve",
@@ -1052,6 +1073,7 @@
     "waiting_because": "",
     "waiting_on": "",
     "watch_slug": null,
+    "watch_title": null,
     "why_now": ""
   },
   "lead": {
@@ -1100,6 +1122,7 @@
       "kind": "lead",
       "long": false,
       "need": "Needs your OK",
+      "noticed": "",
       "options": [],
       "panel": "lead",
       "plan": "",
@@ -1120,6 +1143,7 @@
     "waiting_because": "",
     "waiting_on": "",
     "watch_slug": null,
+    "watch_title": null,
     "why_now": ""
   },
   "nudge": {
@@ -1200,6 +1224,7 @@
       "kind": "proposal",
       "long": false,
       "need": "Needs your OK",
+      "noticed": "",
       "options": [
         {
           "action": "approve",
@@ -1226,6 +1251,7 @@
     "waiting_because": "",
     "waiting_on": "",
     "watch_slug": null,
+    "watch_title": null,
     "why_now": ""
   },
   "proposal": {
@@ -1295,6 +1321,7 @@
       "kind": "proposal",
       "long": false,
       "need": "Needs your OK",
+      "noticed": "",
       "options": [
         {
           "action": "approve",
@@ -1321,6 +1348,7 @@
     "waiting_because": "",
     "waiting_on": "",
     "watch_slug": null,
+    "watch_title": null,
     "why_now": ""
   },
   "routed": {
@@ -1390,6 +1418,7 @@
       "kind": "proposal",
       "long": false,
       "need": "Needs your OK",
+      "noticed": "",
       "options": [
         {
           "action": "approve",
@@ -1416,6 +1445,7 @@
     "waiting_because": "",
     "waiting_on": "",
     "watch_slug": null,
+    "watch_title": null,
     "why_now": ""
   },
   "signal": {
@@ -1485,6 +1515,7 @@
       "kind": "signal",
       "long": false,
       "need": "For you to know",
+      "noticed": "I noticed this on the ACME stock I'm watching.",
       "options": [],
       "panel": "",
       "plan": "",
@@ -1505,6 +1536,7 @@
     "waiting_because": "",
     "waiting_on": "",
     "watch_slug": "acme-stock",
+    "watch_title": "ACME stock",
     "why_now": ""
   },
   "stale": {
@@ -1580,6 +1612,7 @@
       "kind": "proposal",
       "long": false,
       "need": "Needs your OK",
+      "noticed": "",
       "options": [
         {
           "action": "approve",
@@ -1610,6 +1643,7 @@
     "waiting_because": "",
     "waiting_on": "",
     "watch_slug": null,
+    "watch_title": null,
     "why_now": ""
   },
   "stepless": {
@@ -1679,6 +1713,7 @@
       "kind": "proposal",
       "long": false,
       "need": "For you to know",
+      "noticed": "",
       "options": [],
       "panel": "",
       "plan": "",
@@ -1699,6 +1734,7 @@
     "waiting_because": "",
     "waiting_on": "",
     "watch_slug": null,
+    "watch_title": null,
     "why_now": ""
   },
   "waiting_on": {
@@ -1768,6 +1804,7 @@
       "kind": "proposal",
       "long": false,
       "need": "Needs your OK",
+      "noticed": "",
       "options": [
         {
           "action": "approve",
@@ -1794,6 +1831,7 @@
     "waiting_because": "",
     "waiting_on": "Sam Lee",
     "watch_slug": null,
+    "watch_title": null,
     "why_now": ""
   }
 }

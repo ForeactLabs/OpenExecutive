@@ -283,6 +283,7 @@ export default function ProposalCard({
           </p>
         )
       )}
+      {view?.noticed && <p className="mt-1 text-xs text-fg-muted">{view.noticed}</p>}
       {(flag || hasDetails) && (
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-fg-muted">
           {flag && <Chip tone={flag.tone}>{flag.label}</Chip>}

@@ -75,6 +75,12 @@ class ChatRequest(BaseModel):
     # the shared memory of each department consulted that turn; it is not in
     # the transcript, so the chat_turn audit row keeps it next to `message`.
     memory_text: str | None = Field(None, min_length=1, max_length=2000)
+    # A card under a reply in this chat that the person tapped Approve on:
+    # it is approved as its own button does, and this turn carries on from
+    # there (`decisions.approve_in_chat`). `approve_input` is the card's
+    # changed fields, as its Edit sends them.
+    approve_card: int | None = Field(None, ge=1)
+    approve_input: dict[str, Any] | None = None
 
 
 class BackgroundChatRequest(BaseModel):

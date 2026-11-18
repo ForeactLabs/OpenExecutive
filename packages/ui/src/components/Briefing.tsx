@@ -24,10 +24,9 @@ import {
   type RightNowRow,
   type Today,
 } from "@/lib/api";
-import { greeting, homeHeadline, teamOffTrack, waitingOnTeam } from "@/lib/briefingSummary";
+import { greeting, homeHeadline, teamOffTrack, waitingOnTeam, watchingRow } from "@/lib/briefingSummary";
 import { cardFromSearch } from "@/lib/cardMentions";
 import { FIRST_RUN_LINKS } from "@/lib/firstRun";
-import { counted } from "@/lib/glance";
 import {
   NEEDS_YOU_OLDER_AFTER_DAYS,
   ageAnchor,
@@ -88,6 +87,8 @@ interface Tile {
   href?: string;
   // What it says, whole ("5 goals, 1 at risk").
   text: string;
+  // More on hover: where a watch's change was noticed.
+  hint?: string;
 }
 
 interface BriefingProps {
@@ -483,15 +484,14 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
   // The bottom line: only the counts that need you, each a link (the
   // server's `to_act_on`: overdue tasks, goals at risk or never checked,
   // people to follow up), then what waits on someone else on the team and
-  // watch list signals to read. Everything else is on track.
+  // what changed on the watches. Everything else is on track.
   const tiles: Tile[] = [];
   if (today) {
     for (const c of today.to_act_on ?? []) tiles.push({ key: c.key, href: c.href, text: c.text });
     const waitingOn = waitingOnTeam(otherProposals, today.people ?? []);
     if (waitingOn) tiles.push({ key: "team", panel: "team", text: waitingOn.line });
-    const signals = monitoringProposals.length;
-    if (signals > 0)
-      tiles.push({ key: "monitoring", panel: "monitoring", text: counted(signals, "new signal", "new signals") });
+    const watched = watchingRow(monitoringProposals);
+    if (watched) tiles.push({ key: "monitoring", panel: "monitoring", text: watched.line, hint: watched.detail || undefined });
     if (solo && weeklyReview)
       tiles.push({ key: "weeklyReview", panel: "weeklyReview", text: "This week's review is ready" });
   }
@@ -886,7 +886,14 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
                     const cls = "font-medium text-accent hover:underline underline-offset-4";
                     const panel = t.panel;
                     return panel ? (
-                      <button key={t.key} type="button" onClick={() => setOpenPanel(panel)} aria-haspopup="dialog" className={cls}>
+                      <button
+                        key={t.key}
+                        type="button"
+                        onClick={() => setOpenPanel(panel)}
+                        aria-haspopup="dialog"
+                        title={t.hint}
+                        className={cls}
+                      >
                         {t.text}
                       </button>
                     ) : (
@@ -932,7 +939,7 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
                   )}
                 </div>
               </SidePanel>
-              <SidePanel open={openPanel === "monitoring"} onClose={() => setOpenPanel(null)} title="Monitoring">
+              <SidePanel open={openPanel === "monitoring"} onClose={() => setOpenPanel(null)} title="What I'm watching">
                 <MonitoringPanelBody
                   proposals={monitoringProposals}
                   onContinue={onContinue}

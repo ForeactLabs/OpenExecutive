@@ -18,7 +18,13 @@ import {
 // The chat: a step the Executive held for your OK (orchestrator/levels.py,
 // or a teammate's step their department held), shown under its reply.
 // Approve carries out exactly the call shown, on the server; Not now drops
-// it. The same card is on Today and in your chat app.
+// it. The same card is on Today and in your chat app. Under a reply in the
+// chat (``onApprove``), Approve goes through the chat itself: the server
+// approves it as this button does and the Executive carries on with what
+// you asked (decisions.approve_in_chat).
+
+// What the chat shows you said when you tapped Approve on a card there.
+export const APPROVED_MESSAGE = "Approved";
 
 interface HeldPayload {
   summary: string;
@@ -45,8 +51,19 @@ function readPayload(instance: DecisionInstance): HeldPayload | null {
 
 const DONE = new Set(["approved_unchanged", "approved_with_edit", "executed"]);
 
-export default function ChatHeldActionCard({ id }: { id: number }) {
+export default function ChatHeldActionCard({
+  id,
+  onApprove,
+  approveDisabled = false,
+}: {
+  id: number;
+  // Resolves once the chat's turn has ended (or nothing was sent).
+  onApprove?: (id: number, input?: Record<string, string>) => Promise<void> | void;
+  approveDisabled?: boolean;
+}) {
   const [instance, setInstance] = useState<DecisionInstance | null>(null);
+  // Approve went to the chat, which carries on from it.
+  const [handed, setHanded] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,7 +79,25 @@ export default function ChatHeldActionCard({ id }: { id: number }) {
   if (!instance || instance.decision_class !== "department_action") return null;
   const payload = readPayload(instance);
   if (!payload) return null;
-  const done = DONE.has(instance.status);
+  const done = DONE.has(instance.status) || handed;
+  // Approve through the chat: "Approved" while its turn runs, then the
+  // card as the server has it now (done, or still waiting when it was
+  // refused or nothing was sent), so it never stays "Approved" on a guess.
+  const viaChat = async (input?: Record<string, string>) => {
+    if (!onApprove || approveDisabled) return;
+    setHanded(true);
+    setEditing(false);
+    try {
+      await onApprove(instance.id, input);
+    } finally {
+      try {
+        setInstance(await getDecision(instance.id));
+      } catch {
+        /* gone or not this person's: what the reply says stands */
+      }
+      setHanded(false);
+    }
+  };
   const waiting = instance.status === "proposed";
   if (!done && !waiting) return null;
 
@@ -91,13 +126,18 @@ export default function ChatHeldActionCard({ id }: { id: number }) {
         <HeldFieldsEdit
           id={instance.id}
           fields={payload.fields}
-          busy={busy !== null}
+          busy={busy !== null || (onApprove !== undefined && approveDisabled)}
           onCancel={() => setEditing(false)}
-          onApprove={(changed) =>
+          onApprove={(changed) => {
+            const input = Object.keys(changed).length > 0 ? changed : undefined;
+            if (onApprove) {
+              void viaChat(input);
+              return;
+            }
             void act("Doing it…", () =>
-              Object.keys(changed).length > 0 ? approveLeadCard(instance.id, { input: changed }) : approveDecision(instance.id),
-            )
-          }
+              input ? approveLeadCard(instance.id, { input }) : approveDecision(instance.id),
+            );
+          }}
         />
       ) : (
       <>
@@ -112,13 +152,19 @@ export default function ChatHeldActionCard({ id }: { id: number }) {
         </dl>
       )}
       {done ? (
-        <p className="mt-3 text-sm font-semibold text-emerald-700 dark:text-emerald-300">✓ Done.</p>
+        <p className="mt-3 text-sm font-semibold text-emerald-700 dark:text-emerald-300">{DONE.has(instance.status) ? "✓ Done." : "✓ Approved."}</p>
       ) : (
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <Button
             variant="primary"
-            onClick={() => void act("Doing it…", () => approveDecision(instance.id))}
-            disabled={busy !== null}
+            onClick={() => {
+              if (onApprove) {
+                void viaChat();
+                return;
+              }
+              void act("Doing it…", () => approveDecision(instance.id));
+            }}
+            disabled={busy !== null || (onApprove !== undefined && approveDisabled)}
           >
             {busy ?? "Approve"}
           </Button>

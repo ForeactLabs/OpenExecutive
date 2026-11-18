@@ -7,7 +7,7 @@ import logging
 import re
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from types import SimpleNamespace
 from typing import Any, Literal, NamedTuple
 
@@ -183,6 +183,75 @@ def _rename_session_in_background(
         return
     _rename_tasks.add(task)
     task.add_done_callback(_rename_tasks.discard)
+
+
+# Steps approved from a chat that were still running when the turn was
+# stopped or ran out of time: they finish on their own (strong references,
+# as `_rename_tasks`).
+_approving_tasks: set[asyncio.Future[str]] = set()
+class _ApprovedNote(NamedTuple):
+    """What the turn reads about the card it approved."""
+
+    text: str
+
+
+# What the turn shows while an approved step runs.
+APPROVING_LABEL = "Doing what you approved…"
+
+
+async def _approve_card_in_turn(
+    card_id: int,
+    card_input: dict[str, Any] | None,
+    request: Request,
+    session: Any,
+    *,
+    stop_event: asyncio.Event | None,
+    deadline: float,
+    keepalive_s: float,
+) -> AsyncIterator[str | _ApprovedNote]:
+    """Approve a card from inside a chat turn's stream.
+
+    Yields SSE lines (an activity line first, then keepalives while the step
+    runs) and, last, the note the turn reads about it. Yields no note when
+    the turn was stopped, ran out of time or lost its page first: the step
+    carries on to its end on its own, and the turn's loop then ends as
+    stopped or timed out. A turn stopped before it began approves nothing.
+    """
+    from openexecutive.api.routes.decisions import HOST_APPROVE_NOTE, approve_in_chat
+
+    if session.from_host:
+        # A page in another app never approves a card (docs/auth.md): its
+        # turn only reads and advises, so the card stays as it is.
+        yield _ApprovedNote(HOST_APPROVE_NOTE)
+        return
+    if stop_event is not None and stop_event.is_set():
+        return
+    activity = {"type": "activity", "label": APPROVING_LABEL, "tool": "approve_card"}
+    yield f"data: {json.dumps(activity)}\n\n"
+    approving = asyncio.ensure_future(approve_in_chat(card_id, request, card_input))
+    stop_waiter = asyncio.ensure_future(stop_event.wait()) if stop_event is not None else None
+    try:
+        while not approving.done():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or (stop_event is not None and stop_event.is_set()):
+                break
+            if await request.is_disconnected():
+                break
+            wait_s = min(remaining, keepalive_s) if keepalive_s > 0 else remaining
+            waits: set[asyncio.Future[Any]] = {approving}
+            if stop_waiter is not None:
+                waits.add(stop_waiter)
+            await asyncio.wait(waits, timeout=wait_s, return_when=asyncio.FIRST_COMPLETED)
+            if not approving.done() and not (stop_event is not None and stop_event.is_set()):
+                yield _SSE_KEEPALIVE
+    finally:
+        if stop_waiter is not None:
+            stop_waiter.cancel()
+        if not approving.done():
+            _approving_tasks.add(approving)
+            approving.add_done_callback(_approving_tasks.discard)
+    if approving.done():
+        yield _ApprovedNote(approving.result())
 
 
 def _stop_owner_key(request: Request, caller_person_id: int | None) -> str:
@@ -996,6 +1065,8 @@ async def _run_chat_turn(
     memory_text: str | None = None,
     turn_files: dict[str, bytes] | None = None,
     background: bool = False,
+    approve_card: int | None = None,
+    approve_input: dict[str, Any] | None = None,
 ) -> StreamingResponse:
     """Shared streaming-chat handler for both the JSON and multipart routes.
 
@@ -1006,6 +1077,10 @@ async def _run_chat_turn(
     records as the caller's words instead of `message` (see
     `Executive.stream_chat`). `turn_files` are the uploads as sent, which a
     Python job may take by name for this turn (workflows/turn_files.py).
+    `approve_card` is a card under a reply in this chat that the person
+    tapped Approve on (`approve_input`: its changed fields): it is approved
+    as its own button does (`decisions.approve_in_chat`), and this turn reads
+    what happened, so the Executive carries on with the ask.
     """
     from openexecutive.config import get_settings
     from openexecutive.knowledge.retriever import chat_builtin_results, retrieve
@@ -1526,6 +1601,28 @@ async def _run_chat_turn(
             for evt in collector._events:
                 yield f"data: {json.dumps(collector.to_sse_dict(evt))}\n\n"
 
+            turn_page_block = page_context_block
+            if approve_card is not None:
+                # Approve tapped on a card under a reply: do the step inside
+                # the turn, so it shows as working and Stop and the turn's
+                # deadline hold while it runs (the step itself finishes on its
+                # own and its card says how it went).
+                approved: str | None = None
+                async for evt in _approve_card_in_turn(
+                    approve_card, approve_input, request, session,
+                    stop_event=stop_event,
+                    deadline=exec_t0 + timeout_s,
+                    keepalive_s=settings.chat_stream_keepalive_s,
+                ):
+                    if isinstance(evt, _ApprovedNote):
+                        approved = evt.text
+                    else:
+                        yield evt
+                if approved is not None:
+                    turn_page_block = "\n\n".join(
+                        part for part in (page_context_block, f"THE CARD THEY JUST APPROVED:\n{approved}") if part
+                    )
+
             logger.info("chat.executive_start turn_id=%s", turn_id)
 
             if committee_review:
@@ -1539,7 +1636,7 @@ async def _run_chat_turn(
                     attachment_blocks=attachment_blocks,
                     peer_memory_context=peer_memory_context,
                     briefing_context=briefing_context,
-                    page_context_block=page_context_block,
+                    page_context_block=turn_page_block,
                     turn_id=turn_id,
                     memory_text=turn_memory_text,
                     channel_context_block=shared_block,
@@ -1557,7 +1654,7 @@ async def _run_chat_turn(
                     attachment_blocks=attachment_blocks,
                     peer_memory_context=peer_memory_context,
                     briefing_context=briefing_context,
-                    page_context_block=page_context_block,
+                    page_context_block=turn_page_block,
                     turn_id=turn_id,
                     memory_text=turn_memory_text,
                     channel_context_block=shared_block,
@@ -1999,6 +2096,8 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
         page_context=body.page_context,
         client_turn_id=body.client_turn_id,
         memory_text=body.memory_text,
+        approve_card=body.approve_card,
+        approve_input=body.approve_input,
     )
 
 

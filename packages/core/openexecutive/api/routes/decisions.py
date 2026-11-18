@@ -1128,6 +1128,69 @@ async def approve_decision(
     return _served(await spec.approve(instance, body, request, resolver))
 
 
+# What an approved step gave back that the chat's next turn reads.
+_CHAT_RESULT_CHARS = 1500
+# What the turn reads when Approve came from a page in another app, which
+# never approves a card: the card still waits where it was.
+HOST_APPROVE_NOTE = (
+    "Approve came from a page in another app, which can't approve a card, so nothing was done. "
+    "The card still waits where it was. Say so in a line."
+)
+
+
+async def approve_in_chat(instance_id: int, request: Request, input_edits: dict[str, Any] | None = None) -> str:
+    """Approve tapped on a card shown under a reply in the person's own chat
+    (web or phone), then what that chat's next turn reads, so the Executive
+    carries on with what they asked instead of stopping at the card.
+
+    The tap is the card's own Approve (``approve_decision``, with every check
+    it makes on Today); ``input_edits`` are the card's changed fields, as its
+    Edit sends them. Never raises: a refusal or a failure is said in the
+    note, and the turn tells them."""
+    from openexecutive.orchestrator.content_trust import wrap_untrusted
+
+    try:
+        body = ApproveBody(edits={"input": input_edits} if input_edits else None)
+        instance = await approve_decision(instance_id, body, request)
+    except HTTPException as exc:
+        detail = exc.detail
+        if isinstance(detail, dict):
+            # A refusal says why in its `message` (department_gate).
+            detail = detail.get("message")
+        if not isinstance(detail, str) or not detail.strip():
+            detail = "it couldn't be done"
+        # Labelled as data: a failed step's words can carry the outside
+        # service's text, as what a step gave back can.
+        return (
+            "They tapped Approve on a card in this chat, but it didn't go through. "
+            "Say so in a line, then carry on with what you can.\nWhy:\n"
+            + wrap_untrusted(detail[:300], source="tool_result")
+        )
+    except Exception:
+        logger.exception("decisions: approving card %d from the chat failed", instance_id)
+        return (
+            "They tapped Approve on a card in this chat, but something went wrong, so it may not "
+            "have gone through. Say so in a line; don't say it was done."
+        )
+    payload = _parse_payload(instance)
+    try:
+        final = json.loads(instance.final_payload_json or "{}")
+    except ValueError:
+        final = {}
+    # Quoted: a step's summary can quote what it sends, words from outside.
+    summary = json.dumps(" ".join(str(payload.get("summary") or "the step").split())[:200])
+    note = (
+        f"They tapped Approve on the card {summary} in this chat, and it was done. "
+        "Carry on with what they asked in this chat, using what it gave back; "
+        "don't ask them to approve it again."
+    )
+    # A held step says what it gave back in `result`; an app action in `did`.
+    result = (final.get("result") or final.get("did")) if isinstance(final, dict) else None
+    if isinstance(result, str) and result.strip():
+        note += "\nWhat it gave back:\n" + wrap_untrusted(result[:_CHAT_RESULT_CHARS], source="tool_result")
+    return note
+
+
 class StepSayBody(BaseModel):
     """Words said on a held step's card (Take the lead, a teammate's held
     send): ``text``, and ``seen`` the fields as the card showed them, so a

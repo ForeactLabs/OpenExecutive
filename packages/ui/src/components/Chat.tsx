@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useSession } from "next-auth/react";
 import Message from "./Message";
 import HeldStepsCard, { APPROVE_MESSAGE } from "./HeldStepsCard";
+import { APPROVED_MESSAGE } from "./ChatHeldActionCard";
 import BrowserExtensionCard, { BROWSER_GO_AHEAD } from "./browser/BrowserExtensionCard";
 import BrowserWelcomeCard from "./browser/BrowserWelcomeCard";
 import { browserWelcomeClosed, closeBrowserWelcome, showBrowserWelcome } from "@/lib/browserWelcome";
@@ -597,7 +598,12 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
 
   // `queuedFollowup`: the leftovers of a turn, sent on their own. They carry
   // no files and leave alone whatever is being typed in the composer now.
-  async function handleSend(text?: string, memoryText?: string, queuedFollowup = false) {
+  async function handleSend(
+    text?: string,
+    memoryText?: string,
+    queuedFollowup = false,
+    approveCard?: { id: number; input?: Record<string, string> },
+  ) {
     // Carrying on in the chat ends the find, so the reply scrolls into view.
     closeFind();
     if (isLoading && text === undefined) {
@@ -699,6 +705,7 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
         clientTurnId,
         signal,
         memoryText: turnMemoryText,
+        approveCard,
       })) {
         turnClock.markEvent();
         if (item.type === "debug_event") {
@@ -1385,6 +1392,12 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
                       ? (v) => handleFeedback(i, v)
                       : undefined
                   }
+                  // Sent on its own (`queuedFollowup`): no files from the composer,
+                  // which would take the upload route that approves nothing.
+                  onApproveCard={
+                    member ? undefined : (id, input) => handleSend(APPROVED_MESSAGE, undefined, true, { id, input })
+                  }
+                  approveDisabled={isLoading}
                   onRetry={canRedo && i === turn.replyIndex ? () => void handleRetry() : undefined}
                   onEdit={canRedo && !editing && i === turn.userIndex ? startEdit : undefined}
                   memory={

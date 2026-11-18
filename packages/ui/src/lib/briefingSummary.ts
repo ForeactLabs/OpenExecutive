@@ -211,3 +211,21 @@ export function waitingOnTeam(
   const line = team.length === 1 ? (first ? `${title}: ${first}` : title) : `${team.length} waiting on ${whom}`;
   return { title, detail, line };
 }
+
+/** Home's row for what changed on the watches: one change says what it is,
+ *  with where it was noticed under it (the card's `noticed`); several are
+ *  counted, with the first under them. `line` is the same in one line, for
+ *  the web's at-a-glance row. Null when nothing changed. */
+export function watchingRow(
+  signals: { headline: string; view?: { noticed?: string } | null }[],
+): { title: string; detail: string; line: string } | null {
+  if (signals.length === 0) return null;
+  const first = (signals[0]?.headline ?? "").trim();
+  if (signals.length === 1) {
+    const title = first || "Something changed on what I'm watching";
+    return { title, detail: signals[0]?.view?.noticed ?? "", line: title };
+  }
+  const title = `${signals.length} things changed on what I'm watching`;
+  const more = signals.length - 1;
+  return { title, detail: first ? `${first}, and ${more} more` : "", line: title };
+}

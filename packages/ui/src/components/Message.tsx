@@ -54,6 +54,10 @@ interface MessageProps {
   author?: { name: string; mine: boolean };
   // Under a finished reply, after its action chips: the "Memory updated" chip.
   memory?: ReactNode;
+  // Approve a card under this reply from the chat itself: the chat carries
+  // on from there (ChatHeldActionCard). Off while a turn runs.
+  onApproveCard?: (id: number, input?: Record<string, string>) => Promise<void> | void;
+  approveDisabled?: boolean;
 }
 
 // The small text buttons under a message (Copy, Try again, Edit).
@@ -279,6 +283,8 @@ export default function Message({
   onEdit,
   author,
   memory,
+  onApproveCard,
+  approveDisabled,
 }: MessageProps) {
   const executiveName = useExecutiveName();
   // Approval cards this reply left, shown under it (ActionCards).
@@ -383,7 +389,7 @@ export default function Message({
 
         {memory}
 
-        {cardIds.length > 0 && <ChatActionCards ids={cardIds} />}
+        {cardIds.length > 0 && <ChatActionCards ids={cardIds} onApprove={onApproveCard} approveDisabled={approveDisabled} />}
 
         {!isStreaming && chatDrafts.map((d) => <ChatDraftCard key={d.row} draft={d} />)}
 

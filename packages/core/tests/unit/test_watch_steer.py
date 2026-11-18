@@ -464,3 +464,29 @@ async def test_a_skip_without_notes_is_ignored(
     await mp.run_external_monitor_scan(db_path=db)
     assert len(promoted) == 1
     assert ms.list_signals_for_watchlist(wid, db_path=db)[0]["processed_outcome"] == OUTCOME_ALERTED
+
+
+def test_a_watch_card_names_its_watch(db: Path) -> None:
+    """Home and the open card say where a watch's change was noticed, by the
+    watch's own name, from the one place /today builds every card."""
+    from openexecutive.api.routes.today import proposal_item
+
+    _watch(db)
+    alert = alert_store.get_alert(_card(db, "Acme shipped a new plan"), db_path=db)
+    assert alert is not None
+    item = proposal_item(alert)
+    assert item.watch_slug == SLUG
+    from openexecutive.monitoring.describe import watch_title
+
+    watch = ms.get_watchlist_item_by_slug(SLUG, db_path=db)
+    assert watch is not None
+    assert item.watch_title == watch_title(watch) == watch.target
+    # The board looks each watch up once and hands the cards its map.
+    assert proposal_item(alert, watches={SLUG: watch}).watch_title == watch.target
+    assert proposal_item(alert, watches={}).watch_title is None
+    # Not from a watch: no name, nothing looked up.
+    other = alert_store.get_alert(
+        _card(db, "Renew the lease", source="triage", tags=[], dedup_key=""), db_path=db,
+    )
+    assert other is not None
+    assert proposal_item(other).watch_title is None

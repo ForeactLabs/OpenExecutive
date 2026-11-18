@@ -295,6 +295,10 @@ export interface StreamChatOptions {
   // Executive's own card body). JSON route only; the multipart route derives
   // its own from the typed text and filenames.
   memoryText?: string;
+  // A card under a reply in this chat that was tapped Approve: the server
+  // approves it as its own button does, and this turn carries on from there
+  // (`input`: the card's changed fields). JSON route only.
+  approveCard?: { id: number; input?: Record<string, string> };
   // Safety net only. The normal stop path leaves the stream open and lets the
   // server wind down and send `stopped` + `done`; this aborts the fetch
   // outright if that never arrives.
@@ -333,6 +337,8 @@ export async function* streamChat(
         page_context: opts?.pageContext ?? undefined,
         client_turn_id: opts?.clientTurnId ?? undefined,
         memory_text: opts?.memoryText ?? undefined,
+        approve_card: opts?.approveCard?.id ?? undefined,
+        approve_input: opts?.approveCard?.input ?? undefined,
       }),
       signal: opts?.signal,
     });
@@ -5784,6 +5790,8 @@ export interface ProposalItem {
   // The watch that raised this card, when a watch did: what the person
   // says on the card corrects it (sayOnCard), and the card links to its page.
   watch_slug?: string | null;
+  // That watch's name as a person says it ("Acme pricing page").
+  watch_title?: string | null;
   // Someone changed the plan by saying so on the card or picking another
   // of its options.
   plan_changed?: boolean;
@@ -5893,6 +5901,9 @@ export interface CardView {
   need: string;
   as_me: boolean;
   source: string;
+  // A watch's signal: "I noticed this on the Acme pricing page I'm watching."
+  // "" on every other card.
+  noticed?: string;
   status: CardChip | null;
   description: string;
   long: boolean;
