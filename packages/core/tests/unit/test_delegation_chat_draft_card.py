@@ -684,6 +684,18 @@ def test_a_draft_with_no_one_in_to_goes_to_them_with_the_rest_as_written(
     assert args["to"] == _send_tests.OWNER and args["cc"] == _send_tests.DANA
 
 
+@pytest.mark.parametrize("field", ["to", "bcc"])
+def test_a_person_already_on_the_draft_is_not_copied_again(
+    db: Path, owner: Any, as_sender: list[str], exec_sends: list[dict[str, Any]], field: str,
+) -> None:
+    mailbox, row = _chat_draft(owner)
+    _switch(owner, row, mailbox, True)
+    message = mailbox.drafts["d1"].message
+    setattr(message, field, [*getattr(message, field), _send_tests.OWNER])
+    asyncio.run(send_chat_draft(owner, row, caller=LOCAL, gmail=mailbox, now=LATER))
+    assert _send_tests.OWNER not in str(exec_sends[0]["input"].get("cc") or "")
+
+
 def test_a_card_shown_before_a_switch_sends_nothing(
     db: Path, owner: Any, as_sender: list[str], exec_sends: list[dict[str, Any]],
 ) -> None:

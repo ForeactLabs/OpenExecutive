@@ -173,6 +173,14 @@ def sign_off(person: Any) -> str:
     return f"{executive_name()}, for {first}" if first else executive_name()
 
 
+def _names(person: Any, addresses: list[str]) -> bool:
+    """Whether ``addresses`` holds the person's own address."""
+    from openexecutive.delegation.gmail import normalize_email
+
+    mine = normalize_email(str(getattr(person, "email", "") or ""))
+    return bool(mine) and mine in {normalize_email(a) for a in addresses if a}
+
+
 def copied(person: Any, cc: list[str]) -> list[str]:
     """``cc`` with the person on it, once."""
     from openexecutive.delegation.gmail import normalize_email
@@ -359,7 +367,8 @@ def executive_step(
         # Only Cc or Bcc on it: the person goes in To instead of on cc, so
         # the email still names someone there and everyone else stays as written.
         to = [str(getattr(person, "email", "") or "")]
-    else:
+    elif not _names(person, [*to, *(bcc or [])]):
+        # Already in To or on Bcc, they stay where they put themselves.
         cc = copied(person, cc)
     arguments = provider.build_send_arguments(
         mailbox=settings.exec_email_address, to=", ".join(to), subject=subject or "(no subject)",
