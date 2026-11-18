@@ -821,3 +821,14 @@ def test_a_card_spoken_on_before_its_line_is_written_still_gets_it(db: Path) -> 
     second = alert_store.get_alert(other)
     assert second is not None and not card_talk.read([second])[other].written
 
+
+def test_a_question_keeps_the_cards_options(client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    aid = _card(db, action_label="Ask Alex")
+    card_talk.keep_options(aid, OLD, "Alex asked for the Drive.", [
+        card_talk.CardOption(label="Ask Alex", plan=OLD), card_talk.CardOption(label="Ask Sam", plan="Ask Sam."),
+    ])
+    _model(monkeypatch, {"plan": "", "reply": "Alex is on the launch team."})
+    assert _say(client, aid, "who is Alex?").status_code == 200
+    talk = card_talk.read([alert_store.get_alert(aid)])[aid]  # type: ignore[list-item]
+    assert [o.label for o in talk.options] == ["Ask Alex", "Ask Sam"]
+

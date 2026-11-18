@@ -1007,9 +1007,10 @@ async def say_on_card(alert_id: int, body: SayBody, request: Request) -> SayResp
             actor="user",
             details={"alert_id": alert_id, "change_id": change.id, "by": api_caller.actor(request)},
         )
-    if plan.strip():
+    # Words that ask for no step keep the card's options as they are.
+    if plan.strip() and new.plan.strip():
         had = card_talk.read([existing]).get(alert_id)
-        own = card_talk.CardOption(label=new.label or "Do it", plan=plan)
+        own = card_talk.CardOption(label=new.label or existing.action_label or "Do it", plan=plan)
         card_talk.keep_options(
             alert_id, plan.strip(), had.happened if had else "",
             [own, *(card_talk.CardOption(label=label, plan=text) for label, text in new.others)],
