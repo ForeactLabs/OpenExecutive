@@ -45,6 +45,7 @@ activity on Today names what it did (``api.routes.today._build_activity``).
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -1098,7 +1099,7 @@ def _writes_team_file(tool: str, tool_input: dict[str, Any]) -> bool:
     """Whether a connected-app step writes into a file (a sheet, doc,
     slides, Drive file) and reaches no one outside the team: no mail, no
     event, no address of anyone but a teammate."""
-    return bool(_FILE_TOOL_RE.search(tool)) and not _MAIL_TOOL_RE.search(tool) and _team_only(tool, tool_input)
+    return _file_tool(tool) and not _MAIL_TOOL_RE.search(tool) and _team_only(tool, tool_input)
 
 
 def _mcp_deletes(tool: str, tool_input: dict[str, Any]) -> bool:
@@ -1684,9 +1685,26 @@ _MCP_APPS: tuple[tuple[re.Pattern[str], str, str], ...] = tuple(
         (r"drive|file|folder", "Google Drive", "a file"),
     )
 )
-# A file app's tool: a sheet, document, presentation, workbook or drive file.
-_FILE_TOOL_RE = re.compile(r"sheet|doc|slide|presentation|drive|file|folder|excel|workbook|onedrive", re.I)
+# A file app's tool: a sheet, document, presentation, workbook or drive file,
+# from a file app's server ("google_workspace__modify_sheet_values"). Whole
+# name parts only, so "profile", "docusign", "driver" or "timesheet" aren't
+# files, and another app's tool is never a file however it's named.
+_FILE_APP_RE = re.compile(
+    r"^(?:google_workspace|microsoft_365|ms365|onedrive|g?drive|g?docs|g?sheets|g?slides|excel)__", re.I,
+)
+_FILE_WORD_RE = re.compile(
+    r"(?:^|[_-])(?:(?:spread)?sheets?|docs?|documents?|slides?|presentations?|drive|files?|folders?"
+    r"|excel|workbooks?|worksheets?|onedrive|word)(?=$|[_-])", re.I,
+)
 _MAIL_TOOL_RE = re.compile(r"mail|message|calendar|event", re.I)
+
+
+def _file_tool(tool: str) -> bool:
+    """Whether ``tool`` is a file app's tool (``_FILE_APP_RE``)."""
+    app = _FILE_APP_RE.match(tool or "")
+    return app is not None and bool(_FILE_WORD_RE.search(tool[app.end():]))
+
+
 _MCP_NAME_KEYS = ("title", "name", "file_name", "filename", "document_title", "spreadsheet_title", "sheet_title")
 # An argument whose name says the call reaches or opens to someone.
 _MCP_REACH_ARG_RE = re.compile(
@@ -1810,7 +1828,7 @@ _SNIPPET_KEYS = frozenset({"text", "message", "body", "description", "subject"})
 def _file_job(tool: str, tool_input: dict[str, Any]) -> str:
     """A file write's title as the job it does, or "" for any other step:
     rows written to a sheet, text added to the end of a doc."""
-    if not _FILE_TOOL_RE.search(tool) or _MAIL_TOOL_RE.search(tool) or _mcp_deletes(tool, tool_input):
+    if not _file_tool(tool) or _MAIL_TOOL_RE.search(tool) or _mcp_deletes(tool, tool_input):
         return ""
     app, noun = next(((a, n) for rx, a, n in _MCP_APPS if rx.search(tool)), ("", ""))
     what = _first_text(tool_input, _MCP_NAME_KEYS) or noun
@@ -2199,7 +2217,6 @@ def card_details(tool: str, tool_input: dict[str, Any], *, mcp: bool = False) ->
 
 def hold(
     tool: str, tool_input: dict[str, Any], hit: Hit, *, source: str, mcp: bool, db_path: Path | None = None,
-    purpose: str = "",
 ) -> int:
     """Make a held action a decision for its approver, with a card on Today."""
     from openexecutive.alerts.models import PRIVATE_ALERT_TAG
@@ -2259,9 +2276,6 @@ def hold(
         "held": True,
         "tool": tool, "input": tool_input, "mcp": mcp, "kind": hit.kind, "rule_id": hit.rule_id,
         "reason": hit.reason, "summary": summary, "source": source,
-        # The Executive's own line on why it's doing this (``call_tool``'s
-        # ``why``): the card's "Why".
-        **({"purpose": _one_line(purpose, 300)} if purpose.strip() else {}),
         # The card's title says who and what in a few words; the full
         # message or details show under it, and where it would go.
         "headline": title(tool, tool_input, mcp=mcp, private=private),
@@ -2524,8 +2538,14 @@ def result_failed(text: str) -> bool:
 # against the error's text, first match wins.
 _FAILED_WHY: tuple[tuple[re.Pattern[str], str], ...] = tuple(
     (re.compile(p, re.IGNORECASE), w) for p, w in (
+        # The step ran and only its result was kept back (the gateway's "It
+        # did run"): never "nothing changed", or a retry does it twice.
+        (r"it did run|was withheld",
+         "{app} did the step, but I couldn't read back how it went. Check it before trying again."),
         (r"invalid_grant|unauthori[sz]ed|\b401\b|expired or revoked|revoked|reconnect|sign in again",
          "{app} needs to be connected again, so nothing changed."),
+        (r"daily.?limit|per day|limit for today",
+         "{app} has used up its limit for today, so nothing changed. Try again tomorrow."),
         (r"\b429\b|rate.?limit|too many requests|quota", "{app} was busy, so nothing changed. Try again in a few minutes."),
         (r"\b40[34]\b|not found|forbidden|permission|insufficient", "{app} couldn't open that for me, so nothing changed."),
         (r"time.?out|timed out", "{app} took too long, so it may not have gone through. Check before trying again."),
@@ -2542,6 +2562,15 @@ def failure_words(tool: str, result: str) -> str:
         (a for rx, a in _APP_NAMES if rx.search(tool or "")), "The app",
     )
     text = result if isinstance(result, str) else str(result)
+    # A card of several steps (``carry_out``) that stopped partway: the
+    # steps before it went through, so say how many rather than "nothing".
+    with contextlib.suppress(TypeError, ValueError):
+        parsed = json.loads(text)
+        done, of = (parsed.get("done"), parsed.get("of")) if isinstance(parsed, dict) else (0, 0)
+        if isinstance(done, int) and done > 0:
+            total = f" of {of}" if isinstance(of, int) and of > done else ""
+            rest = ", and the rest didn't run" if isinstance(of, int) and of > done + 1 else ""
+            return f"{done}{total} went through, then {app} turned the next one down{rest}. Check before trying again."
     for rx, words in _FAILED_WHY:
         if rx.search(text):
             return words.format(app=app)
@@ -2897,6 +2926,7 @@ async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bo
                             f"{failure[:300]}" + (" The rest didn't run." if done + 1 < len(steps) else "")
                         ),
                         "done": done,
+                        "of": len(steps),
                     })
                     if failure else json.dumps({"done": done, "results": [r[:300] for r in results]})
                 )

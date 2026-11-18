@@ -570,7 +570,8 @@ def top(payload: dict[str, Any], *, approver_id: int | None, viewer_id: int | No
     (web, phone, chat apps):
 
     - ``waiting_on``: whose OK it waits for, when that isn't the reader
-      ("Alex"); empty when it's theirs ("Needs your OK").
+      ("Alex"); empty when it's theirs or the reader isn't known ("Needs
+      your OK").
     - ``started``: who started it: "You asked", "Alex asked", or "I started
       this" when no one on the team asked (Take the lead's own work).
     - ``why``: what it was working on, in the Executive's words; may be empty.
@@ -596,7 +597,9 @@ def top(payload: dict[str, Any], *, approver_id: int | None, viewer_id: int | No
         started = f"{who} asked" if who else "Someone on the team asked"
     else:
         started = "I started this"
-    waiting_on = name(approver_id) if approver_id is not None and approver_id != viewer_id else ""
+    # Unknown reader (a build with no one signed in): say it plainly, as
+    # before, rather than name someone who may be the reader.
+    waiting_on = name(approver_id) if None not in (approver_id, viewer_id) and approver_id != viewer_id else ""
     reason = " ".join(str(payload.get("reason") or "").split()).removesuffix(".")
     if payload.get("kind") == "training":
         waits = "It's a new kind of step for me, so it waits for an OK once."

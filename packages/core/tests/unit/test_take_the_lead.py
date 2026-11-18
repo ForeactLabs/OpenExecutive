@@ -185,6 +185,17 @@ def test_a_team_files_name_and_who_it_reaches_still_count(owner: Any) -> None:
     assert hit is not None and hit.kind == "money"
 
 
+@pytest.mark.parametrize(("tool", "tool_input", "kind"), [
+    ("hris__update_employee_profile", {"employee_id": 5, "title": "Senior Engineer", "salary": "$180,000"}, "money"),
+    ("hris__update_payroll_sheet", {"title": "November", "text": "Pay $4,000 more"}, "money"),
+    ("docusign__send_envelope", {"title": "Offer", "text": "Please sign the contract by Friday."}, "contracts"),
+])
+def test_only_a_file_apps_tool_writes_a_team_file(owner: Any, tool: str, tool_input: dict[str, Any], kind: str) -> None:
+    """Another app's step is read in full, however its tool is named."""
+    hit = ttl.check(tool, tool_input, lead=_lead(), rules=[], mcp=True)
+    assert hit is not None and hit.kind == kind
+
+
 def test_a_plain_message_to_someone_known_goes(owner: Any) -> None:
     assert ttl.check("message_person", {"person_id": 1, "text": "Are we still on for Thursday?"},
                      lead=_lead(), rules=[]) is None
@@ -726,6 +737,18 @@ def test_a_step_the_app_turns_down_says_why_in_plain_words(
      "Google Docs couldn't open that for me, so nothing changed."),
     ("some_app__do_thing", "Error: the request timed out",
      "The app took too long, so it may not have gone through. Check before trying again."),
+    ("google_workspace__modify_doc_text",
+     '{"error": "Couldn\'t check which files are private just now, so the result of x was withheld. It did run."}',
+     "Google Docs did the step, but I couldn't read back how it went. Check it before trying again."),
+    ("google_workspace__modify_sheet_values", "Error: HttpError 403 dailyLimitExceeded: Quota exceeded",
+     "Google Sheets has used up its limit for today, so nothing changed. Try again tomorrow."),
+    ("google_workspace__modify_sheet_values",
+     '{"error": "2 of 4 went through, then step 3 didn\'t: Error: HttpError 429", "done": 2, "of": 4}',
+     "2 of 4 went through, then Google Sheets turned the next one down, and the rest didn't run. "
+     "Check before trying again."),
+    ("google_workspace__modify_sheet_values",
+     '{"error": "1 of 2 went through, then step 2 didn\'t: Error: HttpError 403", "done": 1, "of": 2}',
+     "1 of 2 went through, then Google Sheets turned the next one down. Check before trying again."),
 ])
 def test_failure_words_name_the_app_and_never_quote_it(tool: str, result: str, words: str) -> None:
     assert ttl.failure_words(tool, result) == words
