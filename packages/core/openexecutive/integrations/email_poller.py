@@ -546,21 +546,25 @@ def split_forward(
     if cut_at is None or not (forwarded or is_forward):
         return own, ""
     rest = lines[cut_at:]
-    if rest and rest[0].lstrip().startswith(">"):
-        # Quoted (Apple Mail): the forward is the run of ">" lines, one level
-        # of ">" off each. What the sender wrote below it is in ``kept``.
-        end = len(rest)
-        for k, ln in enumerate(rest):
-            if ln.strip() and not ln.lstrip().startswith(">"):
-                end = k
-                break
-        rest = [re.sub(r"^(\s*)>\s?", r"\1", ln) for ln in rest[:end]]
-    if rest and (
+    if rest and not rest[0].lstrip().startswith(">") and (
         _BEGIN_FORWARDED_RE.match(rest[0].strip())
         or _FORWARDED_RE.match(rest[0].strip())
         or _OUTLOOK_RULE_RE.match(rest[0].strip())
     ):
         rest = rest[1:]  # the reader's own heading says it
+    first = next((k for k, ln in enumerate(rest) if ln.strip()), None)
+    if first is not None and rest[first].lstrip().startswith(">"):
+        # Quoted (Apple Mail, or an iPhone marker with its forward quoted
+        # below): the forward is the run of ">" lines, one level of ">" off
+        # each. What the sender wrote below it is in ``kept``.
+        end = len(rest)
+        for k in range(first, len(rest)):
+            if rest[k].strip() and not rest[k].lstrip().startswith(">"):
+                end = k
+                break
+        rest = [re.sub(r"^(\s*)>\s?", r"\1", ln) for ln in rest[first:end]]
+        if rest and _BEGIN_FORWARDED_RE.match(rest[0].strip()):
+            rest = rest[1:]
     inner = "\n".join(ln.rstrip() for ln in rest).strip()
     cap = forwarded_chars if forwarded_chars is not None else max_chars
     return own, inner[:cap] if cap is not None else inner

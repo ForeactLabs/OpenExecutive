@@ -285,3 +285,10 @@ def test_the_drafting_thread_shares_one_budget_for_forwards() -> None:
     assert text.count("n") >= 5000
     assert text.count("o") <= threads.THREAD_FORWARDED_CHARS - 5000 + 50
 
+
+def test_an_unquoted_marker_over_a_quoted_forward_is_unquoted() -> None:
+    from openexecutive.integrations.email_poller import split_forward
+
+    body = "FYI\n\nBegin forwarded message:\n\n> From: Bob\n> Subject: hi\n> \n> secret plan\n"
+    assert split_forward(body, "Fwd: hi") == ("FYI", "From: Bob\nSubject: hi\n\nsecret plan")
+
