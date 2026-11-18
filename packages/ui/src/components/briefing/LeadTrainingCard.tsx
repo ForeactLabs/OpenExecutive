@@ -230,7 +230,7 @@ export default function LeadTrainingCard({
             disabled={busy || card === null}
             seen={values}
             turns={proposal.view?.turns ?? []}
-            canSay={Boolean(proposal.view?.tell_me) && fields.length > 0}
+            canSay={Boolean(proposal.view?.tell_me) && Boolean(card?.mayChange) && fields.length > 0}
             options={[
               { label: "Do it", run: () => approveLeadCard(decisionId, edits(false)) },
               ...(allowLabel

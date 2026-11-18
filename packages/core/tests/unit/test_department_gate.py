@@ -536,6 +536,11 @@ def test_words_on_a_held_step_rewrite_its_fields_and_approve_sends_them(
     # What the card shows of the step is what its Approve sends.
     shown = " ".join(str(d.get("value", "")) for d in served["details"])
     assert "Short text" in shown and "Draft text" not in shown
+    # A chat card, whose Approve sends the step as filed, shows it as filed.
+    from openexecutive.integrations import channel_cards
+
+    in_chat = channel_cards.card_text(decision_id)
+    assert in_chat is not None and "Draft text" in in_chat and "Short text" not in in_chat
     # Approve sends what was said as the edit, under the step's own rules.
     ok = client.post(f"/decisions/{decision_id}/approve", json={"edits": {"input": {"body": "Short text"}}},
                      headers=OWNER)

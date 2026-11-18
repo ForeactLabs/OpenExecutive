@@ -125,7 +125,14 @@ def _served_json(raw: str | None) -> str | None:
         return None
     if not isinstance(payload, dict) or not isinstance(payload.get("input"), dict):
         return None
-    return json.dumps(card_details.served(payload), ensure_ascii=False)
+    shown = card_details.served(payload)
+    said = payload.get(SAID_INPUT)
+    if isinstance(said, dict) and said and not isinstance(payload.get("steps"), list):
+        # The page's card sends what was said on it with its Approve, so its
+        # step shows with it. A chat card shows (and sends) the step as filed.
+        details = card_details.served({**payload, "input": {**payload["input"], **said}})["details"]
+        shown = {**shown, "details": details}
+    return json.dumps(shown, ensure_ascii=False)
 
 
 def _served(instance: DecisionInstance) -> DecisionInstance:
@@ -426,7 +433,18 @@ def get_decisions(
 
 @router.get("/decisions/{instance_id}", response_model=DecisionInstance)
 def get_decision(instance_id: int, request: Request) -> DecisionInstance:
-    return _served(_visible_instance(instance_id, request))
+    instance = _visible_instance(instance_id, request)
+    served = _served(instance)
+    if instance.decision_class not in _HELD_CLASSES or not served.proposed_payload_json:
+        return served
+    # Whether this reader may change its step (Edit, Or tell me), so a page
+    # offers only what Approve and /say take from them.
+    try:
+        may = _may_change(instance, request, _resolver(instance, request))
+    except HTTPException:
+        may = False
+    shown = {**json.loads(served.proposed_payload_json), "may_change": may}
+    return served.model_copy(update={"proposed_payload_json": json.dumps(shown, ensure_ascii=False)})
 
 
 def _check_booking_edits(payload: dict[str, Any], edits: dict[str, Any]) -> None:

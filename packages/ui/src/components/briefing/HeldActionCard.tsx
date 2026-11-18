@@ -127,7 +127,7 @@ export default function HeldActionCard({
         disabled={busy || held == null}
         seen={seen}
         turns={proposal.view?.turns ?? []}
-        canSay={Boolean(proposal.view?.tell_me) && (held?.fields.length ?? 0) > 0}
+        canSay={Boolean(proposal.view?.tell_me) && Boolean(held?.mayChange) && (held?.fields.length ?? 0) > 0}
         options={[{
           label: "Do it",
           // What was said on the card goes as the edit.

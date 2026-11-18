@@ -548,11 +548,6 @@ def served(payload: dict[str, Any]) -> dict[str, Any]:
         return payload
     out = dict(payload)
     steps = held_steps(payload)
-    said = payload.get("said_input")
-    if isinstance(said, dict) and said and len(steps) == 1:
-        # What was said on the card is what its Approve sends, so the step
-        # shows with it.
-        steps = [{**steps[0], **said}]
     out["details"] = plain_steps(str(payload.get("tool") or ""), steps) + _why(payload, steps)
     with contextlib.suppress(Exception):
         out.update(_named(payload, tool_input))

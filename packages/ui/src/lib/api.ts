@@ -7419,6 +7419,8 @@ export interface LeadCardPayload {
   // What was said on the card, put into its fields (by field): Approve
   // sends it as the edit.
   said: Record<string, string>;
+  // Whether this reader may change it (Edit, Or tell me).
+  mayChange: boolean;
 }
 
 function saidInput(payload: { said_input?: unknown }): Record<string, string> {
@@ -7469,6 +7471,7 @@ export async function getLeadCard(id: number, signal?: AbortSignal): Promise<Lea
     fields: Array.isArray(payload.fields) ? payload.fields : [],
     allow: payload.allow && typeof payload.allow.key === "string" ? payload.allow : undefined,
     said: saidInput(payload),
+    mayChange: payload.may_change !== false,
   };
 }
 
@@ -7484,6 +7487,8 @@ export interface HeldActionPayload {
   fields: LeadCardField[];
   // What was said on the card, put into its fields: Approve sends it.
   said: Record<string, string>;
+  // Whether this reader may change it (Edit, Or tell me).
+  mayChange: boolean;
 }
 
 export async function getHeldAction(id: number, signal?: AbortSignal): Promise<HeldActionPayload> {
@@ -7501,6 +7506,7 @@ export async function getHeldAction(id: number, signal?: AbortSignal): Promise<H
       (f: { field?: unknown; value?: unknown }) => typeof f?.field === "string" && typeof f?.value === "string",
     ),
     said: saidInput(payload),
+    mayChange: payload.may_change !== false,
   };
 }
 

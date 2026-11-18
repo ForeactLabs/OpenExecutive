@@ -1222,6 +1222,19 @@ def test_only_a_change_past_what_was_said_is_an_edit() -> None:
     assert decisions_route._edits_beyond_said({"input": {}}, {"text": "Pay it Friday"}) is True
 
 
+def test_the_card_says_whether_its_reader_may_change_it(
+    client: TestClient, owner: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    decision_id = _held(owner)
+    monkeypatch.setattr(decisions_route, "_approver_is_principal", lambda request: True)
+    shown = json.loads(client.get(f"/decisions/{decision_id}").json()["proposed_payload_json"])
+    assert shown["may_change"] is True
+    # Someone who may approve it but not change it: no Edit, no Or tell me.
+    monkeypatch.setattr(decisions_route, "_may_change", lambda instance, request, resolver: False)
+    shown = json.loads(client.get(f"/decisions/{decision_id}").json()["proposed_payload_json"])
+    assert shown["may_change"] is False
+
+
 def test_a_card_for_several_calls_is_not_changed_before_approving(
     client: TestClient, owner: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
