@@ -12213,8 +12213,8 @@ delegation:
     sent; training.all_allowed(person, reply_goes_to(payload)) gates the
     reply (everyone in draft_to, else the sender), invites by sender,
     action cards by every address. Chat-app cards carry the same as a
-    third button "<Send|Accept|Approve> + on its own next time"
-    (channel_cards.allow_label / tapped_allow). Listed on Delegate as
+    button "<the pick>, and do this on its own next time"
+    (channel_cards.allow_label, choice "n"). Listed on Delegate as
     What it's learned as you (training.learned, setting training), removed
     with DELETE /delegation/learned/{id}.
     Below Hands-off a reply to someone they don't know is refused
