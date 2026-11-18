@@ -165,7 +165,7 @@ from openexecutive.orchestrator.people_tools import (
     is_principal_on_verified_surface,
     turn_is_private_to_principal,
 )
-from openexecutive.orchestrator.reading import TurnReadingBudget, bind_turn_limits
+from openexecutive.orchestrator.reading import TurnReadingBudget, with_turn_limits
 from openexecutive.orchestrator.research_tools import (
     RESEARCH_TOOL_HANDLERS,
     RESEARCH_TOOLS,
@@ -2593,7 +2593,6 @@ class Executive:
         # What this turn's tool results have put in the prompt so far: every
         # one is re-sent on each later call.
         reading_budget = TurnReadingBudget(reading_limits_for(model))
-        bind_turn_limits(reading_budget.limits)
 
         # Every tool call this turn with the start of its result, for the
         # end-of-turn check that the reply claims nothing it didn't do
@@ -3393,7 +3392,10 @@ class Executive:
                 feed = turn_live.Feed()
                 with feed.bound():
                     skill_task = asyncio.ensure_future(asyncio.gather(
-                        *(turn_handlers[tu["name"]](tu["input"]) for tu in skill_tool_uses),
+                        *(
+                            with_turn_limits(reading_budget.limits, turn_handlers[tu["name"]](tu["input"]))
+                            for tu in skill_tool_uses
+                        ),
                         return_exceptions=True,
                     ))
                 # Closed here, so a turn that stops at a yield cancels the
@@ -3720,7 +3722,7 @@ class Executive:
                     source = outside_content.source_of(probe_name, probe_input)
                     try:
                         if own:
-                            text = str(await _handlers[tool](arguments))
+                            text = str(await with_turn_limits(reading_budget.limits, _handlers[tool](arguments)))
                         else:
                             text = str(await _call({"name": tool, "arguments": arguments}))
                     except asyncio.CancelledError:

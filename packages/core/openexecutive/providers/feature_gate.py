@@ -55,7 +55,8 @@ NON_CLAUDE_MAX_OUTPUT_TOKENS = 16_000
 
 
 # How much each model can hold (its context window, in tokens). Claude from
-# 4.6 on, and every Claude 5, holds 1,000,000; older Claude 200,000. Another
+# 4.7 on, and every Claude 5, holds 1,000,000; older Claude is taken at
+# 200,000 (4.6 serves 1M only where a deployment turns it on). Another
 # hosted model is taken at 128,000 (gpt-4o's window, and the smallest of the
 # hosted models offered); a self-hosted one holds LOCAL_CONTEXT_TOKENS.
 CLAUDE_CONTEXT_TOKENS = 1_000_000
@@ -88,7 +89,7 @@ def context_tokens(model: str, *, local_models: Any = (), local_context_tokens: 
     if m is None:
         return NON_CLAUDE_CONTEXT_TOKENS
     major, minor = int(m.group("major")), int(m.group("minor") or 0)
-    if major >= 5 or (major == 4 and minor >= 6):
+    if major >= 5 or (major == 4 and minor >= 7):
         return CLAUDE_CONTEXT_TOKENS
     return OLDER_CLAUDE_CONTEXT_TOKENS
 

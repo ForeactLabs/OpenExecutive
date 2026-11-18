@@ -47,7 +47,8 @@ def _limits(per_read: int, per_turn: int) -> Any:
     [
         ("claude-opus-5-5", 1_000_000),
         ("claude-sonnet-5", 1_000_000),
-        ("claude-sonnet-4-6", 1_000_000),
+        ("claude-sonnet-4-6", 200_000),
+        ("claude-opus-4-7", 1_000_000),
         ("claude-opus-4-8-20260501", 1_000_000),
         ("anthropic/claude-opus-5.5", 1_000_000),
         ("claude-haiku-4-5", 200_000),

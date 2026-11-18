@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Awaitable
 from contextvars import ContextVar
-from typing import Any
+from typing import Any, TypeVar
 
 from openexecutive.orchestrator import tool_groups, turn_progress
 from openexecutive.providers.feature_gate import ReadingLimits
@@ -68,15 +69,21 @@ _PROMPT_FULL_SHARE = 0.8
 _DENSE_SCRIPT_FROM = 0x2E80
 _DENSE_SAMPLE = 20_000
 
-# The reading limits of the turn running now (bind_turn_limits), for a tool
-# that sizes its own parts (orchestrator.document_tools).
+# The reading limits of the turn whose tool is running (with_turn_limits),
+# for a tool that sizes its own parts (orchestrator.document_tools).
 _TURN_LIMITS: ContextVar[ReadingLimits | None] = ContextVar("turn_reading_limits", default=None)
+_T = TypeVar("_T")
 
 
-def bind_turn_limits(limits: ReadingLimits) -> None:
-    """The turn running now reads with ``limits``: a tool that sizes its own
-    parts reads them back with ``turn_limits``."""
-    _TURN_LIMITS.set(limits)
+async def with_turn_limits(limits: ReadingLimits, call: Awaitable[_T]) -> _T:
+    """Run one tool call of a turn that reads with ``limits``: the tool reads
+    them back with ``turn_limits``. Bound for that call only, so nothing
+    else in the task sees them after it."""
+    token = _TURN_LIMITS.set(limits)
+    try:
+        return await call
+    finally:
+        _TURN_LIMITS.reset(token)
 
 
 def turn_limits() -> ReadingLimits | None:

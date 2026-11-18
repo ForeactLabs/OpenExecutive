@@ -213,17 +213,19 @@ async def test_a_long_page_range_reads_on_with_the_same_pages(dirs, monkeypatch)
 
 async def test_a_part_is_what_the_turns_own_model_holds(dirs, monkeypatch) -> None:
     """Inside a turn the part follows that turn's model, not the default one."""
-    from openexecutive.orchestrator.reading import bind_turn_limits
+    from openexecutive.orchestrator.reading import turn_limits, with_turn_limits
     from openexecutive.providers.feature_gate import ReadingLimits
 
     monkeypatch.setattr("openexecutive.providers.registry.reading_limits_for", _parts_of(100_000))
     downloads, _ = dirs
     (downloads / "long.txt").write_text("x" * 5000)
-    bind_turn_limits(ReadingLimits(per_read=1000, per_turn=2000))
 
-    out = await handle_read_document({"path": str(downloads / "long.txt")})
+    out = await with_turn_limits(
+        ReadingLimits(per_read=1000, per_turn=2000), handle_read_document({"path": str(downloads / "long.txt")})
+    )
 
     assert len(out) <= 1000 and "call again with start=" in out
+    assert turn_limits() is None  # bound for that call only
 
 
 async def test_a_part_of_text_written_a_token_a_character_is_a_third_as_long(dirs, monkeypatch) -> None:

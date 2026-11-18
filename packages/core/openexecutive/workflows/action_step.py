@@ -55,7 +55,8 @@ from typing import Any
 from openexecutive.agents.workflow_actor import WORKFLOW_ACTOR_AGENT_ID, WorkflowActorAgent
 from openexecutive.config import get_settings
 from openexecutive.orchestrator import turn_live
-from openexecutive.orchestrator.reading import TurnReadingBudget, bind_turn_limits
+from openexecutive.orchestrator.reading import TurnReadingBudget, with_turn_limits
+from openexecutive.providers.feature_gate import ReadingLimits
 from openexecutive.providers.registry import reading_limits_for
 from openexecutive.providers.translator import reasoning_replay_block
 from openexecutive.workflows import step_script, tool_catalog
@@ -592,6 +593,8 @@ class _StepCalls:
         self._policy = policy
         self._actions = actions
         self._holds = _Holds()
+        # The step's reading limits, for a tool that sizes its own parts.
+        self.limits: ReadingLimits | None = None
         self._events: list[StepYield] = []
         # A tool stopped the step (``extensions.workflow_hold`` / ``_wait``).
         self.stopped = False
@@ -685,7 +688,10 @@ class _StepCalls:
 
                 try:
                     with extensions.collect_workflow_signals() as signals:
-                        content, is_error = await _call_tool(name, arguments, info, self._workflow_name)
+                        call = _call_tool(name, arguments, info, self._workflow_name)
+                        content, is_error = await (
+                            with_turn_limits(self.limits, call) if self.limits is not None else call
+                        )
                 except asyncio.CancelledError:
                     # Stopped mid-call (a script's clock, or the run): it may
                     # have taken effect, so it still gets its audit row.
@@ -874,7 +880,7 @@ async def run_action_step(
     # How much the step's reads may hold, from its model; a long result
     # comes back in parts (orchestrator.reading).
     reading = TurnReadingBudget(reading_limits_for(resolved_model))
-    bind_turn_limits(reading.limits)
+    calls.limits = reading.limits
     max_turns = step.max_tool_calls + _EXTRA_TURNS
     fanout_hinted = False
     turn = 0
