@@ -482,16 +482,16 @@ def _look(tapped: Choice, person: Any) -> tuple[Tapped | None, bool, bool | None
     if tapped.choice == SKIP:
         return None, False, None
     current = card_text(decision_id)
-    if current is None:
-        if _waits(decision_id):
-            # Its words no longer fit a chat: nothing to check the tap against.
-            return Tapped(f"Not done: this card changed. Open it in the app: {_app_link(decision_id)}"), False, None
+    if current is None and not _waits(decision_id):
         return None, False, None  # waits no more: answered as handled
-    if version(decision_id, current) == tapped.version:
+    if current is not None and version(decision_id, current) == tapped.version:
         return None, True, _switches_to_executive(decision_id) if tapped.choice == SWITCH else None
+    # Answered here, not done: only to its own person, as anywhere else.
     if not _theirs(decision_id, person):
-        # As anywhere else: a card that isn't theirs is not there.
         return Tapped("Not done: this card is no longer there."), False, None
+    if current is None:
+        # Its words no longer fit a chat: nothing to check the tap against.
+        return Tapped(f"Not done: this card changed. Open it in the app: {_app_link(decision_id)}"), False, None
     return Tapped(CHANGED, current, card_options(decision_id, current)), False, None
 
 

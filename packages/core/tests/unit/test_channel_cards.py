@@ -488,11 +488,15 @@ def test_a_tap_on_a_card_no_chat_shows_whole_does_nothing(monkeypatch: pytest.Mo
 
     monkeypatch.setattr(channel_cards, "card_text", lambda decision_id: None)
     monkeypatch.setattr(channel_cards, "_waits", lambda decision_id: True)
+    monkeypatch.setattr(channel_cards, "_theirs", lambda decision_id, who: who.id == 3)
     monkeypatch.setattr(channel_cards, "resolve", done)
     monkeypatch.setattr(channel_cards, "_switch", done)
     tapped = asyncio.run(channel_cards.tap(channel_cards.Choice(7, choice, "0000beef"), SimpleNamespace(id=3)))
     assert tapped.line.startswith("Not done: this card changed. Open it in the app: ")
     assert tapped.line.endswith("/cards/7") and tapped.options == ()
+    # Anyone else isn't told it waits.
+    other = asyncio.run(channel_cards.tap(channel_cards.Choice(7, choice, "0000beef"), SimpleNamespace(id=4)))
+    assert other.line == "Not done: this card is no longer there."
 
 
 def test_a_tap_on_a_card_handled_meanwhile_says_so(monkeypatch: pytest.MonkeyPatch) -> None:
