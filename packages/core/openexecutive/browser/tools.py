@@ -310,9 +310,10 @@ AWAY_NO_SHOW_PAGE = (
     "browser. Link the page in your reply instead."
 )
 NOT_CONNECTED_AWAY = (
-    "They aren't at their computer, and the browser there isn't connected right now, so you can't use it "
-    "yet. Tell them: on their computer, open Chrome, click the Open Executive extension's icon and turn on "
-    "Stay connected while Chrome is open, leave Chrome open, and ask again."
+    "The browser on their computer isn't connected right now, so you can't use it yet. Tell them: on their "
+    "computer, open Chrome, click the Open Executive extension's icon and turn on Stay connected while Chrome "
+    "is open, leave Chrome open, and ask again. Not being at their computer isn't the reason: you use that "
+    "browser from wherever they ask once it is connected, so never say it is because they're away from it."
 )
 
 

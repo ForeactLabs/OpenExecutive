@@ -734,6 +734,21 @@ async function run(step, relayTab) {
   return out;
 }
 
+// Every step answers within this long, even one stuck in Chrome, so the tab
+// asking for steps goes on asking (the server waits a little longer).
+const STEP_MS = 40000;
+
+function withinStepTime(work) {
+  let timer;
+  const late = new Promise((done) => {
+    timer = setTimeout(
+      () => done({ ok: false, error: "The browser didn't finish that step in time. Look at the page again before going on." }),
+      STEP_MS,
+    );
+  });
+  return Promise.race([work, late]).finally(() => clearTimeout(timer));
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (!msg || typeof msg !== "object") return false;
   if (sender.id !== chrome.runtime.id) return false;
@@ -750,7 +765,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
         return { ok: false, error: "Not from a connected Open Executive site." };
       }
       try {
-        return await run(msg.step || {}, sender.tab);
+        return await withinStepTime(run(msg.step || {}, sender.tab));
       } catch (e) {
         return { ok: false, error: `The browser couldn't do that (${String(e && e.message ? e.message : e).slice(0, 120)}).` };
       }
