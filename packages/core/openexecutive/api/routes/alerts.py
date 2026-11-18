@@ -920,6 +920,9 @@ class SayResponse(BaseModel):
     reply: str
     card: ProposalItem | None = None
     approval: approvals.AlertApproval | None = None
+    # Other cards a correction to a watch closed with this one, for the
+    # page to take down.
+    closed_alert_ids: list[int] = []
 
 
 SAY_MAX_CHARS = 500
@@ -975,7 +978,10 @@ async def say_on_card(alert_id: int, body: SayBody, request: Request) -> SayResp
         steered = await _steer(alert_id, line, request)
         card_talk.add_turn(alert_id, "you", line, person_id=person)
         card_talk.add_turn(alert_id, "me", steered.reply, person_id=person)
-        return SayResponse(reply=steered.reply, card=_card())
+        return SayResponse(
+            reply=steered.reply, card=_card(),
+            closed_alert_ids=[i for i in steered.closed_alert_ids if i != alert_id],
+        )
 
     def _refuse(exc: replan.ReplanError) -> HTTPException:
         code = {"empty": 422, "too_long": 422, "too_many": 429}.get(exc.code, 503)

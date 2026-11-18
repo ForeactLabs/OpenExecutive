@@ -6845,6 +6845,8 @@ export interface SayResult {
   reply: string;
   card: ProposalItem | null;
   approval: AlertApproval | null;
+  // Other cards a correction to a watch closed with this one.
+  closed_alert_ids?: number[];
 }
 
 // "Or tell me…" on any card: an answer, "ask Dan instead", "yes, send it

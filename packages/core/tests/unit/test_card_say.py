@@ -730,6 +730,27 @@ def test_parse_keeps_the_cards_own_plan_first(db: Path) -> None:
     assert [o.label for o in card_talk.parse({"answers": ["C"]}, ask)[1]] == ["A", "B"]
 
 
+def test_a_watch_correction_names_the_other_cards_it_closed(
+    client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    watch = dict(source="query", topic_tags=["external:news-acme"], dedup_key="watch:news-acme", needs="ok")
+    aid = _card(db, **watch)  # type: ignore[arg-type]
+
+    async def steered(alert_id: int, text: str, request: Any) -> Any:
+        alert_store.set_status_if_open(alert_id, "dismissed")
+        return alerts_route.SteerResponse(
+            reply="Noted: that's our own repo.", watch_slug="news-acme", watch_title="Acme news",
+            notes="Skip our own repo.", previous_notes="", closed_alert_ids=[alert_id, 99],
+        )
+
+    monkeypatch.setattr(alerts_route, "_steer", steered)
+    res = _say(client, aid, "that's our own repo")
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["card"] is None and body["reply"] == "Noted: that's our own repo."
+    assert body["closed_alert_ids"] == [99]
+
+
 def test_a_watch_card_keeps_its_own_plan(client: TestClient, db: Path, turns: _Turns) -> None:
     """A card whose plan can't change gets no other ways to go, and a pick of
     another plan never swaps it in."""

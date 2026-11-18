@@ -220,6 +220,14 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
   // Executive stops re-surfacing the same thread), and the user stays on
   // the briefing — no chat turn is seeded. On failure we revert the
   // optimistic removal so the user can see the card came back and retry.
+  // Cards closed along with another (a correction to a watch) leave now.
+  const handleClosed = useCallback((alertIds: number[]) => {
+    setActedAlertIds((prev) => {
+      const next = new Set(prev);
+      for (const id of alertIds) next.add(id);
+      return next;
+    });
+  }, []);
   const handleDismiss = useCallback(async (proposal: ProposalItem) => {
     const prev = actedAlertIds;
     setActedAlertIds(new Set(prev).add(proposal.alert_id));
@@ -608,6 +616,7 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
             onRerun={handleRerun}
             onApproveWithEdits={handleApproveWithEdits}
             onAnswer={handleAnswer}
+            onClosed={handleClosed}
             defaultBodyExpanded={emphasized}
             emphasized={emphasized}
           />
@@ -912,6 +921,7 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
                       onRerun={handleRerun}
                       onApproveWithEdits={isPrincipalCaller ? handleApproveWithEdits : undefined}
                       onAnswer={isPrincipalCaller ? handleAnswer : undefined}
+                      onClosed={handleClosed}
                     />
                   ))}
                   {otherProposals.length === 0 && (

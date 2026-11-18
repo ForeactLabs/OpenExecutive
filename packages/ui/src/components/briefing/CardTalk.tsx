@@ -43,7 +43,7 @@ export function TellMe({
   disabled?: boolean;
   autoFocus?: boolean;
   onSending?: (text: string) => void;
-  onSaid: (result: SayResult) => void;
+  onSaid: (result: SayResult, said: string) => void;
   onFailed?: () => void;
 }) {
   const [text, setText] = useState("");
@@ -60,7 +60,7 @@ export function TellMe({
     try {
       const r = await sayOnCard(alertId, value);
       setText("");
-      onSaid(r);
+      onSaid(r, value);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't send that. Try again.");
       onFailed?.();
@@ -176,7 +176,12 @@ export default function CardTalk({
   // What they just said, shown with "On it…" until the card comes back.
   const [sending, setSending] = useState<string | null>(null);
   const [approval, setApproval] = useState<AlertApproval | null>(null);
-  const turns = view.turns ?? [];
+  // What was said when it closed the card: no card comes back to carry it.
+  const [last, setLast] = useState<{ you: string; me: string } | null>(null);
+  const turns = [
+    ...(view.turns ?? []),
+    ...(last ? [{ who: "you" as const, text: last.you }, { who: "me" as const, text: last.me }] : []),
+  ];
   const options = view.options ?? [];
   const going = approval !== null;
 
@@ -234,7 +239,8 @@ export default function CardTalk({
           disabled={disabled}
           onSending={setSending}
           onFailed={() => setSending(null)}
-          onSaid={(r) => {
+          onSaid={(r, said) => {
+            if (r.card === null) setLast({ you: said, me: r.reply });
             setSending(null);
             if (r.approval) setApproval(r.approval);
             onSaid?.(r);

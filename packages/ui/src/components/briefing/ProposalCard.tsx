@@ -49,6 +49,7 @@ export default function ProposalCard({
   onRerun,
   onApproveWithEdits,
   onAnswer,
+  onClosed,
   busy = false,
   defaultBodyExpanded = false,
   emphasized = false,
@@ -67,6 +68,8 @@ export default function ProposalCard({
   // Answer a card that asks something with one of its options; rejects
   // with the reason when it couldn't be sent.
   onAnswer?: (p: ProposalItem, answer: string) => Promise<void>;
+  // Other cards something said on this one closed (a correction to a watch).
+  onClosed?: (alertIds: number[]) => void;
   busy?: boolean;
   // Show the whole body while closed (no clamp) — the first card in the
   // queue, so its full text reads without a click.
@@ -328,7 +331,10 @@ export default function ProposalCard({
           view={view}
           disabled={busy}
           onPick={settled ? undefined : (o) => void pick(o)}
-          onSaid={(r) => setSaid({ card: r.card, from: loaded })}
+          onSaid={(r) => {
+            setSaid({ card: r.card, from: loaded });
+            if (r.closed_alert_ids?.length) onClosed?.(r.closed_alert_ids);
+          }}
         />
       )}
       {pickError && (
