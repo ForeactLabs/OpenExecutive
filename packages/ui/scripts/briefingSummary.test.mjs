@@ -9,6 +9,7 @@ import {
   homeHeadline,
   teamOffTrack,
   waitingOnTeam,
+  watchingRow,
 } from "../src/lib/briefingSummary.ts";
 
 // Local-time constructors, so the labels hold in any test-runner time zone.
@@ -165,4 +166,22 @@ test("off track is a goal at risk or off track, or an answer someone waits on", 
   assert.equal(teamOffTrack([{ ...dept, off_track_count: 1 }], []), true);
   assert.equal(teamOffTrack([{ ...dept, awaiting_count: 1 }], []), true);
   assert.equal(teamOffTrack([dept], [{ awaiting_count: 1 }]), true);
+});
+
+test("the watching row says what changed, and counts several", () => {
+  assert.equal(watchingRow([]), null);
+  const noticed = "I noticed this on the Acme pricing page I'm watching.";
+  assert.deepEqual(watchingRow([{ headline: "Acme cut its Pro price to $40", view: { noticed } }]), {
+    title: "Acme cut its Pro price to $40",
+    detail: noticed,
+    line: "Acme cut its Pro price to $40",
+  });
+  assert.deepEqual(
+    watchingRow([{ headline: "Acme cut its Pro price to $40" }, { headline: "Initech filed a 10-Q" }, { headline: "x" }]),
+    {
+      title: "3 things changed on what I'm watching",
+      detail: "Acme cut its Pro price to $40, and 2 more",
+      line: "3 things changed on what I'm watching",
+    },
+  );
 });

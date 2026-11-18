@@ -132,6 +132,10 @@ class CardView(BaseModel):
     need: str = ""
     as_me: bool = False
     source: str = ""
+    # Where a watch's signal came from, in the Executive's words: "I noticed
+    # this on the Acme pricing page I'm watching." Home's row and the open
+    # card say it under the change. "" on every other card.
+    noticed: str = ""
     # The chip under the title: a deadline or "Likely stale".
     status: CardChip | None = None
     # The text under the title, and whether it folds while the card is closed.
@@ -238,6 +242,15 @@ def is_signal(item: Any) -> bool:
         or bool(item.surfaced_reason)
         or any(t.startswith("external:") for t in item.topic_tags or [])
     )
+
+
+def noticed_line(watch_title: str | None) -> str:
+    """Where a watch's signal came from, said the same for a watch someone
+    asked for and one the Executive started itself."""
+    name = " ".join((watch_title or "").split())
+    if not name:
+        return "I noticed this on something I'm watching."
+    return f"I noticed this on the {name} I'm watching."
 
 
 def status_chip(item: Any, now: datetime | None = None) -> CardChip | None:
@@ -503,6 +516,7 @@ def card_view(
         need=need,
         as_me=not source,
         source=source,
+        noticed=noticed_line(getattr(item, "watch_title", None)) if kind == "signal" else "",
         status=None if monitoring else status_chip(item, now),
         description=description,
         long=len(description) > LONG_BODY_CHARS,

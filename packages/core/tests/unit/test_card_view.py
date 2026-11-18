@@ -145,6 +145,12 @@ def test_a_watch_signal() -> None:
     assert v.radar == "ACME fell 9% today."
     assert v.plan == ""
     assert shown(v)[0] == ("primary", "dismiss", "Got it")
+    # Where it was noticed, the same whoever started the watch.
+    assert v.noticed == "I noticed this on something I'm watching."
+    named = view(category="monitoring", watch_slug="acme-stock", watch_title="ACME stock", headline="ACME fell")
+    assert named.noticed == "I noticed this on the ACME stock I'm watching."
+    # Only a watch's change says it.
+    assert view(headline="Renew the lease").noticed == ""
 
 
 def test_an_outside_signal_that_needs_an_ok_keeps_approve() -> None:
@@ -272,7 +278,7 @@ EXAMPLES: dict[str, dict[str, Any]] = {
     "answer": {"needs": "answer", "question": "Which vendor?"},
     "choice": {"needs": "choice", "question": "Which vendor?", "choices": ["Acme", "Globex"]},
     "fixed": {"plan_editable": False},
-    "signal": {"category": "monitoring", "watch_slug": "acme-stock", "body": "ACME fell 9% today.", "headline": "ACME fell"},
+    "signal": {"category": "monitoring", "watch_slug": "acme-stock", "watch_title": "ACME stock", "body": "ACME fell 9% today.", "headline": "ACME fell"},
     "failed_run": {"failed_run_id": "run-9"},
     "document": {"topic_tags": ["artifact"], "artifact_format": "docx", "suggested_action": "For the board pack."},
     "handover": {"topic_tags": ["browser-handover"]},

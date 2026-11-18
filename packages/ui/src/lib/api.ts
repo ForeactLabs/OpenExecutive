@@ -5784,6 +5784,8 @@ export interface ProposalItem {
   // The watch that raised this card, when a watch did: what the person
   // says on the card corrects it (sayOnCard), and the card links to its page.
   watch_slug?: string | null;
+  // That watch's name as a person says it ("Acme pricing page").
+  watch_title?: string | null;
   // Someone changed the plan by saying so on the card or picking another
   // of its options.
   plan_changed?: boolean;
@@ -5893,6 +5895,9 @@ export interface CardView {
   need: string;
   as_me: boolean;
   source: string;
+  // A watch's signal: "I noticed this on the Acme pricing page I'm watching."
+  // "" on every other card.
+  noticed?: string;
   status: CardChip | null;
   description: string;
   long: boolean;

@@ -215,6 +215,9 @@ class ProposalItem(BaseModel):
     # says on the card corrects it (POST /alerts/{id}/say), and the card
     # links to its page.
     watch_slug: str | None = None
+    # That watch's name as a person says it ("Open Executive repo page"),
+    # for the card's "I noticed this on the ... I'm watching" line.
+    watch_title: str | None = None
     # Someone changed this card's plan by saying so on it, or by picking
     # another of its options (POST /alerts/{id}/say, /approve).
     plan_changed: bool = False
@@ -316,7 +319,8 @@ def proposal_item(
         score=item_score,
         category=item_category,
         surfaced_reason=item_reason,
-        watch_slug=watch_slug_of(alert),
+        watch_slug=(slug := watch_slug_of(alert)),
+        watch_title=_watch_title_of(slug),
         plan_editable=plan_refusal(alert) is None,
         decision_instance_id=_parse_decision_instance_id(alert.topic_tags or []),
         failed_run_id=(
@@ -464,6 +468,22 @@ def _handled_overnight(now: datetime, *, include_private: bool = False) -> list[
     except Exception:
         logger.debug("today: handled_overnight unavailable", exc_info=True)
         return []
+
+
+def _watch_title_of(slug: str | None) -> str | None:
+    """The name of the watch ``slug`` as a person says it, or None when
+    there is no such watch (or the store can't be read)."""
+    if not slug:
+        return None
+    try:
+        from openexecutive.monitoring import store as monitoring_store
+        from openexecutive.monitoring.describe import watch_title
+
+        item = monitoring_store.get_watchlist_item_by_slug(slug)
+        return watch_title(item) if item is not None else None
+    except Exception:
+        logger.debug("today: watch title lookup failed", exc_info=True)
+        return None
 
 
 def _watch_trust_by_slug(alerts: list[Any]) -> dict[str, float]:

@@ -47,6 +47,7 @@ function MonitoringRow({
       {proposal.body && proposal.body !== proposal.headline && (
         <div className="mt-1 text-sm leading-snug text-fg-muted line-clamp-2">{proposal.body}</div>
       )}
+      {proposal.view?.noticed && <div className="mt-1 text-xs text-fg-muted">{proposal.view.noticed}</div>}
     </>
   );
   return (
