@@ -100,17 +100,18 @@ class ReadingLimits:
     ``per_read`` is one part of one read (a file, a page, a tool's answer):
     a longer one comes back in parts. ``per_turn`` is what all of a turn's
     reads may add together, since each stays in the prompt for the rest of
-    the turn.
+    the turn. ``window_tokens`` is the model's whole window (0: unknown).
     """
 
     per_read: int
     per_turn: int
+    window_tokens: int = 0
 
 
 def reading_limits(window_tokens: int) -> ReadingLimits:
     """The reading limits for a model that holds ``window_tokens``."""
     per_turn = int(window_tokens * _READ_SHARE) * _CHARS_PER_TOKEN
-    return ReadingLimits(per_read=per_turn // 2, per_turn=per_turn)
+    return ReadingLimits(per_read=per_turn // 2, per_turn=per_turn, window_tokens=window_tokens)
 
 
 # Claude models that reject a forced ``tool_choice`` (``any`` or a named

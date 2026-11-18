@@ -58,6 +58,10 @@ def _safe_tool_name(tool_name: Any) -> str:
     return tool_name[:_TOOL_NAME_MARKER_MAX] if isinstance(tool_name, str) else "?"
 
 
+# Once a turn's prompt holds this share of its model's window (the calls it
+# wrote, its text and its reads, as the model counted them), it answers.
+_PROMPT_FULL_SHARE = 0.8
+
 # Scripts written about one token a character (Chinese, Japanese, Korean)
 # start here; the limits count about three characters a token, so such text
 # counts three times its length (text_weight).
@@ -211,6 +215,7 @@ class TurnReadingBudget:
 
     def __init__(self, limits: ReadingLimits) -> None:
         self.limits = limits
+        self._prompt_tokens = 0
         self.per_result = limits.per_read
         self.turn_budget = limits.per_turn
         self.used = 0
@@ -221,10 +226,19 @@ class TurnReadingBudget:
         # tool_use ids answered by ``replay``: already sized, not cut again.
         self._replayed: set[str] = set()
 
+    def prompt_was(self, tokens: int) -> None:
+        """Note how big the turn's last prompt was, as the model counted it:
+        everything in it (the calls the turn wrote, its text, its reads)."""
+        self._prompt_tokens = max(self._prompt_tokens, tokens)
+
     @property
     def full(self) -> bool:
-        """The turn has read all its model holds: it should answer now."""
-        return self.used >= self.turn_budget
+        """The turn has read all its model holds, or its prompt has filled
+        most of the window (``_PROMPT_FULL_SHARE``): it should answer now."""
+        window = self.limits.window_tokens
+        return self.used >= self.turn_budget or bool(
+            window and self._prompt_tokens >= window * _PROMPT_FULL_SHARE
+        )
 
     @staticmethod
     def _key(name: str, tool_input: Any) -> str:

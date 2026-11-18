@@ -2780,6 +2780,14 @@ class Executive:
             # Cut off at MAX_OUTPUT_TOKENS mid-answer: carry on rather than
             # end the turn on half a step. A cut tool call is answered with
             # CUT_OFF_RESULT below and never runs; cut text gets CUT_OFF_NOTE.
+            usage = getattr(final_msg, "usage", None)
+            if usage is not None:
+                reading_budget.prompt_was(
+                    sum(
+                        int(getattr(usage, k, 0) or 0)
+                        for k in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+                    )
+                )
             cut_off = final_msg.stop_reason == "max_tokens"
             # The call the round was still writing when it was cut off is the
             # last one; its input is unfinished, so nothing reads or runs it.

@@ -344,6 +344,10 @@ caching:
     after the reads fill it is a write-up (TurnReadingBudget.full ->
     executive.FULL_NOTE; no tool runs, FULL_EMPTY_REPLY if it writes nothing),
     so calls that change every round still end once the model is full.
+    full also turns on once a round's prompt, as the model counted it
+    (input plus cached tokens), reaches 80% of the model's window
+    (_PROMPT_FULL_SHARE; ReadingLimits.window_tokens), which covers the
+    calls the turn writes itself, not only its reads.
     consult_specialist results are never cut (they are the analysis, not a
     read) but count toward full, since they fill the window too; run_script, open_tools and search_tools results
     count but are never cut by the turn (_NEVER_CUT_BY_TURN_BUDGET): one lists

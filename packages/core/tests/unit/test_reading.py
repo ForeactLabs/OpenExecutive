@@ -551,3 +551,34 @@ def test_a_turn_that_only_consults_specialists_still_fills_and_writes_up(monkeyp
     noted = [n for n, c in enumerate(provider.calls) if FULL_NOTE in str(c["messages"][-1]["content"])]
     assert noted == [3]  # 45,000 characters of analysis after three
     assert len(provider.calls) == 4
+
+
+def test_a_turn_whose_prompt_fills_the_window_writes_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Calls the turn writes itself (a long document in many calls) fill the
+    prompt without being reads: once the model counts the prompt at most of
+    its window, the turn answers from what it has."""
+    from types import SimpleNamespace
+
+    from openexecutive.orchestrator.executive import FULL_NOTE
+
+    monkeypatch.setattr(
+        "openexecutive.orchestrator.executive.reading_limits_for",
+        lambda _model="": ReadingLimits(per_read=500_000, per_turn=1_000_000, window_tokens=100_000),
+    )
+    wrote: list[int] = []
+
+    async def _write(tool_input: dict[str, Any], *_a: Any, **_k: Any) -> str:
+        wrote.append(tool_input["n"])
+        return "saved"
+
+    rounds = []
+    for n in range(8):
+        msg = _FinalMsg([_ToolUseBlock(f"w{n}", "write_section", {"n": n})], "tool_use")
+        msg.usage = SimpleNamespace(input_tokens=1_000, cache_read_input_tokens=20_000 * (n + 1))
+        rounds.append(msg)
+    provider = _ScriptedProvider(rounds + [_FinalMsg([_TextBlock("never reached")], "end_turn")])
+    _run(provider, {"write_section": _write})
+
+    noted = [n for n, c in enumerate(provider.calls) if FULL_NOTE in str(c["messages"][-1]["content"])]
+    assert noted == [4]  # 81,000 of 100,000 after the fourth round
+    assert wrote == [0, 1, 2, 3]
