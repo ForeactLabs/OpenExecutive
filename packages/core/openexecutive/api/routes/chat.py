@@ -996,6 +996,8 @@ async def _run_chat_turn(
     memory_text: str | None = None,
     turn_files: dict[str, bytes] | None = None,
     background: bool = False,
+    approve_card: int | None = None,
+    approve_input: dict[str, Any] | None = None,
 ) -> StreamingResponse:
     """Shared streaming-chat handler for both the JSON and multipart routes.
 
@@ -1006,6 +1008,10 @@ async def _run_chat_turn(
     records as the caller's words instead of `message` (see
     `Executive.stream_chat`). `turn_files` are the uploads as sent, which a
     Python job may take by name for this turn (workflows/turn_files.py).
+    `approve_card` is a card under a reply in this chat that the person
+    tapped Approve on (`approve_input`: its changed fields): it is approved
+    as its own button does (`decisions.approve_in_chat`), and this turn reads
+    what happened, so the Executive carries on with the ask.
     """
     from openexecutive.config import get_settings
     from openexecutive.knowledge.retriever import chat_builtin_results, retrieve
@@ -1434,6 +1440,13 @@ async def _run_chat_turn(
         logger.info("chat.knowledge_done turn_id=%s chunks=%d", turn_id, len(sources))
 
         page_context_block = _build_page_context_block(page_context)
+        if approve_card is not None:
+            from openexecutive.api.routes.decisions import approve_in_chat
+
+            approved = await approve_in_chat(approve_card, request, approve_input)
+            page_context_block = "\n\n".join(
+                part for part in (page_context_block, f"THE CARD THEY JUST APPROVED:\n{approved}") if part
+            )
 
         executive = Executive(
             mcp_gateway=getattr(request.app.state, "mcp_gateway", None)
@@ -1999,6 +2012,8 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
         page_context=body.page_context,
         client_turn_id=body.client_turn_id,
         memory_text=body.memory_text,
+        approve_card=body.approve_card,
+        approve_input=body.approve_input,
     )
 
 
