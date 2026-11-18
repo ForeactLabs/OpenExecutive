@@ -645,6 +645,23 @@ def test_files_it_cant_read_send_nothing_and_hand_it_back(
     assert drafts.count_waiting(owner.id, NOW - timedelta(days=1)) == 1
 
 
+def test_a_send_that_fails_before_it_goes_hands_it_back(
+    db: Path, owner: Any, as_sender: list[str], exec_sends: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.delegation import send_from
+
+    mailbox, row = _chat_draft(owner)
+    _switch(owner, row, mailbox, True)
+
+    def broken(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("no mail provider")
+
+    monkeypatch.setattr(send_from, "executive_step", broken)
+    with pytest.raises(RuntimeError):
+        asyncio.run(send_chat_draft(owner, row, caller=LOCAL, gmail=mailbox, now=LATER))
+    assert exec_sends == [] and drafts.count_waiting(owner.id, NOW - timedelta(days=1)) == 1
+
+
 def test_a_draft_with_no_one_in_to_goes_to_them_with_the_rest_as_written(
     db: Path, owner: Any, as_sender: list[str], exec_sends: list[dict[str, Any]],
 ) -> None:

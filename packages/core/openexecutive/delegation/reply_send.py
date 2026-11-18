@@ -882,6 +882,8 @@ async def _send_chat_draft_from_executive(
     from openexecutive.delegation.send_from import executive_step
     from openexecutive.orchestrator import take_the_lead
 
+    # Nothing has gone until ``carry_out``: anything that fails before it
+    # hands the draft back, so the card can send it again.
     try:
         attached = list(message.attachments)
         if not attached and message.has_attachments:
@@ -890,13 +892,19 @@ async def _send_chat_draft_from_executive(
         for item in attached:
             info, data = await client.attachment_bytes(message.id, item.index)
             files.append((info.name or "attachment", info.mime_type or "application/octet-stream", data))
+        step, tool = executive_step(
+            person, to=list(message.to), cc=list(message.cc), subject=message.subject,
+            body=message.text, attachments=files, bcc=list(message.bcc),
+        )
     except GmailError as exc:
         drafts.release_send(row.id)
-        raise SendRefused(502, "gmail_error", "Couldn't read the draft's files in your mailbox. Try again in a moment.") from exc
-    step, tool = executive_step(
-        person, to=list(message.to), cc=list(message.cc), subject=message.subject,
-        body=message.text, attachments=files, bcc=list(message.bcc),
-    )
+        raise SendRefused(
+            502, "gmail_error",
+            "Couldn't read the draft's files in your mailbox. Try again in a moment, or send it from your Drafts.",
+        ) from exc
+    except Exception:
+        drafts.release_send(row.id)
+        raise
     try:
         result = await take_the_lead.carry_out(
             step, by_principal=bool(getattr(person, "is_principal", False)), own_card=True,
