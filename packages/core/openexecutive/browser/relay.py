@@ -146,6 +146,12 @@ class NotConnected(Exception):
     """Nobody's extension is there to take the step."""
 
 
+class Busy(NotConnected):
+    """Their extension is connected but still doing a step it took, so it
+    isn't taking another now. A workflow run waits for it like any browser
+    that isn't there (``waiting_key``); a chat says it is busy (``BUSY``)."""
+
+
 BUSY = (
     "Their browser is connected, but it is still busy with an earlier step that hasn't answered yet, so this "
     "wasn't done. Wait a little, then try it again. Don't tell them their browser isn't connected."
@@ -162,7 +168,7 @@ async def run(person_id: int, action: str, args: dict[str, Any], *, timeout: flo
     entry = _person(person_id)
     if not _asking(entry, time.monotonic()):
         # Connected, but every one of its tabs is still doing a step.
-        return {"ok": False, "error": BUSY}
+        raise Busy
     if len(entry.queue) >= MAX_QUEUED:
         return {"ok": False, "error": "The browser is still busy with earlier steps. Wait, then look again."}
     loop = asyncio.get_running_loop()
@@ -197,8 +203,9 @@ async def next_step(
     """The person's next step for their extension, waiting up to ``wait``
     seconds for one; None when none came. Asking marks them connected, and
     ``stay`` is what it says about "Stay connected"."""
-    was_connected = connected(person_id)
     entry = _person(person_id)
+    # Back from a long step counts as coming back: pick up what waited.
+    was_connected = _asking(entry, time.monotonic())
     entry.stay = stay
     deadline = time.monotonic() + max(0.0, min(wait, MAX_WAIT_S))
     if not was_connected or time.monotonic() - entry.picked >= PICKUP_EVERY_S:

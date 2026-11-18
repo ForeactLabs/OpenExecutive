@@ -99,9 +99,17 @@ async def test_an_extension_busy_with_a_step_stays_connected_and_says_busy() -> 
     assert (await first)["ok"] is False
     _ago(7, browser_relay.CONNECTED_S + 10)
     assert browser_relay.connected(7)
-    out = await browser_relay.run(7, "look", {})
-    assert out == {"ok": False, "error": browser_relay.BUSY}
-    assert "isn't connected" in out["error"] and not browser_relay._people[7].queue
+    with pytest.raises(browser_relay.Busy):
+        await browser_relay.run(7, "look", {})
+    assert not browser_relay._people[7].queue
+    # The chat hears it is busy, never that it isn't connected, and gets no Connect card.
+    session = _session()
+    token = current_session.set(session)
+    try:
+        out = json.loads(await browser_tools._handler("browser_look")({}))
+    finally:
+        current_session.reset(token)
+    assert out == {"error": browser_relay.BUSY} and not browser_tools.take_needed(session)
     # Its late answer frees it, and it asks again.
     assert not browser_relay.finish(7, step["id"], {"ok": True})
     assert not browser_relay.connected(7)

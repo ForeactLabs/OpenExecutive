@@ -317,14 +317,21 @@ test("every step answers in time, even one stuck in Chrome, so the tab goes on a
   const ms = Number(/const STEP_MS = (\d+);/.exec(bg)[1]);
   // Below the server's wait for a step (browser_relay.STEP_TIMEOUT_S, 45 s).
   assert.ok(ms > 0 && ms < 45000);
-  assert.ok(bg.includes("await withinStepTime(run(msg.step || {}, sender.tab))"));
+  assert.ok(bg.includes("await withinStepTime((late) => run(msg.step || {}, sender.tab, late))"));
+  assert.ok(bg.includes("if (late.on) return"));
   const fn = bg.slice(bg.indexOf("function withinStepTime"), bg.indexOf("chrome.runtime.onMessage.addListener"));
   const box = { setTimeout, clearTimeout, Promise };
   vm.runInNewContext(`${fn.replace(/STEP_MS/g, "20")}; globalThis.withinStepTime = withinStepTime;`, Object.assign(box, { globalThis: box }));
-  const stuck = await box.withinStepTime(new Promise(() => undefined));
+  let seen;
+  const stuck = await box.withinStepTime((late) => {
+    seen = late;
+    return new Promise(() => undefined);
+  });
   assert.equal(stuck.ok, false);
   assert.match(stuck.error, /didn't finish/);
-  assert.deepEqual(await box.withinStepTime(Promise.resolve({ ok: true })), { ok: true });
+  // Told it is late, so it acts on nothing after answering.
+  assert.equal(seen.on, true);
+  assert.deepEqual(await box.withinStepTime(() => Promise.resolve({ ok: true })), { ok: true });
   // A page Chrome isn't drawing still answers the screenshot's snap.
   const content = readFileSync(new URL("../../extension/content.js", import.meta.url), "utf8");
   const snap = content.slice(content.indexOf('if (msg.type === "snap")'), content.indexOf('if (msg.type === "view")'));

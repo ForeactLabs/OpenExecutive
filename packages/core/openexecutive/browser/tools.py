@@ -753,6 +753,9 @@ async def _hand_over(person_id: int, given: dict[str, Any], window: str | None) 
         args["window"] = window
     try:
         result = await browser_relay.run(person_id, "hand_over", args)
+    except browser_relay.Busy:
+        browser_handover.finish(handover.id, person_id, "stop")
+        return json.dumps({"error": browser_relay.BUSY})
     except browser_relay.NotConnected:
         browser_handover.finish(handover.id, person_id, "stop")
         _mark_needed()
@@ -979,6 +982,8 @@ def _handler(name: str) -> Any:
                     args["element"] = element[:200]
         try:
             result = await browser_relay.run(person_id, action, args)
+        except browser_relay.Busy:
+            return json.dumps({"error": browser_relay.BUSY})
         except browser_relay.NotConnected:
             _mark_needed()
             return json.dumps({"error": NOT_CONNECTED_AWAY if away else not_connected()})
