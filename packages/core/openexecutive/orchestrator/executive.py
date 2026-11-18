@@ -2831,6 +2831,12 @@ class Executive:
                     cut_text += "".join(
                         str(b.get("text", "")) for b in response_content if b.get("type") == "text"
                     )
+                    if reading_budget.full:
+                        # Another cut round would not fit the window: what
+                        # it wrote stays shown and the turn ends plainly.
+                        logger.warning("round %d cut off with the window full; ending the turn", iteration)
+                        yield ("\n\n" if streamed_tail else "") + FULL_EMPTY_REPLY
+                        return
                     note: list[dict[str, Any]] = [{"type": "text", "text": CUT_OFF_NOTE}]
                     current_messages.append({"role": "user", "content": note})
                     # The next round carries on the cut text where it

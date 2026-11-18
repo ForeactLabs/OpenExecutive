@@ -583,3 +583,27 @@ def test_a_turn_whose_prompt_fills_the_window_writes_up(monkeypatch: pytest.Monk
     noted = [n for n, c in enumerate(provider.calls) if FULL_NOTE in str(c["messages"][-1]["content"])]
     assert noted == [4]  # 81,000 of 100,000 after the fourth round
     assert wrote == [0, 1, 2, 3]
+
+
+def test_a_long_answer_cut_with_the_window_full_ends_plainly(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A long answer cut round after round grows the prompt; once it holds
+    most of the window, the turn ends with what it wrote and a plain line,
+    not one more round the window can't take."""
+    from types import SimpleNamespace
+
+    from openexecutive.orchestrator.executive import FULL_EMPTY_REPLY
+
+    monkeypatch.setattr(
+        "openexecutive.orchestrator.executive.reading_limits_for",
+        lambda _model="": ReadingLimits(per_read=500_000, per_turn=1_000_000, window_tokens=100_000),
+    )
+    rounds = []
+    for n in range(8):
+        msg = _FinalMsg([_TextBlock(f"Section {n}: the quarter's numbers in detail. ")], "max_tokens")
+        msg.usage = SimpleNamespace(input_tokens=1_000, cache_read_input_tokens=20_000 * (n + 1))
+        rounds.append(msg)
+    provider = _ScriptedProvider(rounds + [_FinalMsg([_TextBlock("never reached")], "end_turn")])
+    items = _run(provider, {})
+
+    assert len(provider.calls) == 4  # 81,000 of 100,000 after the fourth round
+    assert any(isinstance(i, str) and FULL_EMPTY_REPLY in i for i in items)
