@@ -210,7 +210,7 @@ def test_a_discord_tap_anywhere_else_is_turned_away(
         assert tap.response.sent == ["This card is no longer there."]
     other = _discord_tap(custom_id="something_else")
     asyncio.run(discord_bot.handle_card_tap(other))
-    assert other.response.sent == [] and chat_apps == []
+    assert other.response.sent == ["This card is no longer there."] and chat_apps == []
 
 
 _AGAIN = channel_cards.Tapped(

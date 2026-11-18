@@ -721,7 +721,9 @@ async def handle_card_tap(interaction: Any) -> None:
     data = getattr(interaction, "data", None) or {}
     parsed = channel_cards.parse_choice(data.get("custom_id") if isinstance(data, dict) else None)
     if parsed is None:
-        return  # not one of ours
+        # The bot's only buttons are cards': answer, or Discord shows the tap failed.
+        await interaction.response.send_message("This card is no longer there.", ephemeral=True)
+        return
     user_id = str(getattr(getattr(interaction, "user", None), "id", "") or "")
     channel = getattr(interaction, "channel", None)
     recipient = getattr(channel, "recipient", None)
