@@ -264,6 +264,25 @@ async def test_cut_rounds_that_get_nowhere_end_the_pass() -> None:
     assert done.ended == "cut" and len(model.requests) == MAX_EMPTY_CUT_ROUNDS + 1
 
 
+@pytest.mark.asyncio
+async def test_each_round_reads_the_history_before_it_from_the_cache() -> None:
+    marked: list[list[str]] = []
+
+    async def run_call(_use: dict[str, Any]) -> str:
+        return "ok"
+
+    def reply(n: int, kw: dict[str, Any]) -> Any:
+        marked.append([
+            b["tool_use_id"] for m in kw["messages"] if isinstance(m["content"], list)
+            for b in m["content"] if b.get("type") == "tool_result" and b.get("cache_control")
+        ])
+        return _calls(_use("read", {"n": n}, f"t{n}")) if n < 4 else _answer("done")
+
+    await _run(_Model(reply), run_call)
+    # One breakpoint, always on the newest result: the round reads the rest.
+    assert marked == [[], ["t1"], ["t2"], ["t3"]]
+
+
 def test_a_long_run_of_one_character_is_keyed_in_one_pass() -> None:
     import time
 

@@ -20,6 +20,11 @@ does: the call it was still writing never runs and is answered with
 ``CUT_OFF_RESULT``, and cut text is followed by ``CUT_OFF_NOTE`` so the
 model goes on from where it stopped. ``MAX_EMPTY_CUT_ROUNDS`` cut rounds in
 a row that get nowhere end the pass.
+
+Each round reads the history before it from the prompt cache: the newest
+tool result carries the loop's one cache breakpoint
+(``reading.apply_loop_cache_marker``, as in a chat turn), when caching is
+on and the pass's system and tools leave a breakpoint free.
 """
 from __future__ import annotations
 
@@ -36,6 +41,7 @@ from openexecutive.orchestrator.reading import (
     MAX_EMPTY_CUT_ROUNDS,
     REPEATING_NOTE,
     TurnReadingBudget,
+    apply_loop_cache_marker,
     last_written_block,
     says_something,
 )
@@ -77,6 +83,26 @@ def _block(block: Any) -> dict[str, Any] | None:
     return reasoning_replay_block(block)
 
 
+# The API takes at most four cache breakpoints in a request; the loop's
+# marker is one, so it goes on only when the system and tools leave one.
+_MAX_BREAKPOINTS = 4
+
+
+def _breakpoints(blocks: Any) -> int:
+    if not isinstance(blocks, list):
+        return 0
+    return sum(1 for b in blocks if isinstance(b, dict) and b.get("cache_control"))
+
+
+def _caching() -> bool:
+    try:
+        from openexecutive.config import get_settings
+
+        return bool(get_settings().enable_caching)
+    except Exception:
+        return False
+
+
 def text_of(blocks: list[dict[str, Any]]) -> str:
     return "\n\n".join(b["text"] for b in blocks if b.get("type") == "text" and b.get("text")).strip()
 
@@ -114,6 +140,9 @@ async def run_rounds(
     from openexecutive.providers.registry import reading_limits_for
 
     reading = TurnReadingBudget(reading_limits_for(model))
+    # Only what this loop appends is marked: the caller's messages are its own.
+    first = len(messages)
+    caching = _caching() and _breakpoints(system) + _breakpoints(tools) < _MAX_BREAKPOINTS
     ending: Ended | None = None
     rounds = 0
     # Text of rounds cut off at the output limit, which the next carries on.
@@ -213,3 +242,5 @@ async def run_rounds(
         if note:
             results.append({"type": "text", "text": note})
         messages.append({"role": "user", "content": results})
+        if caching:
+            apply_loop_cache_marker(messages, first)

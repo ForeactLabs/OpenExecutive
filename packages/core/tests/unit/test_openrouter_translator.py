@@ -1412,10 +1412,10 @@ def test_turn_message_keeps_its_shape_once_the_loop_marker_moves() -> None:
     in the same shape on both calls, or the second call cannot read the first
     call's write and pays for the question again."""
     from openexecutive.orchestrator.executive import (
-        _apply_loop_cache_marker,
         _clear_turn_marker,
         _mark_turn_message,
     )
+    from openexecutive.orchestrator.reading import apply_loop_cache_marker
     from openexecutive.providers.translator import _anthropic_messages_to_openai
 
     messages: list[dict] = [
@@ -1433,7 +1433,7 @@ def test_turn_message_keeps_its_shape_once_the_loop_marker_moves() -> None:
     messages.append(
         {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "tu_1", "content": "found it"}]}
     )
-    assert _apply_loop_cache_marker(messages, caller_count)
+    assert apply_loop_cache_marker(messages, caller_count)
     _clear_turn_marker(turn)
     second = _anthropic_messages_to_openai(messages)
 

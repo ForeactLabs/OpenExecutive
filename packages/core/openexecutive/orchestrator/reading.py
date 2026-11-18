@@ -98,6 +98,69 @@ def last_written_block(blocks: list[dict[str, Any]]) -> dict[str, Any] | None:
     return next((b for b in reversed(blocks) if b.get("type") in ("text", "tool_use")), None)
 
 
+def apply_loop_cache_marker(
+    messages: list[dict[str, Any]], start: int = 0
+) -> bool:
+    """Move a tool loop's cache breakpoint to the newest tool result, in
+    place. The Executive's turn and every background pass (run_rounds)
+    mark their history this way.
+
+    Without this the loop caches only the static tools+system prefix, so
+    every iteration re-sends the whole accumulated transcript at full
+    input price and ``cache_read_input_tokens`` stays pinned flat while
+    the prompt grows. Marking the newest tool result makes each iteration
+    read the previous iteration's write and extend it, so hits accrue.
+
+    The marker MOVES rather than accumulates: a per-iteration marker left
+    in place would reach one breakpoint per round and blow the
+    4-breakpoint API limit. Sweeping first also makes this idempotent and
+    self-healing — there is no bookkeeping index to drift out of sync.
+
+    Placement is the newest non-empty ``tool_result`` in a user message.
+    That is normally the last block of the last user message; when the
+    newest results are empty it falls back to the newest non-empty one
+    before them, so an all-empty iteration still gets a breakpoint. Only
+    the empty blocks then sit outside the cached prefix, which costs
+    nothing.
+
+    The marker must stay at the ``tool_result`` block's own top level:
+    ``providers.feature_gate._strip_cache_control`` removes markers one
+    level deep only, so a marker nested inside ``tool_result["content"]``
+    would survive the gate and reach a provider that rejects the field.
+
+    ``start`` bounds the sweep to messages this loop appended. The
+    Executive's ``current_messages`` is a SHALLOW copy, so the caller still owns the
+    dicts before that index; without the bound a caller-supplied
+    ``tool_result`` would be mutated in place. Today no caller builds one,
+    but making that structural beats guarding it with a comment.
+    """
+    # Sweep every marker, and remember every markable block in order. The
+    # newest one wins, but keeping the whole list means an iteration whose
+    # last results are all empty falls back to the newest earlier result
+    # rather than shipping with no breakpoint at all — losing the marker
+    # costs the entire accumulated transcript at full price for that step.
+    markable: list[dict[str, Any]] = []
+    for msg in messages[start:]:
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        is_user = msg.get("role") == "user"
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "tool_result":
+                continue
+            block.pop("cache_control", None)
+            # An empty result carries nothing worth caching and risks an
+            # upstream 400 on the translated typed block. Non-str content
+            # (a typed/image result) is markable — it is real bytes in the
+            # prefix — but is left to the translator to render.
+            body = block.get("content")
+            if is_user and body:
+                markable.append(block)
+    if markable:
+        markable[-1]["cache_control"] = {"type": "ephemeral"}
+    return bool(markable)
+
+
 # Ids and times in a result (a request id, a timestamp, a clock, time
 # elapsed or left) don't make it a different answer: they are left out of
 # call_key. Other numbers stay, so a status read whose progress moves

@@ -332,7 +332,7 @@ def _user_content_to_openai(
             inner = block.get("content")
             tool_text = _content_to_text(inner)
             # A cache_control marker on a tool_result is the agent loop's
-            # intra-turn breakpoint (executive._apply_loop_cache_marker). It
+            # intra-turn breakpoint (reading.apply_loop_cache_marker). It
             # must survive translation or the loop re-pays full input price
             # for its own transcript on every iteration. Carrying it on the
             # tool message keeps it AFTER the tool results in wire order —

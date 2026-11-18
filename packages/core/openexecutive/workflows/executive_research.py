@@ -1025,8 +1025,11 @@ async def _watchlist_analysis_loop(
         return result
 
     def _proposed_enough() -> str | None:
-        if len(proposals) >= _MAX_WATCHLIST_PROPOSALS_PER_RUN:
-            logger.info("research.watchlist: proposal cap reached (%d); stopping", len(proposals))
+        # Every proposal made counts, kept or refused (a declined target, a
+        # slug already watched): a pass that keeps proposing what is refused
+        # is done as surely as one that filled its proposals.
+        if len(call_summaries) >= _MAX_WATCHLIST_PROPOSALS_PER_RUN:
+            logger.info("research.watchlist: proposal cap reached (%d); stopping", len(call_summaries))
             return ""  # the proposals are the pass's output: no write-up
         return None
 

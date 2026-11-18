@@ -172,6 +172,7 @@ from openexecutive.orchestrator.reading import (
     REPEAT_LIMIT,
     REPEATING_NOTE,
     TurnReadingBudget,
+    apply_loop_cache_marker,
     last_written_block,
     says_something,
     with_turn_limits,
@@ -383,7 +384,7 @@ def _apply_history_cache_marker(
     stored as plain text and rebuilt identically every turn, so on the next
     message everything up to that point is a cache read, and only what is
     new (the last exchange, this turn's context) is written. Without it the
-    loop marker (``_apply_loop_cache_marker``) writes the whole history again
+    loop marker (``apply_loop_cache_marker``) writes the whole history again
     on every turn, because the previous turn's cached prefix ended inside
     that turn's own context and tool calls, which history does not keep.
 
@@ -495,68 +496,6 @@ def _clear_turn_marker(message: dict[str, Any] | None) -> None:
     for block in message.get("content") or []:
         if isinstance(block, dict):
             block.pop("cache_control", None)
-
-
-def _apply_loop_cache_marker(
-    messages: list[dict[str, Any]], start: int = 0
-) -> bool:
-    """Move the agent loop's intra-turn cache breakpoint to the newest
-    tool result, in place.
-
-    Without this the loop caches only the static tools+system prefix, so
-    every iteration re-sends the whole accumulated transcript at full
-    input price and ``cache_read_input_tokens`` stays pinned flat while
-    the prompt grows. Marking the newest tool result makes each iteration
-    read the previous iteration's write and extend it, so hits accrue.
-
-    The marker MOVES rather than accumulates: a per-iteration marker left
-    in place would reach one breakpoint per round and blow the
-    4-breakpoint API limit. Sweeping first also makes this idempotent and
-    self-healing — there is no bookkeeping index to drift out of sync.
-
-    Placement is the newest non-empty ``tool_result`` in a user message.
-    That is normally the last block of the last user message; when the
-    newest results are empty it falls back to the newest non-empty one
-    before them, so an all-empty iteration still gets a breakpoint. Only
-    the empty blocks then sit outside the cached prefix, which costs
-    nothing.
-
-    The marker must stay at the ``tool_result`` block's own top level:
-    ``providers.feature_gate._strip_cache_control`` removes markers one
-    level deep only, so a marker nested inside ``tool_result["content"]``
-    would survive the gate and reach a provider that rejects the field.
-
-    ``start`` bounds the sweep to messages this loop appended. The loop's
-    ``current_messages`` is a SHALLOW copy, so the caller still owns the
-    dicts before that index; without the bound a caller-supplied
-    ``tool_result`` would be mutated in place. Today no caller builds one,
-    but making that structural beats guarding it with a comment.
-    """
-    # Sweep every marker, and remember every markable block in order. The
-    # newest one wins, but keeping the whole list means an iteration whose
-    # last results are all empty falls back to the newest earlier result
-    # rather than shipping with no breakpoint at all — losing the marker
-    # costs the entire accumulated transcript at full price for that step.
-    markable: list[dict[str, Any]] = []
-    for msg in messages[start:]:
-        content = msg.get("content")
-        if not isinstance(content, list):
-            continue
-        is_user = msg.get("role") == "user"
-        for block in content:
-            if not isinstance(block, dict) or block.get("type") != "tool_result":
-                continue
-            block.pop("cache_control", None)
-            # An empty result carries nothing worth caching and risks an
-            # upstream 400 on the translated typed block. Non-str content
-            # (a typed/image result) is markable — it is real bytes in the
-            # prefix — but is left to the translator to render.
-            body = block.get("content")
-            if is_user and body:
-                markable.append(block)
-    if markable:
-        markable[-1]["cache_control"] = {"type": "ephemeral"}
-    return bool(markable)
 
 
 def _with_notice(result: Any, notice: str) -> Any:
@@ -4030,7 +3969,7 @@ class Executive:
             # Bounded to the messages this loop appended: current_messages
             # is a shallow copy, so anything at a lower index is still owned
             # by the caller and must not be mutated.
-            if self._settings.enable_caching and _apply_loop_cache_marker(
+            if self._settings.enable_caching and apply_loop_cache_marker(
                 current_messages, caller_message_count
             ):
                 _clear_turn_marker(turn_marked)

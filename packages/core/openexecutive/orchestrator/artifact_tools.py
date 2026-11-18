@@ -276,7 +276,8 @@ async def handle_draft_artifact(tool_input: dict[str, Any]) -> str:
 
     fmt_name = str(tool_input.get("format") or "").strip().lower() or DEFAULT_FORMAT
     try:
-        built = build_artifact(fmt_name, tool_input)
+        # Off the event loop: a sheet at the cap takes seconds to check.
+        built = await asyncio.to_thread(build_artifact, fmt_name, tool_input)
     except ArtifactInputError as exc:
         return _err(str(exc))
 
@@ -300,7 +301,8 @@ async def handle_draft_artifact(tool_input: dict[str, Any]) -> str:
         severity = AlertSeverity.MEDIUM
 
     try:
-        alert_id = insert_alert(
+        alert_id = await asyncio.to_thread(
+            insert_alert,
             source="artifact",
             external_id=str(uuid.uuid4()),
             severity=severity.value,
@@ -447,7 +449,7 @@ async def index_artifact(
         from openexecutive.knowledge.loader import ingest_text_sync
         from openexecutive.knowledge.store import ChromaDBStore
 
-        text = get_format(fmt_name).display(stored)[:_INDEX_CHARS]
+        text = (await asyncio.to_thread(get_format(fmt_name).display, stored))[:_INDEX_CHARS]
         await asyncio.to_thread(
             ingest_text_sync,
             f"{title}\n\n{text}",

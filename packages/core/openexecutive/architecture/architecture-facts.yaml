@@ -472,6 +472,11 @@ caching:
     the Executive): the call it was still writing never runs, cut text goes
     on from where it stopped, and more than three cut rounds in a row that
     get nowhere end the pass (ended "cut").
+    Each round reads the history before it from the prompt cache: the newest
+    tool result carries the loop's one breakpoint
+    (reading.apply_loop_cache_marker, shared with the Executive's turn),
+    when ENABLE_CACHING is on and the system and tools leave one of the four
+    free. The watch pass counts every proposal it makes, kept or refused.
     workflows/_synthesis.py execute_tool_call runs one call and returns its
     short summary for the run's log with the whole result for the model.
     Tool results reach the model whole from knowledge_tools.search_knowledge
