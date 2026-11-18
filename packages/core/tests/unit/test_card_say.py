@@ -175,7 +175,7 @@ def test_words_change_what_the_card_will_do(
 def _go(monkeypatch: pytest.MonkeyPatch, answer: bool) -> list[tuple[str, str, str | None]]:
     asked: list[tuple[str, str, str | None]] = []
 
-    async def fake(plan: str, text: str, *, before: str | None = None) -> bool:
+    async def fake(plan: str, text: str, *, before: str | None = None, caller_key: str = "") -> bool:
         asked.append((plan, text, before))
         return answer
 
@@ -248,7 +248,9 @@ async def test_said_go_reads_only_the_plan_and_their_words(monkeypatch: pytest.M
         raise replan.ReplanError("unavailable", "x")
 
     monkeypatch.setattr(replan, "_call_tool", failing)
-    assert await replan.said_go(NEW, "yes") is False
+    # Couldn't tell is never a no: the caller decides what that means.
+    with pytest.raises(replan.ReplanError):
+        await replan.said_go(NEW, "yes")
 
 
 def test_for_you_to_know_takes_words_and_then_waits_for_an_ok(
@@ -769,6 +771,7 @@ def test_a_watch_correction_names_the_other_cards_it_closed(
         )
 
     monkeypatch.setattr(alerts_route, "_steer", steered)
+    _go(monkeypatch, False)
     res = _say(client, aid, "that's our own repo")
     assert res.status_code == 200, res.text
     body = res.json()
@@ -799,10 +802,51 @@ def test_a_watch_card_past_the_hours_budget_pays_for_no_go_call(
     watch = dict(source="query", topic_tags=["external:news-acme"], dedup_key="watch:news-acme", needs="ok")
     aid = _card(db, **watch)  # type: ignore[arg-type]
     monkeypatch.setattr(replan, "REWRITES_PER_HOUR", 0)
-    asked = _go(monkeypatch, True)
+    asked: list[str] = []
+
+    async def go(system: str, tool: dict[str, Any], turn: str, *, actor: str) -> dict[str, Any]:
+        asked.append(turn)
+        return {"go": True}
+
+    monkeypatch.setattr(replan, "_call_tool", go)
     res = _say(client, aid, "yes, go ahead")
     assert res.status_code == 429, res.text
     assert asked == []
+
+
+def test_a_go_that_cant_be_read_on_a_watch_card_changes_nothing(
+    client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch, turns: _Turns,
+) -> None:
+    watch = dict(source="query", topic_tags=["external:news-acme"], dedup_key="watch:news-acme", needs="ok")
+    aid = _card(db, **watch)  # type: ignore[arg-type]
+
+    async def no_steer(*a: object, **k: object) -> None:
+        raise AssertionError("a go it couldn't read is not a correction")
+
+    async def failing(*a: Any, **k: Any) -> dict[str, Any]:
+        raise replan.ReplanError("unavailable", "Couldn't read that just now. Try again.")
+
+    monkeypatch.setattr(alerts_route, "_steer", no_steer)
+    monkeypatch.setattr(replan, "_call_tool", failing)
+    res = _say(client, aid, "yes, do it")
+    assert res.status_code == 503, res.text
+    card = alert_store.get_alert(aid)
+    assert card is not None and card.status == "unread" and turns.calls == []
+
+
+def test_a_plan_go_takes_its_own_place_in_the_hours_budget(
+    client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch, turns: _Turns,
+) -> None:
+    aid = _card(db)
+    _model(monkeypatch, {"plan": NEW, "label": "Share it", "go": True, "reply": "On it."})
+
+    async def go(*a: Any, **k: Any) -> dict[str, Any]:
+        return {"go": True}
+
+    monkeypatch.setattr(replan, "_call_tool", go)
+    assert _say(client, aid, "yes, share the folder from me").status_code == 200
+    # One slot for the rewrite and one for the go.
+    assert len(replan._CALLS) == 2
 
 
 def test_a_question_echoing_the_plan_leaves_a_for_you_to_know_card_as_it_is(

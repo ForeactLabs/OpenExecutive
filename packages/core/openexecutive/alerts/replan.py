@@ -450,17 +450,17 @@ def build_go_turn(plan: str, text: str, before: str | None = None) -> str:
     return "\n\n".join(blocks)
 
 
-async def said_go(plan: str, text: str, *, before: str | None = None) -> bool:
+async def said_go(plan: str, text: str, *, before: str | None = None, caller_key: str = "") -> bool:
     """Whether ``text`` tells the Executive to carry out ``plan`` now. Read
     from the person's words and the plans only, never the card. When
     ``plan`` was just rewritten from ``before``, it is a go only if what it
     does comes from ``before`` (the plan they saw) or their words, so a step
     the rewrite picked up from the card's text never runs unseen. False when
-    unsure or the call fails."""
-    try:
-        data = await _call_tool(GO_SYSTEM, _go_tool(), build_go_turn(plan, text, before), actor="card_go")
-    except ReplanError:
-        return False
+    unsure. The call takes its own place in the hour's budget, and raises
+    ``ReplanError`` when it can't be made or read, so a caller never takes
+    "couldn't tell" for "no"."""
+    take_call_slot(caller_key)
+    data = await _call_tool(GO_SYSTEM, _go_tool(), build_go_turn(plan, text, before), actor="card_go")
     return data.get("go") is True
 
 

@@ -1000,16 +1000,16 @@ async def say_on_card(alert_id: int, body: SayBody, request: Request) -> SayResp
 
     if kind == "watch":
         # A go on a watch's card that shows its step runs it, as a tap does;
-        # anything else corrects the watch. Reading for a go is a model call,
-        # so it takes its place in the hour's budget first.
+        # anything else corrects the watch. When it can't tell, it says so and
+        # changes nothing: a go is never saved as a correction.
         shown = (existing.suggested_action or "").strip()
-        reads_go = bool(shown) and not hidden and _may_approve(existing, request)
-        if reads_go:
+        go = False
+        if shown and not hidden and _may_approve(existing, request):
             try:
-                replan.take_call_slot(api_caller.caller(request).email)
+                go = await replan.said_go(shown, line, before=seen, caller_key=api_caller.caller(request).email)
             except replan.ReplanError as exc:
                 raise _refuse(exc) from exc
-        if reads_go and await replan.said_go(shown, line, before=seen):
+        if go:
             card_talk.add_turn(alert_id, "you", line, person_id=person)
             reply, approval = await _start(shown, "On it.")
             card_talk.add_turn(alert_id, "me", reply, person_id=person)
@@ -1038,7 +1038,14 @@ async def say_on_card(alert_id: int, body: SayBody, request: Request) -> SayResp
     # said go is read from their words and the plans alone, never from the
     # card, so text from outside on the card can't make its plan run.
     # A go names a step: words that ask for none never run anything.
-    go = new.go and bool(new.plan.strip()) and await replan.said_go(plan, line, before=seen)
+    # The new plan stands either way, so when the go can't be read it doesn't
+    # start and waits for their OK.
+    go = False
+    if new.go and new.plan.strip():
+        try:
+            go = await replan.said_go(plan, line, before=seen, caller_key=api_caller.caller(request).email)
+        except replan.ReplanError:
+            go = False
     # A card that showed no plan takes a step once they ask for one: from
     # then on it shows the plan and waits for their OK like any other. When
     # the step they asked for is the one it had, nobody changed the plan,
