@@ -79,6 +79,7 @@
       "surfaced": "",
       "tags": [],
       "tell_me": true,
+      "top": {},
       "turns": [],
       "waiting_because": ""
     },
@@ -173,6 +174,7 @@
       "surfaced": "",
       "tags": [],
       "tell_me": false,
+      "top": {},
       "turns": [],
       "waiting_because": "Bookings wait for your OK."
     },
@@ -275,6 +277,7 @@
       "surfaced": "",
       "tags": [],
       "tell_me": true,
+      "top": {},
       "turns": [],
       "waiting_because": ""
     },
@@ -365,6 +368,7 @@
       "surfaced": "",
       "tags": [],
       "tell_me": false,
+      "top": {},
       "turns": [],
       "waiting_because": ""
     },
@@ -469,6 +473,7 @@
       "surfaced": "",
       "tags": [],
       "tell_me": true,
+      "top": {},
       "turns": [],
       "waiting_because": ""
     },
@@ -579,6 +584,7 @@
       "surfaced": "",
       "tags": [],
       "tell_me": false,
+      "top": {},
       "turns": [],
       "waiting_because": ""
     },
@@ -684,6 +690,7 @@
       "surfaced": "",
       "tags": [],
       "tell_me": false,
+      "top": {},
       "turns": [],
       "waiting_because": ""
     },
@@ -772,6 +779,7 @@
       "surfaced": "",
       "tags": [],
       "tell_me": true,
+      "top": {},
       "turns": [],
       "waiting_because": ""
     },
@@ -874,6 +882,7 @@
         }
       ],
       "tell_me": false,
+      "top": {},
       "turns": [],
       "waiting_because": ""
     },
@@ -941,6 +950,7 @@
       "surfaced": "",
       "tags": [],
       "tell_me": true,
+      "top": {},
       "turns": [],
       "waiting_because": ""
     },
@@ -1035,6 +1045,7 @@
       "surfaced": "",
       "tags": [],
       "tell_me": true,
+      "top": {},
       "turns": [],
       "waiting_because": ""
     },
@@ -1080,7 +1091,7 @@
       "decision_class:take_the_lead_action"
     ],
     "view": {
-      "as_me": true,
+      "as_me": false,
       "buttons": [],
       "chips": [],
       "description": "",
@@ -1102,6 +1113,7 @@
       "surfaced": "",
       "tags": [],
       "tell_me": true,
+      "top": {},
       "turns": [],
       "waiting_because": ""
     },
@@ -1207,6 +1219,7 @@
       "surfaced": "",
       "tags": [],
       "tell_me": true,
+      "top": {},
       "turns": [],
       "waiting_because": ""
     },
@@ -1301,6 +1314,7 @@
       "surfaced": "",
       "tags": [],
       "tell_me": true,
+      "top": {},
       "turns": [],
       "waiting_because": ""
     },
@@ -1395,6 +1409,7 @@
       "surfaced": "",
       "tags": [],
       "tell_me": true,
+      "top": {},
       "turns": [],
       "waiting_because": ""
     },
@@ -1483,6 +1498,7 @@
       "surfaced": "",
       "tags": [],
       "tell_me": true,
+      "top": {},
       "turns": [],
       "waiting_because": ""
     },
@@ -1587,6 +1603,7 @@
       "surfaced": "",
       "tags": [],
       "tell_me": true,
+      "top": {},
       "turns": [],
       "waiting_because": ""
     },
@@ -1675,6 +1692,7 @@
       "surfaced": "",
       "tags": [],
       "tell_me": true,
+      "top": {},
       "turns": [],
       "waiting_because": ""
     },
@@ -1769,6 +1787,7 @@
       "surfaced": "",
       "tags": [],
       "tell_me": true,
+      "top": {},
       "turns": [],
       "waiting_because": ""
     },

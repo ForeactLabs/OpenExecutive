@@ -508,7 +508,7 @@ def one_card(alert: Alert, viewer: Any = None) -> ProposalItem:
             person = people_store.get_person(pid)
             if person is not None:
                 names[pid] = person.full_name
-    attach_views([item], names, talk=card_talks([alert], viewer))
+    attach_views([item], names, talk=card_talks([alert], viewer), viewer_id=getattr(viewer, "person_id", None))
     return item
 
 
@@ -1401,7 +1401,10 @@ def _build_today(
     _group_requests(proposal_items)
     _mark_waiting(proposal_items)
     names = {p.id: p.full_name for p in person_items}
-    attach_views(proposal_items, names, talk=card_talks(raw_alerts, viewer), now=now)
+    attach_views(
+        proposal_items, names, talk=card_talks(raw_alerts, viewer), now=now,
+        viewer_id=getattr(viewer, "person_id", None),
+    )
 
     response = TodayResponse(
         departments=dept_items,

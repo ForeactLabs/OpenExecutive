@@ -444,7 +444,16 @@ def get_decision(instance_id: int, request: Request) -> DecisionInstance:
         may = _may_change(instance, request, _resolver(instance, request))
     except HTTPException:
         may = False
-    shown = {**json.loads(served.proposed_payload_json), "may_change": may}
+    from openexecutive.api.routes.chat import _resolve_caller_person_id
+    from openexecutive.orchestrator import card_details
+
+    proposed = json.loads(served.proposed_payload_json)
+    # The card's opening lines (who it waits on, who started it, why, why
+    # it waits), as every app shows them.
+    top = card_details.top(
+        proposed, approver_id=instance.approver_person_id, viewer_id=_resolve_caller_person_id(request),
+    )
+    shown = {**proposed, "may_change": may, "top": top}
     return served.model_copy(update={"proposed_payload_json": json.dumps(shown, ensure_ascii=False)})
 
 

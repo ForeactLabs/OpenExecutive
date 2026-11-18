@@ -186,7 +186,7 @@ def test_a_take_the_lead_card_is_done_as_it_stands(owner: int, monkeypatch: pyte
     payload = {"tool": "send_slack_dm", "input": {"text": "hi"}, "summary": "Message Ben: hi", "reason": "it's new"}
     card = _card("take_the_lead_action", payload, owner)
     assert channel_cards.card_text(card) == (
-        "Waiting for your OK\nMessage Ben: hi\n\nWhat happened\nIt waited because it's new.\n\n"
+        "Waiting for your OK\nMessage Ben: hi\nI started this.\n\nWhy it waits\nIt waits because it's new.\n\n"
         "What I'll do\nMessage: hi"
     )
     assert asyncio.run(channel_cards.resolve(card, get_person(owner), approve=True)) == "Approved."
@@ -229,7 +229,7 @@ def test_a_department_card_reaches_its_approver_though_made_on_the_askers_turn(
     assert asyncio.run(channel_cards.push_waiting(NOW)) == 1
     assert pushed[0][1] == card
     assert pushed[0][2].startswith(
-        "Waiting for your approval\nEmail the vendor\n\nWhat happened\nBen Teammate asked for this."
+        "Waiting for your approval\nEmail the vendor\nBen asked.\n\nWhy it waits"
     )
 
 
@@ -299,7 +299,7 @@ def test_the_reason_a_card_waited_is_shown_as_written(owner: int) -> None:
         owner,
     )
     text = channel_cards.card_text(card)
-    assert text is not None and "It waited because the path is ../shared." in text
+    assert text is not None and "It waits because the path is ../shared." in text
 
 
 def test_the_chat_app_is_the_first_one_that_proves_taps(owner: int, monkeypatch: pytest.MonkeyPatch) -> None:

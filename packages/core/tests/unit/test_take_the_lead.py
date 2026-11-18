@@ -154,6 +154,37 @@ def test_an_amount_is_money(text: str) -> None:
     assert ttl.mentions_money(text)
 
 
+@pytest.mark.parametrize(("tool", "tool_input"), [
+    ("google_workspace__modify_sheet_values", {
+        "spreadsheet_id": "s" * 30, "range_name": "Prospects!A1:F2",
+        "values": [["Name", "Fit reason"], ["Vlad Stan", "Owner-operator; fits $100 Starter"]]}),
+    ("google_workspace__modify_doc_text", {
+        "document_id": "d" * 30, "end_of_segment": True,
+        "text": "Post drafts. No sign-up numbers; terms of the license stay as they are."}),
+    ("google_workspace__modify_doc_text", {"document_id": "d" * 30, "text": "We should hire a second engineer."}),
+])
+def test_words_inside_a_team_file_are_not_what_the_step_is_about(
+    owner: Any, tool: str, tool_input: dict[str, Any]
+) -> None:
+    """A price in a prospect's note or "sign-up" in a post draft is no
+    payment or contract: a write into a company file is about the file."""
+    assert ttl.check(tool, tool_input, lead=_lead(), rules=[], mcp=True) is None
+
+
+def test_a_team_files_name_and_who_it_reaches_still_count(owner: Any) -> None:
+    named = {"spreadsheet_id": "s" * 30, "title": "Q3 budget $40,000", "values": [["x"]]}
+    hit = ttl.check("google_workspace__create_spreadsheet", named, lead=_lead(), rules=[], mcp=True)
+    assert hit is not None and hit.kind == "money"
+    # An email is what it says, wherever it goes.
+    mail = {"to": DANA, "subject": "Plan", "body": "It fits the $100 Starter plan."}
+    hit = ttl.check("google_workspace__send_gmail_message", mail, lead=_lead(), rules=[], mcp=True)
+    assert hit is not None and hit.kind == "money"
+    # A file shared outside the team is not a team file.
+    shared = {"document_id": "d" * 30, "text": "Pay $4,000", "share_with": "stranger@far.example"}
+    hit = ttl.check("google_workspace__modify_doc_text", shared, lead=_lead(), rules=[], mcp=True)
+    assert hit is not None and hit.kind == "money"
+
+
 def test_a_plain_message_to_someone_known_goes(owner: Any) -> None:
     assert ttl.check("message_person", {"person_id": 1, "text": "Are we still on for Thursday?"},
                      lead=_lead(), rules=[]) is None

@@ -119,9 +119,18 @@ KIND_LABELS: dict[str, str] = {
 }
 # One line under each switch saying what it catches, in the words check() uses.
 KIND_HINTS: dict[str, str] = {
-    MONEY: "Anything with an amount of money in it, such as a payment, an invoice, a price or a budget.",
-    CONTRACTS: "Contracts, agreements, signatures, terms and other legal matters.",
-    PEOPLE_DECISIONS: "Hiring, firing, pay, promotions and performance reviews.",
+    MONEY: (
+        "Anything with an amount of money in it, such as a payment, an invoice, a price or a budget."
+        " Words inside a team file it writes don't count."
+    ),
+    CONTRACTS: (
+        "Contracts, agreements, signatures, terms and other legal matters."
+        " Words inside a team file it writes don't count."
+    ),
+    PEOPLE_DECISIONS: (
+        "Hiring, firing, pay, promotions and performance reviews."
+        " Words inside a team file it writes don't count."
+    ),
     DELETE_SHARE: "Deleting or cancelling something, or sharing a file or access.",
     SOMEONE_NEW: "Messages to anyone who isn't on your team or in your contacts.",
     BIG_SEND: f"Company-wide or department-wide messages, or anything going to more than {BIG_SEND_RECIPIENTS} people.",
@@ -1085,6 +1094,13 @@ def rule_text(rule: Rule) -> str:
     return f"anything with {rule.value}"
 
 
+def _writes_team_file(tool: str, tool_input: dict[str, Any]) -> bool:
+    """Whether a connected-app step writes into a file (a sheet, doc,
+    slides, Drive file) and reaches no one outside the team: no mail, no
+    event, no address of anyone but a teammate."""
+    return bool(_FILE_TOOL_RE.search(tool)) and not _MAIL_TOOL_RE.search(tool) and _team_only(tool, tool_input)
+
+
 def _mcp_deletes(tool: str, tool_input: dict[str, Any]) -> bool:
     """Whether a connected tool deletes, cancels or shares: by its name, or
     by its ``action`` (Google's ``manage_event`` deletes with
@@ -1116,14 +1132,23 @@ def check(
     hit = _rule_hit(rules, text, recipients)
     if hit is not None:
         return hit
+    deletes = tool in _DELETE_TOOLS or (mcp and _mcp_deletes(tool, tool_input))
+    # What the step is about, for money, contracts and people decisions. A
+    # write into a company file that reaches only the team is about that
+    # file, not the words it puts in it: a price in a prospect's note or
+    # "sign-up" in a post draft is no payment or contract. Its name still
+    # counts ("Q3 budget").
+    about = (
+        _first_text(tool_input, _MCP_NAME_KEYS)
+        if mcp and not deletes and _writes_team_file(tool, tool_input) else text
+    )
     checks: list[tuple[str, bool, str]] = [
-        (DELETE_SHARE, tool in _DELETE_TOOLS or (mcp and _mcp_deletes(tool, tool_input)),
-         "it deletes, cancels or shares something"),
+        (DELETE_SHARE, deletes, "it deletes, cancels or shares something"),
         (BIG_SEND, tool in _BROADCAST_TOOLS or len(recipients) > BIG_SEND_RECIPIENTS,
          "it goes to a lot of people"),
-        (MONEY, mentions_money(text), "it's about money"),
-        (CONTRACTS, bool(_CONTRACTS_RE.search(text)), "it's about a contract or legal matter"),
-        (PEOPLE_DECISIONS, bool(_PEOPLE_RE.search(text)), "it's about hiring or a people decision"),
+        (MONEY, mentions_money(about), "it's about money"),
+        (CONTRACTS, bool(_CONTRACTS_RE.search(about)), "it's about a contract or legal matter"),
+        (PEOPLE_DECISIONS, bool(_PEOPLE_RE.search(about)), "it's about hiring or a people decision"),
         (SOMEONE_NEW, any(not _known(r) for r in recipients), "it goes to someone new"),
     ]
     for kind, matched, reason in checks:
@@ -1659,6 +1684,9 @@ _MCP_APPS: tuple[tuple[re.Pattern[str], str, str], ...] = tuple(
         (r"drive|file|folder", "Google Drive", "a file"),
     )
 )
+# A file app's tool: a sheet, document, presentation, workbook or drive file.
+_FILE_TOOL_RE = re.compile(r"sheet|doc|slide|presentation|drive|file|folder|excel|workbook|onedrive", re.I)
+_MAIL_TOOL_RE = re.compile(r"mail|message|calendar|event", re.I)
 _MCP_NAME_KEYS = ("title", "name", "file_name", "filename", "document_title", "spreadsheet_title", "sheet_title")
 # An argument whose name says the call reaches or opens to someone.
 _MCP_REACH_ARG_RE = re.compile(
@@ -1766,13 +1794,36 @@ def summarize(tool: str, tool_input: dict[str, Any], *, mcp: bool = False, quote
 def title(tool: str, tool_input: dict[str, Any], *, mcp: bool = False, private: bool = False) -> str:
     """A held step's card title in a few words: who it goes to ("Email Leo
     Park") on a card only its approver sees (``private``), else just what
-    it does ("Send an email"). The message itself shows under it."""
+    it does ("Send an email"). The message itself shows under it. A write
+    into a file says the job: "Write 6 rows to Launch tracker (Google
+    Sheets)", "Add to Post drafts (Google Docs)"."""
+    job = _file_job(tool, tool_input) if mcp else ""
+    if job:
+        return job
     if not private:
         return summarize(tool, tool_input, mcp=mcp, quote=False)
     return summarize(tool, {k: v for k, v in tool_input.items() if k not in _SNIPPET_KEYS}, mcp=mcp)
 
 
 _SNIPPET_KEYS = frozenset({"text", "message", "body", "description", "subject"})
+
+def _file_job(tool: str, tool_input: dict[str, Any]) -> str:
+    """A file write's title as the job it does, or "" for any other step:
+    rows written to a sheet, text added to the end of a doc."""
+    if not _FILE_TOOL_RE.search(tool) or _MAIL_TOOL_RE.search(tool) or _mcp_deletes(tool, tool_input):
+        return ""
+    app, noun = next(((a, n) for rx, a, n in _MCP_APPS if rx.search(tool)), ("", ""))
+    what = _first_text(tool_input, _MCP_NAME_KEYS) or noun
+    if not what:
+        return ""
+    where = f"{what} ({app})" if app else what
+    values = tool_input.get("values")
+    if isinstance(values, list) and values and all(isinstance(r, list) for r in values):
+        return f"Write {len(values)} {'row' if len(values) == 1 else 'rows'} to {where}"
+    if tool_input.get("end_of_segment") is True and isinstance(tool_input.get("text"), str):
+        return f"Add to the end of {where}"
+    return ""
+
 
 
 def mail_sent(tool: str, tool_input: dict[str, Any]) -> tuple[str, str] | None:
@@ -2148,6 +2199,7 @@ def card_details(tool: str, tool_input: dict[str, Any], *, mcp: bool = False) ->
 
 def hold(
     tool: str, tool_input: dict[str, Any], hit: Hit, *, source: str, mcp: bool, db_path: Path | None = None,
+    purpose: str = "",
 ) -> int:
     """Make a held action a decision for its approver, with a card on Today."""
     from openexecutive.alerts.models import PRIVATE_ALERT_TAG
@@ -2207,6 +2259,9 @@ def hold(
         "held": True,
         "tool": tool, "input": tool_input, "mcp": mcp, "kind": hit.kind, "rule_id": hit.rule_id,
         "reason": hit.reason, "summary": summary, "source": source,
+        # The Executive's own line on why it's doing this (``call_tool``'s
+        # ``why``): the card's "Why".
+        **({"purpose": _one_line(purpose, 300)} if purpose.strip() else {}),
         # The card's title says who and what in a few words; the full
         # message or details show under it, and where it would go.
         "headline": title(tool, tool_input, mcp=mcp, private=private),

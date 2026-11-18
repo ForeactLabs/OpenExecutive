@@ -209,6 +209,27 @@ def test_cards_answered_on_their_own_panel() -> None:
     assert (held.kind, held.panel) == ("held", "held")
 
 
+def test_a_held_card_says_who_it_waits_on_and_who_started_it(monkeypatch: Any) -> None:
+    """Every app opens a held step's card from ``card_details.top``: the
+    chips say whose OK it waits for and who started it, not "As me"."""
+    from openexecutive.orchestrator import card_details
+
+    seen: list[tuple[int, int | None]] = []
+
+    def top(decision_id: int, viewer_id: int | None) -> dict[str, str]:
+        seen.append((decision_id, viewer_id))
+        return {"waiting_on": "Alex", "started": "I started this", "why": "", "waits": "It waits.", "title": "T"}
+
+    monkeypatch.setattr(card_details, "held_top", top)
+    v = card_view(item(decision_instance_id=3, topic_tags=["decision_class:take_the_lead_action"]), viewer_id=1)
+    assert (v.need, v.source, v.as_me) == ("Waiting on Alex", "I started this", False)
+    assert v.top["title"] == "T" and seen == [(3, 1)]
+    monkeypatch.setattr(card_details, "held_top", lambda decision_id, viewer_id: {
+        "waiting_on": "", "started": "Sam asked", "why": "", "waits": "It waits.", "title": ""})
+    v = card_view(item(decision_instance_id=3, topic_tags=["decision_class:department_action"]), viewer_id=7)
+    assert (v.need, v.source) == ("Needs your OK", "Sam asked")
+
+
 def test_an_answered_new_sender_only_dismisses() -> None:
     v = view(source="roster_request")
     assert shown(v) == [("side", "dismiss", "Dismiss")]

@@ -5912,6 +5912,9 @@ export interface CardView {
   document: boolean;
   reviewed: string;
   buttons: CardButton[];
+  // A held step's card opens with these (orchestrator.card_details.top):
+  // empty on every other card. Read with heldCardTop.
+  top?: Record<string, string>;
 }
 
 // One autonomous alert-review move since the last delivered morning brief
@@ -7402,9 +7405,34 @@ export interface LeadCardField {
   header?: boolean;
 }
 
+// The lines a held step's card opens with, the same on every app
+// (``orchestrator.card_details.top``): whose OK it waits for when that isn't
+// the reader, who started it, what it was working on, and why it waits.
+export interface HeldCardTop {
+  waitingOn: string;
+  started: string;
+  why: string;
+  waits: string;
+  // The title, naming the file it works on; "" when not known.
+  title: string;
+}
+
+export function heldCardTop(raw: unknown): HeldCardTop | null {
+  if (!raw || typeof raw !== "object" || Object.keys(raw).length === 0) return null;
+  const t = raw as Record<string, unknown>;
+  return {
+    waitingOn: String(t.waiting_on ?? ""),
+    started: String(t.started ?? ""),
+    why: String(t.why ?? ""),
+    waits: String(t.waits ?? ""),
+    title: String(t.title ?? ""),
+  };
+}
+
 // What a Take the lead card holds (its decision's payload), for the card's
 // Edit and Approve + allow. Only its approver and the owner can read it.
 export interface LeadCardPayload {
+  top: HeldCardTop | null;
   summary: string;
   // Who and what in a few words, and where it would go ("On Slack"). Empty on
   // cards made before they were saved.
@@ -7464,6 +7492,7 @@ export async function getLeadCard(id: number, signal?: AbortSignal): Promise<Lea
   const instance: DecisionInstance = await res.json();
   const payload = JSON.parse(instance.proposed_payload_json || "{}");
   return {
+    top: heldCardTop(payload.top),
     summary: String(payload.summary ?? ""),
     headline: String(payload.headline ?? ""),
     where: String(payload.where ?? ""),
@@ -7482,6 +7511,7 @@ export async function getLeadCard(id: number, signal?: AbortSignal): Promise<Lea
 // decision): who asked, why it waited, and every field of the call in full.
 // Only its approver and the owner can read it.
 export interface HeldActionPayload {
+  top: HeldCardTop | null;
   summary: string;
   reason: string;
   requestedBy: string;
@@ -7504,6 +7534,7 @@ export async function getHeldAction(id: number, signal?: AbortSignal): Promise<H
   const payload = JSON.parse(instance.proposed_payload_json || "{}");
   const details = Array.isArray(payload.details) ? payload.details : [];
   return {
+    top: heldCardTop(payload.top),
     summary: String(payload.summary ?? ""),
     reason: String(payload.reason ?? ""),
     requestedBy: String(payload.requested_by ?? ""),
