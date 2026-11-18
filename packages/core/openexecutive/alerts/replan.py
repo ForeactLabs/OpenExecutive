@@ -340,6 +340,9 @@ async def _call_tool(
         logger.error("card replan: provider call failed (%s)", type(exc).__name__)
         raise ReplanError("unavailable", "Couldn't read that just now. Try again.") from exc
     log_model_usage(response, model=model, actor=actor)
+    if getattr(response, "stop_reason", "") == "max_tokens":
+        # Cut off: a value it wrote may end mid-sentence, so none is used.
+        raise ReplanError("too_long", "That's too long to change this way. Change it by hand.")
     for block in getattr(response, "content", []) or []:
         if getattr(block, "type", "") == "tool_use" and getattr(block, "name", "") == tool["name"]:
             data = getattr(block, "input", None)
@@ -479,7 +482,7 @@ FIELDS_TOOL_NAME = "rewrite_fields"
 # The longest field a step takes as a change (``take_the_lead.EDIT_MAX``):
 # a longer one is changed by hand, never cut and rewritten.
 _FIELD_CHARS = 4000
-_FIELDS_MAX_TOKENS = 3000
+_FIELDS_MAX_TOKENS = 8192
 
 # Constant: see CLAUDE.md on prompt caching.
 FIELDS_SYSTEM = (

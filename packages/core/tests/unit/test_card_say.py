@@ -1086,3 +1086,21 @@ def test_a_go_with_no_step_runs_nothing(
     card = alert_store.get_alert(aid)
     assert card is not None and card.needs == "fyi"
 
+
+def test_a_rewrite_cut_off_by_its_length_is_not_used(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    from openexecutive.alerts import replan
+
+    block = SimpleNamespace(type="tool_use", name="t", input={"fields": [{"field": "body", "value": "Half a sen"}]})
+
+    class Provider:
+        async def messages_create(self, **kwargs: Any) -> Any:
+            return SimpleNamespace(stop_reason="max_tokens", content=[block], usage=None)
+
+    monkeypatch.setattr("openexecutive.providers.get_provider", lambda model: Provider())
+    monkeypatch.setattr("openexecutive.audit.usage.log_model_usage", lambda *a, **k: None)
+    with pytest.raises(replan.ReplanError) as err:
+        asyncio.run(replan._call_tool("s", {"name": "t"}, "turn", actor="card_fields"))
+    assert err.value.code == "too_long"
