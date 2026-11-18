@@ -495,7 +495,7 @@ def test_a_turn_checks_only_so_many_reads(monkeypatch: pytest.MonkeyPatch) -> No
     async def go() -> str:
         state = oc.begin_turn(Session(caller_person_id=1), user_message="hi")
         try:
-            for i in range(content_scan.MAX_PER_TURN):
+            for i in range(content_scan.checks_a_turn()):
                 await oc.mark_read(oc.DOCUMENT, {}, f"page {i}")
             assert not oc.read_outside()
             notice = await oc.mark_read(oc.DOCUMENT, {}, "one more")
@@ -507,7 +507,31 @@ def test_a_turn_checks_only_so_many_reads(monkeypatch: pytest.MonkeyPatch) -> No
     # Past its budget a read goes unchecked and holds, like one too big to
     # check: a pile of harmless reads is no way past the check.
     assert asyncio.run(go()) == oc.UNCHECKED_NOTICE
-    assert len(seen) == content_scan.MAX_PER_TURN
+    assert len(seen) == content_scan.checks_a_turn()
+
+
+def test_a_long_read_spends_a_check_for_each_piece(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A long text is read in pieces, and each piece counts: long reads past
+    what a turn may check hold like one too big to check."""
+    _use(monkeypatch, outside_mode.OUTSIDERS)
+    _check_says(monkeypatch, content_scan.CLEAN)
+    monkeypatch.setattr(content_scan, "_most_a_turn_reads", lambda: 3 * content_scan.MAX_CHARS)
+    long = "".join(f"row {n}.\n" for n in range(40_000))
+    assert content_scan.checks_for(long) == 4
+
+    async def go() -> list[bool]:
+        state = oc.begin_turn(Session(caller_person_id=1), user_message="hi")
+        try:
+            held = []
+            for i in range(content_scan.checks_a_turn() // 4 + 1):
+                await oc.mark_read(oc.DOCUMENT, {}, f"{i} {long}")
+                held.append(oc.read_outside())
+            return held
+        finally:
+            oc.end_turn(state)
+
+    held = asyncio.run(go())
+    assert not any(held[:-1]) and held[-1]
 
 
 def test_files_and_synced_excerpts_are_checked_before_the_next_round(monkeypatch: pytest.MonkeyPatch) -> None:

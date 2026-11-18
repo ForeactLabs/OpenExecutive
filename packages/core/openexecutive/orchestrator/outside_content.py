@@ -277,7 +277,7 @@ class TurnOutside:
     # Reads waiting for their check (``mark_pending``, ``settle``): source and
     # content.
     pending: list[tuple[str, Any]] = field(default_factory=list)
-    # Checks made this turn (``content_scan.MAX_PER_TURN``).
+    # Checks made this turn, a long text's pieces each (``content_scan.checks_a_turn``).
     scans: int = 0
     # What the check flagged: source, categories and which item it was, in
     # words ("", or a mail's subject and sender) (``content_scan``, ``_flag``).
@@ -677,11 +677,12 @@ def mark_pending(source: str, content: Any) -> None:
 async def _check(state: TurnOutside, content: Any) -> Any:
     from openexecutive.orchestrator import content_scan
 
-    if state.scans >= content_scan.MAX_PER_TURN:
+    cost = content_scan.checks_for(content)
+    if state.scans + cost > content_scan.checks_a_turn():
         # Past the budget a read goes unchecked, and it holds like content
         # too big to check: otherwise the read after the budget is a way past.
         return content_scan.TOO_BIG
-    state.scans += 1
+    state.scans += cost
     return await content_scan.scan(content)
 
 
@@ -689,9 +690,10 @@ async def _check_list(state: TurnOutside, entries: list[Any]) -> Any:
     """``_check`` for a list of entries, in one call (``content_scan.scan_list``)."""
     from openexecutive.orchestrator import content_scan
 
-    if state.scans >= content_scan.MAX_PER_TURN:
+    cost = content_scan.checks_for("\n".join(content_scan._as_text(e) for e in entries))
+    if state.scans + cost > content_scan.checks_a_turn():
         return content_scan.TOO_BIG
-    state.scans += 1
+    state.scans += cost
     return await content_scan.scan_list(entries)
 
 

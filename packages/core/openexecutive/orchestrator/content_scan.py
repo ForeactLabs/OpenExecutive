@@ -118,7 +118,8 @@ def without_server_notes(content: Any) -> Any:
 # bounded apart from its text: past either, the item counts as unchecked.
 MAX_MEDIA_BLOCKS = 5
 MAX_MEDIA_CHARS = 8_000_000
-# Checks one turn may make; past it, a read holds like one too big to check.
+# Reads one turn may check, besides the pieces of long ones; past what a
+# turn may check (``checks_a_turn``), a read holds like one too big to check.
 MAX_PER_TURN = 30
 _MAX_TOKENS = 200
 _CACHE_SIZE = 2000
@@ -496,14 +497,38 @@ def _most_a_turn_reads() -> int:
     return reading_limits(max(CLAUDE_CONTEXT_TOKENS, local)).per_turn
 
 
+def _pieces(text: str) -> list[str]:
+    """``text`` as ``_scan_in_pieces`` reads it: as much as a turn can read,
+    in overlapping pieces of ``MAX_CHARS``."""
+    text = text[: _most_a_turn_reads()]
+    if len(text) <= MAX_CHARS:
+        return [text]
+    step = MAX_CHARS - _PIECE_OVERLAP
+    return [text[i : i + MAX_CHARS] for i in range(0, len(text) - _PIECE_OVERLAP, step)]
+
+
+def checks_for(content: Any) -> int:
+    """How many checks reading ``content`` makes: one, or a long text's
+    pieces. Counted against ``checks_a_turn`` by the caller."""
+    content = checked_content(content)
+    if isinstance(content, str) and len(content) > MAX_CHARS:
+        return len(_pieces(content))
+    return 1
+
+
+def checks_a_turn() -> int:
+    """The checks one turn may make: ``MAX_PER_TURN`` reads, and the pieces
+    of as much long text as a turn can read."""
+    step = MAX_CHARS - _PIECE_OVERLAP
+    return MAX_PER_TURN + -(-_most_a_turn_reads() // step)
+
+
 async def _scan_in_pieces(text: str, *, model: str | None, entries: int) -> Verdict:
     """Check long text a piece at a time, as much of it as a turn can read
     (``_most_a_turn_reads``). A flag in any piece flags the whole (its
     categories and entries together); otherwise a piece that holds
     (``TOO_BIG``) or couldn't be checked makes the whole so; else clean."""
-    text = text[: _most_a_turn_reads()]
-    step = MAX_CHARS - _PIECE_OVERLAP
-    pieces = [text[i : i + MAX_CHARS] for i in range(0, len(text) - _PIECE_OVERLAP, step)]
+    pieces = _pieces(text)
     at_once = asyncio.Semaphore(_PIECES_AT_ONCE)
 
     async def _one(piece: str) -> Verdict:
