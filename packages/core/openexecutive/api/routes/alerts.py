@@ -983,7 +983,8 @@ async def say_on_card(alert_id: int, body: SayBody, request: Request) -> SayResp
     # The plan they saw: a card only for them to know doesn't show its plan.
     fyi = existing.needs == NEEDS_FYI
     seen = "" if fyi else existing.suggested_action or ""
-    go = new.go and bool(plan.strip()) and await replan.said_go(plan, line, before=seen)
+    # A go names a step: words that ask for none never run anything.
+    go = new.go and bool(new.plan.strip()) and await replan.said_go(plan, line, before=seen)
     # A card only for them to know takes a step once they ask for one: from
     # then on it shows the plan and waits for their OK like any other. When
     # the step they asked for is the one it had, nobody changed the plan.

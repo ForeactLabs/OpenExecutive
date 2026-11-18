@@ -832,3 +832,16 @@ def test_a_question_keeps_the_cards_options(client: TestClient, db: Path, monkey
     talk = card_talk.read([alert_store.get_alert(aid)])[aid]  # type: ignore[list-item]
     assert [o.label for o in talk.options] == ["Ask Alex", "Ask Sam"]
 
+
+def test_a_go_with_no_step_runs_nothing(
+    client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch, turns: _Turns,
+) -> None:
+    aid = _card(db, needs="fyi")
+    _model(monkeypatch, {"plan": "", "go": True, "reply": "Noted."})
+    asked = _go(monkeypatch, True)
+    res = _say(client, aid, "ok go")
+    assert res.status_code == 200, res.text
+    assert asked == [] and turns.calls == [] and res.json()["approval"] is None
+    card = alert_store.get_alert(aid)
+    assert card is not None and card.needs == "fyi"
+
