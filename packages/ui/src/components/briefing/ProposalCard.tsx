@@ -328,7 +328,13 @@ export default function ProposalCard({
       {talks && view && (
         <CardTalk
           proposal={proposal}
-          view={view}
+          // Only what this page can carry out: an option or "Or tell me…"
+          // with no handler here isn't shown, as for the other buttons.
+          view={{
+            ...view,
+            options: (view.options ?? []).filter((o) => (o.action === "approve" ? onApprove : onAnswer) !== undefined),
+            tell_me: view.tell_me && (onApprove !== undefined || onAnswer !== undefined),
+          }}
           disabled={busy}
           onPick={settled ? undefined : (o) => void pick(o)}
           onSaid={(r) => {

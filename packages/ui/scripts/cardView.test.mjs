@@ -30,3 +30,9 @@ test("the card handles every action and place the server sends", () => {
   for (const action of actions) assert.ok(src.includes(`case "${action}":`), `ProposalCard doesn't carry out ${action}`);
   for (const place of places) assert.ok(src.includes(`b.place === "${place}"`), `ProposalCard doesn't show ${place} buttons`);
 });
+
+test("an option or Or tell me shows only when this page can carry it out", () => {
+  const src = readFileSync(CARD, "utf8");
+  assert.ok(src.includes('(o.action === "approve" ? onApprove : onAnswer) !== undefined'), "options show without a handler");
+  assert.ok(src.includes("tell_me: view.tell_me && (onApprove !== undefined || onAnswer !== undefined)"), "Or tell me shows without a handler");
+});
