@@ -527,8 +527,10 @@ def card_talks(alerts: list[Alert], viewer: Any = None) -> dict[int, Any]:
     # What someone said on a card, and what was said back, is theirs: it
     # shows only to them. Everyone else sees the plan as it stands, with who
     # changed it.
-    # A reader with no person record sees lines with none only when they
-    # are the owner, so two callers nobody knows never see each other's.
+    # A line with no person shows to nobody in the app (a caller with no
+    # person record reads as nobody, and nobody isn't the owner), so two
+    # callers nobody knows never see each other's. The owner check guards a
+    # viewer built some other way.
     reader = getattr(viewer, "person_id", None)
     owner = bool(getattr(viewer, "is_principal", False))
     for t in talk.values():

@@ -980,15 +980,17 @@ async def say_on_card(alert_id: int, body: SayBody, request: Request) -> SayResp
     # A go runs the plan through the same Approve as a tap. Whether they
     # said go is read from their words and the plans alone, never from the
     # card, so text from outside on the card can't make its plan run.
-    # The plan they saw: a card only for them to know doesn't show its plan.
-    fyi = existing.needs == NEEDS_FYI
-    seen = "" if fyi else existing.suggested_action or ""
+    # The plan they saw, as the card draws it: one only for them to know, or
+    # a signal from outside, shows none.
+    drawn = one_card(existing, viewer)
+    hidden = not (drawn is not None and drawn.view is not None and drawn.view.plan_title)
+    seen = "" if hidden else existing.suggested_action or ""
     # A go names a step: words that ask for none never run anything.
     go = new.go and bool(new.plan.strip()) and await replan.said_go(plan, line, before=seen)
-    # A card only for them to know takes a step once they ask for one: from
+    # A card that showed no plan takes a step once they ask for one: from
     # then on it shows the plan and waits for their OK like any other. When
     # the step they asked for is the one it had, nobody changed the plan.
-    asked_same = fyi and not changed and bool(new.plan.strip())
+    asked_same = hidden and not changed and bool(new.plan.strip())
     if asked_same and not replan.wait_for_ok(alert_id, expected=existing.suggested_action or ""):
         raise HTTPException(status_code=409, detail="This card just changed. Try again.")
     if changed:

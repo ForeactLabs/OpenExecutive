@@ -184,11 +184,11 @@ def apply_change(
         ).fetchone()
         if last is not None and last["status"] != STATUS_FAILED:
             return None
-        # A card that was only for them to know now has a step,
-        # so it waits for their OK like any other.
+        # A card that showed no step now has one, so it waits for their OK
+        # like any other.
         cursor = conn.execute(
             "UPDATE alerts SET suggested_action = ?, action_label = ?, "
-            "needs = CASE WHEN needs = 'fyi' THEN 'ok' ELSE needs END "
+            "needs = CASE WHEN needs IN ('fyi', '') THEN 'ok' ELSE needs END "
             "WHERE id = ? AND status IN ('unread', 'read') AND COALESCE(suggested_action, '') = ?",
             (plan, label, alert_id, expected),
         )
@@ -206,15 +206,15 @@ def apply_change(
 
 
 def wait_for_ok(alert_id: int, *, expected: str, db_path: Path | None = None) -> bool:
-    """Make a card that was only for them to know wait for their OK on the
-    plan it already has (they asked for that very step), while it is still
-    open and showing ``expected``. Nobody changed the plan, so no change is
-    kept. False when the card moved on meanwhile."""
+    """Make a card that showed no step wait for their OK on the plan it
+    already has (they asked for that very step), while it is still open and
+    holding ``expected``. Nobody changed the plan, so no change is kept.
+    False when the card moved on meanwhile."""
     with _get_conn(db_path) as conn:
         ensure_schema(conn)
         cursor = conn.execute(
-            "UPDATE alerts SET needs = 'ok' WHERE id = ? AND needs = 'fyi' "
-            "AND status IN ('unread', 'read') AND COALESCE(suggested_action, '') = ?",
+            "UPDATE alerts SET needs = CASE WHEN needs IN ('fyi', '') THEN 'ok' ELSE needs END "
+            "WHERE id = ? AND status IN ('unread', 'read') AND COALESCE(suggested_action, '') = ?",
             (alert_id, expected),
         )
         return cursor.rowcount > 0
