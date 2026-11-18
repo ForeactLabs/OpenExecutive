@@ -215,8 +215,7 @@ export function waitingOnTeam(
 /** Home's row for what changed on the watches: one change says what it is,
  *  with where it was noticed under it (the card's `noticed`); several are
  *  counted, with the first under them. `line` is the same in one line, for
- *  the web's at-a-glance row. Null when nothing changed. The phone's
- *  lib/needsYouGroups.ts says it the same way. */
+ *  the web's at-a-glance row. Null when nothing changed. */
 export function watchingRow(
   signals: { headline: string; view?: { noticed?: string } | null }[],
 ): { title: string; detail: string; line: string } | null {

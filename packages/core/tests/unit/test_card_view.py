@@ -149,6 +149,9 @@ def test_a_watch_signal() -> None:
     assert v.noticed == "I noticed this on something I'm watching."
     named = view(category="monitoring", watch_slug="acme-stock", watch_title="ACME stock", headline="ACME fell")
     assert named.noticed == "I noticed this on the ACME stock I'm watching."
+    # A big change a watch pulled into the action lane says it too.
+    big = view(category="action", surfaced_reason="Moved 10%", watch_slug="acme-stock", watch_title="ACME stock", headline="ACME fell 10%")
+    assert big.noticed == "I noticed this on the ACME stock I'm watching."
     # Only a watch's change says it.
     assert view(headline="Renew the lease").noticed == ""
 
