@@ -1130,6 +1130,8 @@ async def approve_in_chat(instance_id: int, request: Request, input_edits: dict[
     it makes on Today); ``input_edits`` are the card's changed fields, as its
     Edit sends them. Never raises: a refusal or a failure is said in the
     note, and the turn tells them."""
+    from openexecutive.orchestrator.content_trust import wrap_untrusted
+
     try:
         body = ApproveBody(edits={"input": input_edits} if input_edits else None)
         instance = await approve_decision(instance_id, body, request)
@@ -1140,10 +1142,12 @@ async def approve_in_chat(instance_id: int, request: Request, input_edits: dict[
             detail = detail.get("message")
         if not isinstance(detail, str) or not detail.strip():
             detail = "it couldn't be done"
-        # Quoted: a failed step's words can carry the outside service's text.
+        # Labelled as data: a failed step's words can carry the outside
+        # service's text, as what a step gave back can.
         return (
-            f"They tapped Approve on a card in this chat, but it didn't go through: {json.dumps(detail[:300])}. "
-            "Say so in a line, then carry on with what you can."
+            "They tapped Approve on a card in this chat, but it didn't go through. "
+            "Say so in a line, then carry on with what you can.\nWhy:\n"
+            + wrap_untrusted(detail[:300], source="tool_result")
         )
     except Exception:
         logger.exception("decisions: approving card %d from the chat failed", instance_id)
@@ -1166,8 +1170,6 @@ async def approve_in_chat(instance_id: int, request: Request, input_edits: dict[
     # A held step says what it gave back in `result`; an app action in `did`.
     result = (final.get("result") or final.get("did")) if isinstance(final, dict) else None
     if isinstance(result, str) and result.strip():
-        from openexecutive.orchestrator.content_trust import wrap_untrusted
-
         note += "\nWhat it gave back:\n" + wrap_untrusted(result[:_CHAT_RESULT_CHARS], source="tool_result")
     return note
 
