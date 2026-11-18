@@ -99,9 +99,9 @@ def test_the_work_on_a_switched_card_writes_as_the_executive(
     # Signed as the Executive, never with their signature.
     assert changed["draft_body"] == f"Hi Dana,\n\nI built the spreadsheet.\n\n{send_from.sign_off(owner)}"
     assert changed[card_drafts.UNDO_KEY]["draft_body"] == before
-    # A note alone keeps that change's undo; work that changed the files
-    # can't be taken back by its words alone, so it offers none.
-    assert card_drafts.can_undo(_apply(card, owner, mailbox, note="Nothing else to do."))
+    # Only what a run changed can be taken back: a note alone offers none,
+    # and work that changed the files can't be undone by its words alone.
+    assert not card_drafts.can_undo(_apply(card, owner, mailbox, note="Nothing else to do."))
     with_files = _apply(card, owner, mailbox, body="Hi Dana,\n\nThe sheet is attached.", note="Done.", files=[SHEET])
     assert not card_drafts.can_undo(with_files)
     assert changed["conversation"][-1]["changed"] == ["I built the spreadsheet."]

@@ -589,6 +589,7 @@ async def from_chat(
     Sends nothing."""
     from openexecutive.delegation import disclosure as ai_disclosure
     from openexecutive.delegation import send_from
+    from openexecutive.delegation.answers import CONVERSATION_KEY, CONVERSATION_MAX, conversation
     from openexecutive.delegation.inbox import SENDING, card_payload
     from openexecutive.delegation.reply_send import SendRefused
     from openexecutive.delegation.settings import is_enabled
@@ -607,10 +608,14 @@ async def from_chat(
     try:
         signed = ai_disclosure.sign(person.id, words, on_its_own=False)
         # What they asked for in chat goes as them: the card goes from them again.
-        extra = {
-            QUESTIONS_SETTLED: True, "gist": "", CHANGED_IN_CHAT: datetime.now(UTC).isoformat(),
-            send_from.FROM_EXECUTIVE: False,
+        now = datetime.now(UTC).isoformat()
+        extra: dict[str, Any] = {
+            QUESTIONS_SETTLED: True, "gist": "", CHANGED_IN_CHAT: now, send_from.FROM_EXECUTIVE: False,
         }
+        if send_from.is_from_executive(payload):
+            # Said on the card, as a switch on the card is.
+            turns = [*conversation(payload), {"kind": "note", "text": send_from.NOTE_TO_YOU, "at": now}]
+            extra.update({CONVERSATION_KEY: turns[-CONVERSATION_MAX:], send_from.SWITCHED_BACK_AT: now})
         return await _edit(
             instance, person, payload, _check_words(signed), gmail, extra, (list(to), list(cc)), by_hand=False,
         )

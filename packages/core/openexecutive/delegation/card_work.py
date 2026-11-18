@@ -691,9 +691,9 @@ async def apply(
         **_end_turn(payload, state=STUCK if picks else DONE, text=text, choices=picks),
         WORK_KEY: DONE, REWROTE_KEY: bool((body or "").strip()),
     }
-    if (body or "").strip() or files:
-        # Only the change made now can be taken back, never one before it.
-        changed.pop(card_drafts.UNDO_KEY, None)
+    # Only what this run changed can be taken back (Undo shows under its
+    # note), never a change from before it.
+    changed.pop(card_drafts.UNDO_KEY, None)
     words = (body or "").replace("\r", "").strip()
     if words:
         # Written for whoever sends it (prompt_for), signed for them.

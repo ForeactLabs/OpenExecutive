@@ -351,6 +351,29 @@ def test_their_mailbox_draft_waits_while_it_goes_from_the_executive(
     assert back["draft_message_id"] == made.message.id
 
 
+def test_a_reply_asked_for_in_chat_goes_from_them_again(
+    db: Path, owner: Any, models: dict[str, Any], rewrites: list[str],
+) -> None:
+    from openexecutive.delegation import card_work
+
+    inbox.set_mailbox_drafts(owner.id, True, updated_by="test")
+    mailbox, card = _card(owner)
+    draft_id = inbox.card_payload(_fresh(card))["draft_id"]
+    _switch(card, mailbox, owner, True)
+    card_work._store(card.id, [("sheet.xlsx", "application/octet-stream", b"PK")])
+    saved = asyncio.run(card_drafts.from_chat(
+        _fresh(card), owner, mailbox, words="Hi Dana,\n\nMonday works.", to=[DANA], cc=["ben@northpeak.example"],
+    ))
+    assert saved[send_from.FROM_EXECUTIVE] is False and saved["draft_body"].startswith("Hi Dana,\n\nMonday works.")
+    # Said on the card, like a switch there.
+    assert saved["conversation"][-1]["text"] == send_from.NOTE_TO_YOU and saved[send_from.SWITCHED_BACK_AT]
+    # Their draft made again: the chat's words and recipients, the card's files.
+    assert saved["draft_id"] != draft_id and draft_id not in mailbox.drafts
+    made = mailbox.drafts[saved["draft_id"]].message
+    assert made.text == saved["draft_body"] and made.cc == ["ben@northpeak.example"]
+    assert mailbox.specs[-1].attachments == [("sheet.xlsx", "application/octet-stream", b"PK")]
+
+
 @pytest.mark.parametrize("there", ["changed", "gone"])
 def test_back_from_them_never_replaces_a_draft_changed_in_their_mailbox(
     db: Path, owner: Any, models: dict[str, Any], rewrites: list[str], there: str,
