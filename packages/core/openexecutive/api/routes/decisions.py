@@ -633,9 +633,10 @@ async def _carry_out_lead(
 
     payload = _parse_payload(instance)
     edits = body.edits or {}
-    if edits.get("input") is not None:  # noqa: SIM102
+    if _edits_beyond_said(payload, edits.get("input")):  # noqa: SIM102
         # Changing what the Executive says or books is the principal's: an
-        # area approver says yes or no to what it would do, as it stands.
+        # area approver says yes or no to what it would do, as it stands,
+        # with what was said on its card.
         if not _approver_is_principal(request):
             raise HTTPException(status_code=403, detail="Only the account owner can change this before approving.")
     payload, changed = _with_edits(payload, edits.get("input"))
@@ -1111,6 +1112,15 @@ class StepSayResponse(BaseModel):
 
 
 SAID_INPUT = "said_input"
+
+
+def _edits_beyond_said(payload: dict[str, Any], input_edits: object) -> bool:
+    """True when ``input_edits`` changes the step past what was said on its card."""
+    if not input_edits:
+        return False
+    said = payload.get(SAID_INPUT)
+    said = said if isinstance(said, dict) else {}
+    return not isinstance(input_edits, dict) or any(said.get(k) != v for k, v in input_edits.items())
 SAY_MAX_CHARS = 500
 _COULD_NOT_DO = "I couldn't do that. Tap to try again."
 _PICK_TO_GO = "Here it is now. Tap Do it to go ahead."
@@ -1224,8 +1234,13 @@ async def say_on_step(instance_id: int, body: StepSayBody, request: Request) -> 
                     fresh, ApproveBody(edits={"input": edits}), request, resolver,
                 )
                 approved = _served(approved)
-            except HTTPException:
-                reply = _COULD_NOT_DO
+            except HTTPException as exc:
+                if exc.status_code >= 500:
+                    # It was tried: say what happened, and show it as it is now.
+                    reply = str(exc.detail)
+                    approved = _served(_refresh(instance_id))
+                else:
+                    reply = _COULD_NOT_DO
     if talk_id is not None:
         card_talk.add_turn(talk_id, "me", reply, person_id=resolver)
     return StepSayResponse(reply=reply, fields=fields, approved=approved)

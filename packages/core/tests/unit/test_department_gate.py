@@ -563,6 +563,23 @@ def test_a_go_on_a_held_step_approves_it_at_once(
     assert done[0]["input"]["body"] == "Short text"
 
 
+def test_a_go_that_fails_once_tried_says_so_and_closes_the_card(
+    client: TestClient, team: dict[str, Person], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bool = False) -> str:
+        raise TimeoutError
+
+    monkeypatch.setattr(ttl, "carry_out", carry_out)
+    _model(monkeypatch, {"body": "Short text"}, go=True, said_go=True)
+    decision_id = _mail_card(team)
+    res = client.post(f"/decisions/{decision_id}/say", json={"text": "shorter, then send it"}, headers=OWNER)
+    assert res.status_code == 200, res.text
+    body = res.json()
+    # It may have gone out: never "try again", and the card shows it failed.
+    assert "may not have gone through" in body["reply"]
+    assert body["approved"]["status"] == ledger.STATUS_FAILED
+
+
 def test_a_go_that_cant_be_read_leaves_the_step_waiting(
     client: TestClient, team: dict[str, Person], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
