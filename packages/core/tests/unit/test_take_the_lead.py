@@ -185,6 +185,17 @@ def test_a_team_files_name_and_who_it_reaches_still_count(owner: Any) -> None:
     assert hit is not None and hit.kind == "money"
 
 
+def test_a_team_files_known_name_counts_when_the_step_gives_only_an_id(
+    owner: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.orchestrator import card_details
+
+    monkeypatch.setattr(card_details, "file_name", lambda file_id: "Q3 budget $40,000" if file_id else "")
+    write = {"spreadsheet_id": "s" * 30, "range_name": "A1:B2", "values": [["Alex", "note"]]}
+    hit = ttl.check("google_workspace__modify_sheet_values", write, lead=_lead(), rules=[], mcp=True)
+    assert hit is not None and hit.kind == "money"
+
+
 @pytest.mark.parametrize(("tool", "tool_input", "kind"), [
     ("hris__update_employee_profile", {"employee_id": 5, "title": "Senior Engineer", "salary": "$180,000"}, "money"),
     ("hris__update_payroll_sheet", {"title": "November", "text": "Pay $4,000 more"}, "money"),

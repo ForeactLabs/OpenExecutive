@@ -1095,6 +1095,14 @@ def rule_text(rule: Rule) -> str:
     return f"anything with {rule.value}"
 
 
+def _team_file_name(tool_input: dict[str, Any]) -> str:
+    """A file step's file name: the one it gives, else the file's known
+    name by its id (``card_details.file_name``), else ""."""
+    from openexecutive.orchestrator import card_details
+
+    return _first_text(tool_input, _MCP_NAME_KEYS) or card_details.file_name(card_details._file_of(tool_input))
+
+
 def _writes_team_file(tool: str, tool_input: dict[str, Any]) -> bool:
     """Whether a connected-app step writes into a file (a sheet, doc,
     slides, Drive file) and reaches no one outside the team: no mail, no
@@ -1138,9 +1146,9 @@ def check(
     # write into a company file that reaches only the team is about that
     # file, not the words it puts in it: a price in a prospect's note or
     # "sign-up" in a post draft is no payment or contract. Its name still
-    # counts ("Q3 budget").
+    # counts ("Q3 budget"), the known one when the step gives only an id.
     about = (
-        _first_text(tool_input, _MCP_NAME_KEYS)
+        _team_file_name(tool_input)
         if mcp and not deletes and _writes_team_file(tool, tool_input) else text
     )
     checks: list[tuple[str, bool, str]] = [
