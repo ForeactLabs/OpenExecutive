@@ -63,7 +63,7 @@ SYSTEM = (
     "current plan, drop what they said not to do, and never add a step they "
     "didn't ask for. Name the people, files and messages concretely. At most "
     "600 characters. When the card has no plan yet, write the one they asked "
-    "for.\n"
+    "for; when they asked for no step (a thanks, a question), leave it empty.\n"
     "- label: a few words for the button that carries out that plan, as a "
     "command from the person (\"Ask Dan\", \"Send it from me\"). At most "
     "6 words.\n"
@@ -343,10 +343,11 @@ def _one_text(value: object, limit: int) -> str:
 
 
 def parse_plan(data: dict[str, Any]) -> NewPlan:
-    """Validate the model's call: the plan and reply non-empty and bounded."""
+    """Validate the model's call: the reply non-empty, both bounded. An
+    empty plan means their words asked for no step."""
     plan = _one_text(data.get("plan"), PLAN_MAX_CHARS)
     reply = _one_text(data.get("reply"), _REPLY_MAX_CHARS).replace("\n", " ")
-    if not plan or not reply:
+    if not reply:
         raise ReplanError("unavailable", "Couldn't read that just now. Try again.")
     label = _one_text(data.get("label"), _LABEL_MAX_CHARS).replace("\n", " ")
     others: list[tuple[str, str]] = []

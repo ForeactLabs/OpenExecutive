@@ -973,21 +973,24 @@ async def say_on_card(alert_id: int, body: SayBody, request: Request) -> SayResp
         raise _refuse(exc) from exc
 
     previous = (existing.suggested_action or "").strip()
-    plan = new.plan if new.plan.strip() != previous else existing.suggested_action or ""
+    # Words that ask for no step ("thanks", a question) leave the plan as it
+    # is, and a card with none without one.
+    changed = bool(new.plan.strip()) and new.plan.strip() != previous
+    plan = new.plan if changed else existing.suggested_action or ""
     # A go runs the plan through the same Approve as a tap. Whether they
     # said go is read from their words and the plans alone, never from the
     # card, so text from outside on the card can't make its plan run.
     # The plan they saw: a card only for them to know doesn't show its plan.
     fyi = existing.needs == NEEDS_FYI
     seen = "" if fyi else existing.suggested_action or ""
-    go = new.go and await replan.said_go(plan, line, before=seen)
+    go = new.go and bool(plan.strip()) and await replan.said_go(plan, line, before=seen)
     # A card only for them to know takes a step once they say anything on
     # it: from then on it shows the plan and waits for their OK like any other.
-    if new.plan.strip() != previous or (fyi and plan.strip()):
+    if changed or (fyi and plan.strip()):
         # The model call takes seconds: only an open card still showing the
         # plan the model read takes the new one.
         change = replan.apply_change(
-            alert_id, expected=existing.suggested_action or "", plan=new.plan,
+            alert_id, expected=existing.suggested_action or "", plan=plan,
             person_id=person, label=new.label,
         )
         if change is None:
@@ -1000,13 +1003,14 @@ async def say_on_card(alert_id: int, body: SayBody, request: Request) -> SayResp
             actor="user",
             details={"alert_id": alert_id, "change_id": change.id, "by": api_caller.actor(request)},
         )
-    had = card_talk.read([existing]).get(alert_id)
-    own = card_talk.CardOption(label=new.label or "Do it", plan=plan)
-    card_talk.keep_options(
-        alert_id, plan.strip(), had.happened if had else "",
-        [own, *(card_talk.CardOption(label=label, plan=text) for label, text in new.others)],
-    )
-    reply = new.reply if go or not new.go else "Here's the plan now. Pick it to go ahead."
+    if plan.strip():
+        had = card_talk.read([existing]).get(alert_id)
+        own = card_talk.CardOption(label=new.label or "Do it", plan=plan)
+        card_talk.keep_options(
+            alert_id, plan.strip(), had.happened if had else "",
+            [own, *(card_talk.CardOption(label=label, plan=text) for label, text in new.others)],
+        )
+    reply = new.reply if go or not new.go or not plan.strip() else "Here's the plan now. Pick it to go ahead."
     card_talk.add_turn(alert_id, "you", line, person_id=person)
     approval = None
     if go:

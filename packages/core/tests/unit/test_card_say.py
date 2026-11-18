@@ -320,6 +320,20 @@ def test_what_one_person_says_on_a_card_shows_only_to_them(
     assert today.card_talks([alert], Viewer(person_id=1))[aid].turns == []
 
 
+def test_words_with_no_step_leave_a_plan_less_card_as_it_is(
+    client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch, turns: _Turns,
+) -> None:
+    aid = _card(db, needs="fyi", suggested_action="")
+    _model(monkeypatch, {"plan": "", "go": True, "reply": "You're welcome."})
+    asked = _go(monkeypatch, True)
+    res = _say(client, aid, "thanks")
+    assert res.status_code == 200, res.text
+    assert res.json()["reply"] == "You're welcome." and res.json()["approval"] is None
+    assert asked == [] and turns.calls == []
+    card = alert_store.get_alert(aid)
+    assert card is not None and (card.needs, card.suggested_action) == ("fyi", "")
+
+
 def test_an_asking_card_takes_words_as_the_answer(
     client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch, turns: _Turns,
 ) -> None:
@@ -477,9 +491,9 @@ def test_per_caller_cap(client: TestClient, db: Path, monkeypatch: pytest.Monkey
     assert _say(client, aid, "c").status_code == 429
 
 
-def test_parse_plan_bounds_and_requires_both_fields() -> None:
-    with pytest.raises(replan.ReplanError):
-        replan.parse_plan({"plan": "", "reply": "ok"})
+def test_parse_plan_bounds_and_requires_a_reply() -> None:
+    # An empty plan means their words asked for no step.
+    assert replan.parse_plan({"plan": "", "reply": "ok"}).plan == ""
     with pytest.raises(replan.ReplanError):
         replan.parse_plan({"plan": "do it", "reply": 3})
     long = replan.parse_plan({"plan": "Share it. " * 100, "reply": "ok"})
