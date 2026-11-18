@@ -1022,12 +1022,13 @@ async def say_on_card(alert_id: int, body: SayBody, request: Request) -> SayResp
     card_talk.add_turn(alert_id, "you", line, person_id=person)
     approval = None
     if go:
-        # The card says it started only once it has.
+        # The card says it started only once it has. When it couldn't, the
+        # card says so and comes back as it reads now (the plan may have
+        # changed above), so the page never keeps offering the old plan.
         try:
             approval = await _approve(alert_id, ApproveBody(plan=plan), request)
         except HTTPException:
-            card_talk.add_turn(alert_id, "me", COULD_NOT_START, person_id=person)
-            raise
+            reply = COULD_NOT_START
     card_talk.add_turn(alert_id, "me", reply, person_id=person)
     return SayResponse(reply=reply, card=_card(), approval=approval)
 

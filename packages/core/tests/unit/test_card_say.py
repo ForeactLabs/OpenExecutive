@@ -301,7 +301,12 @@ def test_a_go_that_cant_start_says_so_on_the_card(
         raise HTTPException(status_code=409, detail="Someone else just did it.")
 
     monkeypatch.setattr(alerts_route, "_approve", fails)
-    assert _say(client, aid, "yes, do it").status_code == 409
+    res = _say(client, aid, "yes, do it")
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["reply"] == alerts_route.COULD_NOT_START and body["approval"] is None
+    # The card comes back with the plan as it now stands, to pick again.
+    assert body["card"]["view"]["options"][0]["plan"] == NEW
     talk = card_talk.read([alert_store.get_alert(aid)])[aid]  # type: ignore[list-item]
     assert [(t.who, t.text) for t in talk.turns] == [
         ("you", "yes, do it"), ("me", alerts_route.COULD_NOT_START),
