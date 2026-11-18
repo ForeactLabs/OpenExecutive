@@ -383,10 +383,7 @@ async def fill(card: Alert, *, db_path: Path | None = None) -> CardTalk | None:
         logger.warning("card options: model call failed for card %s (%s)", card.id, type(exc).__name__)
         return None
     happened, options = parse(data, card)
-    from openexecutive.alerts import store
-
-    now = store.get_alert(card.id)
-    if now is None or (now.suggested_action or "").strip() != (card.suggested_action or "").strip():
+    if _moved_on(card):
         # The plan changed while the call ran (something said on the card
         # keeps its own options): these were for the old one.
         return None
@@ -399,6 +396,14 @@ async def fill(card: Alert, *, db_path: Path | None = None) -> CardTalk | None:
         # Tried again later (after RETRY_AFTER_S), so the card gets its line.
         return None
     return read([card], db_path=db_path).get(card.id)
+
+
+def _moved_on(card: Alert) -> bool:
+    """Whether the card's plan changed since ``card`` was read."""
+    from openexecutive.alerts import store
+
+    now = store.get_alert(card.id) if card.id is not None else None
+    return now is None or (now.suggested_action or "").strip() != (card.suggested_action or "").strip()
 
 
 _FILLING: set[int] = set()
@@ -434,10 +439,12 @@ def fill_soon(cards: list[Alert], talk: dict[int, CardTalk]) -> None:
 
         async def run(c: Alert = card, i: int = cid) -> None:
             try:
-                if await fill(c) is None:
-                    _MISSED[i] = time.monotonic()
-                else:
+                if await fill(c) is not None or _moved_on(c):
+                    # Written, or the plan changed meanwhile: the new plan
+                    # is written on the next read, with no wait.
                     _MISSED.pop(i, None)
+                else:
+                    _MISSED[i] = time.monotonic()
             finally:
                 _FILLING.discard(i)
 

@@ -746,6 +746,21 @@ async def test_a_card_whose_call_failed_waits_before_the_next_try(
     card_talk.fill_soon([card], {})
     await asyncio.gather(*card_talk._TASKS)
     assert calls == [1]
+    # A plan that changed while the call ran is written on the next read,
+    # with no wait.
+    async def racing(c: Any) -> None:
+        calls.append(2)
+        alert_store.update_alert_content(c.id, suggested_action=NEW)
+
+    monkeypatch.setattr(card_talk, "fill", racing)
+    monkeypatch.setattr(card_talk, "_MISSED", {})
+    card_talk.fill_soon([card], {})
+    await asyncio.gather(*card_talk._TASKS)
+    moved = alert_store.get_alert(aid)
+    assert moved is not None
+    card_talk.fill_soon([moved], {})
+    await asyncio.gather(*card_talk._TASKS)
+    assert calls == [1, 2, 2]
 
 
 def test_options_show_only_for_the_plan_they_were_written_for(db: Path) -> None:
