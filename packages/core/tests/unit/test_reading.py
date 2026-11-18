@@ -471,3 +471,12 @@ def test_progress_updates_between_parts_keep_the_held_parts(monkeypatch: pytest.
 
     assert len(runs) == 1
     assert "[LAST PART" in _result(3)
+
+
+def test_a_connected_apps_read_keeps_the_held_parts() -> None:
+    budget = TurnReadingBudget(ReadingLimits(per_read=5_000, per_turn=1_000_000))
+    budget.cap("read_document", {"id": "a"}, "d" * 20_000, "t1")
+    budget.ran([{"id": "t2", "name": "call_tool", "input": {"name": "google_workspace__read_sheet_values"}}])
+    assert budget.replay({"id": "t3", "name": "read_document", "input": {"id": "a"}}) is not None
+    budget.ran([{"id": "t4", "name": "call_tool", "input": {"name": "google_workspace__modify_sheet_values"}}])
+    assert budget.replay({"id": "t5", "name": "read_document", "input": {"id": "a"}}) is None

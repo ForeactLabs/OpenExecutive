@@ -548,9 +548,14 @@ def _apply_loop_cache_marker(
     return bool(markable)
 
 
-# Numbers and ids in a result (a request id, a timestamp, a retry count) don't
-# make it a different answer: they are left out of _call_key.
-_VARYING_IN_A_RESULT = re.compile(r"[0-9a-fA-F]{8,}(?:-[0-9a-fA-F]{4,})*|\d+")
+# Ids and times in a result (a request id, a timestamp) don't make it a
+# different answer: they are left out of _call_key. Other numbers stay, so a
+# status read whose progress moves (20, 40, 60) is getting somewhere.
+_VARYING_IN_A_RESULT = re.compile(
+    r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?"
+    r"|(?<![0-9A-Za-z])[0-9a-fA-F]{8,}(?:-[0-9a-fA-F]{4,})*(?![0-9A-Za-z])"
+    r"|(?<![0-9A-Za-z])(?=[0-9A-Za-z_-]*\d)(?=[0-9A-Za-z_-]*[A-Za-z])[0-9A-Za-z_-]{12,}(?![0-9A-Za-z])"
+)
 
 
 def _call_key(tool_use: dict[str, Any], result: Any) -> str:

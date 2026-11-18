@@ -5414,7 +5414,7 @@ chat:
     a step of the work. After MAX_EMPTY_CUT_ROUNDS (3) cut rounds in a row
     that got nowhere, the turn ends with EMPTY_CUTS_REPLY. The other is a
     call that keeps coming back the same: once the same call (name and
-    input) has returned the same result (numbers and ids in it aside)
+    input) has returned the same result (ids and times in it aside)
     REPEAT_LIMIT (4) times in a turn
     (a write failing on an expired sign-in, a retry finding nothing new),
     REPEATING_NOTE asks for the answer from what the turn has and no more

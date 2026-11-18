@@ -234,6 +234,9 @@ class TurnReadingBudget:
             if tu.get("id") in self._replayed:
                 continue
             name = str(tu.get("name") or "")
+            inner = (tu.get("input") or {}).get("name") if isinstance(tu.get("input"), dict) else None
+            if name == "call_tool" and isinstance(inner, str):
+                name = inner  # a connected app's tool, through the gateway: judged by its own name
             if name in _READS_NOTHING or tool_catalog.read_only_label(name, {}):
                 continue
             self._parts.clear()
