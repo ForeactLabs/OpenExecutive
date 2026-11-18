@@ -911,8 +911,10 @@ def _handler(name: str) -> Any:
             args["hold"] = True
         try:
             result = await browser_relay.run(person_id, action, args)
-        except browser_relay.NotConnected:
+        except browser_relay.NotConnected as gone:
             if levels.is_approved():
+                if isinstance(gone, browser_relay.Busy):
+                    return json.dumps({"error": browser_relay.BUSY})
                 return json.dumps({"error": "Their browser isn't connected, so this wasn't done."})
             return extensions.workflow_wait(browser_relay.waiting_key(person_id), "your browser")
         held_now = result.get("held") is True or (result.get("sending_site") is True and name in ACTS)

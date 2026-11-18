@@ -95,6 +95,10 @@ async def test_a_browser_busy_with_a_step_that_never_answers_pauses_the_run() ->
     out, step, signals = await _call("browser_look", {})
     assert step is None and out["status"] == "waiting"
     assert [(s.kind, s.key) for s in signals] == [("wait", "browser:7")]
+    # An approved step says busy, never that the browser isn't connected.
+    with levels.approved():
+        out, step, signals = await _call("browser_click", {"ref": 4, "_at": CART})
+    assert step is None and out == {"error": browser_relay.BUSY} and signals == []
 
 
 async def test_no_browser_connected_pauses_the_run_until_it_is() -> None:
