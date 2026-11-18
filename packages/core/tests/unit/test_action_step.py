@@ -604,6 +604,30 @@ def test_progress_says_what_a_tool_is_doing_in_plain_words() -> None:
         assert "__" not in line and line.endswith("…")
 
 
+async def test_reading_a_long_result_in_parts_leaves_turns_for_the_action(
+    monkeypatch: pytest.MonkeyPatch, gateway: _FakeGateway, audit: list[dict[str, Any]]
+) -> None:
+    """Next parts run no tool, so they don't use up the step's turns: a step
+    allowed one call reads a long sheet to the end and still files the row."""
+    from openexecutive.providers.feature_gate import ReadingLimits
+
+    monkeypatch.setattr(act, "reading_limits_for", lambda _m="": ReadingLimits(per_read=2_000, per_turn=100_000))
+    gateway.replies[READ] = "r" * 9_000
+    parts = [_resp(_use(READ, {"range": "A:B"}, f"tu_{n}")) for n in range(6)]
+    provider = _ScriptedProvider([
+        *parts,
+        _resp(_use(APPEND, {"values": [["x"]]}, "tu_add")),
+        _resp(_text("Filed it.")),
+    ])
+    _install(monkeypatch, provider)
+
+    out = await _run(_step(max_tool_calls=2))
+
+    assert [c["name"] for c in gateway.calls] == [READ, APPEND]
+    assert "[LAST PART" in str(provider.calls[6]["messages"][-1]["content"])
+    assert out[-1][0] == "output"
+
+
 async def test_a_long_result_is_read_in_parts_without_running_again(
     monkeypatch: pytest.MonkeyPatch, gateway: _FakeGateway, audit: list[dict[str, Any]]
 ) -> None:

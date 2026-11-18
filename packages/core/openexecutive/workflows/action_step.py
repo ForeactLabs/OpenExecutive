@@ -935,6 +935,10 @@ async def run_action_step(
         # A repeat of a call whose result came in parts gets the next part;
         # a call that may change something drops the parts held from before.
         replays = {str(u["id"]): r for u in tool_uses if (r := reading.replay(u)) is not None}
+        if len(replays) == len(tool_uses):
+            # Only next parts of what the step already read: nothing ran, so
+            # the round leaves the step's turns for the work it reads for.
+            turn -= 1
         reading.ran(tool_uses)
         for use in tool_uses:
             name = str(use["name"])
