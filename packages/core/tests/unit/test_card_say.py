@@ -167,10 +167,10 @@ def test_words_change_what_the_card_will_do(
     assert events == ["card_plan_changed"] and turns.calls == []
 
 
-def _go(monkeypatch: pytest.MonkeyPatch, answer: bool) -> list[tuple[str, str, str]]:
-    asked: list[tuple[str, str, str]] = []
+def _go(monkeypatch: pytest.MonkeyPatch, answer: bool) -> list[tuple[str, str, str | None]]:
+    asked: list[tuple[str, str, str | None]] = []
 
-    async def fake(plan: str, text: str, *, before: str = "") -> bool:
+    async def fake(plan: str, text: str, *, before: str | None = None) -> bool:
         asked.append((plan, text, before))
         return answer
 
@@ -229,6 +229,10 @@ async def test_said_go_reads_only_the_plan_and_their_words(monkeypatch: pytest.M
     # neither it nor their words is not a go.
     assert await replan.said_go(NEW, "yes", before=OLD) is True
     assert f"<plan_before>\n{OLD}" in seen["turn"] and "<plan_before>" in replan.GO_SYSTEM
+    # A card that had no plan still says so, so the rewrite's steps must all
+    # come from their words.
+    assert await replan.said_go(NEW, "go ahead", before="") is True
+    assert "<plan_before>\n(none)" in seen["turn"]
 
     async def failing(*a: Any, **k: Any) -> dict[str, Any]:
         raise replan.ReplanError("unavailable", "x")

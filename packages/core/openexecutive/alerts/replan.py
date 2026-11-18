@@ -414,14 +414,15 @@ def _go_tool() -> dict[str, Any]:
     }
 
 
-def build_go_turn(plan: str, text: str, before: str = "") -> str:
+def build_go_turn(plan: str, text: str, before: str | None = None) -> str:
     blocks = [_block("plan", plan), _block("person_said", text)]
-    if before.strip() and before.strip() != plan.strip():
-        blocks.insert(0, _block("plan_before", before))
+    if before is not None and before.strip() != plan.strip():
+        # A card that had no plan: every step must come from their words.
+        blocks.insert(0, _block("plan_before", before.strip() or "(none)"))
     return "\n\n".join(blocks)
 
 
-async def said_go(plan: str, text: str, *, before: str = "") -> bool:
+async def said_go(plan: str, text: str, *, before: str | None = None) -> bool:
     """Whether ``text`` tells the Executive to carry out ``plan`` now. Read
     from the person's words and the plans only, never the card. When
     ``plan`` was just rewritten from ``before``, it is a go only if what it
