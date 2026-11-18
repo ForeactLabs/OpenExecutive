@@ -1236,16 +1236,19 @@ async def say_on_step(instance_id: int, body: StepSayBody, request: Request) -> 
         step = [replan.StepField(field=f.field, label=f.label, value=f.value) for f in fields]
         saw = body.seen or shown
         seen = [replan.StepField(field=f.field, label=f.label, value=saw.get(f.field, "")) for f in fields]
+        limit = ""
         try:
             go = await replan.said_go(
                 replan.step_text(step), line, before=replan.step_text(seen),
                 before_max=replan.STEP_TEXT_MAX, caller_key=api_caller.caller(request).email,
             )
-        except replan.ReplanError:
+        except replan.ReplanError as exc:
             go = False
+            limit = exc.message if exc.code == "too_many" else ""
         if not go:
-            # It said it was on it, but the go wasn't sure: the step waits.
-            reply = _PICK_TO_GO
+            # It said it was on it, but the go wasn't sure (or the hour's
+            # limit was reached, which it says): the step waits.
+            reply = limit or _PICK_TO_GO
         if go:
             edits = {f.field: f.value for f in fields if f.value != original.get(f.field)}
             fresh = get_decision_instance(instance_id)

@@ -803,29 +803,27 @@ async def change(
         from openexecutive.delegation.inbox import card_payload
 
         payload = card_payload(instance)
-        try:
-            go = await replan.said_go(
-                str(payload.get("draft_body") or ""), text, caller_key=str(getattr(caller, "email", "") or ""),
-            )
-        except replan.ReplanError:
-            go = False
-        switched = ask.executive is not None and ask.executive != send_from.is_from_executive(payload)
-        if switched:
-            # "Send it from you": who it goes from switches first, go or not,
-            # and says so.
-            payload = await send_from.switch(
+        if ask.executive is not None and ask.executive != send_from.is_from_executive(payload):
+            # "Send it from you": who it goes from switches, and says so. The
+            # send waits: the new wording is theirs to read first.
+            saved = await send_from.switch(
                 instance, caller=caller, resolver=resolver, executive=bool(ask.executive), gmail=gmail, asked=text,
             )
-        if go and questions_left(payload):
+            return saved, [], False
+        go = False
+        if questions_left(payload):
             # Send waits for the card's open questions, whatever was said.
-            go, note = False, NOTE_ANSWER_FIRST
+            note = NOTE_ANSWER_FIRST
         else:
-            # A go opens the send to check; unsure, it stays theirs to tap.
-            note = "" if switched else NOTE_CONFIRM_SEND if go else NOTE_TAP_SEND
-        if note:
-            fresh = (get_decision_instance(instance.id) or instance) if switched else instance
-            payload = send_from.say(fresh, note, asked="" if switched else text) or payload
-        return payload, [], go
+            try:
+                go = await replan.said_go(
+                    str(payload.get("draft_body") or ""), text, caller_key=str(getattr(caller, "email", "") or ""),
+                )
+                # A go opens the send to check; unsure, it stays theirs to tap.
+                note = NOTE_CONFIRM_SEND if go else NOTE_TAP_SEND
+            except replan.ReplanError as exc:
+                note = exc.message if exc.code == "too_many" else NOTE_TAP_SEND
+        return send_from.say(instance, note, asked=text) or payload, [], go
     if asked:
         current = get_decision_instance(instance.id) or instance
         try:

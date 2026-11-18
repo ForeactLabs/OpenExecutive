@@ -169,7 +169,7 @@ def test_saying_it_on_the_card_switches_the_same_card(
 
 
 @pytest.mark.parametrize("go", [True, False])
-def test_send_it_from_you_switches_the_sender_go_or_not(
+def test_send_it_from_you_switches_the_sender_and_waits(
     db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch, go: bool,
 ) -> None:
     from openexecutive.alerts import replan
@@ -191,8 +191,9 @@ def test_send_it_from_you_switches_the_sender_go_or_not(
     saved, changed, send_now = asyncio.run(answers.change(
         _fresh(card), caller=LOCAL, resolver=owner.id, text="send it from you", gmail=mailbox,
     ))
-    # Who it goes from switches either way; only a go opens the send.
-    assert changed == [] and send_now is go
+    # Who it goes from switches either way; the send waits, since the new
+    # wording is theirs to read first.
+    assert changed == [] and send_now is False
     assert saved[send_from.FROM_EXECUTIVE] is True
     assert saved["conversation"][-1]["text"] == send_from.NOTE_TO_EXECUTIVE
 

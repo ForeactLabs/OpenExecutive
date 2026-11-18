@@ -661,7 +661,7 @@ def test_a_send_it_that_isnt_sure_leaves_the_send_to_a_tap(
 
     monkeypatch.setattr(answers, "_call_model", fake)
     _go_said(monkeypatch, go)
-    mailbox, card_id = _card(ids["principal"], monkeypatch)
+    mailbox, card_id = _card(ids["principal"], monkeypatch, questions=False)
     monkeypatch.setattr("openexecutive.delegation.gmail.gmail_for", lambda email: mailbox)
     monkeypatch.setenv("OE_LOCAL_LOGIN", "1")
     resp = client.post(f"/delegation/replies/{card_id}/change", json={"text": "send it?"}, headers=OWNER)

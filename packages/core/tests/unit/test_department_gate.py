@@ -604,6 +604,24 @@ def test_a_go_without_what_the_page_showed_is_judged_against_the_card(
     assert "<plan_before>" in turns[-1] and "Draft text" in turns[-1]
 
 
+def test_a_go_past_the_hours_limit_says_so(
+    client: TestClient, team: dict[str, Person], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.alerts import replan
+
+    done = _carry_out(monkeypatch)
+    _model(monkeypatch, {"body": "Short text"}, go=True)
+
+    async def spent(*args: Any, **kwargs: Any) -> bool:
+        raise replan.ReplanError("too_many", "That's a lot of changes this hour. Try again later.")
+
+    monkeypatch.setattr(replan, "said_go", spent)
+    decision_id = _mail_card(team)
+    res = client.post(f"/decisions/{decision_id}/say", json={"text": "shorter, then send it"}, headers=OWNER)
+    assert res.status_code == 200, res.text
+    assert res.json()["reply"] == "That's a lot of changes this hour. Try again later." and done == []
+
+
 def test_a_go_that_cant_be_read_leaves_the_step_waiting(
     client: TestClient, team: dict[str, Person], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
