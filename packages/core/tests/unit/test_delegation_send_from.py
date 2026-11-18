@@ -819,3 +819,10 @@ def test_a_change_of_who_it_goes_to_keeps_the_undo(db: Path, owner: Any, models:
     saved = asyncio.run(card_drafts.edit(_fresh(card), caller=LOCAL, resolver=owner.id, gmail=mailbox, rewrite=write))
     moved = _drafts_tests._recipients(card, mailbox, owner, False)
     assert moved["draft_to"] == [DANA] and moved[card_drafts.UNDO_KEY] == saved[card_drafts.UNDO_KEY]
+
+
+def test_the_executive_signs_once(db: Path, owner: Any, models: dict[str, Any], rewrites: list[str]) -> None:
+    mailbox, card = _card(owner)
+    payload = _switch(card, mailbox, owner, True)
+    mine = send_from.sign_off(owner)
+    assert send_from.sign(owner, payload, f"Hi Dana,\n\nDone.\n\n{mine}") == f"Hi Dana,\n\nDone.\n\n{mine}"

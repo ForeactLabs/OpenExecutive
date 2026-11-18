@@ -134,7 +134,11 @@ def sign(person: Any, payload: dict[str, Any], main: str, *, on_its_own: bool = 
 
     main = main.rstrip()
     if is_from_executive(payload):
-        return f"{main}\n\n{sign_off(person)}"
+        mine = sign_off(person)
+        if main.endswith(mine):
+            # Signed already: never twice.
+            main = main[: -len(mine)].rstrip()
+        return f"{main}\n\n{mine}"
     signature = get_voice(person.id).profile.signature.strip()
     if signature and signature not in main:
         main = f"{_drop_name_before_signature(main, signature)}\n\n{signature}"
