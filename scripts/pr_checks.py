@@ -18,9 +18,16 @@ Checks (see CLAUDE.md -> "Architecture Docs" and "PR Requirements"):
 - tests-present   WARN  openexecutive/ code changed with no tests/ change
 - pinned-actions  FAIL  a workflow line added under .github/ uses an action by
                         tag or branch instead of a full commit SHA
-- one-gate        FAIL  an added line refuses or holds a step outside
-                        orchestrator/levels.py (an owner-only check, a daily
-                        cap, a 403): Approvals is the only gate
+- one-gate        FAIL  the change adds a line that refuses or holds a step
+                        outside orchestrator/levels.py (an owner-only check, a
+                        daily cap, a 403): Approvals is the only gate. No
+                        waiver; rewording or moving an old one passes
+- one-gate-code   FAIL  anywhere in the code (not just the diff), something
+                        outside the gate reads the level, applies Your rules
+                        or In training, makes a card, writes a held or refused
+                        result, or names a hold or refusal, and is not on
+                        scripts/one_gate_known.txt; or the change adds a line
+                        to that list (scripts/one_gate.py). No waiver
 
 A release-please version bump is not a code change: when a file release-please
 manages only has the version number rewritten on its marked lines (the release
@@ -38,10 +45,9 @@ screen updates its guide section too, or says why not:
 
 Approvals (orchestrator/levels.py) is the one place a step is held or refused
 for who is asking. A line that checks its input rather than the asker (a
-malformed argument, an address that isn't one) ends with ``# input-safety``;
-any other exception is waived for the whole change with:
-
-    Gates: n/a - <reason>
+malformed argument, an address that isn't one) ends with ``# input-safety``.
+There is no waiver for anything else: a change may reword, move or remove a
+refusal that was already there, never add one.
 
 Stdlib only, so it runs without the project's virtualenv.
 """
@@ -54,6 +60,7 @@ import os
 import re
 import subprocess
 import sys
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
@@ -203,10 +210,6 @@ STUB_EXEMPT = {"scripts/pr_checks.py", TESTS + "unit/test_pr_checks.py"}
 # second gate. Input checks carry the marker; anything else needs the waiver.
 LEVELS_PY = PKG + "orchestrator/levels.py"
 GATE_MARKER = "# input-safety"
-GATE_WAIVER_RE = re.compile(
-    r"^[ \t]*Gates:[ \t]*n/?a\b[ \t]*[-\u2013\u2014:][ \t]*\S.*$",
-    re.IGNORECASE | re.MULTILINE,
-)
 GATE_RE = re.compile(
     r"status_code\s*=\s*403"
     r"|\bprincipal_only\b|\bPRINCIPAL_ONLY\b|\bOWNER_ONLY\b"
@@ -235,6 +238,8 @@ class Change:
     # path -> lines the diff removes from that file
     removed_lines: dict[str, list[str]] = field(default_factory=dict)
     waiver_text: str = ""
+    # The checkout to read whole (one-gate-code); empty skips that check.
+    root: str = ""
 
     def version_bump_only(self, path: str) -> bool:
         """True when the diff to path only rewrites marked version numbers.
@@ -444,32 +449,102 @@ def check_pinned_actions(c: Change) -> Result:
     return Result("pinned-actions", "PASS", "added workflow steps pin actions by SHA")
 
 
-def check_one_gate(c: Change) -> Result:
-    if GATE_WAIVER_RE.search(c.waiver_text):
-        return Result("one-gate", "PASS", "waived (Gates: n/a)")
-    hits = [
-        f"{path}: {line.strip()[:80]}"
-        for path, lines in sorted(c.added_lines.items())
-        if path.startswith(PKG) and path.endswith(".py") and path != LEVELS_PY
+def _gate_lines(lines: list[str]) -> list[str]:
+    return [
+        line.strip()
         for line in lines
-        if GATE_RE.search(line)
-        and GATE_MARKER not in line
-        and not line.lstrip().startswith("#")
+        if GATE_RE.search(line) and GATE_MARKER not in line and not line.lstrip().startswith("#")
+    ]
+
+
+def check_one_gate(c: Change) -> Result:
+    """No waiver. A change may reword or move a refusal that was already
+    there, and may remove one; it may not add one. So per file the diff may
+    add at most as many gate lines as it takes away, after lines moved
+    unchanged from anywhere in the change are set aside."""
+    def gated(lines_by_path: dict[str, list[str]]) -> dict[str, list[str]]:
+        return {
+            path: _gate_lines(lines)
+            for path, lines in sorted(lines_by_path.items())
+            if path.startswith(PKG) and path.endswith(".py") and path != LEVELS_PY
+        }
+
+    added, removed = gated(c.added_lines), gated(c.removed_lines)
+    # A line that left one place and arrived, byte for byte, in another moved:
+    # set both ends aside.
+    for lines in added.values():
+        for line in list(lines):
+            home = next((old for old in removed.values() if line in old), None)
+            if home is not None:
+                home.remove(line)
+                lines.remove(line)
+    # What is left was written new: it can only stand in for a line this same
+    # file gave up (a refusal reworded where it stood).
+    hits = [
+        f"{path}: {line[:80]}"
+        for path, lines in added.items()
+        for line in lines[len(removed.get(path, [])):]
     ]
     if hits:
         return Result(
             "one-gate",
             "FAIL",
             "a new refusal or hold outside orchestrator/levels.py (Approvals is the only "
-            f"gate; end an input check with '{GATE_MARKER}', or add 'Gates: n/a - <reason>' "
-            "to a commit message or the PR description): " + " | ".join(hits[:5]),
+            f"gate; end an input check with '{GATE_MARKER}'). There is no waiver: a role "
+            "that cannot do something is on the administration list in CLAUDE.md, and "
+            "run-or-wait is take_the_lead.gate with levels.decide: " + " | ".join(hits[:5]),
         )
     return Result("one-gate", "PASS", "no new refusal or hold outside Approvals")
 
 
+def check_one_gate_code(c: Change) -> Result:
+    """The whole code, not just the diff: anything outside the gate that
+    holds, refuses or decides run-or-wait itself fails unless it is on the
+    known list, and the known list may only lose lines (scripts/one_gate.py)."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    try:
+        import one_gate
+    finally:
+        sys.path.pop(0)
+
+    name = "one-gate-code"
+    # Entries the change adds to the list, by what they name (a reworded note
+    # is no new entry). The change that first writes the list adds them all.
+    grown: list[str] = []
+    if one_gate.KNOWN not in c.added:
+        left = Counter(k for k, _ in one_gate.parse_known("\n".join(c.removed_lines.get(one_gate.KNOWN, []))))
+        for key, _ in one_gate.parse_known("\n".join(c.added_lines.get(one_gate.KNOWN, []))):
+            if left[key] > 0:
+                left[key] -= 1
+            else:
+                grown.append(key)
+    if grown:
+        return Result(
+            name, "FAIL",
+            f"{one_gate.KNOWN} only shrinks: route the step through levels / take_the_lead.gate "
+            "instead of listing it: " + " | ".join(g.strip()[:80] for g in grown[:5]),
+        )
+    if not c.root:
+        return Result(name, "PASS", "no checkout to read")
+    new, gone = one_gate.compare(one_gate.scan_tree(c.root), one_gate.load_known(c.root))
+    if new:
+        return Result(
+            name, "FAIL",
+            "decides run-or-wait outside the one gate (pass a reason to orchestrator/levels.py "
+            "instead; there is no waiver): " + " | ".join(str(h) for h in new[:5]),
+        )
+    if gone:
+        return Result(
+            name, "FAIL",
+            f"gone from the code, take it off {one_gate.KNOWN} "
+            "(python3 scripts/one_gate.py --write): " + " | ".join(gone[:5]),
+        )
+    return Result(name, "PASS", "nothing outside the one gate that isn't already listed")
+
+
 CHECKS = (
     check_arch_drift, check_guide_drift, check_no_stubs, check_eval_scenarios, check_tests_present,
-    check_pinned_actions, check_one_gate,
+    check_pinned_actions, check_one_gate, check_one_gate_code,
 )
 
 
@@ -561,8 +636,9 @@ def collect(base: str, extra_waiver: Iterable[str] = ()) -> Change:
             pass
 
     waiver = _git("log", "--format=%B", f"{merge_base}..HEAD")
+    root = _git("rev-parse", "--show-toplevel").strip()
     return Change(
-        changed, added, renamed, added_lines, removed_lines, "\n".join([waiver, *extra_waiver])
+        changed, added, renamed, added_lines, removed_lines, "\n".join([waiver, *extra_waiver]), root
     )
 
 

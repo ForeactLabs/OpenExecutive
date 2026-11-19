@@ -63,6 +63,22 @@ Build order in `prompts/cache_manager.py`:
 
 RAG context goes in the **user turn**, not the system prompt.
 
+## One Gate
+
+Role says what someone can do. The Approvals level (Careful, Balanced,
+Hands-off) says whether a step runs or waits, and only Your rules and In
+training cap it. Nothing else may hold or refuse a step: a feature notices a
+reason and passes it to `orchestrator/levels.py`, which decides.
+
+CI enforces this two ways, with no waiver. `one-gate` in `scripts/pr_checks.py`
+fails a diff that adds a refusal phrase (`only the owner`, a 403, a daily cap).
+`one-gate-code` (`scripts/one_gate.py`) reads the whole code by shape. Outside
+the gate files it lists, code may not read the level, apply In training or Your
+rules, make a card, write a held, waiting or refused result, or define a
+function whose name says it holds, refuses, withholds or gates. What the code
+does that today is in `scripts/one_gate_known.txt`. CI fails on anything not
+listed and on any line added there, so the list only shrinks.
+
 ## Adding a New Specialist Agent
 
 1. Create `packages/core/openexecutive/agents/your_agent.py`:

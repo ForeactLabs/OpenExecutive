@@ -545,8 +545,11 @@ def test_main_reports_missing_base(
 # --- one-gate ----------------------------------------------------------------
 
 
-def _gate(lines: dict[str, list[str]], waiver: str = "") -> str:
-    return _level(pr_checks.check_one_gate, changed=set(lines), added_lines=lines, waiver_text=waiver)
+def _gate(lines: dict[str, list[str]], removed: dict[str, list[str]] | None = None, body: str = "") -> str:
+    return _level(
+        pr_checks.check_one_gate, changed=set(lines) | set(removed or {}), added_lines=lines,
+        removed_lines=removed or {}, waiver_text=body,
+    )
 
 
 def test_one_gate_fails_on_a_new_refusal_outside_levels() -> None:
@@ -561,6 +564,7 @@ def test_one_gate_fails_on_a_can_only_reason() -> None:
     assert _gate({PKG + "scheduler/runner.py": [line]}) == "FAIL"
     assert _gate({PKG + "api/routes/x.py": ['    detail="You can only change your own."']}) == "FAIL"
     # Prose in a docstring is not a message the code sends.
+    assert _gate({PKG + "scheduler/runner.py": ["    A turn that may only read and advise."]}) == "PASS"
     assert _gate({PKG + "scheduler/runner.py": ["    The teammate's own turn may only read and advise."]}) == "PASS"
 
 
@@ -572,6 +576,24 @@ def test_one_gate_allows_levels_input_checks_comments_and_tests() -> None:
     assert _gate({"packages/core/tests/unit/test_x.py": ["assert r.status_code == 403"]}) == "PASS"
 
 
-def test_one_gate_waiver() -> None:
+def test_one_gate_has_no_waiver() -> None:
     lines = {PKG + "api/routes/x.py": ["    status_code=403"]}
-    assert _gate(lines, "Gates: n/a - a route that was already refused moved files") == "PASS"
+    assert _gate(lines, body="Gates: n/a - a route that was already refused moved files") == "FAIL"
+
+
+def test_one_gate_lets_an_old_refusal_be_reworded_moved_or_removed() -> None:
+    x, y = PKG + "api/routes/x.py", PKG + "api/routes/y.py"
+    old = '    raise HTTPException(status_code=403, detail="Only the account owner can change this.")'
+    new = '    raise HTTPException(status_code=403, detail="Only someone on the team can change this.")'
+    # Reworded where it stood.
+    assert _gate({x: [new]}, {x: [old]}) == "PASS"
+    # Moved to another file unchanged.
+    assert _gate({y: [old]}, {x: [old]}) == "PASS"
+    # Removed.
+    assert _gate({}, {x: [old]}) == "PASS"
+    # One reworded and a second one added beside it: the second is new.
+    assert _gate({x: [new, "    status_code=403"]}, {x: [old]}) == "FAIL"
+    # One removed in a file does not pay for a new one in another.
+    assert _gate({y: [new]}, {x: [old]}) == "FAIL"
+    # A move does not pay twice: moved to y, and a new one where it left.
+    assert _gate({y: [old], x: [new]}, {x: [old]}) == "FAIL"
