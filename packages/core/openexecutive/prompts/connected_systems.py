@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from openexecutive.config import Settings
 
 GOOGLE_SERVER = "google_workspace"
+MICROSOFT_SERVER = "microsoft_365"
 
 # Server names are operator-written JSON keys rendered into the prompt; only
 # plain identifiers are shown (a `_comment` key is config, not a server).
@@ -169,6 +170,35 @@ def google_chat_reach(settings: Settings) -> str | None:
     )
 
 
+def microsoft_mail_on(settings: Settings) -> bool:
+    """Whether the Microsoft 365 server's Outlook mail tools are offered: the
+    MCP config hides them while the company's mail runs elsewhere."""
+    from fnmatch import fnmatchcase
+
+    from openexecutive.config import denied_tool_patterns
+
+    probe = f"{MICROSOFT_SERVER}__send-mail"
+    return not any(fnmatchcase(probe, p) for p in denied_tool_patterns(settings.mcp_servers_config_path))
+
+
+def _microsoft_line(settings: Settings, *, dead: bool) -> str:
+    if dead:
+        return (
+            "- **Microsoft 365: needs reconnecting.** Its sign-in has expired or was revoked, so "
+            "its calendar, OneDrive and other tools fail until the owner connects it again "
+            "(Settings → Status). If asked, say so plainly."
+        )
+    mail = (
+        "Outlook mail too"
+        if microsoft_mail_on(settings)
+        else "not Outlook mail: your email is your own mailbox above"
+    )
+    return (
+        "- **Microsoft 365: connected** — calendar, OneDrive and the rest of its tools, "
+        f"{mail}. Find its tools with `search_tools`."
+    )
+
+
 def render_connected_systems(
     *,
     mcp_servers: Sequence[str],
@@ -190,7 +220,8 @@ def render_connected_systems(
     servers = sorted({s for s in mcp_servers if _SERVER_NAME_RE.fullmatch(s)})
     google = GOOGLE_SERVER in servers
     google_dead = google and GOOGLE_SERVER in set(needs_reconnect)
-    others = [s for s in servers if s != GOOGLE_SERVER]
+    others = [s for s in servers if s not in (GOOGLE_SERVER, MICROSOFT_SERVER)]
+    microsoft = MICROSOFT_SERVER in servers
     email = settings.exec_email_address
 
     lines = [
@@ -244,6 +275,9 @@ def render_connected_systems(
             "than implying access."
         )
 
+    if microsoft:
+        lines.append(_microsoft_line(settings, dead=MICROSOFT_SERVER in set(needs_reconnect)))
+
     if others:
         lines.append(
             "- **Other tool servers:** "
@@ -274,6 +308,18 @@ def render_connected_systems(
     elif not any("notion" in s.lower() for s in others):
         # A Notion MCP server, when configured, is listed with the others.
         lines.append("- **Notion:** not connected.")
+    folders = [
+        name for name, on in (
+            ("Google Drive", settings.drive_sync_enabled),
+            ("OneDrive", settings.onedrive_sync_enabled),
+        ) if on
+    ]
+    if folders:
+        lines.append(
+            f"- **{' and '.join(folders)} folders: synced into your knowledge base.** You read "
+            "the shared folders through retrieval, not live; opening or changing a file live "
+            "needs that service connected above."
+        )
     if settings.confluence_sync_enabled:
         # Settings-derived and constant per deployment, so block 0 stays
         # cacheable. Without the sync, a Confluence MCP server (if any) is

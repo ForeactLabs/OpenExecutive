@@ -264,6 +264,38 @@ def raw_booking_refusal(tool_input: Any) -> str | None:
     return json.dumps({"error": RAW_BOOKING_REFUSAL})
 
 
+def calendar_gateway(settings: Any = None) -> Any:
+    """The tool gateway bookings go through, or ``None`` when they can't
+    reach a calendar: booking is off, the gateway is down, or the calendar
+    provider's tools aren't loaded (a Google server started with mail only
+    has no Calendar). Every place that offers or books a meeting asks this,
+    so none offers a calendar that isn't there."""
+    from openexecutive.config import get_settings
+    from openexecutive.orchestrator.mcp_gateway import get_active_gateway
+
+    settings = settings or get_settings()
+    if not getattr(settings, "calendar_booking_enabled", False):
+        return None
+    gateway = get_active_gateway()
+    if gateway is None:
+        return None
+    # The servers it started with (a started gateway always names some).
+    named = getattr(gateway, "server_names", None)
+    servers: tuple[str, ...] = tuple(named) if isinstance(named, tuple | list) else ()
+    known = bool(servers)
+    if getattr(settings, "calendar_provider", "google") != "google":
+        return gateway if not known or "microsoft_365" in servers else None
+    if known and "google_workspace" not in servers:
+        return None
+    service_on = getattr(settings, "google_service_on", None)
+    return gateway if not callable(service_on) or service_on("calendar") else None
+
+
+def calendar_connected(settings: Any = None) -> bool:
+    """Whether bookings can reach a calendar (``calendar_gateway``)."""
+    return calendar_gateway(settings) is not None
+
+
 def typed_booking_only(offered: bool, call_tool: Any) -> Any:
     """Wrap the model's ``call_tool``: on a turn that offers
     create_calendar_event, a raw booking with people is sent back to it
@@ -676,15 +708,12 @@ async def handle_create_calendar_event(tool_input: dict[str, Any]) -> str:
         mark_executed,
         mark_resolved,
     )
-    from openexecutive.orchestrator.mcp_gateway import get_active_gateway
     from openexecutive.orchestrator.schedule_tools import current_session
 
     settings = get_settings()
 
     # 1. Gate: calendar must be enabled and MCP must be active.
-    if not settings.calendar_booking_enabled:
-        return json.dumps({"error": "calendar booking isn't turned on for this workspace"})
-    gateway = get_active_gateway()
+    gateway = calendar_gateway(settings)
     if gateway is None:
         return json.dumps({"error": "the calendar isn't connected right now"})
 
@@ -886,14 +915,11 @@ async def handle_create_instant_meeting(tool_input: dict[str, Any]) -> str:
         mark_executed,
         mark_resolved,
     )
-    from openexecutive.orchestrator.mcp_gateway import get_active_gateway
     from openexecutive.orchestrator.schedule_tools import current_session
 
     settings = get_settings()
 
-    if not settings.calendar_booking_enabled:
-        return json.dumps({"error": "calendar booking isn't turned on for this workspace"})
-    gateway = get_active_gateway()
+    gateway = calendar_gateway(settings)
     if gateway is None:
         return json.dumps({"error": "the calendar isn't connected right now"})
     # It books at once, with no approval: only for someone on the team.

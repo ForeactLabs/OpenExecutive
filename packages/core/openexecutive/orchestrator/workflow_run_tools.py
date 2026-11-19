@@ -289,6 +289,7 @@ async def handle_list_workflows(tool_input: dict[str, Any]) -> str:
         logger.exception("list_workflows: failed")
         return _err("list_workflows", str(exc))
 
+    made_by = _made_by()
     out: list[dict[str, Any]] = []
     for wf in workflows:
         if wf.name in _CHAT_LAUNCH_BLOCKLIST:
@@ -305,11 +306,46 @@ async def handle_list_workflows(tool_input: dict[str, Any]) -> str:
             "section": meta.section.value,
             "estimated_minutes": meta.estimated_minutes,
             "is_custom": meta.is_custom,
+            **({"made_by": made_by(meta.name)} if meta.is_custom else {}),
             "inputs": _input_fields(meta.input_schema),
         })
 
     _audit("list_workflows", "read", True, f"list_workflows returned {len(out)}", {"count": len(out)})
-    return json.dumps({"workflows": out, "count": len(out)})
+    return json.dumps({
+        "workflows": out,
+        "count": len(out),
+        "note": (
+            "made_by says whose a saved workflow is: \"you\" (the person you're speaking with) "
+            "or someone else on the team by name. Never call someone else's workflow theirs."
+        ),
+    })
+
+
+def _made_by() -> Callable[[str], str]:
+    """Who made each saved workflow, as the speaker reads it: "you", a
+    teammate's name, or "someone on the team" when it isn't known."""
+    from openexecutive.orchestrator.speaker import speaker
+    from openexecutive.people.store import get_person
+    from openexecutive.workflows.dynamic_store import get_owner
+
+    me = getattr(speaker(), "id", None)
+    names: dict[int, str] = {}
+
+    def made_by(name: str) -> str:
+        try:
+            owner = get_owner(name)
+            if owner is None:
+                return "someone on the team"
+            if me is not None and owner == me:
+                return "you"
+            if owner not in names:
+                person = get_person(owner)
+                names[owner] = " ".join(((person.full_name or "") if person else "").split()) or "someone on the team"
+            return names[owner]
+        except Exception:
+            return "someone on the team"
+
+    return made_by
 
 
 def _principal_only_refusal(name: str, workflow: Any) -> str | None:

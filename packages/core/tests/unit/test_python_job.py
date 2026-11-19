@@ -183,7 +183,7 @@ def test_an_image_comes_back_ready_to_show(company: Path, monkeypatch: pytest.Mo
     files = {f["name"]: f for f in _run({"code": "1"})["files"]}
     png = files["Monthly sales.png"]
     assert png["show"] == f"![Monthly sales.png]({png['link']})"
-    assert "show" not in files["data.csv"]
+    assert files["data.csv"]["show"] == f"[data.csv]({files['data.csv']['link']})"
 
 
 async def test_the_api_stops_reading_a_flood(monkeypatch: pytest.MonkeyPatch) -> None:

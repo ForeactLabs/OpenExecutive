@@ -479,10 +479,13 @@ SCHEDULE_FOLLOWUP_TOOL: dict[str, Any] = {
         "else (channel_ref). One to someone else is sent when it runs, under the "
         "asker's Approvals like any send. Use "
         "ONLY when the user explicitly asks for a follow-up, reminder, check-in or "
-        "scheduled action, never to defer a normal reply. It runs once: for "
-        "something that repeats (a recap every Friday, a check each morning), "
-        "save a workflow with that schedule instead (the workflows tools), never "
-        "a follow-up that promises to set up the next one. Give run_at in the "
+        "scheduled action, never to defer a normal reply. It runs once, unless "
+        "they want it again and again (\"from now on\", \"every Monday\", \"each "
+        "morning\"): then give repeat, and it comes back at each time until it is "
+        "cancelled; run_at is its first time. Never set a one-time follow-up that "
+        "promises to set up the next one. A recurring piece of work with several "
+        "steps (a recap built from mail and the calendar) is a workflow with a "
+        "schedule instead. Give run_at in the "
         "company's time zone, as the person said it (\"tomorrow 9am\" is 09:00 "
         "tomorrow), never converted to UTC."
     ),
@@ -512,6 +515,14 @@ SCHEDULE_FOLLOWUP_TOOL: dict[str, Any] = {
                 "description": (
                     "1-3 sentences on what to do at run_at, with the context it needs "
                     "(topic, decision, key facts): that run will not see this conversation."
+                ),
+            },
+            "repeat": {
+                "type": "string",
+                "description": (
+                    "Only for one that repeats: 'daily@HH:MM' or 'weekly@DOW@HH:MM' "
+                    "(mon..sun), in the company's time zone ('every Monday 9am' is "
+                    "'weekly@mon@09:00')."
                 ),
             },
             "department": {
@@ -890,6 +901,14 @@ async def handle_schedule_followup(tool_input: dict[str, Any]) -> str:
     parsed = company_time(run_at_raw)
     if parsed is None:
         return json.dumps({"error": f"run_at {run_at_raw!r} can't be read. {COMPANY_TIME_HINT}"})
+    repeat = " ".join(str(tool_input.get("repeat") or "").split()) or None
+    if repeat is not None:
+        from openexecutive.departments.cadence import is_valid_cadence_spec
+
+        if not is_valid_cadence_spec(repeat):
+            return json.dumps({
+                "error": f"repeat {repeat!r} can't be read: use 'daily@HH:MM' or 'weekly@DOW@HH:MM'.",
+            })
     parsed_utc = parsed.astimezone(UTC)
 
     now = datetime.now(UTC)
@@ -943,6 +962,7 @@ async def handle_schedule_followup(tool_input: dict[str, Any]) -> str:
             assigned_to_person_id=assigned_to_person_id,
             required_scope=required_scope,
             created_by_person_id=_turn_speaker_id(session),
+            repeat=repeat,
         )
     except Exception as exc:
         logger.exception("schedule_followup: insert failed")
@@ -986,6 +1006,7 @@ async def handle_schedule_followup(tool_input: dict[str, Any]) -> str:
         "id": action_id,
         "run_at": parsed_utc.isoformat(),
         "channel": channel,
+        **({"repeat": repeat} if repeat else {"repeat": "none: it runs once"}),
     })
 
 
@@ -1870,11 +1891,12 @@ def configured_integrations(settings: Any) -> set[str]:
         configured.add("telegram")
     if getattr(settings, "google_chat_project_number", None):
         configured.add("google_chat")
-    # Calendar is enabled when the feature flag is true AND MCP is running.
+    # Calendar: booking on, MCP running and the calendar really loaded.
     # Import lazily to avoid circular imports.
-    if getattr(settings, "calendar_booking_enabled", False) and getattr(settings, "mcp_enabled", False):
-        from openexecutive.orchestrator.mcp_gateway import get_active_gateway
-        if get_active_gateway() is not None:
+    if getattr(settings, "mcp_enabled", False):
+        from openexecutive.orchestrator.calendar_tools import calendar_connected
+
+        if calendar_connected(settings):
             configured.add("calendar")
     return configured
 

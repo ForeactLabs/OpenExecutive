@@ -102,6 +102,11 @@ class ScheduledAction(BaseModel):
     # runs as that teammate and reaches only them (scheduler.runner). NULL
     # for rows the system queued and for rows from before the column.
     created_by_person_id: int | None = None
+    # A follow-up that repeats ("from now on", "every Monday"): its cadence
+    # spec ('daily@HH:MM', 'weekly@DOW@HH:MM', …, company time). When one
+    # occurrence finishes the next is queued (``_queue_next``), until it is
+    # cancelled. None runs once.
+    repeat: str | None = None
 
 
 class OutboundContext(BaseModel):
@@ -350,6 +355,8 @@ def initialize_db(db_path: Path | None = None) -> None:
             ("task_completed_at", "TEXT"),
             ("task_closed_reason", "TEXT"),
             ("task_closed_due_at", "TEXT"),
+            # ScheduledAction.repeat.
+            ("repeat", "TEXT"),
         ):
             if col not in _sa_existing:
                 try:
@@ -1280,6 +1287,7 @@ def insert_scheduled_action(
     required_scope: str | None = None,
     status: str = "pending",
     created_by_person_id: int | None = None,
+    repeat: str | None = None,
     db_path: Path | None = None,
 ) -> int:
     if channel not in _VALID_SCHEDULED_CHANNELS:
@@ -1302,12 +1310,12 @@ def insert_scheduled_action(
             "INSERT INTO scheduled_actions "
             "(created_at, run_at, channel, channel_ref, intent_text, originating_session_id, "
             "department, kind, assigned_to_person_id, awaiting_response_since, scope_key, "
-            "required_scope, status, created_by_person_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "required_scope, status, created_by_person_id, repeat) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 now, run_at, channel, channel_ref, intent_text, originating_session_id,
                 department, kind, assigned_to_person_id, awaiting_str, scope_key,
-                required_scope, status, created_by_person_id,
+                required_scope, status, created_by_person_id, repeat or None,
             ),
         )
         return int(cursor.lastrowid or 0)
@@ -1697,12 +1705,21 @@ def settle_restored_queue(
             "WHERE id IN (SELECT value FROM json_each(?))",
             (json.dumps(stale),),
         ).rowcount
+        late = [
+            int(row[0]) for row in conn.execute(
+                "SELECT id FROM scheduled_actions WHERE status = 'pending' AND run_at <= ?", (cutoff,),
+            ).fetchall()
+        ]
         overdue = conn.execute(
             "UPDATE scheduled_actions SET status = 'cancelled', "
             "last_error = 'its time passed long before this copy came back' "
-            "WHERE status = 'pending' AND run_at <= ?",
-            (cutoff,),
+            "WHERE id IN (SELECT value FROM json_each(?))",
+            (json.dumps(late),),
         ).rowcount
+        # Only these occurrences are dropped: a repeating one comes back at
+        # its next time from now.
+        for action_id in [*stale, *late]:
+            _queue_next(conn, action_id)
         return int(running) + int(overdue)
 
 
@@ -1763,24 +1780,67 @@ def reschedule_action(
 def mark_action_done(action_id: int, db_path: Path | None = None) -> bool:
     with _get_conn(_resolve_db_path(db_path)) as conn:
         cursor = conn.execute(
-            "UPDATE scheduled_actions SET status = 'done', last_error = '' WHERE id = ?",
+            "UPDATE scheduled_actions SET status = 'done', last_error = '' "
+            "WHERE id = ? AND status IN ('pending', 'running')",
             (action_id,),
         )
-        return cursor.rowcount > 0
+        done = cursor.rowcount > 0
+        # Only the first finish of an open row queues a repeat's next one.
+        if done:
+            _queue_next(conn, action_id)
+        return done
 
 
-def mark_action_cancelled(action_id: int, reason: str, db_path: Path | None = None) -> bool:
+def _queue_next(conn: sqlite3.Connection, action_id: int) -> int | None:
+    """When a repeating follow-up's occurrence finishes (it went, or gave
+    up), queue the next one: the same row, at its cadence's next time after
+    now. The one place a repeat goes on, whichever path finished it; a
+    cancelled one stops. Returns the new row's id."""
+    row = conn.execute("SELECT * FROM scheduled_actions WHERE id = ?", (action_id,)).fetchone()
+    spec = (row["repeat"] or "").strip() if row is not None else ""
+    if not spec:
+        return None
+    from openexecutive.departments.cadence import _parse_cadence_spec
+    from openexecutive.memory import workspace_settings
+
+    run_at = _parse_cadence_spec(spec, datetime.now(UTC), workspace_settings.get_user_timezone())
+    if run_at is None:
+        logger.warning("episodic: repeating follow-up %s has a cadence that can't be read: %r", action_id, spec)
+        return None
+    cursor = conn.execute(
+        "INSERT INTO scheduled_actions "
+        "(created_at, run_at, channel, channel_ref, intent_text, originating_session_id, "
+        "department, kind, assigned_to_person_id, scope_key, required_scope, status, "
+        "created_by_person_id, repeat) "
+        "SELECT ?, ?, channel, channel_ref, intent_text, originating_session_id, department, kind, "
+        "assigned_to_person_id, scope_key, required_scope, 'pending', created_by_person_id, "
+        "repeat FROM scheduled_actions WHERE id = ?",
+        (datetime.now(UTC).isoformat(), run_at.isoformat(), action_id),
+    )
+    return int(cursor.lastrowid or 0) or None
+
+
+def mark_action_cancelled(
+    action_id: int, reason: str, db_path: Path | None = None, *, ends_repeat: bool = False,
+) -> bool:
     """Retire a claimed action without running it, recording why in
     ``last_error`` (e.g. a department check-in in a solo workspace). Unlike
     ``cancel_scheduled_action`` this also moves a ``running`` row — for the
-    runner, which holds the claim."""
+    runner, which holds the claim. Only this occurrence stands down (already
+    handled, the creator's month used up, …): a repeating one queues its
+    next. ``ends_repeat`` stops the series too, for a stop nobody would want
+    repeated (the creator left the team); a person's own cancel is
+    ``cancel_scheduled_action``."""
     with _get_conn(_resolve_db_path(db_path)) as conn:
         cursor = conn.execute(
             "UPDATE scheduled_actions SET status = 'cancelled', last_error = ? "
             "WHERE id = ? AND status IN ('pending', 'running')",
             (reason[:500], action_id),
         )
-        return cursor.rowcount > 0
+        done = cursor.rowcount > 0
+        if done and not ends_repeat:
+            _queue_next(conn, action_id)
+        return done
 
 
 def mark_action_failed_or_retry(
@@ -1803,6 +1863,7 @@ def mark_action_failed_or_retry(
                 "UPDATE scheduled_actions SET status = 'failed', last_error = ? WHERE id = ?",
                 (error[:500], action_id),
             )
+            _queue_next(conn, action_id)
             return "failed"
         # Backoff: 30s, 5m, 30m for attempts 1, 2, 3.
         backoff_seconds = {1: 30, 2: 300, 3: 1800}.get(attempts, 1800)
@@ -1816,27 +1877,33 @@ def mark_action_failed_or_retry(
 
 
 def cancel_scheduled_action(action_id: int, db_path: Path | None = None) -> str:
-    """Soft-cancel a pending action. Returns the resulting status or 'not_cancellable'."""
+    """Soft-cancel a pending action. Returns the resulting status or 'not_cancellable'.
+    A repeating one that is running right now finishes this time and comes
+    back no more: its repeat is cleared and the answer is 'cancelled'."""
     with _get_conn(_resolve_db_path(db_path)) as conn:
         row = conn.execute(
             "SELECT status FROM scheduled_actions WHERE id = ?", (action_id,)
         ).fetchone()
         if row is None:
             return "not_found"
-        current = row["status"]
-        if current != "pending":
-            return "not_cancellable"
-        # Guard the write too: the scheduler's claim can flip the row to
-        # 'running' between the SELECT and here, and a cancel must never
-        # overwrite a claimed row (the dispatch would go ahead regardless).
+        # Guard the write: the scheduler's claim can flip the row to
+        # 'running' at any moment, and a cancel must never overwrite a
+        # claimed row (the dispatch would go ahead regardless).
         cursor = conn.execute(
             "UPDATE scheduled_actions SET status = 'cancelled' "
             "WHERE id = ? AND status = 'pending'",
             (action_id,),
         )
-        if cursor.rowcount == 0:
-            return "not_cancellable"
-        return "cancelled"
+        if cursor.rowcount:
+            return "cancelled"
+        # Claimed (before or after the read above): a repeat ends after this
+        # occurrence.
+        ended = conn.execute(
+            "UPDATE scheduled_actions SET repeat = NULL "
+            "WHERE id = ? AND status = 'running' AND repeat IS NOT NULL AND repeat != ''",
+            (action_id,),
+        )
+        return "cancelled" if ended.rowcount else "not_cancellable"
 
 
 # Intent-text shapes of the ad-hoc reminders the removed talent /

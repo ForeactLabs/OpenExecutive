@@ -796,21 +796,25 @@ async def _keep(files: dict[str, bytes]) -> dict[str, Any]:
             from_mail=turn_used_mail_files(),
         )
     ))
+    def _entry(n: str, d: bytes) -> dict[str, Any]:
+        link = f"/api/backend/python-jobs/{job_id}/{urllib.parse.quote(n)}"
+        # The line to put in the answer, ready made: an image shows inline,
+        # any other file is a link that opens it.
+        show = f"![{n}]({link})" if _IMAGE_NAME.search(n) else f"[{n}]({link})"
+        return {
+            "name": n, "bytes": len(d), "link": link, "show": show,
+            **({"handle": f"file:{safe_name(n)}"} if safe_name(n) in kept else {}),
+        }
+
     return {
-        "files": [
-            {"name": n, "bytes": len(d),
-             "link": f"/api/backend/python-jobs/{job_id}/{urllib.parse.quote(n)}",
-             **({"handle": f"file:{safe_name(n)}"} if safe_name(n) in kept else {}),
-             **({"show": f"![{n}](/api/backend/python-jobs/{job_id}/{urllib.parse.quote(n)})"}
-                if _IMAGE_NAME.search(n) else {})}
-            for n, d in sorted(files.items())
-        ],
+        "files": [_entry(n, d) for n, d in sorted(files.items())],
         "note": (
-            "Put each image file's `show` line in the answer as it is, so the image "
-            "appears in the chat (a handle never shows as an image); give every "
-            "other file's link as a markdown link. A file's handle "
-            "attaches it to a draft (ghostwrite_email files) or saves it to a "
-            "Drive folder (save_file): do that yourself when they asked for it."
+            "Put each file's `show` line in the answer exactly as it is: an image "
+            "appears in the chat and any other file opens from it. Never write a "
+            "handle (file:...) in the answer: it opens nothing for the reader. A "
+            "handle is only for your own tools: it attaches the file to a draft "
+            "(ghostwrite_email files) or saves it to a Drive folder (save_file); "
+            "do that yourself when they asked for it."
         ),
     }
 

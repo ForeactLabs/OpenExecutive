@@ -1530,7 +1530,7 @@ async def _run_teammate_followup(
 
     if creator is None or creator.archived or creator.kind != "team":
         reason = "the person who scheduled it is no longer on the team"
-        mark_action_cancelled(action.id, reason)
+        mark_action_cancelled(action.id, reason, ends_repeat=True)
         logger.info("scheduler: action %d cancelled: %s", action.id, reason)
         _audit("cancelled", f"cancelled: {reason}")
         return True

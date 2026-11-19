@@ -497,15 +497,61 @@ def hold_many(
         f" It is one card for all {len(steps)} of these {tool} calls: one tap does them all."
         if len(steps) > 1 else ""
     )
+    return waiting_result(decision_id, why, together=together)
+
+
+def waiting_result(decision_id: int, why: str, *, together: str = "") -> str:
+    """What the model is told about a step held on an Approve card, the same
+    wherever it was held (here and ``take_the_lead``). Nothing went yet, so
+    every word about it is what happens once it's approved: a reply that
+    said "waiting for your tap" and then "I sent it from my own account"
+    told the person it went. Whose tap it waits on is the card's own
+    approver: the one speaking here, or someone else (a contact's or an
+    unattended run's step waits on a teammate who isn't in this chat)."""
+    whose = _card_approver_name(decision_id)
+    if whose is None:
+        where = "it's on an Approve card for them (in this chat, on Today and in their chat app)"
+        tell = "Tell them in one line it's waiting for their tap."
+    else:
+        where = f"it's on an Approve card for {whose} (on their Today and in their chat app)"
+        tell = f"Tell them in one line it's waiting on {whose}'s OK: they have no card to tap themselves."
     return json.dumps({
         "status": "waiting_for_approval",
         "decision_instance_id": decision_id,
         "message": (
-            "Not done yet: it's on an Approve card for them (in this chat, on Today and in their chat app), "
-            f"because {why}. Tapping Approve does exactly this.{together} Tell them in one line it's "
-            "waiting for their tap. Do not retry or work around it."
+            f"Not done yet: {where}, because {why}. Tapping Approve does exactly this.{together} {tell} "
+            "Say what it does only as what happens once it's approved "
+            "(\"it will go from my account\"), never as sent or done. Do not retry or work around it."
         ),
     })
+
+
+def _card_approver_name(decision_id: int) -> str | None:
+    """The name of the person card ``decision_id`` waits on, when that isn't
+    the one speaking this turn; None when it is them (or it can't be told,
+    which reads as theirs, as before). Never raises."""
+    try:
+        from openexecutive.memory.decision_ledger import get_decision_instance
+        from openexecutive.orchestrator import speaker as speaker_mod
+        from openexecutive.people.registry import get_principal
+        from openexecutive.people.store import get_person
+
+        row = get_decision_instance(decision_id)
+        if row is None:
+            return None
+        approver_id = row.approver_person_id
+        if approver_id is None:
+            principal = get_principal()
+            approver_id = principal.id if principal is not None else None
+        here = speaker_mod.speaker()
+        if approver_id is None or (here is not None and here.id == approver_id):
+            return None
+        approver = get_person(int(approver_id))
+        name = (approver.full_name or "").strip() if approver is not None else ""
+        return name or "the owner"
+    except Exception:
+        logger.warning("levels: couldn't tell whose card %s is", decision_id, exc_info=True)
+        return None
 
 
 def waiting_chip(result: str, *, label: str, iteration: int | None = None) -> dict[str, Any] | None:

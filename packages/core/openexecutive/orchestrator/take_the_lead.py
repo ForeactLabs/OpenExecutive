@@ -2089,6 +2089,9 @@ def done(scopes: list[str], *, days: int = 7, limit: int = 100, db_path: Path | 
 # How far back a turn's <done_lately> looks, and how many steps it lists.
 DONE_LATELY_WINDOW = timedelta(hours=24)
 DONE_LATELY_MAX = 12
+# How much of each step's own words the block keeps: enough to tell whether a new ask is the same email (with only a
+# line cut at 160 the Executive couldn't say whether its own draft matched).
+DONE_LATELY_TEXT = 400
 # A step that went (on its own, or once its card was approved), and one
 # whose card is still open. A failed or skipped one didn't happen: asking
 # again is a new ask.
@@ -2163,7 +2166,7 @@ def done_lately_block(session: Any, *, now: datetime | None = None, db_path: Pat
                 at = when.astimezone(zone).strftime("%a %d %b %H:%M")
             except ValueError:
                 at = step.at[:16]
-            what = _one_line(plain(step.summary), 160)
+            what = _one_line(plain(step.summary), DONE_LATELY_TEXT)
             if step.mail_to:
                 what = f"{what}, to {_one_line(plain(step.mail_to), 160)}"
                 if step.mail_subject:
@@ -2747,14 +2750,9 @@ async def _gated(name: str, inner: _Handler, tool_input: dict[str, Any], *, sour
         except Exception:
             logger.exception("take_the_lead: couldn't hold %s", name)
             return json.dumps({"error": f"{name} was not done: it needs someone's approval first. Do not retry."})
-        return json.dumps({
-            "status": "waiting_for_approval",
-            "decision_instance_id": decision_id,
-            "message": (
-                f"Not done yet: it waits for approval on Today because {hit.reason}. "
-                "Do not retry or work around it."
-            ),
-        })
+        from openexecutive.orchestrator import levels
+
+        return levels.waiting_result(decision_id, hit.reason)
     result = await inner(tool_input)
     text = result if isinstance(result, str) else json.dumps(result) if isinstance(result, dict) else str(result)
     if result_waiting(text, name):
@@ -3060,14 +3058,9 @@ async def _asked(name: str, inner: _Handler, tool_input: dict[str, Any], *, mcp:
     except Exception:
         logger.exception("take_the_lead: couldn't hold %s", name)
         return json.dumps({"error": f"{name} was not done: it needs the owner's approval first. Do not retry."})
-    return json.dumps({
-        "status": "waiting_for_approval",
-        "decision_instance_id": decision_id,
-        "message": (
-            f"Not done yet: it waits on an Approve card for the owner because {hit.reason}. "
-            "Tell them in one line it's waiting. Do not retry or work around it."
-        ),
-    })
+    from openexecutive.orchestrator import levels
+
+    return levels.waiting_result(decision_id, hit.reason)
 
 
 def asked_handlers(handlers: dict[str, Any]) -> dict[str, Any]:
