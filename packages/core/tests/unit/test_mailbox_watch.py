@@ -335,3 +335,17 @@ def test_research_never_proposes_an_email_watch() -> None:
         {"slug": "email-x", "signal_type": "mailbox", "target": "x"}, [],
     )))
     assert "error" in out
+
+
+def test_an_inbox_watch_can_be_set_after_their_mail_was_read(db: Path) -> None:
+    # "Check Dana's email and tell me when she replies": the read shuts the
+    # watch list's outside fetches, not a watch on their own inbox.
+    from openexecutive.delegation import lockdown
+
+    assert not lockdown.mail_touched_withholds("add_watchlist_entry", {"signal_type": "mailbox", "slug": "x"})
+    assert lockdown.mail_touched_withholds("add_watchlist_entry", {"signal_type": "rss", "slug": "x"})
+    _email_watch(db)
+    ms.insert_watchlist_item(slug="rss-acme", signal_type="rss", target="https://acme.example/feed", db_path=db)
+    assert not lockdown.mail_touched_withholds("tune_watchlist_entry", {"slug": "email-sign-ups", "enabled": False})
+    assert lockdown.mail_touched_withholds("tune_watchlist_entry", {"slug": "rss-acme", "enabled": False})
+    assert lockdown.mail_touched_withholds("tune_watchlist_entry", "not a dict")
