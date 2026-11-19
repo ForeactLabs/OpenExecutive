@@ -32,6 +32,9 @@ KEYWORDS_KEY = "keywords"
 # ``config_json`` key: when the last read that worked began
 # (``sources.mailbox``); the next read starts a little before it.
 READ_THROUGH_KEY = "read_through"
+# ``config_json`` key: when it was last turned back on. Nothing that came
+# before is read, as nothing from before the watch was set is.
+READ_FROM_KEY = "read_from"
 MAX_SENDERS = 10
 MAX_KEYWORDS = 10
 _KEYWORD_MAX_CHARS = 60
@@ -134,6 +137,7 @@ __all__ = [
     "FROM_KEY",
     "KEYWORDS_KEY",
     "OWNER_KEY",
+    "READ_FROM_KEY",
     "READ_THROUGH_KEY",
     "audit_privacy",
     "clean_trigger",

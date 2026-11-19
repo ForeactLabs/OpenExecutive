@@ -627,12 +627,13 @@ def _email_watch_reads_from_now(conn: sqlite3.Connection, item_id: int) -> None:
     now: the person turned it off, so the mail that came meanwhile is not
     news. (A watch that was on but couldn't read, its inbox disconnected,
     still catches up: only turning it off moves this.)"""
-    from openexecutive.monitoring.mailbox import READ_THROUGH_KEY
+    from openexecutive.monitoring.mailbox import READ_FROM_KEY, READ_THROUGH_KEY
 
+    now = datetime.now(UTC).isoformat()
     conn.execute(
-        "UPDATE watchlist SET config_json = json_set(config_json, ?, ?) "
+        "UPDATE watchlist SET config_json = json_set(config_json, ?, ?, ?, ?) "
         "WHERE id = ? AND enabled = 0 AND signal_type = ?",
-        (f"$.{READ_THROUGH_KEY}", datetime.now(UTC).isoformat(), item_id, SOURCE_KIND_MAILBOX),
+        (f"$.{READ_THROUGH_KEY}", now, f"$.{READ_FROM_KEY}", now, item_id, SOURCE_KIND_MAILBOX),
     )
 
 

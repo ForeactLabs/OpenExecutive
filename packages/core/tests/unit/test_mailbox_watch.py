@@ -283,6 +283,29 @@ def test_turned_back_on_it_reads_from_then_not_from_when_it_was_turned_off(db: P
         assert datetime.now(UTC) - read_through() < timedelta(minutes=1)
 
 
+def test_turned_back_on_it_tells_nothing_from_while_it_was_off(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Off from 09:00 to 10:00; a sign-up at 09:55 is not news at 10:00, not
+    # even inside the overlap a later poll re-reads.
+    item = _email_watch(db)
+    ms.set_enabled(item.id, False, db_path=db)
+    ms.set_enabled(item.id, True, db_path=db)
+    row = ms.get_watchlist_item(item.id, db_path=db)
+    assert row is not None
+    on_at = datetime.fromisoformat(row.config_json[mailbox.READ_FROM_KEY])
+    box = _Mailbox([
+        gm.MailMessage(id="off", thread_id="t1", from_addr="noreply@app.example", from_name="App",
+                       subject="New sign up", received_at=(on_at - timedelta(minutes=5)).isoformat()),
+        gm.MailMessage(id="on", thread_id="t2", from_addr="noreply@app.example", from_name="App",
+                       subject="New sign up", received_at=(on_at + timedelta(seconds=1)).isoformat()),
+    ], [])
+    _patch_mailbox(monkeypatch, box)
+    signals = asyncio.run(mailbox_source.MailboxSource().poll(row, db_path=db))
+    assert [s.source_external_id for s in signals] == ["on"]
+    assert box.asked == [on_at]
+
+
 def test_a_later_poll_reads_from_a_little_before_the_last_read_that_worked(
     db: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

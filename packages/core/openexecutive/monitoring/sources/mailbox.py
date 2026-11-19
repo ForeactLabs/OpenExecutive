@@ -78,13 +78,22 @@ def _read_through(item: WatchlistItem, *, db_path: Path | None) -> datetime | No
     return through if read is None else max(read, through)
 
 
+def _start(item: WatchlistItem, now: datetime) -> datetime:
+    """The oldest mail it may tell: from when the watch was set, or when it
+    was last turned back on (``mailbox.READ_FROM_KEY``)."""
+    created = _parse(item.created_at) or now
+    turned_on = _parse(str((item.config_json or {}).get(mailbox.READ_FROM_KEY) or ""))
+    return max(created, turned_on) if turned_on is not None else created
+
+
 def _since(item: WatchlistItem, now: datetime, read: datetime | None) -> datetime:
     """From when to read: a little before the last read that worked
-    (``read``), else from when the watch was set. Not the last poll: a poll
-    that couldn't read (inbox not connected, the mail service down) must
-    not move it on, or the mail that came meanwhile is skipped."""
-    created = _parse(item.created_at) or now
-    return max(created, read - _OVERLAP) if read is not None else created
+    (``read``), else from its start (``_start``), never before that. Not
+    the last poll: a poll that couldn't read (inbox not connected, the mail
+    service down) must not move it on, or the mail that came meanwhile is
+    skipped."""
+    start = _start(item, now)
+    return max(start, read - _OVERLAP) if read is not None else start
 
 
 async def _read_back_to(client: Any, since: datetime) -> list[Any]:
@@ -155,12 +164,12 @@ class MailboxSource:
         now = datetime.now(UTC)
         read = _read_through(item, db_path=db_path)
         since = _since(item, now, read)
-        created = _parse(item.created_at) or since
+        start = _start(item, now)
         received = await _read_back_to(gmail_for(email), since)
         found: list[tuple[datetime, Any]] = []
         for message in received:
             arrived = _parse(getattr(message, "received_at", "") or "")
-            if arrived is not None and arrived < created:
+            if arrived is not None and arrived < start:
                 continue
             if mailbox.matches(
                 item.trigger_json,
