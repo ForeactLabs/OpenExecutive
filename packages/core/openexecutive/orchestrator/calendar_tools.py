@@ -23,6 +23,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from openexecutive.memory import workspace_settings
+from openexecutive.memory.workspace_settings import COMPANY_TIME_HINT
 
 if TYPE_CHECKING:
     from openexecutive.departments.authority import GateDecision
@@ -86,11 +87,11 @@ CREATE_CALENDAR_EVENT_TOOL: dict[str, Any] = {
             },
             "start": {
                 "type": "string",
-                "description": "Start time in ISO 8601 format with timezone (e.g. 2025-06-15T14:00:00+00:00)",
+                "description": "Start time. " + COMPANY_TIME_HINT,
             },
             "end": {
                 "type": "string",
-                "description": "End time in ISO 8601 format with timezone. Must be after start.",
+                "description": "End time, after the start. " + COMPANY_TIME_HINT,
             },
             "attendee_person_ids": {
                 "type": "array",
