@@ -4,11 +4,11 @@
 // this exact step go (take_the_lead.rule_offers), plus Keep asking me, which
 // is the default. Picking one adds that rule to Your rules once Do it has
 // gone through; the card then says so, with Undo. A Goes rule is the
-// account owner's: for anyone else the server refuses it and the card says so.
+// account owner's, so only the owner sees the box.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { addCompanyLeadRule, deleteCompanyLeadRule, type LeadRuleKind } from "@/lib/api";
+import { addCompanyLeadRule, deleteCompanyLeadRule, getPeopleViewer, type LeadRuleKind } from "@/lib/api";
 import { describeRule } from "@/lib/leadRules";
 
 export interface RuleOffer {
@@ -44,7 +44,21 @@ export function offerLine(offer: RuleOffer): string {
  * the offers were worked out for the step as it was.
  */
 export function useNextTimeRule(offers: RuleOffer[], onResolved: () => void, editing = false) {
-  const shown = offers.length > 0 && !editing;
+  const [owner, setOwner] = useState(false);
+  const offered = offers.length > 0;
+  useEffect(() => {
+    if (!offered) return;
+    let live = true;
+    getPeopleViewer()
+      .then((viewer) => {
+        if (live) setOwner(viewer.is_principal);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [offered]);
+  const shown = offered && owner && !editing;
   const [pick, setPick] = useState<number>(-1);
   const [added, setAdded] = useState<{ id: number | null; line: string } | null>(null);
   const [error, setError] = useState<string | null>(null);

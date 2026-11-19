@@ -1147,10 +1147,11 @@ def rule_offers(
         recipients = [a for a in addresses if "@" in a]
         new = sorted({a.lower() for a in new_people(addresses)})
         spends = says(tool, tool_input, mcp=mcp)
-        if mcp and new and not _goes_rules_apply():
-            # A connected app's step to someone new also meets the egress
-            # list, which counts Goes rules only where they apply on this
-            # turn: no rule would let it go here.
+        if new and not _goes_rules_apply():
+            # A step to someone new also meets the egress list (a connected
+            # app's) or the off-roster check (a direct message), which count
+            # Goes rules only where they apply on this turn (``lets_go``):
+            # no rule would let it go here.
             return []
         # A recipient it can't read: no person or company rule covers them,
         # and a connected app's check holds it whatever the rules say.
