@@ -1041,6 +1041,28 @@ def _round_separator(tail: str, text: str) -> str:
 
 # Longest text before a tool call that is still a working note.
 WORKING_NOTE_MAX_CHARS = 300
+# A call that only looks something up (whole name segments, as in "search_gmail_messages").
+_LOOKUP_CALL_RE = re.compile(
+    r"(?:^|_)(?:search|read|get|list|find|lookup|query|fetch|consult|retrieve|recall|open)(?:_|$)", re.IGNORECASE
+)
+# Calls that neither look nor act: they don't change what a round is.
+_NEUTRAL_CALLS = frozenset({"show_progress"})
+
+
+def _only_looks(tool_uses: list[dict[str, Any]]) -> bool:
+    """Whether every call a round made only looks something up: a connected
+    app's call (call_tool) or a group's (use_tool) by the tool it runs. A
+    round that also acts (a send, a save) wrote its text as part of the
+    answer ("Runway is 14 months." before the email with it)."""
+    names = []
+    for tu in tool_uses:
+        name = str(tu.get("name", ""))
+        given = tu.get("input")
+        if name in ("call_tool", "use_tool") and isinstance(given, dict):
+            name = str(given.get("name") or name)
+        if name not in _NEUTRAL_CALLS:
+            names.append(name)
+    return bool(names) and all(_LOOKUP_CALL_RE.search(n) for n in names)
 
 
 def _is_working_note(text: str) -> bool:
@@ -1054,12 +1076,13 @@ def _is_working_note(text: str) -> bool:
 def _without_notes(rounds: list[tuple[str, bool]]) -> str | None:
     """The reply without its working notes, when it had any, else None.
     ``rounds`` is each round's streamed text (its separator first) and
-    whether the round went on to call tools. A note stays when no round
+    whether the round went on only to look something up (``_only_looks``,
+    and not the rest of a cut round's text). A note stays when no round
     after it wrote anything: then it is all the reply there is."""
     last_text = max((i for i, (text, _) in enumerate(rounds) if text.strip()), default=-1)
     kept = [
-        text for i, (text, called) in enumerate(rounds)
-        if not (called and i < last_text and _is_working_note(text))
+        text for i, (text, looked) in enumerate(rounds)
+        if not (looked and i < last_text and _is_working_note(text))
     ]
     if len(kept) == len(rounds):
         return None
@@ -2488,8 +2511,9 @@ class Executive:
         # never run together ("...stock.Yes. ITEM-1...").
         streamed_tail = ""
         # Each round's streamed text (its separator first) and whether it went
-        # on to call tools, since the reply was last written again: the
-        # working notes among them leave the reply at the end (_without_notes).
+        # on only to look something up, since the reply was last written
+        # again: the working notes among them leave the reply at the end
+        # (_without_notes).
         rounds: list[tuple[str, bool]] = []
         # Set once a failed web search got its one more round this turn.
         searched_again = False
@@ -2656,7 +2680,10 @@ class Executive:
                     response_content.append(replay)
             if turn_sources is not None:
                 record_web_sources(turn_sources, final_msg.content)
-            rounds.append((round_sep_text + full_text, final_msg.stop_reason == "tool_use"))
+            rounds.append((
+                round_sep_text + full_text,
+                final_msg.stop_reason == "tool_use" and not carries_on and _only_looks(tool_uses),
+            ))
             # A web search is a look, like any read: the after-reply check
             # sees it with the turn's other calls.
             claim_calls.extend(web_searches.searched(response_content))

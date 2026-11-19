@@ -5582,7 +5582,7 @@ chat:
     costs far less than running every answer on it.
   one_clean_answer: |
     The reply is the answer alone (orchestrator/executive.py). A short
-    working note a round wrote before its tool calls (one line, no list
+    working note a round wrote before lookups only (one line, no list
     or table: "Now the live data.") leaves it once a later round writes
     the answer, sent as a rewrite with the clean text; a note with
     nothing after it stays. Each web search is a look for the after-reply

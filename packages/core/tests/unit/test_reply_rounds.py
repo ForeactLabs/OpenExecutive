@@ -81,18 +81,19 @@ def test_a_new_round_starts_a_new_paragraph(tail: str, text: str, separator: str
 
 def test_a_turn_keeps_every_round_in_its_own_paragraph() -> None:
     reply = _reply([
-        FinalMsg([TextBlock("Stock by store:\n- Stores: 12"), ToolUseBlock("tu1", "no_such_tool", {})], "tool_use"),
+        FinalMsg([TextBlock("Check actual stock."), ToolUseBlock("tu1", "no_such_tool", {})], "tool_use"),
         FinalMsg([TextBlock("Yes. ITEM-1 has 12 in Stores.")], "end_turn"),
     ])
-    assert reply == "Stock by store:\n- Stores: 12\n\nYes. ITEM-1 has 12 in Stores."
+    assert reply == "Check actual stock.\n\nYes. ITEM-1 has 12 in Stores."
 
 
 def test_a_working_note_before_a_lookup_leaves_the_answer() -> None:
     # Seen in a research reply: "Nothing on the carrier's surcharge schedule
     # in the mailbox. Now the live data." stayed at the top of the answer.
     reply = _reply([
-        FinalMsg([TextBlock("Now to find the Finance folder."), ToolUseBlock("tu1", "no_such_tool", {})], "tool_use"),
-        FinalMsg([TextBlock("Nothing in the mailbox. Now the live data."), ToolUseBlock("tu2", "no_such_tool", {})],
+        FinalMsg([TextBlock("Now to find the Finance folder."),
+                  ToolUseBlock("tu1", "call_tool", {"name": "search_drive_files", "arguments": {}})], "tool_use"),
+        FinalMsg([TextBlock("Nothing in the mailbox. Now the live data."), ToolUseBlock("tu2", "search_tools", {})],
                  "tool_use"),
         FinalMsg([TextBlock("Midwest diesel is $5.97, down 23 cents.")], "end_turn"),
     ])
@@ -101,10 +102,32 @@ def test_a_working_note_before_a_lookup_leaves_the_answer() -> None:
 
 def test_a_note_with_nothing_after_it_is_the_reply() -> None:
     reply = _reply([
-        FinalMsg([TextBlock("I saved the sheet."), ToolUseBlock("tu1", "no_such_tool", {})], "tool_use"),
+        FinalMsg([TextBlock("Checking the sheet."), ToolUseBlock("tu1", "read_sheet", {})], "tool_use"),
         FinalMsg([], "end_turn"),
     ])
-    assert reply == "I saved the sheet."
+    assert reply == "Checking the sheet."
+
+
+def test_an_answer_written_before_an_action_stays() -> None:
+    # "What's our runway? Email it to Dana.": the one-line answer comes
+    # before the send, and the person still gets it.
+    reply = _reply([
+        FinalMsg([TextBlock("Runway is 14 months at the current burn."),
+                  ToolUseBlock("tu1", "send_email", {})], "tool_use"),
+        FinalMsg([TextBlock("Sent to Dana.")], "end_turn"),
+    ])
+    assert reply == "Runway is 14 months at the current burn.\n\nSent to Dana."
+
+
+def test_the_rest_of_a_cut_sentence_stays() -> None:
+    # A round cut mid-answer carries on in the next; that short rest is
+    # the end of the sentence, not a note.
+    reply = _reply([
+        FinalMsg([TextBlock("Revenue grew")], "max_tokens"),
+        FinalMsg([TextBlock(" 12% in Q3."), ToolUseBlock("tu1", "search_knowledge", {})], "tool_use"),
+        FinalMsg([TextBlock("Margins held.")], "end_turn"),
+    ])
+    assert reply == "Revenue grew 12% in Q3.\n\nMargins held."
 
 
 class SearchBlock:
