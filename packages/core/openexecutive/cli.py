@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -60,14 +59,12 @@ async def _ask(question: str) -> None:
 
 
 async def print_reply(stream: AsyncIterator[str | dict[str, Any]]) -> str:
-    """Print a streamed reply and return the reply it ends on.
+    """Print a streamed reply and return the one left on screen.
 
     A terminal can't take back printed text, so when the reply is written
     again (a ``rewrite`` event) the new text is held until it differs from
     what is on screen, then printed under a "Corrected" line. A rewrite that
-    comes back the same, or empty, leaves the shown reply as the answer. One
-    that only leaves sentences out (working notes, ``_without_notes``) is
-    returned without printing it again: nothing in it was corrected."""
+    comes back the same, or empty, leaves the shown reply as the answer."""
     from openexecutive.orchestrator.executive import Executive
 
     shown = ""
@@ -89,31 +86,13 @@ async def print_reply(stream: AsyncIterator[str | dict[str, Any]]) -> str:
             console.print(chunk, end="", highlight=False)
             continue
         new += chunk
-        if not shown.startswith(new) and not _fewer_sentences(shown, new, done=False):
+        if not shown.startswith(new):
             _correct(new)
             shown, new = new, None
     if new and new != shown:
-        if not _fewer_sentences(shown, new, done=True):
-            _correct(new)
+        _correct(new)
         shown = new
     return shown
-
-
-_SENTENCE_GAP_RE = re.compile(r"(?<=[.!?])\s+")
-
-
-def _fewer_sentences(shown: str, new: str, *, done: bool) -> bool:
-    """Whether ``new`` is ``shown`` with whole sentences left out. While the
-    rewrite is still coming (``done`` False) its last sentence may be cut,
-    so it only has to start one still ahead."""
-    want = _SENTENCE_GAP_RE.split(new.strip())
-    ahead = iter(_SENTENCE_GAP_RE.split(shown.strip()))
-    for i, sentence in enumerate(want):
-        if i == len(want) - 1 and not done:
-            return any(have.startswith(sentence) for have in ahead)
-        if sentence not in ahead:
-            return False
-    return True
 
 
 @cli.command()
