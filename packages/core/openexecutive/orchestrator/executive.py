@@ -1220,6 +1220,15 @@ class Executive:
             user_content_parts.append(
                 {"type": "text", "text": f"<pending_followups>\n{followups}\n</pending_followups>"}
             )
+        # What this speaker asked for in the last day, in any chat or app,
+        # that went or waits on its card (take_the_lead.done_lately_block),
+        # so the same ask sent again in a new chat is that ask, not a second
+        # email or card. Changes with every step, so the user turn.
+        from openexecutive.orchestrator.take_the_lead import done_lately_block
+
+        lately = done_lately_block(session)
+        if lately:
+            user_content_parts.append({"type": "text", "text": f"<done_lately>\n{lately}\n</done_lately>"})
 
         # Attachment blocks (images) are inserted before the text message so
         # the model sees the visual context first, then the user's question.

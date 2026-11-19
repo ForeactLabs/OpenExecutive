@@ -324,7 +324,10 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                     raise
     # ``goal_id``: the company goal the step was for (``for_goal``), so the
     # Goals page can say what it did for each goal this week.
-    for column in ("job_id", "to_person_id", "goal_id"):
+    # ``asked_by``: the person it did it for (who asked, or whose card was
+    # approved), so a new turn of theirs is shown what they asked for lately
+    # (``done_lately_block``).
+    for column in ("job_id", "to_person_id", "goal_id", "asked_by"):
         if column not in log_columns:
             try:
                 conn.execute(f"ALTER TABLE {LOG_TABLE} ADD COLUMN {column} INTEGER")  # noqa: S608
@@ -1937,6 +1940,23 @@ def is_mail_send(tool: str) -> bool:
     )
 
 
+def asked_by_now() -> int | None:
+    """Who the step being logged is for: inside an approved step, the person
+    who asked for it (the owner when they approved their own); else the
+    owner or teammate whose own turn this is. None for unattended work.
+    Never raises."""
+    try:
+        from openexecutive.orchestrator import levels
+
+        if levels.is_approved():
+            requester = levels.approved_requester()
+            return requester if requester is not None else _principal_id()
+        return _team_asker_id()
+    except Exception:
+        logger.warning("take_the_lead: couldn't tell whom a step was for", exc_info=True)
+        return None
+
+
 def record(
     *, scope: str, source: str, tool: str, summary: str, status: str, why: str = "",
     decision_id: int | None = None, db_path: Path | None = None,
@@ -1956,10 +1976,11 @@ def record(
         try:
             conn.execute(
                 f"INSERT INTO {LOG_TABLE} (at, scope, source, tool, summary, status, why, decision_id, "  # noqa: S608
-                "mail_to, mail_subject, prompted_by, job_id, outcome, to_person_id, goal_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "mail_to, mail_subject, prompted_by, job_id, outcome, to_person_id, goal_id, asked_by) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (datetime.now(UTC).isoformat(), scope, source, tool, summary, status, why, decision_id,
-                 mail_to, mail_subject, prompted_by, job_id, _one_line(outcome, 160), to_person_id, goal_id),
+                 mail_to, mail_subject, prompted_by, job_id, _one_line(outcome, 160), to_person_id, goal_id,
+                 asked_by_now()),
             )
             conn.commit()
         finally:
@@ -2000,6 +2021,7 @@ class Done:
     outcome: str = ""
     to_person_id: int | None = None
     goal_id: int | None = None
+    asked_by: int | None = None
 
 
 def done(scopes: list[str], *, days: int = 7, limit: int = 100, db_path: Path | None = None) -> list[Done]:
@@ -2020,6 +2042,87 @@ def done(scopes: list[str], *, days: int = 7, limit: int = 100, db_path: Path | 
     finally:
         conn.close()
     return [Done(**dict(r)) for r in rows]
+
+
+# How far back a turn's <done_lately> looks, and how many steps it lists.
+DONE_LATELY_WINDOW = timedelta(hours=24)
+DONE_LATELY_MAX = 12
+# A step that went (on its own, or once its card was approved), and one
+# whose card is still open. A failed or skipped one didn't happen: asking
+# again is a new ask.
+_LATELY_WENT = ("done", "approved")
+_LATELY_WAITING = "waiting"
+
+
+def done_lately(
+    person_id: int, *, now: datetime | None = None, db_path: Path | None = None,
+) -> list[Done]:
+    """The steps a person asked for in the last day that went or still wait
+    on a card, newest first: what a new turn of theirs is shown, so the same
+    ask again is taken as that one (``done_lately_block``)."""
+    since = ((now or datetime.now(UTC)) - DONE_LATELY_WINDOW).isoformat()
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            f"SELECT * FROM {LOG_TABLE} WHERE asked_by = ? AND at >= ? AND status IN (?, ?, ?) "  # noqa: S608
+            "ORDER BY at DESC, id DESC LIMIT ?",
+            (int(person_id), since, *_LATELY_WENT, _LATELY_WAITING, DONE_LATELY_MAX * 4),
+        ).fetchall()
+    finally:
+        conn.close()
+    steps = [Done(**dict(r)) for r in rows]
+    # A connected-app read did nothing for anyone.
+    return [s for s in steps if "__" not in s.tool or mcp_tool_acts(s.tool)][:DONE_LATELY_MAX]
+
+
+def done_lately_block(session: Any, *, now: datetime | None = None, db_path: Path | None = None) -> str:
+    """The body of the turn's ``<done_lately>`` block: what the speaker asked
+    for in the last day, in any chat or app, that went or waits on its card.
+    A new conversation otherwise starts blind, so the same ask sent again
+    sent a second email or made a second card. Only in a conversation
+    private to them (their steps are theirs alone). "" when there are none
+    or the lookup fails (it never blocks a turn)."""
+    try:
+        from openexecutive.memory.workspace_settings import get_user_timezone
+        from openexecutive.orchestrator.speaker import own_private_speaker
+        from openexecutive.utils.prompt_blocks import no_tags, plain
+
+        person = own_private_speaker(session)
+        if person is None:
+            return ""
+        steps = done_lately(person.id, now=now, db_path=db_path)
+        if not steps:
+            return ""
+        zone = get_user_timezone()
+        lines = []
+        for step in steps:
+            try:
+                when = datetime.fromisoformat(step.at.replace("Z", "+00:00"))
+                if when.tzinfo is None:
+                    when = when.replace(tzinfo=UTC)
+                at = when.astimezone(zone).strftime("%a %d %b %H:%M")
+            except ValueError:
+                at = step.at[:16]
+            what = _one_line(plain(step.summary), 160)
+            if step.mail_to:
+                what = f"{what}, to {_one_line(plain(step.mail_to), 160)}"
+                if step.mail_subject:
+                    what = f"{what}, subject “{_one_line(plain(step.mail_subject), 120)}”"
+            if step.status == _LATELY_WAITING:
+                state = f"waiting on their OK (card {step.decision_id})" if step.decision_id else "waiting on their OK"
+            else:
+                state = "done"
+            lines.append(no_tags(f"- {at}, {state}: {what}"))
+    except Exception:
+        logger.warning("take_the_lead: couldn't list what the speaker asked for lately", exc_info=True)
+        return ""
+    return (
+        "What they asked you for in the last day, in any chat or app, that went or waits on its card. "
+        "When this message asks for the same thing again (the same email to the same person, the same "
+        "step), it is that ask, not a new one: don't send it again and don't make another card. Say in "
+        "one line that it went (when, to whom) or that its card is waiting for their OK, and do it again "
+        "only if they say to. Anything else here, leave alone and don't mention.\n" + "\n".join(lines)
+    )
 
 
 # Area → the authority scope whose holders may approve a held action of

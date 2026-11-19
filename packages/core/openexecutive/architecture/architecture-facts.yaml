@@ -5148,6 +5148,15 @@ scheduler:
     rule, up to 10) asking the Executive to cancel_followup one the message
     shows is settled. The conversation review cannot do this for a chat that
     read mail (it skips those turns), which is the case that prompted it.
+    Every turn in a conversation private to the speaker also carries
+    <done_lately> (take_the_lead.done_lately_block): what they asked for in
+    the last day, in any chat or app, that went (done, approved) or still
+    waits on its card (waiting), from the Take the lead log by asked_by
+    (take_the_lead.asked_by_now), up to 12, connected-app reads left out.
+    The same ask again is that ask: the Executive says it went or its card
+    waits and redoes it only if told to. A new chat otherwise started
+    blind, so a repeated ask sent a second email or made a second card.
+    Information only, no hold.
   monthly_value: |
     The owner's monthly tally (briefing/value_summary.py). A tick hook,
     `_maybe_send_monthly_value` → `value_summary.maybe_send_monthly`
