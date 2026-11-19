@@ -1149,9 +1149,10 @@ def rule_offers(
             # no rule would let it go here.
             return []
         # A recipient it can't read: no person or company rule covers them,
-        # and a connected app's check holds it whatever the rules say.
+        # and a connected app's check holds it whatever the rules say (a
+        # direct message's off-roster check still takes a Someone new rule).
         unreadable = any(not _EMAIL_RE.fullmatch(a) for a in addresses)
-        if asked and unreadable:
+        if asked and mcp and unreadable:
             return []
         candidates = [(RULE_TOPIC, kind)]
         reached = new or recipients

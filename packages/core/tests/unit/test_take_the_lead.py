@@ -2667,8 +2667,11 @@ def test_a_direct_message_to_someone_new_offers_nothing_where_goes_rules_dont_co
     monkeypatch.setattr(mcp_gateway, "_goes_rules_apply", lambda: applies["on"])
     dm = ("send_slack_dm", {"user_id": "U1", "text": "hi"})
     assert {"kind": "topic", "value": "someone_new"} in ttl.rule_offers(*dm, ttl.SOMEONE_NEW, mcp=False)
+    # The card the off-roster check holds (asked) offers it too, and only it.
+    assert ttl.rule_offers(*dm, ttl.SOMEONE_NEW, mcp=False, asked=True) == [{"kind": "topic", "value": "someone_new"}]
     applies["on"] = False  # the off-roster check won't count a rule here
     assert ttl.rule_offers(*dm, ttl.SOMEONE_NEW, mcp=False) == []
+    assert ttl.rule_offers(*dm, ttl.SOMEONE_NEW, mcp=False, asked=True) == []
 
 
 def test_a_topic_waits_rule_sees_who_a_booking_invites(owner: Any) -> None:
