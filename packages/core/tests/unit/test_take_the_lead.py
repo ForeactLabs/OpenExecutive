@@ -147,14 +147,14 @@ def test_a_money_word_without_an_amount_goes(owner: Any, text: str) -> None:
 @pytest.mark.parametrize("text", [
     "Sixteen posts, each aimed at sign-ups or booked sessions.",
     "Sign up today; two people signed up and one signed in to the app.",
-    "The sign-in page, the signout link and the signup form are live. Sign in with Google.",
+    "The sign-in page, the signout link and the signup form are live. Sign in to Google, sign out of Slack.",
 ])
 def test_signing_up_or_in_is_not_a_contract(owner: Any, text: str) -> None:
     assert ttl.check("message_person", {"person_id": 1, "text": text}, lead=_lead(), rules=[]) is None
 
 
 @pytest.mark.parametrize("text", ["Please sign in the box below.", "Can you come by to sign in person?",
-                                  "He signed in blue ink."])
+                                  "He signed in blue ink.", "Please sign in with your initials on page 3."])
 def test_signing_in_a_box_is_still_signing(owner: Any, text: str) -> None:
     hit = ttl.check("message_person", {"person_id": 1, "text": text}, lead=_lead(), rules=[])
     assert hit is not None and hit.kind == "contracts"

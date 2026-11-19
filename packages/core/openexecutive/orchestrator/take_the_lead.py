@@ -195,7 +195,7 @@ _MCP_DELETE_RE = re.compile(r"(delete|remove|trash|cancel|share|permission|clear
 # in" ("sign in the box", "sign in person") is still signing.
 _CONTRACTS_RE = re.compile(
     r"\b(contracts?|agreements?|"
-    r"sign(?:ed)?(?![-\s]?ups?\b|-?(?:ins?|outs?)\b|\s+(?:in|out)\s+(?:to|with|as|using|of)\b)|"
+    r"sign(?:ed)?(?![-\s]?ups?\b|-?(?:ins?|outs?)\b|\s+in\s+to\b|\s+out\s+of\b)|"
     r"signature|nda|terms|legal|lawyers?|"
     r"liabilit\w*|lawsuit)\b",
     re.IGNORECASE,
