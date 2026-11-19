@@ -642,3 +642,26 @@ def test_chat_deletes_a_workflow_only_for_its_creator_or_the_principal(
 
     out = _run(app_control.handle_do_in_app, args, _web(roster["owner"], "s-own"))
     assert "error" not in out
+
+
+def test_a_snooze_with_no_offset_is_on_the_companys_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """"Snooze it until 9 tomorrow" in New York is 9 there, and the reply
+    says so in the company's time, not UTC."""
+    from types import SimpleNamespace
+    from zoneinfo import ZoneInfo
+
+    from openexecutive.api.routes import alerts
+
+    zone = ZoneInfo("America/New_York")
+    monkeypatch.setattr("openexecutive.memory.workspace_settings.get_user_timezone", lambda: zone)
+    monkeypatch.setattr(app_control_catalog, "_trusted_alert_ids", lambda: {7})
+    seen: list[Any] = []
+
+    def _snooze(alert_id: int, body: Any, request: Any) -> Any:
+        seen.append(body.until)
+        return SimpleNamespace(headline="Late invoice")
+
+    monkeypatch.setattr(alerts, "snooze_alert", _snooze)
+    out = asyncio.run(app_control_catalog._snooze_alert(None, "7", "2026-10-20T09:00"))
+    assert seen == [datetime(2026, 10, 20, 13, 0, tzinfo=UTC)]
+    assert out == "Snoozed “Late invoice” until Oct 20, 09:00 (EDT)"
