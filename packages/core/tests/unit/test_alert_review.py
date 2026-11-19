@@ -1136,6 +1136,17 @@ def test_a_card_already_on_their_list_is_not_a_nudge(db: Path, audit_events, mon
     assert not any(e[0] == review.EVENT_NUDGED for e in audit_events)
 
 
+def test_a_personal_card_is_never_reviewed_nor_evidence(db: Path) -> None:
+    # An email watch's card is one person's alone: the review never routes,
+    # nudges or audits it, nor shows it as evidence for another card.
+    old = _insert(db, "Pilot pricing", hours_ago=30, topic_tags=["pilot"])
+    mine = _insert(db, "Dana Lee: Offer letter", hours_ago=30, source="mailbox", topic_tags=["pilot"])
+    assert [a.id for a in review.select_candidates(NOW, _settings(), db_path=db)] == [old]
+    related = review.gather_evidence(alert_store.get_alert(old, db_path=db), NOW, db_path=db)  # type: ignore[arg-type]
+    assert mine not in {r.get("alert_id") for r in related.get("related_alerts") or []}
+    assert _apply(db, mine, AlertVerdict(alert_id=mine, verdict="stale"), evidence={}) == ""
+
+
 def test_an_escalation_with_no_chat_app_says_no_message_went(db: Path, audit_events, monkeypatch) -> None:
     """The principal has no chat app: the card on their list is raised, and
     the log doesn't claim a message reached them."""
