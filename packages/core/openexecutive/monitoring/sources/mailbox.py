@@ -29,7 +29,7 @@ from openexecutive.monitoring.sources.base import observe
 logger = logging.getLogger(__name__)
 
 # Mail read per page, and pages per poll: a poll reads back page by page to
-# where it last read, so a busy inbox or a day disconnected loses nothing,
+# where it last read (one more page to see there is nothing older), so a busy inbox or a day disconnected loses nothing,
 # up to this many emails at once.
 _READ_LIMIT = 50
 _MAX_PAGES = 20
@@ -65,9 +65,11 @@ def _since(item: WatchlistItem, now: datetime) -> datetime:
 
 async def _read_back_to(client: Any, since: datetime) -> list[Any]:
     """Every inbox email since ``since``: the newest page, then the page
-    before its oldest email, and so on until a page comes back short (up to
-    ``_MAX_PAGES``). A page boundary is read twice (the mail services count
-    in whole seconds); each email is kept once."""
+    before its oldest email, and so on until a page has nothing new (up to
+    ``_MAX_PAGES``). Not until a page comes back short: the clients drop the
+    person's own mail and mail deleted since it was listed, so a short page
+    can still have older mail behind it. A page boundary is read twice (the
+    mail services count in whole seconds); each email is kept once."""
     received: list[Any] = []
     seen: set[str] = set()
     before: datetime | None = None
@@ -77,7 +79,7 @@ async def _read_back_to(client: Any, since: datetime) -> list[Any]:
         seen.update(m.id for m in new)
         received += new
         stamps = [t for m in page if (t := _parse(getattr(m, "received_at", "") or "")) is not None]
-        if len(page) < _READ_LIMIT or not new or not stamps:
+        if not new or not stamps:
             break
         before = min(stamps) + timedelta(seconds=1)
     else:

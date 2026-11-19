@@ -115,6 +115,10 @@ class _Mailbox:
     messages: list[Any]
     asked: list[datetime]
 
+    # Ids a real client lists but drops (the person's own mail, or mail
+    # deleted since it was listed), so the page comes back short.
+    dropped: frozenset[str] = frozenset()
+
     async def received_since(self, after: datetime, *, before: datetime | None = None, limit: int = 25) -> list[Any]:
         if before is None:
             self.asked.append(after)
@@ -122,7 +126,7 @@ class _Mailbox:
             (m for m in self.messages if before is None or datetime.fromisoformat(m.received_at) < before),
             key=lambda m: m.received_at, reverse=True,
         )
-        return newest_first[:limit]
+        return [m for m in newest_first[:limit] if m.id not in self.dropped]
 
 
 def _person(**kw: Any) -> Any:
@@ -175,7 +179,7 @@ def test_a_poll_reads_back_page_by_page_to_where_it_last_read(
     db: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # A day disconnected, then 130 emails: the newest page alone would miss
-    # the sign-up that came first.
+    # the sign-up that came first, and so would stopping at a short page.
     item = _email_watch(db)
     set_at = datetime.fromisoformat(item.created_at)
     mail = [
@@ -185,7 +189,8 @@ def test_a_poll_reads_back_page_by_page_to_where_it_last_read(
     ]
     mail.append(gm.MailMessage(id="first", thread_id="tf", from_addr="noreply@app.example", from_name="App",
                                subject="New sign up", received_at=(set_at + timedelta(minutes=1)).isoformat()))
-    _patch_mailbox(monkeypatch, _Mailbox(mail, []))
+    # One of the newest is their own note to self: the first page is short.
+    _patch_mailbox(monkeypatch, _Mailbox(mail, [], dropped=frozenset({"n129"})))
 
     signals = asyncio.run(mailbox_source.MailboxSource().poll(item, db_path=db))
 
