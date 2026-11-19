@@ -129,7 +129,7 @@ def test_only_their_own_steps_from_the_last_day(monkeypatch: pytest.MonkeyPatch,
 
 
 def test_a_card_still_open_shows_however_old(monkeypatch: pytest.MonkeyPatch, roster: SimpleNamespace) -> None:
-    # A card's row keeps the time it was made until it is approved.
+    # A card's row keeps the time it was made while it is open.
     card = _card()
     _step(monkeypatch, roster.principal, status="waiting", decision_id=card, subject="Open since Monday", hours_ago=30)
     block = ttl.done_lately_block(_web(roster.principal))
@@ -183,3 +183,13 @@ def test_a_card_on_someone_elses_list_names_them(monkeypatch: pytest.MonkeyPatch
     _step(monkeypatch, roster.teammate, status="waiting", decision_id=card, subject="Needs Olivia")
     block = ttl.done_lately_block(_web(roster.teammate))
     assert f"waiting on Olivia Owner's OK (card {card})" in block
+
+
+def test_a_card_approved_after_a_day_shows_from_when_it_went(
+    monkeypatch: pytest.MonkeyPatch, roster: SimpleNamespace,
+) -> None:
+    card = _card()
+    _step(monkeypatch, roster.principal, status="waiting", decision_id=card, subject="Approved today", hours_ago=30)
+    ttl.resolved(card, "approved")
+    block = ttl.done_lately_block(_web(roster.principal))
+    assert "done:" in block and "Approved today" in block

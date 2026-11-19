@@ -1997,9 +1997,17 @@ def _set_log_status(decision_id: int, status: str, *, db_path: Path | None = Non
     try:
         conn = _connect(db_path)
         try:
-            conn.execute(
-                f"UPDATE {LOG_TABLE} SET status = ? WHERE decision_id = ?", (status, decision_id),  # noqa: S608
-            )
+            if status == "approved":
+                # It went now, not when its card was made (``done_lately``
+                # reads when a step went).
+                conn.execute(
+                    f"UPDATE {LOG_TABLE} SET status = ?, at = ? WHERE decision_id = ?",  # noqa: S608
+                    (status, datetime.now(UTC).isoformat(), decision_id),
+                )
+            else:
+                conn.execute(
+                    f"UPDATE {LOG_TABLE} SET status = ? WHERE decision_id = ?", (status, decision_id),  # noqa: S608
+                )
             conn.commit()
         finally:
             conn.close()
