@@ -1041,12 +1041,17 @@ def _round_separator(tail: str, text: str) -> str:
 
 # Longest text before a tool call that is still a working note.
 WORKING_NOTE_MAX_CHARS = 300
-# A sentence that says what it does next: how a working note reads.
+# A sentence that says what it does next: how a working note reads ("Now
+# the live data.", "Let me check the folder."). Anchored to the sentence's
+# start, and "now"/"next" only with a step after them ("Now that Acme
+# signed, ..." is an answer).
 _NEXT_STEP_RE = re.compile(
-    r"(?:^|[.!?]\s+)(?:let me|let's|now\b|next\b|first\b|then\b|time to|checking|looking|searching|pulling|"
-    r"i'll (?:check|look|search|pull|find|try)|i will (?:check|look|search|pull|find|try))",
+    r"^(?:let me|let's|now,? (?:to|for|on to|let|i'll|i will|checking|looking|searching|the)\b|"
+    r"next,? (?:to|let|i'll|i will|checking|looking|searching|the)\b|time to|checking|looking (?:up|for|into|at)|"
+    r"searching|pulling|i'll (?:check|look|search|pull|find|try)|i will (?:check|look|search|pull|find|try))",
     re.IGNORECASE,
 )
+_SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+")
 # A call that only looks something up (whole name segments, as in "search_gmail_messages").
 _LOOKUP_CALL_RE = re.compile(
     r"(?:^|_)(?:search|read|get|list|find|lookup|query|fetch|consult|retrieve|recall|open)(?:_|$)", re.IGNORECASE
@@ -1071,18 +1076,24 @@ def _only_looks(tool_uses: list[dict[str, Any]]) -> bool:
     return bool(names) and all(_LOOKUP_CALL_RE.search(n) for n in names)
 
 
-def _is_working_note(text: str) -> bool:
-    """Whether a round's text before its tool calls is a working note ("Now
-    the live data.", "Let me check the folder."): a line or two that says
-    what it does next, with no list, table or figure. Longer text, a figure
-    ("Revenue was $1.2M.") or an answer ("Yes, Acme signed it.") is part of
-    the answer and stays."""
+def _less_notes(text: str) -> str | None:
+    """A round's text before its lookups without its working-note
+    sentences, when it had any, else None. Only a line or two with no list
+    or table is looked at, and a sentence with a figure always stays, so
+    "Yes, Acme signed it. Let me pull the signed copy." keeps its answer."""
     note = text.strip()
-    return (
-        bool(note) and len(note) <= WORKING_NOTE_MAX_CHARS
-        and "\n" not in note and "|" not in note and not any(c.isdigit() for c in note)
-        and _NEXT_STEP_RE.search(note) is not None
-    )
+    if not note or len(note) > WORKING_NOTE_MAX_CHARS or "\n" in note or "|" in note:
+        return None
+    sentences = _SENTENCE_END_RE.split(note)
+    kept = [
+        s for s in sentences if not (_NEXT_STEP_RE.match(s) and not any(c.isdigit() for c in s))
+    ]
+    if len(kept) == len(sentences):
+        return None
+    if not kept:
+        return ""
+    # Its paragraph break before it (the round's separator) stays.
+    return text[: len(text) - len(text.lstrip())] + " ".join(kept)
 
 
 def _without_notes(rounds: list[tuple[str, bool]]) -> str | None:
@@ -1092,13 +1103,18 @@ def _without_notes(rounds: list[tuple[str, bool]]) -> str | None:
     and not the rest of a cut round's text). A note stays when no round
     after it wrote anything: then it is all the reply there is."""
     last_text = max((i for i, (text, _) in enumerate(rounds) if text.strip()), default=-1)
-    kept = [
-        text for i, (text, looked) in enumerate(rounds)
-        if not (looked and i < last_text and _is_working_note(text))
-    ]
-    if len(kept) == len(rounds):
+    out: list[str] = []
+    changed = False
+    for i, (text, looked) in enumerate(rounds):
+        rest = _less_notes(text) if looked and i < last_text else None
+        if rest is None:
+            out.append(text)
+        else:
+            changed = True
+            out.append(rest)
+    if not changed:
         return None
-    return "".join(kept).lstrip()
+    return "".join(out).lstrip()
 
 
 class Executive:

@@ -97,7 +97,21 @@ def test_a_working_note_before_a_lookup_leaves_the_answer() -> None:
                  "tool_use"),
         FinalMsg([TextBlock("Midwest diesel is $5.97, down 23 cents.")], "end_turn"),
     ])
-    assert reply == "Midwest diesel is $5.97, down 23 cents."
+    assert reply == "Nothing in the mailbox.\n\nMidwest diesel is $5.97, down 23 cents."
+
+
+@pytest.mark.parametrize(("text", "kept"), [
+    ("Yes, Acme signed it. Let me pull the signed copy.", "Yes, Acme signed it."),
+    ("No, the NDA was never signed. Let me find the draft.", "No, the NDA was never signed."),
+    ("First, the good news: Acme renewed.", "First, the good news: Acme renewed."),
+    ("Now that Acme signed, the deal is closed.", "Now that Acme signed, the deal is closed."),
+])
+def test_only_the_next_step_sentences_leave(text: str, kept: str) -> None:
+    reply = _reply([
+        FinalMsg([TextBlock(text), ToolUseBlock("tu1", "search_drive_files", {})], "tool_use"),
+        FinalMsg([TextBlock("Here's the signed copy.")], "end_turn"),
+    ])
+    assert reply == kept + "\n\nHere's the signed copy."
 
 
 def test_a_note_with_nothing_after_it_is_the_reply() -> None:
