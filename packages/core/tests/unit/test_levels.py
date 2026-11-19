@@ -169,6 +169,11 @@ async def test_a_step_only_its_speaker_can_do_never_goes_on_a_card(tool: str) ->
     assert result_failed(out) or '"refused"' in out
 
 
+def test_an_app_link_is_for_the_turn_that_asked() -> None:
+    # It checks no one, so a card would "succeed" and the link reach nobody.
+    assert "open_in_app" in levels.TURN_OWN and not levels.carriable("open_in_app", mcp=False)
+
+
 def test_a_look_up_or_a_card_is_never_put_on_a_card() -> None:
     # Its answer is for the turn that asked, gone by the time anyone taps.
     assert not levels.carriable("google_workspace__search_gmail_messages", mcp=True)

@@ -357,9 +357,11 @@ TURN_OWN: frozenset[str] = frozenset({
     "run_python_job",
     # The person's own words, said in their own conversation: a figure kept
     # from the reply they are reading, a fact or correction they stated, a
-    # card they answered, an app they are using. Each checks who is speaking
-    # when it runs, and a tap carries it out with nobody speaking, so an
-    # Approve card for it could only fail.
+    # card they answered, an app they are using. Each of these but
+    # open_in_app checks who is speaking when it runs, and a tap carries it
+    # out with nobody speaking, so an Approve card for it could only fail.
+    # open_in_app checks no one: its link is for the turn that asked, like
+    # the reads above, and would reach nobody from a card.
     "answer_card",
     "cancel_followup",
     "do_in_app",
