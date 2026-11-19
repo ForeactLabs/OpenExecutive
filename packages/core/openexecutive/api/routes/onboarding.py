@@ -902,13 +902,18 @@ async def commit_interview(body: OnboardCommitRequest, request: Request) -> Comp
 
     # The company's clock, from the device setup ran on, when it has none
     # yet: a later setup run never moves a clock someone set (Settings is
-    # where it changes). Best effort, and audited like a Settings change.
+    # where it changes). The zone is a company-wide setting, so it is saved
+    # for whoever Settings lets change it (the same role rule as
+    # PUT /workspace); setup itself still saves for anyone. Best effort, and
+    # audited like a Settings change.
     if body.timezone:
         try:
+            from openexecutive.api.routes.chat import _caller_is_principal_or_unclaimed
             from openexecutive.audit import log_event as audit_log
             from openexecutive.memory import workspace_settings
 
-            if workspace_settings.get_workspace().timezone is None:
+            may_set = _caller_is_principal_or_unclaimed(request)
+            if may_set and workspace_settings.get_workspace().timezone is None:
                 workspace_settings.set_timezone(body.timezone)
                 audit_log(
                     "workspace_settings_changed",

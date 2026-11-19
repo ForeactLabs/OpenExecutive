@@ -1703,6 +1703,9 @@ def _zone_calls(monkeypatch: pytest.MonkeyPatch, stored: str | None) -> list[str
     monkeypatch.setattr(ws, "get_workspace", lambda *a, **k: ws.WorkspaceSettings(timezone=stored))
     monkeypatch.setattr(ws, "set_timezone", lambda tz: saved.append(tz))
     monkeypatch.setattr("openexecutive.audit.log_event", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "openexecutive.api.routes.chat._caller_is_principal_or_unclaimed", lambda request: True
+    )
     return saved
 
 
@@ -1740,3 +1743,22 @@ def test_commit_with_an_unknown_zone_still_saves_and_leaves_the_zone(
     body = {**_commit_body(sid), "timezone": "Mars/Olympus"}
     assert client.post("/onboard/interview/commit", json=body).status_code == 200
     assert profile_path.exists() and saved == []
+
+
+def test_a_teammates_setup_leaves_the_companys_clock_alone(
+    client: TestClient, seeded: list[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The zone is a company-wide setting: setup saves it only for someone
+    Settings lets change it. The rest of the setup still saves."""
+    saved = _zone_calls(monkeypatch, None)
+    monkeypatch.setattr(
+        "openexecutive.api.routes.chat._caller_is_principal_or_unclaimed", lambda request: False
+    )
+    monkeypatch.setattr(
+        "openexecutive.api.routes.people.caller_is_admin_teammate", lambda request: False, raising=False
+    )
+    seeded.append(_draft())
+    sid = _start(client)
+    body = {**_commit_body(sid), "timezone": "Asia/Tokyo"}
+    assert client.post("/onboard/interview/commit", json=body).status_code == 200
+    assert saved == []
