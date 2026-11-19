@@ -951,9 +951,11 @@ routing:
     the same generation. The Executive echoes those blocks in the
     assistant turn on the next iteration so continuity is preserved. The
     tool is appended after the sorted client-tool list so it never
-    receives the cache_control marker. Each turn is capped at
-    `WEB_SEARCH_MAX_USES` searches (default 2) — every search is billed, so
-    this bounds per-turn search spend and, multiplied across the
+    receives the cache_control marker. Each model request (one step of a
+    turn) is capped at `WEB_SEARCH_MAX_USES` searches (default 2), and a
+    chat turn whose last step hit the cap gets one more step to search
+    again (one_clean_answer) — every search is billed, so this bounds
+    per-step search spend and, multiplied across the
     7-specialist research fan-out, is a primary cost control.
 
     When the selected model is non-Claude (routed via OpenRouter), the
