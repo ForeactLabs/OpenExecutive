@@ -303,6 +303,19 @@ def test_cancelling_a_running_repeat_stops_what_comes_after(session_with_telegra
     assert _pending_others(action_id) == []
 
 
+def test_a_restore_drops_only_the_occurrence(session_with_telegram_ref: Session) -> None:
+    import sqlite3
+
+    from openexecutive.memory import episodic
+
+    action_id = _repeating()
+    with sqlite3.connect(str(episodic.DB_PATH)) as conn:
+        conn.execute("UPDATE scheduled_actions SET run_at = '2020-01-01T00:00:00+00:00' WHERE id = ?", (action_id,))
+    assert episodic.settle_restored_queue(episodic.DB_PATH) == 1
+    (nxt,) = _pending_others(action_id)
+    assert nxt.repeat == "daily@09:00" and datetime.fromisoformat(nxt.run_at) > datetime.now(UTC)
+
+
 def test_a_one_time_follow_up_does_not_come_back(session_with_telegram_ref: Session) -> None:
     from openexecutive.memory import episodic
 

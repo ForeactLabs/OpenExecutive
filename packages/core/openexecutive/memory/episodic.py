@@ -1705,12 +1705,21 @@ def settle_restored_queue(
             "WHERE id IN (SELECT value FROM json_each(?))",
             (json.dumps(stale),),
         ).rowcount
+        late = [
+            int(row[0]) for row in conn.execute(
+                "SELECT id FROM scheduled_actions WHERE status = 'pending' AND run_at <= ?", (cutoff,),
+            ).fetchall()
+        ]
         overdue = conn.execute(
             "UPDATE scheduled_actions SET status = 'cancelled', "
             "last_error = 'its time passed long before this copy came back' "
-            "WHERE status = 'pending' AND run_at <= ?",
-            (cutoff,),
+            "WHERE id IN (SELECT value FROM json_each(?))",
+            (json.dumps(late),),
         ).rowcount
+        # Only these occurrences are dropped: a repeating one comes back at
+        # its next time from now.
+        for action_id in [*stale, *late]:
+            _queue_next(conn, action_id)
         return int(running) + int(overdue)
 
 
