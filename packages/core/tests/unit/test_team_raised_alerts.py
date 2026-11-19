@@ -181,13 +181,14 @@ def test_other_alerts_still_broadcast(monkeypatch, db: Path) -> None:
 
 def test_a_personal_card_reaches_only_its_person(monkeypatch, db: Path) -> None:
     # An email watch's card names a sender and subject from one inbox: never
-    # a room or the Executive's mailbox, whatever triage picked.
+    # a room, the Executive's mailbox or a live push to every open browser,
+    # whatever triage picked.
     event = AlertEvent(source="mailbox", external_id="mailbox:1:m1", subject="s", body="b", routed_to_person_id=7)
     sent, _ = _run_pipeline(monkeypatch, db, event, channels=[
         AlertChannel.WEB, AlertChannel.SLACK_DM, AlertChannel.EMAIL,
         AlertChannel.DEPARTMENT_CHANNEL, AlertChannel.COMPANY_BROADCAST,
     ])
-    assert sent == [[AlertChannel.WEB, AlertChannel.SLACK_DM]]
+    assert sent == [[AlertChannel.SLACK_DM]]
 
 
 def test_words_from_outside_never_make_a_card_the_principals(monkeypatch, db: Path) -> None:

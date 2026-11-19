@@ -34,7 +34,9 @@ _recent_event_ts: deque[float] = deque(maxlen=_RATE_LIMIT_PER_MIN)
 _rate_lock = threading.Lock()
 
 # Where a personal card (``PERSONAL_SOURCES``) may go: to its person only.
-_PERSONAL_CHANNELS = frozenset({AlertChannel.WEB, AlertChannel.PERSISTED, AlertChannel.SLACK_DM})
+# Not WEB: ``dispatch_web`` pushes the whole card to every open browser
+# (``_make_private`` leaves it out for the same reason).
+_PERSONAL_CHANNELS = frozenset({AlertChannel.PERSISTED, AlertChannel.SLACK_DM})
 
 
 # Severities that justify re-dispatching a coalesced alert (a repeat that
@@ -289,7 +291,7 @@ async def evaluate_and_dispatch(
         ]
     if event.source in PERSONAL_SOURCES:
         # A card that is one person's alone (an email watch's sender and
-        # subject, say) reaches only them: the page, their own DM. Never a
+        # subject, say) reaches only them: their page, their own DM. Never a
         # room, and never the Executive's own mailbox, whatever triage made
         # of its words.
         effective_channels = [c for c in effective_channels if c in _PERSONAL_CHANNELS]
