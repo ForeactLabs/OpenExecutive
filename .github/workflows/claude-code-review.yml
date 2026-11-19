@@ -84,6 +84,19 @@ jobs:
                from SPECIALIST_TOOLS or `_AREAS`.
             4. Missing tests for new behavior.
 
+            The product's rules (CLAUDE.md): the point of the app is for the AI
+            to do things for people. Role says what someone can do. The
+            Approvals level (Careful, Balanced, Hands-off), capped by Your rules
+            and In training, says whether a step runs or waits, in one engine
+            (orchestrator/levels.py and take_the_lead's gate). Privacy hides
+            things; it never blocks them. Never suggest a hold, cap, word list,
+            refusal, allow-list or approval card outside that engine, and never
+            report removing one as a bug or a security issue. If a step looks
+            risky, the answer is one of Balanced's topics (money, contracts and
+            legal, hiring and people decisions, deleting or cancelling, sharing,
+            someone new, big sends) or a Your rules entry the owner can add,
+            and at most a 🟡 note.
+
             Skip style nits that ruff/mypy would catch and anything the
             `pr-checks` CI job already enforces (architecture-doc drift,
             stub markers, eval scenarios).
