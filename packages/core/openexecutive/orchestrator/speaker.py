@@ -27,7 +27,8 @@ logger = logging.getLogger(__name__)
 # else "needs to" do it.
 PASS_ON_NOTHING = (
     "Answer only the person who asked (on email, your reply to them is that answer); "
-    "send nothing to anyone else on their behalf: no message, card or alert about it."
+    "send nothing to anyone else on their behalf: no message, card or alert about it. "
+    "A run nobody is watching still says in its own result that this step didn't happen."
 )
 
 
