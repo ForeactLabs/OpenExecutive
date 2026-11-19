@@ -2555,8 +2555,10 @@ def test_a_topic_goes_rule_releases_its_words_in_what_it_sends_on_its_own(owner:
 def test_topic_rules_on_what_it_sends_as_you(owner: Any, balanced: None) -> None:
     _go("topic", "contracts")
     assert handle_it.content_hold("The contract is attached.") is None
-    # A password is no topic: only the topics wait.
-    assert handle_it.content_hold("The contract is attached, password inside.") is None
+    # Handing over a password is sharing, which a contracts rule doesn't cover.
+    assert handle_it.content_hold("The contract is attached, password inside.") == "sensitive"
+    assert ttl.topics_in("Your API key is sk-1") == {ttl.SHARE}
+    assert ttl.topics_in("Use the login page") == set()
     assert handle_it.content_hold("Here is the invoice for $450.") == "sensitive"
     _go("topic", "money")
     assert handle_it.content_hold("Here is the invoice for $450.") is None

@@ -348,13 +348,23 @@ def test_below_hands_off_a_reply_about_a_topic_waits(
 
 @pytest.mark.parametrize("body", [
     "The agenda is at https://docs.example.com/agenda.",
-    "Here's the new password for the portal.",
     "Sure, the board deck is on its way.",
 ])
 def test_only_the_topics_hold_a_reply(switched_on: Any, body: str) -> None:
-    """A link, a password or a word like "board" is no topic: on Balanced
-    only the topics wait, as for any other step."""
+    """A link or a word like "board" is no topic: on Balanced only the
+    topics wait, as for any other step."""
     assert _check(switched_on, reply=_reply(body=body)) is None
+
+
+def test_handing_over_a_password_is_sharing(switched_on: Any) -> None:
+    """A password is handed over like anything else shared: it waits on
+    Balanced, and a Sharing Goes rule lets it go."""
+    from openexecutive.orchestrator import take_the_lead as ttl
+
+    password = _reply(body="Here's the new password for the portal.")
+    assert _check(switched_on, reply=password) == "sensitive"
+    ttl.add_rule(ttl.SCOPE_COMPANY, "topic", ttl.SHARE, created_by="t", effect=ttl.EFFECT_GO)
+    assert _check(switched_on, reply=password) is None
 
 
 def test_below_hands_off_the_email_s_own_topic_holds_the_reply(switched_on: Any) -> None:

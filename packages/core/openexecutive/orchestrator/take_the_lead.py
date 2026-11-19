@@ -213,6 +213,15 @@ _CONTRACTS_RE = re.compile(
     r"liabilit\w*|lawsuit)\b",
     re.IGNORECASE,
 )
+# Handing over a way in is sharing, whatever carries it: a password, a key,
+# a login.
+_CREDENTIALS_RE = re.compile(
+    r"\b(passwords?|passcodes?|passphrases?|pins?\s+(?:code|number)|api[\s_-]?keys?|access\s+tokens?|"
+    r"auth(?:entication)?\s+tokens?|secret\s+keys?|private\s+keys?|credentials|"
+    r"log-?in\s+(?:details|info|credentials)|sign-?in\s+(?:details|info|credentials)|"
+    r"social\s+security\s+numbers?|ssn)\b",
+    re.IGNORECASE,
+)
 _PEOPLE_RE = re.compile(
     r"\b(hire|hiring|hired|offer letter|fire|fired|firing|terminat\w*|salary|salaries|compensation|"
     r"promot\w*|layoffs?|laid off|resign\w*|performance review|disciplinary)\b",
@@ -1426,7 +1435,7 @@ def _topics(
     """Every topic (``KINDS``) a step is about, in order, with the reason a
     card shows: the one place a step's topics are decided."""
     removes = tool in _DELETE_TOOLS or (mcp and _mcp_removes(tool, tool_input))
-    shares = mcp and _mcp_shares(tool, tool_input)
+    shares = (mcp and _mcp_shares(tool, tool_input)) or bool(_CREDENTIALS_RE.search(about))
     found: list[tuple[str, str]] = []
     if removes:
         found.append((DELETE, "it deletes or cancels something"))

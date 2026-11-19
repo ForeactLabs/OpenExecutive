@@ -133,7 +133,7 @@ REASONS: dict[str, str] = {
     "work_stranger": "I did what they asked, and they aren't in your People, so it waits for you to look.",
     # Meeting invites (delegation.invites).
     "stranger": "Below Hands-off it acts on its own only for people you know.",
-    "sensitive": "On Balanced, mail about money, a contract or hiring waits for you.",
+    "sensitive": "On Balanced, mail about money, a contract or hiring, or that hands over a password or key, waits for you.",
     "rule": "One of your rules says this waits for you.",
     "clash": "It clashes with something already on your calendar.",
     "calendar_unread": "It couldn't check your calendar for clashes, so it asked instead.",
