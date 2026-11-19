@@ -2057,16 +2057,17 @@ _LATELY_WAITING = "waiting"
 def done_lately(
     person_id: int, *, now: datetime | None = None, db_path: Path | None = None,
 ) -> list[Done]:
-    """The steps a person asked for in the last day that went or still wait
-    on a card, newest first: what a new turn of theirs is shown, so the same
-    ask again is taken as that one (``done_lately_block``)."""
+    """The steps a person asked for in the last day that went, and those
+    whose card is still open however old, newest first: what a new turn of
+    theirs is shown, so the same ask again is taken as that one
+    (``done_lately_block``). A waiting row's time is when its card was made."""
     since = ((now or datetime.now(UTC)) - DONE_LATELY_WINDOW).isoformat()
     conn = _connect(db_path)
     try:
         rows = conn.execute(
-            f"SELECT * FROM {LOG_TABLE} WHERE asked_by = ? AND at >= ? AND status IN (?, ?, ?) "  # noqa: S608
-            "ORDER BY at DESC, id DESC LIMIT ?",
-            (int(person_id), since, *_LATELY_WENT, _LATELY_WAITING, DONE_LATELY_MAX * 4),
+            f"SELECT * FROM {LOG_TABLE} WHERE asked_by = ? "  # noqa: S608
+            "AND (status = ? OR (status IN (?, ?) AND at >= ?)) ORDER BY at DESC, id DESC LIMIT ?",
+            (int(person_id), _LATELY_WAITING, *_LATELY_WENT, since, DONE_LATELY_MAX * 4),
         ).fetchall()
     finally:
         conn.close()
@@ -2077,7 +2078,7 @@ def done_lately(
 
 def done_lately_block(session: Any, *, now: datetime | None = None, db_path: Path | None = None) -> str:
     """The body of the turn's ``<done_lately>`` block: what the speaker asked
-    for in the last day, in any chat or app, that went or waits on its card.
+    for in any chat or app that went in the last day or waits on its card.
     A new conversation otherwise starts blind, so the same ask sent again
     sent a second email or made a second card. Only in a conversation
     private to them (their steps are theirs alone). "" when there are none
@@ -2117,11 +2118,12 @@ def done_lately_block(session: Any, *, now: datetime | None = None, db_path: Pat
         logger.warning("take_the_lead: couldn't list what the speaker asked for lately", exc_info=True)
         return ""
     return (
-        "What they asked you for in the last day, in any chat or app, that went or waits on its card. "
-        "When this message asks for the same thing again (the same email to the same person, the same "
-        "step), it is that ask, not a new one: don't send it again and don't make another card. Say in "
-        "one line that it went (when, to whom) or that its card is waiting for their OK, and do it again "
-        "only if they say to. Anything else here, leave alone and don't mention.\n" + "\n".join(lines)
+        "What they asked you for lately, in any chat or app: what went in the last day, and cards still "
+        "waiting for their OK. When this message asks for the same thing again (the same email to the "
+        "same person, the same step), take it as that ask, not a new one. If it went, say in one line "
+        "when and to whom, and ask whether they want it sent again. If its card is waiting, point them to "
+        "that card rather than making another. When they say again or yes, do it. Anything else here, "
+        "leave alone and don't mention.\n" + "\n".join(lines)
     )
 
 

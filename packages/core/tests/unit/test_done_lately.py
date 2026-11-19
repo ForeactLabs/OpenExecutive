@@ -93,7 +93,8 @@ def test_a_sent_email_and_a_waiting_card_are_shown(monkeypatch: pytest.MonkeyPat
 
     assert "done: Send gmail message, to sam@example.com, subject “Thursday pickup at Elm Street”" in block
     assert "waiting on their OK (card 41)" in block and "pat@example.com" in block
-    assert "don't send it again and don't make another card" in block
+    assert "point them to that card rather than making another" in block
+    assert "ask whether they want it sent again" in block
 
 
 def test_what_did_not_happen_is_left_out(monkeypatch: pytest.MonkeyPatch, roster: SimpleNamespace) -> None:
@@ -115,6 +116,13 @@ def test_only_their_own_steps_from_the_last_day(monkeypatch: pytest.MonkeyPatch,
     assert "This morning's email" in block
     assert "Ben's email" not in block and "Last week's email" not in block
     assert "Ben's email" in ttl.done_lately_block(_web(roster.teammate))
+
+
+def test_a_card_still_open_shows_however_old(monkeypatch: pytest.MonkeyPatch, roster: SimpleNamespace) -> None:
+    # A card's row keeps the time it was made until it is approved.
+    _step(monkeypatch, roster.principal, status="waiting", decision_id=41, subject="Open since Monday", hours_ago=30)
+    block = ttl.done_lately_block(_web(roster.principal))
+    assert "waiting on their OK (card 41)" in block and "Open since Monday" in block
 
 
 def test_never_in_a_conversation_others_read(monkeypatch: pytest.MonkeyPatch, roster: SimpleNamespace) -> None:
