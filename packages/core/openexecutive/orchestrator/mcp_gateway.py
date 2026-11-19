@@ -3969,8 +3969,8 @@ class MCPGateway:
             "WORKSPACE_MCP_TOOLS=%s / WORKSPACE_MCP_TOOL_TIER=%s, or renamed by "
             "workspace-mcp? (prompts/connected_systems.GOOGLE_TOOL_MANIFEST)",
             tool_name,
-            settings.workspace_mcp_tools,
-            settings.workspace_mcp_tool_tier,
+            ",".join(settings.workspace_mcp_service_list or ["all"]),
+            settings.workspace_mcp_tier,
         )
         return False
 

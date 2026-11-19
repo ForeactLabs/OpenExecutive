@@ -205,3 +205,12 @@ def test_closed_cards_never_crowd_out_what_went(monkeypatch: pytest.MonkeyPatch,
         decision_ledger.close_externally(card, reason="replaced by a newer card")
     block = ttl.done_lately_block(_web(roster.principal))
     assert "This morning's email" in block and "Replaced" not in block
+
+
+def test_a_steps_own_words_are_shown(monkeypatch: pytest.MonkeyPatch, roster: SimpleNamespace) -> None:
+    """Enough of what it said that a repeat ask can be matched to its own
+    step (a line cut at 160 left the Executive unable to say)."""
+    summary = "Email Sam confirming the Thursday pickup at Elm Street at 10am. " * 4
+    _step(monkeypatch, roster.principal, summary=summary)
+    block = ttl.done_lately_block(_web(roster.principal))
+    assert summary.strip()[:250] in block

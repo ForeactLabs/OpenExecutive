@@ -60,6 +60,9 @@ STATUS_CLOSED_EXTERNALLY = "closed_externally"
 
 # Still open: waiting on someone, or being carried out right now.
 OPEN_STATUSES: tuple[str, ...] = (STATUS_PROPOSED, STATUS_EXECUTING)
+# A step that never happened: asking for the same thing again is a new step
+# under the same key (``create_decision_instance``). One that went keeps it.
+FREES_KEY: tuple[str, ...] = (STATUS_REJECTED, STATUS_AUTO_NO_RESPONSE, STATUS_FAILED)
 
 # Severity values for circuit-breaker detection.
 SEVERITY_NONE = ""
@@ -185,8 +188,12 @@ def create_decision_instance(
 ) -> int:
     """Insert a new decision_instances row and return its id.
 
-    Raises sqlite3.IntegrityError if idempotency_key already exists — callers
-    should catch this and return the existing row instead of double-proposing.
+    ``idempotency_key`` says this step was asked for, or done. A step that
+    never happened (skipped, left to lapse, or failed: ``FREES_KEY``) gives
+    its key up here, so asking for the same thing again makes a new step
+    instead of failing. Raises sqlite3.IntegrityError while an open step, or
+    one that went, holds the key: callers look up the open one first
+    (``get_live_by_idem``) and return it instead of double-proposing.
     """
     now = datetime.now(UTC).isoformat()
     sql = """
@@ -197,6 +204,13 @@ def create_decision_instance(
         VALUES (?,?,?,?,?,?,?,?,?,?)
     """
     with _get_conn(db_path or _db_path()) as conn:
+        if idempotency_key is not None:
+            marks = ",".join("?" * len(FREES_KEY))
+            conn.execute(
+                "UPDATE decision_instances SET idempotency_key = NULL"
+                f" WHERE idempotency_key = ? AND status IN ({marks})",  # noqa: S608 - placeholders only
+                (idempotency_key, *FREES_KEY),
+            )
         cur = conn.execute(sql, (
             decision_class, now, department, originating_session_id,
             json.dumps(proposed_payload), idempotency_key, gate_mode,

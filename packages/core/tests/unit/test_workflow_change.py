@@ -568,6 +568,22 @@ def test_list_workflows_reads_one_for_its_owner(owner: Any) -> None:
     assert "know who is asking" in _call(wrt.handle_list_workflows, {"name": "meeting_prep"}, None)["error"]
 
 
+def test_the_list_says_whose_each_saved_workflow_is(owner: Any) -> None:
+    """A teammate told about the owner's Monday recap heard "you already
+    have it" (Test lab): the list never said who made a workflow."""
+    _stored(owner.id)
+    mate_id = people_store.upsert_person(full_name="Avery Mate", email="avery@co.example")
+    people_registry.invalidate()
+    mate = people_store.get_person(mate_id)
+
+    def made_by(person: Any) -> str:
+        listed = _call(wrt.handle_list_workflows, {}, _web(person))
+        return next(w["made_by"] for w in listed["workflows"] if w["name"] == "meeting_prep")
+
+    assert made_by(owner) == "you"
+    assert made_by(mate) == "Olivia Owner"
+
+
 def test_the_builder_is_told_whose_calendar_gateway_tools_read(monkeypatch: pytest.MonkeyPatch) -> None:
     from openexecutive.workflows import designer
 

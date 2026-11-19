@@ -102,6 +102,11 @@ class ScheduledAction(BaseModel):
     # runs as that teammate and reaches only them (scheduler.runner). NULL
     # for rows the system queued and for rows from before the column.
     created_by_person_id: int | None = None
+    # A follow-up that repeats ("from now on", "every Monday"): its cadence
+    # spec ('daily@HH:MM', 'weekly@DOW@HH:MM', …, company time). When one
+    # occurrence finishes the next is queued (``_queue_next``), until it is
+    # cancelled. None runs once.
+    repeat: str | None = None
 
 
 class OutboundContext(BaseModel):
@@ -350,6 +355,8 @@ def initialize_db(db_path: Path | None = None) -> None:
             ("task_completed_at", "TEXT"),
             ("task_closed_reason", "TEXT"),
             ("task_closed_due_at", "TEXT"),
+            # ScheduledAction.repeat.
+            ("repeat", "TEXT"),
         ):
             if col not in _sa_existing:
                 try:
@@ -1280,6 +1287,7 @@ def insert_scheduled_action(
     required_scope: str | None = None,
     status: str = "pending",
     created_by_person_id: int | None = None,
+    repeat: str | None = None,
     db_path: Path | None = None,
 ) -> int:
     if channel not in _VALID_SCHEDULED_CHANNELS:
@@ -1302,12 +1310,12 @@ def insert_scheduled_action(
             "INSERT INTO scheduled_actions "
             "(created_at, run_at, channel, channel_ref, intent_text, originating_session_id, "
             "department, kind, assigned_to_person_id, awaiting_response_since, scope_key, "
-            "required_scope, status, created_by_person_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "required_scope, status, created_by_person_id, repeat) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 now, run_at, channel, channel_ref, intent_text, originating_session_id,
                 department, kind, assigned_to_person_id, awaiting_str, scope_key,
-                required_scope, status, created_by_person_id,
+                required_scope, status, created_by_person_id, repeat or None,
             ),
         )
         return int(cursor.lastrowid or 0)
@@ -1766,7 +1774,39 @@ def mark_action_done(action_id: int, db_path: Path | None = None) -> bool:
             "UPDATE scheduled_actions SET status = 'done', last_error = '' WHERE id = ?",
             (action_id,),
         )
-        return cursor.rowcount > 0
+        done = cursor.rowcount > 0
+        if done:
+            _queue_next(conn, action_id)
+        return done
+
+
+def _queue_next(conn: sqlite3.Connection, action_id: int) -> int | None:
+    """When a repeating follow-up's occurrence finishes (it went, or gave
+    up), queue the next one: the same row, at its cadence's next time after
+    now. The one place a repeat goes on, whichever path finished it; a
+    cancelled one stops. Returns the new row's id."""
+    row = conn.execute("SELECT * FROM scheduled_actions WHERE id = ?", (action_id,)).fetchone()
+    spec = (row["repeat"] or "").strip() if row is not None else ""
+    if not spec:
+        return None
+    from openexecutive.departments.cadence import _parse_cadence_spec
+    from openexecutive.memory import workspace_settings
+
+    run_at = _parse_cadence_spec(spec, datetime.now(UTC), workspace_settings.get_user_timezone())
+    if run_at is None:
+        logger.warning("episodic: repeating follow-up %s has a cadence that can't be read: %r", action_id, spec)
+        return None
+    cursor = conn.execute(
+        "INSERT INTO scheduled_actions "
+        "(created_at, run_at, channel, channel_ref, intent_text, originating_session_id, "
+        "department, kind, assigned_to_person_id, scope_key, required_scope, status, "
+        "created_by_person_id, repeat) "
+        "SELECT ?, ?, channel, channel_ref, intent_text, originating_session_id, department, kind, "
+        "assigned_to_person_id, scope_key, required_scope, 'pending', created_by_person_id, "
+        "repeat FROM scheduled_actions WHERE id = ?",
+        (datetime.now(UTC).isoformat(), run_at.isoformat(), action_id),
+    )
+    return int(cursor.lastrowid or 0) or None
 
 
 def mark_action_cancelled(action_id: int, reason: str, db_path: Path | None = None) -> bool:
@@ -1803,6 +1843,7 @@ def mark_action_failed_or_retry(
                 "UPDATE scheduled_actions SET status = 'failed', last_error = ? WHERE id = ?",
                 (error[:500], action_id),
             )
+            _queue_next(conn, action_id)
             return "failed"
         # Backoff: 30s, 5m, 30m for attempts 1, 2, 3.
         backoff_seconds = {1: 30, 2: 300, 3: 1800}.get(attempts, 1800)

@@ -202,3 +202,45 @@ def test_a_time_with_no_offset_is_the_companys_time(
     )
     assert payload["status"] == "scheduled"
     assert datetime.fromisoformat(payload["run_at"]) == noon
+
+
+def test_a_repeating_follow_up_comes_back_until_cancelled(session_with_telegram_ref: Session) -> None:
+    """'Nudge us every Monday from now on' was set once (Test lab): a
+    follow-up can repeat, and each occurrence that finishes queues the next."""
+    from openexecutive.memory import episodic
+
+    payload = _call({
+        "run_at": _future_iso(), "channel": "telegram", "channel_ref": "42",
+        "intent": "Nudge the team about the open orders.", "repeat": "weekly@mon@09:00",
+    })
+    assert payload["status"] == "scheduled" and payload["repeat"] == "weekly@mon@09:00"
+    first = episodic.get_scheduled_action(payload["id"])
+    assert first is not None and first.repeat == "weekly@mon@09:00"
+
+    assert episodic.mark_action_done(first.id)
+    pending = [a for a in episodic.list_scheduled_actions(status="pending") if a.id != first.id]
+    assert len(pending) == 1
+    nxt = pending[0]
+    assert nxt.repeat == "weekly@mon@09:00" and nxt.intent_text == first.intent_text
+    assert datetime.fromisoformat(nxt.run_at) > datetime.now(UTC)
+
+    # Cancelling the waiting one ends it: nothing queues after a cancel.
+    episodic.cancel_scheduled_action(nxt.id)
+    assert [a for a in episodic.list_scheduled_actions(status="pending")] == []
+
+
+def test_a_one_time_follow_up_does_not_come_back(session_with_telegram_ref: Session) -> None:
+    from openexecutive.memory import episodic
+
+    payload = _call({"run_at": _future_iso(), "channel": "telegram", "channel_ref": "42", "intent": "Once."})
+    assert payload["repeat"] == "none: it runs once"
+    episodic.mark_action_done(payload["id"])
+    assert episodic.list_scheduled_actions(status="pending") == []
+
+
+def test_an_unreadable_repeat_is_sent_back(session_with_telegram_ref: Session) -> None:
+    payload = _call({
+        "run_at": _future_iso(), "channel": "telegram", "channel_ref": "42", "intent": "x",
+        "repeat": "every monday",
+    })
+    assert "can't be read" in payload["error"]

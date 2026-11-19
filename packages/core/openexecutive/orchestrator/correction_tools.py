@@ -256,7 +256,8 @@ def pending_followups_block(session: Any) -> str:
                 at = when.astimezone(zone).strftime("%a %d %b %H:%M")
             except ValueError:
                 at = a.run_at
-            lines.append(f"- #{a.id}, {at}: {' '.join(a.intent_text.split())[:200]}")
+            again = f" (repeats {a.repeat} until cancelled)" if a.repeat else ""
+            lines.append(f"- #{a.id}, {at}{again}: {' '.join(a.intent_text.split())[:200]}")
     except Exception:
         logger.warning("correction_tools: pending follow-ups lookup failed", exc_info=True)
         return ""
@@ -282,7 +283,8 @@ async def handle_list_followups(tool_input: dict[str, Any]) -> str:
     ][:_LIST_MAX]
     return json.dumps({
         "followups": [
-            {"action_id": a.id, "run_at": a.run_at, "says": " ".join(a.intent_text.split())[:200]}
+            {"action_id": a.id, "run_at": a.run_at, "says": " ".join(a.intent_text.split())[:200],
+             **({"repeat": a.repeat} if a.repeat else {})}
             for a in rows
         ],
     })

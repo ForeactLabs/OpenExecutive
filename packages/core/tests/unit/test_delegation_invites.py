@@ -379,7 +379,7 @@ def test_a_settled_card_under_the_key_doesnt_block_a_new_one(db: Path, decision_
     assert second != first and ledger.get_decision_instance(second).status == "proposed"  # type: ignore[union-attr]
     with sqlite3.connect(db) as conn:
         keys = [r[0] for r in conn.execute("SELECT idempotency_key FROM decision_instances ORDER BY id")]
-    assert keys[0] == key and keys[1].startswith(f"{key}:")
+    assert keys == [None, key]
 
 
 @pytest.mark.parametrize("decision_class", [invites.DECISION_CLASS, inbox.DECISION_CLASS])
