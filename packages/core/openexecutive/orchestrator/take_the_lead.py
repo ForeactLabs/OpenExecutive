@@ -1139,7 +1139,7 @@ def rule_text(rule: Rule) -> str:
 # money, sign nothing and decide nothing about anyone, whatever their text
 # mentions (a calendar invite about a $2,150 lease). ``says``.
 _KEEPS_TOOLS = frozenset({"assign_open_loop", "cancel_calendar_event", "create_calendar_event", "create_instant_meeting"})
-_MCP_SENDS_RE = re.compile(r"(?:^|_)(?:e?mails?|gmail|messages?|reply|replies|forward|post|chat|dm|sms)(?=$|_)")
+_MCP_SENDS_RE = re.compile(r"(?:^|_)(?:send\w*|notify\w*|share\w*|e?mails?|gmail|messages?|reply|replies|forward|post|chat|dm|sms)(?=$|_)")
 # Calendar, meeting, task and note apps: only their steps can be a booking,
 # a task or a note that carries nothing. Any other app is read in full.
 _MCP_KEEPS_APP_RE = re.compile(

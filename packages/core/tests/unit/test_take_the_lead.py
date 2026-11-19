@@ -2300,6 +2300,9 @@ def test_the_same_words_sent_or_paid_still_wait(owner: Any) -> None:
         ("quickbooks__create_task", {"text": _LEASE}, True),
         ("hubspot__create_invoice_note", {"text": _LEASE}, True),
         ("orb__ingest_event", {"value": "$5,000", "customer": "Acme"}, True),
+        ("teams__send_meeting_notes", {"to": DANA, "text": _LEASE}, True),
+        ("zoom__send_meeting_invite", {"to": DANA, "text": _LEASE}, True),
+        ("notion__share_note", {"email": DANA, "text": _LEASE}, True),
         ("lago__create_event", {"value": "$5,000", "customer": "Acme"}, True),
     ]:
         hit = ttl.check(tool, tool_input, lead=off, rules=rules, mcp=mcp)
