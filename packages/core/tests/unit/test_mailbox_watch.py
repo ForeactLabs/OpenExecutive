@@ -223,6 +223,31 @@ def test_a_backlog_comes_through_oldest_first_a_poll_at_a_time(
     assert told[2] == ""  # the overlap re-reads only what was already told
 
 
+def test_turned_back_on_it_reads_from_then_not_from_when_it_was_turned_off(db: Path) -> None:
+    item = _email_watch(db)
+    key = mailbox.READ_THROUGH_KEY
+    weeks_ago = (datetime.now(UTC) - timedelta(days=14)).isoformat()
+    ms.set_watchlist_config_key(item.id, key, weeks_ago, db_path=db)
+
+    def read_through() -> datetime:
+        row = ms.get_watchlist_item(item.id, db_path=db)
+        assert row is not None
+        return datetime.fromisoformat(row.config_json[key])
+
+    # On, and changed while on: where it read to stays (it catches up).
+    ms.update_watchlist_fields(item.id, {"enabled": 1}, db_path=db)
+    assert read_through().isoformat() == weeks_ago
+    # Off, then on again: the mail while it was off is not news.
+    for turn_on in (
+        lambda: ms.update_watchlist_fields(item.id, {"enabled": 1}, db_path=db),
+        lambda: ms.set_enabled(item.id, True, db_path=db),
+    ):
+        ms.set_watchlist_config_key(item.id, key, weeks_ago, db_path=db)
+        ms.set_enabled(item.id, False, db_path=db)
+        turn_on()
+        assert datetime.now(UTC) - read_through() < timedelta(minutes=1)
+
+
 def test_a_later_poll_reads_from_a_little_before_the_last_read_that_worked(
     db: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

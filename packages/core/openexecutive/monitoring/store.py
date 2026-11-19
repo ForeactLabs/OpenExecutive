@@ -613,11 +613,27 @@ def update_watchlist_fields(
     params: list[Any] = list(fields.values())
     params.append(item_id)
     with _get_conn(db_path) as conn:
+        if fields.get("enabled"):
+            _email_watch_reads_from_now(conn, item_id)
         cursor = conn.execute(
             f"UPDATE watchlist SET {sets} WHERE id = ?",
             params,
         )
         return int(cursor.rowcount)
+
+
+def _email_watch_reads_from_now(conn: sqlite3.Connection, item_id: int) -> None:
+    """When an email watch that was off is turned back on, it reads from
+    now: the person turned it off, so the mail that came meanwhile is not
+    news. (A watch that was on but couldn't read, its inbox disconnected,
+    still catches up: only turning it off moves this.)"""
+    from openexecutive.monitoring.mailbox import READ_THROUGH_KEY
+
+    conn.execute(
+        "UPDATE watchlist SET config_json = json_set(config_json, ?, ?) "
+        "WHERE id = ? AND enabled = 0 AND signal_type = ?",
+        (f"$.{READ_THROUGH_KEY}", datetime.now(UTC).isoformat(), item_id, SOURCE_KIND_MAILBOX),
+    )
 
 
 def remove_watchlist_config_key(
@@ -707,6 +723,8 @@ def set_enabled(
     db_path: Path | None = None,
 ) -> bool:
     with _get_conn(db_path) as conn:
+        if enabled:
+            _email_watch_reads_from_now(conn, item_id)
         cursor = conn.execute(
             "UPDATE watchlist SET enabled = ? WHERE id = ?",
             (1 if enabled else 0, item_id),

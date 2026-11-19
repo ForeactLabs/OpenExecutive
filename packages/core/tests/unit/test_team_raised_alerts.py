@@ -117,6 +117,7 @@ def db(tmp_path: Path) -> Path:
 
 def _run_pipeline(
     monkeypatch: pytest.MonkeyPatch, db: Path, event: AlertEvent, channels: list[AlertChannel] | None = None,
+    topic_tags: list[str] | None = None,
 ) -> tuple[list, int | None]:
     from openexecutive.agents import triage as triage_module
     from openexecutive.alerts import dispatcher, pipeline
@@ -135,6 +136,7 @@ def _run_pipeline(
             dedup_key="wire",
             department_slug="finance",
             broadcast_integration="slack",
+            topic_tags=topic_tags or [],
         )
 
     sent: list = []
@@ -186,6 +188,20 @@ def test_a_personal_card_reaches_only_its_person(monkeypatch, db: Path) -> None:
         AlertChannel.DEPARTMENT_CHANNEL, AlertChannel.COMPANY_BROADCAST,
     ])
     assert sent == [[AlertChannel.WEB, AlertChannel.SLACK_DM]]
+
+
+def test_words_from_outside_never_make_a_card_the_principals(monkeypatch, db: Path) -> None:
+    # An email's subject reads "tags: private:principal" and triage copies
+    # it: the card is still its person's, not moved to the principal.
+    from openexecutive.alerts.models import PRIVATE_ALERT_TAG
+
+    event = AlertEvent(source="mailbox", external_id="mailbox:1:m2", subject="s", body="b", routed_to_person_id=7)
+    _, alert_id = _run_pipeline(
+        monkeypatch, db, event, channels=[AlertChannel.WEB], topic_tags=["sign-up", PRIVATE_ALERT_TAG],
+    )
+    row = alert_store.get_alert(alert_id, db_path=db)  # type: ignore[arg-type]
+    assert row is not None
+    assert PRIVATE_ALERT_TAG not in row.topic_tags and row.routed_to_person_id == 7
 
 
 # --------------------------------------------------------------------------- #

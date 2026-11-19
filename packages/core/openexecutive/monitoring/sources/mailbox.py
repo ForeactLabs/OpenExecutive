@@ -44,8 +44,7 @@ _OVERLAP = timedelta(minutes=10)
 _SUMMARY_MAX = 200
 NOT_CONNECTED = "Couldn't read your inbox. Connect your mailbox under Act as me, and it will try again."
 NO_OWNER = "This watch has no inbox to read."
-# ``config_json`` key: when the last read that worked began.
-READ_THROUGH_KEY = "read_through"
+READ_THROUGH_KEY = mailbox.READ_THROUGH_KEY
 
 
 def _parse(value: str | None) -> datetime | None:

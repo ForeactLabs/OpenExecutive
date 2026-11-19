@@ -29,6 +29,9 @@ from openexecutive.monitoring.models import SOURCE_KIND_MAILBOX, WatchlistItem
 OWNER_KEY = "mailbox_of"
 FROM_KEY = "from"
 KEYWORDS_KEY = "keywords"
+# ``config_json`` key: when the last read that worked began
+# (``sources.mailbox``); the next read starts a little before it.
+READ_THROUGH_KEY = "read_through"
 MAX_SENDERS = 10
 MAX_KEYWORDS = 10
 _KEYWORD_MAX_CHARS = 60
@@ -131,6 +134,7 @@ __all__ = [
     "FROM_KEY",
     "KEYWORDS_KEY",
     "OWNER_KEY",
+    "READ_THROUGH_KEY",
     "audit_privacy",
     "clean_trigger",
     "own_slug",

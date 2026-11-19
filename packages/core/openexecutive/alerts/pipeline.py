@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from openexecutive.alerts import dispatcher, preferences, store
 from openexecutive.alerts.models import (
     PERSONAL_SOURCES,
+    PRIVATE_ALERT_TAG,
     AlertChannel,
     AlertEvent,
     AlertSeverity,
@@ -87,8 +88,6 @@ def _make_private(
     stored but never pushed live or broadcast, and deduplicated only against
     other private alerts (coalescing into a shared card would copy its body
     there)."""
-    from openexecutive.alerts.models import PRIVATE_ALERT_TAG
-
     principal_id: int | None = None
     try:
         from openexecutive.people.store import find_principal_person
@@ -270,7 +269,12 @@ async def evaluate_and_dispatch(
         triaged = await _triage(event, path)
         if not triaged.alert:
             return triaged, None
-        decision = triaged
+        # Whether a card is the principal's alone is the producer's to say
+        # (``event.private``), never triage's: it reads words from outside
+        # (an email's subject, a web page), which must not route a card.
+        decision = triaged.model_copy(update={
+            "topic_tags": [t for t in triaged.topic_tags if t != PRIVATE_ALERT_TAG],
+        })
     if event.raised_by:
         decision = _label_team_raised(decision, event.raised_by)
 
