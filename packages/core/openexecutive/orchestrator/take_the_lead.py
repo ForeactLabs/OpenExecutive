@@ -647,11 +647,6 @@ def new_people(addresses: Iterable[str]) -> list[str]:
     return [a for a in wanted if a not in allow and not _executive(a)]
 
 
-def _known(address: str) -> bool:
-    """Not someone new (``new_people``)."""
-    return not new_people([address])
-
-
 def _names_of(addresses: list[str]) -> list[str]:
     """The People names (contacts too) of these addresses. Never raises."""
     from openexecutive.people.store import find_person_by_address
