@@ -152,12 +152,14 @@ async def handle_record_decision_outcome(tool_input: dict[str, Any]) -> str:
 
     # ---- Who is asking ----
     if not _principal_asked():
+        from openexecutive.orchestrator.speaker import PASS_ON_NOTHING
+
         return _bad(
             "refused: only the principal can record how a decision turned out, "
             "and this request did not come from a conversation that confirms it "
-            "is them. Tell whoever asked that the principal needs to record it — "
-            "in the web app, or by telling you there or in their own Slack or "
-            "Discord.",
+            "is them. Tell whoever asked, plainly, that the principal can record "
+            "it in the web app, or by telling you there or in their own Slack or "
+            f"Discord. {PASS_ON_NOTHING}",
             refused=True, **_caller_context(),
         )
 
