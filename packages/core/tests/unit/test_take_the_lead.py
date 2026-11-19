@@ -145,6 +145,15 @@ def test_a_money_word_without_an_amount_goes(owner: Any, text: str) -> None:
 
 
 @pytest.mark.parametrize("text", [
+    "Sixteen posts, each aimed at sign-ups or booked sessions.",
+    "Sign up today; she signed in yesterday and two people signed up.",
+    "The sign-in page and the signup form are live.",
+])
+def test_signing_up_or_in_is_not_a_contract(owner: Any, text: str) -> None:
+    assert ttl.check("message_person", {"person_id": 1, "text": text}, lead=_lead(), rules=[]) is None
+
+
+@pytest.mark.parametrize("text", [
     "Pay 1200 now", "That's fifty dollars", "Budget is $250", "Wire 2k EUR",
     "We will pay you ten thousand dollars on signing.", "Approved: wire 15k to the vendor.",
     "Wire five hundred thousand to the escrow account.", "Budget approved: 25,000 SEK for the campaign.",

@@ -190,8 +190,11 @@ _MCP_FIRST_WORD_RE = re.compile(r"[a-z]+|[A-Z][a-z]*")
 _MCP_BATCH_READ_RE = re.compile(r"[_-]?batch$", re.IGNORECASE)
 _MCP_DELETE_RE = re.compile(r"(delete|remove|trash|cancel|share|permission|clear|archive)", re.IGNORECASE)
 
+# "Sign" is signing something, not signing up, in or out (a sign-up page,
+# "signed in"): those are about an account.
 _CONTRACTS_RE = re.compile(
-    r"\b(contracts?|agreements?|sign|signed|signature|nda|terms|legal|lawyers?|liabilit\w*|lawsuit)\b",
+    r"\b(contracts?|agreements?|sign(?:ed)?(?![-\s]?(?:ups?|ins?|outs?)\b)|signature|nda|terms|legal|lawyers?|"
+    r"liabilit\w*|lawsuit)\b",
     re.IGNORECASE,
 )
 _PEOPLE_RE = re.compile(
