@@ -337,6 +337,10 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         f"CREATE INDEX IF NOT EXISTS idx_{LOG_TABLE}_goal ON {LOG_TABLE}(goal_id, at)"  # noqa: S608
     )
+    # Every private turn reads the speaker's own steps (``done_lately``).
+    conn.execute(
+        f"CREATE INDEX IF NOT EXISTS idx_{LOG_TABLE}_asked_by ON {LOG_TABLE}(asked_by, status, at)"  # noqa: S608
+    )
     conn.execute(
         f"CREATE TABLE IF NOT EXISTS {JOBS_TABLE} ("  # noqa: S608
         "id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL, created_by TEXT NOT NULL, "
@@ -2105,6 +2109,16 @@ def done_lately_block(session: Any, *, now: datetime | None = None, db_path: Pat
         steps = done_lately(person.id, now=now, db_path=db_path)
         if not steps:
             return ""
+        # Whose OK a card waits on: a teammate's may be the owner's or an
+        # approver's, and they can't act on it themselves.
+        from openexecutive.memory.decision_ledger import get_decision_instances
+        from openexecutive.people.store import get_person
+
+        held = [int(s.decision_id) for s in steps if s.status == _LATELY_WAITING and s.decision_id]
+        approvers = {
+            i: card.approver_person_id
+            for i, card in (get_decision_instances(held, db_path=db_path) if held else {}).items()
+        }
         zone = get_user_timezone()
         lines = []
         for step in steps:
@@ -2121,7 +2135,14 @@ def done_lately_block(session: Any, *, now: datetime | None = None, db_path: Pat
                 if step.mail_subject:
                     what = f"{what}, subject “{_one_line(plain(step.mail_subject), 120)}”"
             if step.status == _LATELY_WAITING:
-                state = f"waiting on their OK (card {step.decision_id})" if step.decision_id else "waiting on their OK"
+                approver = approvers.get(int(step.decision_id)) if step.decision_id else None
+                other = get_person(approver) if approver is not None and approver != person.id else None
+                whose = (
+                    f"{plain(' '.join((other.full_name or other.email or 'someone else').split()))}'s"
+                    if other is not None else "their"
+                )
+                card = f" (card {step.decision_id})" if step.decision_id else ""
+                state = f"waiting on {whose} OK{card}"
             else:
                 state = "done"
             lines.append(no_tags(f"- {at}, {state}: {what}"))
@@ -2130,10 +2151,10 @@ def done_lately_block(session: Any, *, now: datetime | None = None, db_path: Pat
         return ""
     return (
         "What they asked you for lately, in any chat or app: what went in the last day, and cards still "
-        "waiting for their OK. When this message asks for the same thing again (the same email to the "
+        "waiting for an OK. When this message asks for the same thing again (the same email to the "
         "same person, the same step), take it as that ask, not a new one. If it went, say in one line "
-        "when and to whom, and ask whether they want it sent again. If its card is waiting, point them to "
-        "that card rather than making another. When they say again or yes, do it. Anything else here, "
+        "when and to whom, and ask whether they want it sent again. If its card is waiting on their OK, "
+        "point them to that card rather than making another; if it waits on someone else's, say whose. When they say again or yes, do it. Anything else here, "
         "leave alone and don't mention.\n" + "\n".join(lines)
     )
 

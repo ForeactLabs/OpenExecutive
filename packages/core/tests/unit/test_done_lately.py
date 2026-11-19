@@ -84,12 +84,12 @@ def _step(
             conn.close()
 
 
-def _card() -> int:
+def _card(approver: int | None = None) -> int:
     from openexecutive.memory import decision_ledger
 
     return decision_ledger.create_decision_instance(
         decision_class=ttl.DECISION_CLASS, department="", originating_session_id=None, proposed_payload={},
-        idempotency_key=None, gate_mode="propose", approver_person_id=None, confidence=None,
+        idempotency_key=None, gate_mode="propose", approver_person_id=approver, confidence=None,
     )
 
 
@@ -176,3 +176,10 @@ def test_a_step_is_logged_as_the_askers(roster: SimpleNamespace) -> None:
                    status="done", mail=("sam@example.com", "Olivia asked for this"))
     assert [s.mail_subject for s in ttl.done_lately(roster.principal)] == ["Olivia asked for this"]
     assert ttl.done_lately(roster.teammate) == []
+
+
+def test_a_card_on_someone_elses_list_names_them(monkeypatch: pytest.MonkeyPatch, roster: SimpleNamespace) -> None:
+    card = _card(approver=roster.principal)
+    _step(monkeypatch, roster.teammate, status="waiting", decision_id=card, subject="Needs Olivia")
+    block = ttl.done_lately_block(_web(roster.teammate))
+    assert f"waiting on Olivia Owner's OK (card {card})" in block
