@@ -1771,10 +1771,12 @@ def reschedule_action(
 def mark_action_done(action_id: int, db_path: Path | None = None) -> bool:
     with _get_conn(_resolve_db_path(db_path)) as conn:
         cursor = conn.execute(
-            "UPDATE scheduled_actions SET status = 'done', last_error = '' WHERE id = ?",
+            "UPDATE scheduled_actions SET status = 'done', last_error = '' "
+            "WHERE id = ? AND status IN ('pending', 'running')",
             (action_id,),
         )
         done = cursor.rowcount > 0
+        # Only the first finish of an open row queues a repeat's next one.
         if done:
             _queue_next(conn, action_id)
         return done
@@ -1866,7 +1868,9 @@ def mark_action_failed_or_retry(
 
 
 def cancel_scheduled_action(action_id: int, db_path: Path | None = None) -> str:
-    """Soft-cancel a pending action. Returns the resulting status or 'not_cancellable'."""
+    """Soft-cancel a pending action. Returns the resulting status or 'not_cancellable'.
+    A repeating one that is running right now finishes this time and comes
+    back no more: its repeat is cleared and the answer is 'cancelled'."""
     with _get_conn(_resolve_db_path(db_path)) as conn:
         row = conn.execute(
             "SELECT status FROM scheduled_actions WHERE id = ?", (action_id,)
@@ -1874,6 +1878,13 @@ def cancel_scheduled_action(action_id: int, db_path: Path | None = None) -> str:
         if row is None:
             return "not_found"
         current = row["status"]
+        if current == "running":
+            ended = conn.execute(
+                "UPDATE scheduled_actions SET repeat = NULL "
+                "WHERE id = ? AND status = 'running' AND repeat IS NOT NULL AND repeat != ''",
+                (action_id,),
+            )
+            return "cancelled" if ended.rowcount else "not_cancellable"
         if current != "pending":
             return "not_cancellable"
         # Guard the write too: the scheduler's claim can flip the row to

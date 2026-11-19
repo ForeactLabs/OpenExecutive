@@ -10,6 +10,7 @@ import json
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -248,6 +249,58 @@ def test_an_occurrence_that_stands_down_keeps_the_repeat(session_with_telegram_r
     nxt = pending[0]
     episodic.mark_action_cancelled(nxt.id, "the person who scheduled it is no longer on the team", ends_repeat=True)
     assert episodic.list_scheduled_actions(status="pending") == []
+
+
+def _repeating(**kw: Any) -> int:
+    from openexecutive.memory import episodic
+
+    return episodic.insert_scheduled_action(
+        run_at=_future_iso(), channel="telegram", channel_ref="42", intent_text="Daily nudge.",
+        repeat="daily@09:00", **kw,
+    )
+
+
+def _pending_others(action_id: int) -> list[Any]:
+    from openexecutive.memory import episodic
+
+    return [a for a in episodic.list_scheduled_actions(status="pending") if a.id != action_id]
+
+
+def test_a_repeat_that_gives_up_still_comes_back(session_with_telegram_ref: Session) -> None:
+    import sqlite3
+
+    from openexecutive.memory import episodic
+
+    action_id = _repeating()
+    # A retry (attempts below the max) queues nothing new.
+    assert episodic.mark_action_failed_or_retry(action_id, "boom", max_attempts=3) == "pending"
+    assert _pending_others(action_id) == []
+    with sqlite3.connect(str(episodic.DB_PATH)) as conn:
+        conn.execute("UPDATE scheduled_actions SET attempts = 3 WHERE id = ?", (action_id,))
+    assert episodic.mark_action_failed_or_retry(action_id, "boom", max_attempts=3) == "failed"
+    assert len(_pending_others(action_id)) == 1
+
+
+def test_a_second_finish_queues_nothing(session_with_telegram_ref: Session) -> None:
+    from openexecutive.memory import episodic
+
+    action_id = _repeating()
+    assert episodic.mark_action_done(action_id)
+    assert not episodic.mark_action_done(action_id)
+    assert len(_pending_others(action_id)) == 1
+
+
+def test_cancelling_a_running_repeat_stops_what_comes_after(session_with_telegram_ref: Session) -> None:
+    import sqlite3
+
+    from openexecutive.memory import episodic
+
+    action_id = _repeating()
+    with sqlite3.connect(str(episodic.DB_PATH)) as conn:
+        conn.execute("UPDATE scheduled_actions SET status = 'running' WHERE id = ?", (action_id,))
+    assert episodic.cancel_scheduled_action(action_id) == "cancelled"
+    assert episodic.mark_action_done(action_id)
+    assert _pending_others(action_id) == []
 
 
 def test_a_one_time_follow_up_does_not_come_back(session_with_telegram_ref: Session) -> None:
