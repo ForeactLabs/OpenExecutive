@@ -2681,6 +2681,18 @@ def test_a_topic_waits_rule_sees_who_a_booking_invites(owner: Any) -> None:
     assert ttl.SOMEONE_NEW in ttl.topics_of("create_calendar_event", {"title": "Sync", "attendee_person_ids": [9999]})
 
 
+def test_asking_whether_a_rule_could_clear_a_call_audits_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.orchestrator import mcp_gateway
+
+    def refused(*_a: Any, **_k: Any) -> str:
+        raise AssertionError("audited")
+
+    monkeypatch.setattr(mcp_gateway, "_refuse", refused)
+    rsvp = {"event_id": "e1", "rsvp_comment": "See you"}
+    assert mcp_gateway.goes_rules_clear("google_workspace__respond_to_event", rsvp) is False
+    assert mcp_gateway.goes_rules_clear("google_workspace__send_gmail_message", {"to": "a@b.example"}) is True
+
+
 def test_just_above() -> None:
     assert [ttl._just_above(x) for x in (450, 1200, 8000, 10, 99.5)] == ["500", "1500", "10000", "15", "100"]
 

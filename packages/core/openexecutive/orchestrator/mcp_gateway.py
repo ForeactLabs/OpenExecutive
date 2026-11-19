@@ -825,20 +825,29 @@ def _nested_fetch_key(value: Any, depth: int = 0) -> str | None:
     return None
 
 
-def _check_mailed_text(tool: str, arguments: dict[str, Any]) -> str | None:
-    """Return None unless the call carries text Google would mail to someone
-    the roster never checked (`_MAILED_TEXT_KEYS`); else a JSON error."""
+def _mailed_text_key(arguments: dict[str, Any]) -> str | None:
+    """The argument Google would mail to someone the roster never checked
+    (`_MAILED_TEXT_KEYS`), or None. No audit, no log."""
     for key, value in arguments.items():
         if isinstance(key, str) and _norm_key(key) in _MAILED_TEXT_KEYS and value not in (None, ""):
-            return _refuse(
-                tool, key, "<unchecked-recipient>",
-                reason=(
-                    f"{key!r} is mailed by Google to a person the People roster "
-                    "never checked (an event's organizer, whoever sends an "
-                    "invitation) — refusing. Leave it out."
-                ),
-            )
+            return key
     return None
+
+
+def _check_mailed_text(tool: str, arguments: dict[str, Any]) -> str | None:
+    """Return None unless the call carries text Google would mail to someone
+    the roster never checked (`_mailed_text_key`); else a JSON error."""
+    key = _mailed_text_key(arguments)
+    if key is None:
+        return None
+    return _refuse(
+        tool, key, "<unchecked-recipient>",
+        reason=(
+            f"{key!r} is mailed by Google to a person the People roster "
+            "never checked (an event's organizer, whoever sends an "
+            "invitation) — refusing. Leave it out."
+        ),
+    )
 
 
 def _attachment_fetches_url(attachments: Any) -> bool:
@@ -969,7 +978,7 @@ def goes_rules_clear(tool: str, arguments: dict[str, Any]) -> bool:
         normalized = _normalize_tool_name(tool)
         if tool == _CALENDAR_SHARE_TOOL or _is_drive_share_tool(tool) or normalized in _M365_DRIVE_SHARE_TOOLS:
             return False
-        return _check_mailed_text(tool, arguments) is None
+        return _mailed_text_key(arguments) is None
     except Exception:
         logger.warning("mcp_gateway: couldn't tell whether a Goes rule could clear a call", exc_info=True)
         return False
