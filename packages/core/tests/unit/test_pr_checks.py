@@ -343,7 +343,7 @@ def test_parse_removed_lines_keys_by_new_path() -> None:
             "-bye",
         ]
     )
-    assert pr_checks._parse_removed_lines(diff) == {"x.py": ["-- a", "old"]}
+    assert pr_checks._parse_removed_lines(diff) == {"x.py": ["-- a", "old"], "gone.py": ["bye"]}
 
 
 # --- tests-present -----------------------------------------------------------
@@ -597,3 +597,16 @@ def test_one_gate_lets_an_old_refusal_be_reworded_moved_or_removed() -> None:
     assert _gate({y: [new]}, {x: [old]}) == "FAIL"
     # A move does not pay twice: moved to y, and a new one where it left.
     assert _gate({y: [old], x: [new]}, {x: [old]}) == "FAIL"
+
+
+def test_parse_removed_lines_keeps_a_deleted_files_lines_under_its_old_path() -> None:
+    diff = (
+        "diff --git a/gone.py b/gone.py\n"
+        "deleted file mode 100644\n"
+        "--- a/gone.py\n"
+        "+++ /dev/null\n"
+        "@@ -1 +0,0 @@\n"
+        "-    raise HTTPException(status_code=403)\n"
+    )
+    assert pr_checks._parse_removed_lines(diff) == {"gone.py": ["    raise HTTPException(status_code=403)"]}
+    assert pr_checks._parse_added_lines(diff) == {}

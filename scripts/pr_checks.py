@@ -584,7 +584,7 @@ def _parse_added_lines(diff: str) -> dict[str, list[str]]:
 
 
 def _parse_removed_lines(diff: str) -> dict[str, list[str]]:
-    """Removed lines, keyed by the file's new path (a deleted file has none)."""
+    """Removed lines, keyed by the file's new path (a deleted file's by its old one)."""
     return _parse_diff_lines(diff, "-")
 
 
@@ -592,13 +592,21 @@ def _parse_diff_lines(diff: str, sign: str) -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
     current: str | None = None
     in_header = False
+    source: str | None = None
     for line in diff.splitlines():
         if line.startswith("diff --git "):
-            in_header, current = True, None
+            in_header, current, source = True, None, None
+        elif in_header and line.startswith("--- "):
+            old = _unquote(line[4:].rstrip("\t"))
+            source = old[2:] if old.startswith("a/") else None
         elif in_header and line.startswith("+++ "):
             # git ends a path containing a space with a tab
             target = _unquote(line[4:].rstrip("\t"))
             current = target[2:] if target.startswith("b/") else None
+            # A deleted file's removed lines stay under its old path, so a
+            # line it gave up can be seen arriving somewhere else.
+            if current is None and sign == "-":
+                current = source
         elif line.startswith("@@"):
             in_header = False
         elif current and not in_header and line.startswith(sign):
