@@ -1116,18 +1116,48 @@ def _without_notes(rounds: list[tuple[str, bool]]) -> str | None:
     and not the rest of a cut round's text). A note stays when no round
     after it wrote anything: then it is all the reply there is."""
     last_text = max((i for i, (text, _) in enumerate(rounds) if text.strip()), default=-1)
-    out: list[str] = []
-    changed = False
+    out = ""
+    changed = cut = False
     for i, (text, looked) in enumerate(rounds):
         rest = _less_notes(text) if looked and i < last_text else None
+        if cut and out.strip() and text and not out[-1:].isspace() and not text[:1].isspace():
+            # Text after a web search in the same round follows the note
+            # with nothing between; with the note gone it needs its break.
+            out += _round_separator(out[-2:], text)
+        cut = rest is not None
         if rest is None:
-            out.append(text)
+            out += text
         else:
             changed = True
-            out.append(rest)
+            out += rest
     if not changed:
         return None
-    return "".join(out).lstrip()
+    return out.lstrip()
+
+
+def _round_parts(
+    lead: str, text: str, content: list[dict[str, Any]], looked: bool, carries_on: bool
+) -> list[tuple[str, bool]]:
+    """A round's text for ``_without_notes``, split where it ran a web
+    search: a web search runs inside the round, so the text before one was
+    written before a lookup, like the text before a lookup call. ``lead`` is
+    the round's separator, ``looked`` whether its calls only look
+    (``_only_looks``) and ``carries_on`` whether it starts with the rest of
+    a cut round's text."""
+    parts: list[str] = []
+    current = ""
+    for block in content:
+        if block.get("type") == "text":
+            current += str(block.get("text", ""))
+        elif block.get("type") == "server_tool_use" and block.get("name") == WEB_SEARCH_TOOL_NAME and current:
+            parts.append(current)
+            current = ""
+    if not parts or "".join(parts) + current != text:
+        return [(lead + text, looked)]
+    out = [(part, not (i == 0 and carries_on)) for i, part in enumerate(parts)]
+    out[0] = (lead + out[0][0], out[0][1])
+    out.append((current, looked))
+    return out
 
 
 class Executive:
@@ -2730,9 +2760,12 @@ class Executive:
                     response_content.append(replay)
             if turn_sources is not None:
                 record_web_sources(turn_sources, final_msg.content)
-            rounds.append((
-                round_sep_text + full_text,
+            rounds.extend(_round_parts(
+                round_sep_text,
+                full_text,
+                response_content,
                 final_msg.stop_reason == "tool_use" and not carries_on and _only_looks(tool_uses),
+                carries_on,
             ))
             # A web search is a look, like any read: the after-reply check
             # sees it with the turn's other calls.

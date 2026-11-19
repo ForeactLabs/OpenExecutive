@@ -191,6 +191,24 @@ def _search(id_: str, query: str, error: str | None = None) -> list[Any]:
     ]
 
 
+def test_a_working_note_before_a_web_search_in_the_same_round_leaves() -> None:
+    # A web search runs inside the round, so the note before it and the
+    # answer after it come in one response.
+    reply = _reply([
+        FinalMsg([TextBlock("Nothing in the mailbox. Now the live data."), *_search("s1", "diesel"),
+                  TextBlock("Midwest diesel is $5.97"), TextBlock(", down 23 cents.")], "end_turn"),
+    ])
+    assert reply == "Nothing in the mailbox.\n\nMidwest diesel is $5.97, down 23 cents."
+
+
+def test_an_answer_before_a_web_search_in_the_same_round_stays() -> None:
+    reply = _reply([
+        FinalMsg([TextBlock("Acme renewed. "), *_search("s1", "acme"), TextBlock("Beta churned in March.")],
+                 "end_turn"),
+    ])
+    assert reply == "Acme renewed. Beta churned in March."
+
+
 def test_a_search_that_did_not_run_gets_one_more_round() -> None:
     # "I ran out of searches" left two of three questions open: the limit is
     # per step, so the next step searches again and writes the whole reply.
