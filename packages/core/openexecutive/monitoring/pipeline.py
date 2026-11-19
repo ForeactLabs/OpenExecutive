@@ -1086,6 +1086,11 @@ async def _poll_one_watchlist_item(
     tally.deferred_skew = skew
     tally.race_tick = lost_race is not None
     cap_logged = False
+    # An email watch's emails are never charged to the scan budget nor
+    # dropped by it: each is one email the person asked to hear about, and
+    # its source has already read past them (``sources.mailbox``), so a
+    # dropped one would never come back.
+    charged = not mailbox.is_mailbox(item)
     for signal in capped:
         baseline_entry = lost_race is not None and lost_race.covers(signal)
         # The three guards below apply only to entries that are NOT baseline;
@@ -1095,7 +1100,7 @@ async def _poll_one_watchlist_item(
         if not baseline_entry and _is_future(signal, fetched_at, skew):
             tally.deferred.append(signal)  # not recorded: see _is_future
             continue
-        if not baseline_entry and budget.exhausted:
+        if not baseline_entry and charged and budget.exhausted:
             # Skip (don't break): baseline-covered entries later in the
             # list must still be recorded, or they'd replay next tick.
             if not cap_logged:
@@ -1116,7 +1121,7 @@ async def _poll_one_watchlist_item(
             continue
 
         tally.written += 1
-        if not baseline_entry:
+        if not baseline_entry and charged:
             budget.admit()
         _audit_received(signal_id, item, signal)
 
@@ -1315,8 +1320,8 @@ async def run_external_monitor_scan(
     budget = _ScanBudget(remaining=cap_total)
     poll_start = datetime.now(UTC)
     for item in items:
-        if budget.exhausted:
-            break
+        if budget.exhausted and not mailbox.is_mailbox(item):
+            continue
         # Billed standing-query adapter has its own kill switch — skip those
         # rows entirely (no poll, no mark_polled) when disabled.
         if (
