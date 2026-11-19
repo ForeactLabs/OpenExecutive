@@ -46,7 +46,7 @@ export default function LeadTrainingCard({
   const [learn, setLearn] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const nextTime = useNextTimeRule(parseOffers(card?.offers), onResolved);
+  const nextTime = useNextTimeRule(parseOffers(card?.offers), onResolved, editing);
 
   useEffect(() => {
     if (decisionId == null) return;

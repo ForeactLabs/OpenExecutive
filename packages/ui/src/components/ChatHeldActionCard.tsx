@@ -73,7 +73,7 @@ export default function ChatHeldActionCard({
   const [error, setError] = useState<string | null>(null);
   const shownPayload = instance ? readPayload(instance) : null;
   // The card stays in the chat once done, so nothing to drop.
-  const nextTime = useNextTimeRule(parseOffers(shownPayload?.offers), () => {});
+  const nextTime = useNextTimeRule(parseOffers(shownPayload?.offers), () => {}, editing);
 
   useEffect(() => {
     const controller = new AbortController();

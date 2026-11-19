@@ -38,11 +38,13 @@ export function offerLine(offer: RuleOffer): string {
 
 /**
  * The box, its pick, and what Do it runs: `withRule(approve)` approves, then
- * adds the picked rule. While a rule just added shows, `resolved` waits for
- * Close (or Undo) instead of dropping the card at once.
+ * adds the picked rule. While a rule just added (or why it wasn't) shows,
+ * `resolved` waits for Close (or Undo) instead of dropping the card at once.
+ * While the step is being edited the box is hidden and no rule is added:
+ * the offers were worked out for the step as it was.
  */
-export function useNextTimeRule(offers: RuleOffer[], onResolved: () => void) {
-  const shown = offers.length > 0;
+export function useNextTimeRule(offers: RuleOffer[], onResolved: () => void, editing = false) {
+  const shown = offers.length > 0 && !editing;
   const [pick, setPick] = useState<number>(-1);
   const [added, setAdded] = useState<{ id: number | null; line: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -63,7 +65,6 @@ export function useNextTimeRule(offers: RuleOffer[], onResolved: () => void) {
         const rule = lead.rules.find((r) => r.kind === offer.kind && r.value === offer.value && r.effect === "go");
         setAdded({ id: rule?.id ?? null, line: offerLine(offer) });
       } catch (err) {
-        setAdded({ id: null, line: offerLine(offer) });
         setError(err instanceof Error ? `It was done, but the rule wasn't added: ${err.message}` : "It was done, but the rule wasn't added.");
       }
     }
@@ -85,7 +86,7 @@ export function useNextTimeRule(offers: RuleOffer[], onResolved: () => void) {
     }
   }
 
-  const box = shown && !added ? (
+  const box = shown && !added && !error ? (
     <fieldset className="mt-3 rounded-xl border border-line bg-surface p-3">
       <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-fg-subtle">Next time</legend>
       <div className="flex flex-col gap-1.5">
@@ -126,6 +127,14 @@ export function useNextTimeRule(offers: RuleOffer[], onResolved: () => void) {
         </button>
       </div>
       {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
+    </div>
+  ) : error ? (
+    <div className="mt-3 rounded-xl bg-surface px-4 py-3">
+      <p className="text-[15px] text-fg break-words">Done.</p>
+      <p className="mt-1 text-sm text-red-500">{error}</p>
+      <button type="button" onClick={onResolved} className="mt-2 min-h-touch text-sm text-fg-muted hover:underline">
+        Close
+      </button>
     </div>
   ) : null;
 

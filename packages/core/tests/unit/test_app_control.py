@@ -530,6 +530,10 @@ def test_a_waits_rule_is_added_now_and_a_goes_rule_waits(
     assert out["card"] == "Add a rule that goes on its own: amount: 500"
     out = _run(app_control.handle_do_in_app, {"action": "add_goes_rule", "id": "new", "value": "words: free"}, session)
     assert out == {"error": "A words rule can only wait for you."}
+    out = _run(app_control.handle_do_in_app, {"action": "add_goes_rule", "id": "new", "value": "topic: share"}, session)
+    assert out["card"] == "Add a rule that goes on its own: topic: share"
+    out = _run(app_control.handle_do_in_app, {"action": "add_goes_rule", "id": "new", "value": "topic: anything"}, session)
+    assert "error" in out
     [waits] = take_the_lead.list_rules([take_the_lead.SCOPE_COMPANY])
     assert waits.effect == take_the_lead.EFFECT_WAIT
     out = _run(app_control.handle_do_in_app, {"action": "add_waits_rule", "id": "new", "value": "acme.com"}, session)
