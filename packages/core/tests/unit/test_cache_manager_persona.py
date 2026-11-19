@@ -99,6 +99,16 @@ def test_identity_addendum_forbids_impersonation() -> None:
     assert "(principal)" in persona_text
 
 
+
+def test_a_draft_the_person_sends_themselves_is_signed_as_they_say() -> None:
+    # Asked for a draft "signed from me" to send from their own mailbox, the
+    # Executive signed it as itself and told them to fix the sign-off. The
+    # rule stops sending in someone's name, not handing the asker their words.
+    persona_text = build_system_blocks()[0]["text"]
+    assert "Never send an email, or post a Slack/Discord/Telegram" in persona_text
+    assert "draft an email, or post" not in persona_text
+    assert "sign it the way they say" in persona_text
+    assert "you send nothing" in persona_text
 def test_persona_holds_the_line_on_followups() -> None:
     blocks = build_system_blocks()
     persona_text = blocks[0]["text"]
