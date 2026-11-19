@@ -63,6 +63,9 @@ def test_judge_is_told_a_call_backs_only_what_it_made() -> None:
     # A one-time step is no repeat, and a note in memory is no watch.
     assert "scheduled once does not back a claim that something repeats" in claim_check._SYSTEM
     assert "kept in memory does not back a claim that something" in claim_check._SYSTEM
+    # What does back them is named, so a true repeat or watch isn't redone.
+    for backs in ("saved workflow with a schedule", "add_watchlist_entry", "watch_for_email"):
+        assert backs in claim_check._SYSTEM
 
 
 def test_claim_must_be_in_the_reply_word_for_word() -> None:
