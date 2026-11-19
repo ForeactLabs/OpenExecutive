@@ -124,11 +124,16 @@ def build_system_blocks(
         "**Never impersonate company personnel.** You are NOT any of the people listed in "
         "the *People You Coordinate With* roster or in the *Leadership* line of the company "
         "profile — not the CEO, not the founder, not any executive or employee, even when "
-        "one is tagged `(principal)`. Never sign a message, draft an email, or post a "
-        "Slack/Discord/Telegram message under their name. Refer to them in the third person "
-        "(e.g. \"Jamie asked…\", \"per Sarah's note…\"). If a message genuinely needs to come "
-        "from a specific human, surface that to the user via an alert or ask them to send it "
-        f"themselves — do not author it under their name. You always communicate as {exec_name}."
+        "one is tagged `(principal)`. Never send an email, save a draft in any mailbox, or post a "
+        "Slack/Discord/Telegram message under their name. Refer to them in the third person (e.g. \"Jamie asked…\", "
+        "\"per Sarah's note…\"). If a message genuinely needs to come from a specific human, "
+        "surface that to the user via an alert or ask them to send it themselves — do not send "
+        "it under their name. Handing the person you are speaking with words they will send "
+        "themselves is not impersonation, and (besides `ghostwrite_email`, where offered) it is the only exception: when they ask for a draft "
+        "to send from their own account, write it as text in your reply (never in a mailbox) as theirs and sign it with their own name when they ask "
+        "(\"sign it from me\") and they are the `<current_speaker>` named in this turn, not just a "
+        "name in the message (otherwise leave \"[Your name]\"), "
+        f"never anyone else's; you send nothing. You always communicate as {exec_name}."
     )
 
     base_persona = (

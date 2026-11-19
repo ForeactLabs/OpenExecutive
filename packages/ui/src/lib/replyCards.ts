@@ -215,8 +215,34 @@ export function recipientNames(list: readonly string[]): string {
   return `${names.slice(0, 2).join(", ")} and ${names.length - 2} more`;
 }
 
+// Right now's draft rows name who they go to as one line, "Name (address),
+// Name (address)": its entries, one per person.
+function lineEntries(line: string): string[] {
+  return line.match(/[^,(]+\([^)]*\)?|[^,]+/g) ?? [];
+}
+
 /** Right now's draft rows name who they go to as one line, "Name (address),
  * Name (address)": the same as recipientNames, from that line. */
 export function namesFromLine(line: string): string {
-  return recipientNames(line.match(/[^,(]+\([^)]*\)?|[^,]+/g) ?? []);
+  return recipientNames(lineEntries(line));
+}
+
+/** Who an email goes to, for a button: first names ("Kyle", "Kyle and
+ * Annamarie"). A name that came with an address is cut to its first word,
+ * unless that word ends in "," or "." ("Monaco, Brennan", "Dr. Kyle
+ * Harrelson"), which stays whole; a bare address or bare words stay whole. */
+export function firstNames(list: readonly string[]): string {
+  return recipientNames(
+    list.map((entry) => {
+      const named = /^\s*"?([^"<(]*?)"?\s*[<(]/.exec(entry)?.[1]?.trim();
+      if (!named) return entry.replace(/[<>()"]/g, "").trim();
+      const first = named.split(/\s+/)[0] ?? named;
+      return /[,.]$/.test(first) ? named : first;
+    }),
+  );
+}
+
+/** firstNames, from a draft row's one line of who it goes to. */
+export function firstNamesFromLine(line: string): string {
+  return firstNames(lineEntries(line));
 }

@@ -84,6 +84,23 @@ async def test_a_look_goes_to_the_creators_browser_in_its_own_window(monkeypatch
     assert out == {"url": CART, "text": "Cart", "done": True} and signals == []
 
 
+async def test_a_browser_busy_with_a_step_that_never_answers_pauses_the_run() -> None:
+    await browser_relay.next_step(7, wait=0)
+    stuck = asyncio.create_task(browser_relay.run(7, "look", {}, timeout=0.05))
+    assert await browser_relay.next_step(7, wait=1) is not None
+    await stuck
+    entry = browser_relay._people[7]
+    entry.seen -= browser_relay.CONNECTED_S + 10
+    assert browser_relay.connected(7)
+    out, step, signals = await _call("browser_look", {})
+    assert step is None and out["status"] == "waiting"
+    assert [(s.kind, s.key) for s in signals] == [("wait", "browser:7")]
+    # An approved step says busy, never that the browser isn't connected.
+    with levels.approved():
+        out, step, signals = await _call("browser_click", {"ref": 4, "_at": CART})
+    assert step is None and out == {"error": browser_relay.BUSY} and signals == []
+
+
 async def test_no_browser_connected_pauses_the_run_until_it_is() -> None:
     out, step, signals = await _call("browser_look", {})
     assert step is None and out["status"] == "waiting"

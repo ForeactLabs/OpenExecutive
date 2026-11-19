@@ -19,6 +19,8 @@ import {
   draftIsLong,
   namesFromLine,
   recipientNames,
+  firstNames,
+  firstNamesFromLine,
 } from "../src/lib/replyCards.ts";
 
 test("relationLabel names who the sender is, and nothing for an unknown relation", () => {
@@ -163,6 +165,24 @@ test("namesFromLine reads a draft row's line, even one cut short", () => {
     "Brennan Monaco and Annamarie Braden",
   );
   assert.equal(namesFromLine("dana@example.com"), "dana@example.com");
+});
+
+test("firstNames names each person by first name for a button, or by address", () => {
+  assert.equal(firstNamesFromLine("Kyle Harrelson (kharrelson@example.com)"), "Kyle");
+  assert.equal(
+    firstNamesFromLine("Brennan Monaco (brennan.monaco@example.com), Annamarie Braden (annamarie@…"),
+    "Brennan and Annamarie",
+  );
+  assert.equal(firstNames(["Annamarie Braden"]), "Annamarie Braden");
+  assert.equal(firstNames(["dana@example.com"]), "dana@example.com");
+  assert.equal(firstNames(["A One <a@x.example>", "B Two <b@x.example>", "C <c@x.example>", "D <d@x.example>"]), "A, B and 2 more");
+  // Who it goes to, not who wrote: a reply to everyone names everyone.
+  assert.equal(firstNames(["Brennan Monaco <b@example.com>", "Annamarie Braden <a@example.com>"]), "Brennan and Annamarie");
+  // Bare words stay whole, so a placeholder never reads as half a name.
+  assert.equal(firstNamesFromLine("No one yet"), "No one yet");
+  assert.equal(firstNamesFromLine(""), "");
+  assert.equal(firstNames(['"Monaco, Brennan" <b@example.com>']), "Monaco, Brennan");
+  assert.equal(firstNames(["Dr. Kyle Harrelson <k@example.com>"]), "Dr. Kyle Harrelson");
 });
 
 test("a reply sent from the Executive says so on Send", () => {

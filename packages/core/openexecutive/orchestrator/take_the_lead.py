@@ -324,7 +324,10 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                     raise
     # ``goal_id``: the company goal the step was for (``for_goal``), so the
     # Goals page can say what it did for each goal this week.
-    for column in ("job_id", "to_person_id", "goal_id"):
+    # ``asked_by``: the person it did it for (who asked, or whose card was
+    # approved), so a new turn of theirs is shown what they asked for lately
+    # (``done_lately_block``).
+    for column in ("job_id", "to_person_id", "goal_id", "asked_by"):
         if column not in log_columns:
             try:
                 conn.execute(f"ALTER TABLE {LOG_TABLE} ADD COLUMN {column} INTEGER")  # noqa: S608
@@ -333,6 +336,10 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                     raise
     conn.execute(
         f"CREATE INDEX IF NOT EXISTS idx_{LOG_TABLE}_goal ON {LOG_TABLE}(goal_id, at)"  # noqa: S608
+    )
+    # Every private turn reads the speaker's own steps (``done_lately``).
+    conn.execute(
+        f"CREATE INDEX IF NOT EXISTS idx_{LOG_TABLE}_asked_by ON {LOG_TABLE}(asked_by, status, at)"  # noqa: S608
     )
     conn.execute(
         f"CREATE TABLE IF NOT EXISTS {JOBS_TABLE} ("  # noqa: S608
@@ -1937,6 +1944,23 @@ def is_mail_send(tool: str) -> bool:
     )
 
 
+def asked_by_now() -> int | None:
+    """Who the step being logged is for: inside an approved step, the person
+    who asked for it (the owner when they approved their own); else the
+    owner or teammate whose own turn this is. None for unattended work.
+    Never raises."""
+    try:
+        from openexecutive.orchestrator import levels
+
+        if levels.is_approved():
+            requester = levels.approved_requester()
+            return requester if requester is not None else _principal_id()
+        return _team_asker_id()
+    except Exception:
+        logger.warning("take_the_lead: couldn't tell whom a step was for", exc_info=True)
+        return None
+
+
 def record(
     *, scope: str, source: str, tool: str, summary: str, status: str, why: str = "",
     decision_id: int | None = None, db_path: Path | None = None,
@@ -1956,10 +1980,11 @@ def record(
         try:
             conn.execute(
                 f"INSERT INTO {LOG_TABLE} (at, scope, source, tool, summary, status, why, decision_id, "  # noqa: S608
-                "mail_to, mail_subject, prompted_by, job_id, outcome, to_person_id, goal_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "mail_to, mail_subject, prompted_by, job_id, outcome, to_person_id, goal_id, asked_by) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (datetime.now(UTC).isoformat(), scope, source, tool, summary, status, why, decision_id,
-                 mail_to, mail_subject, prompted_by, job_id, _one_line(outcome, 160), to_person_id, goal_id),
+                 mail_to, mail_subject, prompted_by, job_id, _one_line(outcome, 160), to_person_id, goal_id,
+                 asked_by_now()),
             )
             conn.commit()
         finally:
@@ -1972,9 +1997,17 @@ def _set_log_status(decision_id: int, status: str, *, db_path: Path | None = Non
     try:
         conn = _connect(db_path)
         try:
-            conn.execute(
-                f"UPDATE {LOG_TABLE} SET status = ? WHERE decision_id = ?", (status, decision_id),  # noqa: S608
-            )
+            if status == "approved":
+                # It went now, not when its card was made (``done_lately``
+                # reads when a step went).
+                conn.execute(
+                    f"UPDATE {LOG_TABLE} SET status = ?, at = ? WHERE decision_id = ?",  # noqa: S608
+                    (status, datetime.now(UTC).isoformat(), decision_id),
+                )
+            else:
+                conn.execute(
+                    f"UPDATE {LOG_TABLE} SET status = ? WHERE decision_id = ?", (status, decision_id),  # noqa: S608
+                )
             conn.commit()
         finally:
             conn.close()
@@ -2000,6 +2033,7 @@ class Done:
     outcome: str = ""
     to_person_id: int | None = None
     goal_id: int | None = None
+    asked_by: int | None = None
 
 
 def done(scopes: list[str], *, days: int = 7, limit: int = 100, db_path: Path | None = None) -> list[Done]:
@@ -2020,6 +2054,113 @@ def done(scopes: list[str], *, days: int = 7, limit: int = 100, db_path: Path | 
     finally:
         conn.close()
     return [Done(**dict(r)) for r in rows]
+
+
+# How far back a turn's <done_lately> looks, and how many steps it lists.
+DONE_LATELY_WINDOW = timedelta(hours=24)
+DONE_LATELY_MAX = 12
+# A step that went (on its own, or once its card was approved), and one
+# whose card is still open. A failed or skipped one didn't happen: asking
+# again is a new ask.
+_LATELY_WENT = ("done", "approved")
+_LATELY_WAITING = "waiting"
+
+
+def done_lately(
+    person_id: int, *, now: datetime | None = None, db_path: Path | None = None,
+) -> list[Done]:
+    """The steps a person asked for in the last day that went, and those
+    whose card is still open however old, newest first: what a new turn of
+    theirs is shown, so the same ask again is taken as that one
+    (``done_lately_block``). A waiting row's time is when its card was made."""
+    from openexecutive.memory.decision_ledger import OPEN_STATUSES
+
+    since = ((now or datetime.now(UTC)) - DONE_LATELY_WINDOW).isoformat()
+    open_marks = ",".join("?" * len(OPEN_STATUSES))
+    conn = _connect(db_path)
+    try:
+        # A waiting row counts only while its card is open: the decision
+        # says so, whichever way the card was closed (a row isn't moved on
+        # every path). Filtered here so the limit counts only what shows.
+        rows = conn.execute(
+            f"SELECT l.* FROM {LOG_TABLE} l LEFT JOIN decision_instances d ON d.id = l.decision_id "  # noqa: S608
+            f"WHERE l.asked_by = ? AND ((l.status = ? AND (l.decision_id IS NULL OR d.status IN ({open_marks}))) "
+            "OR (l.status IN (?, ?) AND l.at >= ?)) ORDER BY l.at DESC, l.id DESC LIMIT ?",
+            (int(person_id), _LATELY_WAITING, *OPEN_STATUSES, *_LATELY_WENT, since, DONE_LATELY_MAX * 4),
+        ).fetchall()
+    finally:
+        conn.close()
+    steps = [Done(**dict(r)) for r in rows]
+    # A connected-app read did nothing for anyone.
+    return [s for s in steps if "__" not in s.tool or mcp_tool_acts(s.tool)][:DONE_LATELY_MAX]
+
+
+def done_lately_block(session: Any, *, now: datetime | None = None, db_path: Path | None = None) -> str:
+    """The body of the turn's ``<done_lately>`` block: what the speaker asked
+    for in any chat or app that went in the last day or waits on its card.
+    A new conversation otherwise starts blind, so the same ask sent again
+    sent a second email or made a second card. Only in a conversation
+    private to them (their steps are theirs alone). "" when there are none
+    or the lookup fails (it never blocks a turn)."""
+    try:
+        from openexecutive.memory.workspace_settings import get_user_timezone
+        from openexecutive.orchestrator.speaker import own_private_speaker
+        from openexecutive.utils.prompt_blocks import no_tags, plain
+
+        person = own_private_speaker(session)
+        if person is None:
+            return ""
+        steps = done_lately(person.id, now=now, db_path=db_path)
+        if not steps:
+            return ""
+        # Whose OK a card waits on: a teammate's may be the owner's or an
+        # approver's, and they can't act on it themselves.
+        from openexecutive.memory.decision_ledger import get_decision_instances
+        from openexecutive.people.store import get_person
+
+        held = [int(s.decision_id) for s in steps if s.status == _LATELY_WAITING and s.decision_id]
+        approvers = {
+            i: card.approver_person_id
+            for i, card in (get_decision_instances(held, db_path=db_path) if held else {}).items()
+        }
+        zone = get_user_timezone()
+        lines = []
+        for step in steps:
+            try:
+                when = datetime.fromisoformat(step.at.replace("Z", "+00:00"))
+                if when.tzinfo is None:
+                    when = when.replace(tzinfo=UTC)
+                at = when.astimezone(zone).strftime("%a %d %b %H:%M")
+            except ValueError:
+                at = step.at[:16]
+            what = _one_line(plain(step.summary), 160)
+            if step.mail_to:
+                what = f"{what}, to {_one_line(plain(step.mail_to), 160)}"
+                if step.mail_subject:
+                    what = f"{what}, subject “{_one_line(plain(step.mail_subject), 120)}”"
+            if step.status == _LATELY_WAITING:
+                approver = approvers.get(int(step.decision_id)) if step.decision_id else None
+                other = get_person(approver) if approver is not None and approver != person.id else None
+                whose = (
+                    f"{plain(' '.join((other.full_name or other.email or 'someone else').split()))}'s"
+                    if other is not None else "their"
+                )
+                card = f" (card {step.decision_id})" if step.decision_id else ""
+                state = f"waiting on {whose} OK{card}"
+            else:
+                state = "done"
+            lines.append(no_tags(f"- {at}, {state}: {what}"))
+    except Exception:
+        logger.warning("take_the_lead: couldn't list what the speaker asked for lately", exc_info=True)
+        return ""
+    return (
+        "What they asked you for lately, in any chat or app: what went in the last day, and cards still "
+        "waiting for an OK. When this message asks for the same thing again (the same email to the "
+        "same person, the same step), take it as that ask, not a new one. If it went, say in one line "
+        "when and to whom, and ask whether they want it sent again. If its card is waiting on their OK, "
+        "point them to that card rather than making another; if it waits on someone else's, say whose. When they say again or yes, do it. Anything else here, "
+        "leave alone and don't mention.\n" + "\n".join(lines)
+    )
 
 
 # Area → the authority scope whose holders may approve a held action of
@@ -3037,9 +3178,40 @@ def _as_text(result: Any) -> str:
     return result if isinstance(result, str) else json.dumps(result, default=str)
 
 
-def resolved(decision_id: int, status: str) -> None:
-    """Mirror an approval or decline into the log."""
-    _set_log_status(decision_id, status)
+def resolved(
+    decision_id: int, status: str, *, payload: dict[str, Any] | None = None, result: str = "",
+    db_path: Path | None = None,
+) -> None:
+    """Mirror an approval or decline into the log. Every held step's card
+    ends here, whichever screen or chat app approved it. An approved one
+    (``payload``: the call as it went, edits included; ``result``: what came
+    back) reads as what went out and when: its time becomes now, its
+    addresses, subject and outcome the sent ones'. Best effort."""
+    if status != "approved" or payload is None:
+        _set_log_status(decision_id, status, db_path=db_path)
+        return
+    tool = str(payload.get("tool") or "")
+    raw_input = payload.get("input")
+    tool_input: dict[str, Any] = raw_input if isinstance(raw_input, dict) else {}
+    mcp = bool(payload.get("mcp"))
+    mail_to, mail_subject = (mail_sent(tool, tool_input) if mcp else None) or ("", "")
+    try:
+        conn = _connect(db_path)
+        try:
+            conn.execute(
+                f"UPDATE {LOG_TABLE} SET status = ?, at = ?, summary = ?, mail_to = ?, mail_subject = ?, "  # noqa: S608
+                "outcome = ?, to_person_id = ? WHERE decision_id = ?",
+                (status, datetime.now(UTC).isoformat(), summarize(tool, tool_input, mcp=mcp, quote=False),
+                 mail_to, mail_subject, _one_line(outcome_of(tool, tool_input, result, mcp=mcp), 160),
+                 _message_target(tool, tool_input), decision_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        # Whatever else failed, the step went: it never stays "waiting".
+        logger.warning("take_the_lead: couldn't update what it did", exc_info=True)
+        _set_log_status(decision_id, status, db_path=db_path)
 
 
 # --------------------------------------------------------------------------- #

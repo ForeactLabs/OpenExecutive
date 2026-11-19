@@ -71,6 +71,8 @@ def test_save_persists_with_matching_token() -> None:
     assert out["name"] == "weekly_watch"
     assert out["deep_link"].endswith("/jobs/weekly_watch")
     assert dynamic_store.get_definition("weekly_watch") is not None
+    # No schedule, said in so many words.
+    assert out["schedule"].startswith("none")
 
 
 def test_save_rejects_token_mismatch() -> None:
@@ -293,6 +295,26 @@ def test_analysis_workflow_still_saves_active_and_schedules(scheduled: list[str]
     stored = dynamic_store.get_definition("weekly_watch")
     assert stored is not None and stored.is_active is True
     assert scheduled == ["weekly_watch"]
+    # The schedule leads the result, so the after-reply check sees it
+    # however long the definition the call was given.
+    assert out["schedule"] == stored.cadence
+    from openexecutive.orchestrator import claim_check
+
+    raw = json.dumps(out)
+    line = claim_check.render_calls([(claim_check.call_label("save_workflow", {"definition": d}), raw)])
+    assert stored.cadence in line
+
+
+def test_a_schedule_that_could_not_be_queued_says_so(
+    scheduled: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openexecutive.workflows import dynamic_cadence
+
+    monkeypatch.setattr(dynamic_cadence, "schedule_dynamic_workflow_cadence", lambda _defn: None)
+    d = _with_cadence(_valid_definition())
+    out = _save(d, wat._canonical_token(d))
+    assert out["status"] == "saved"
+    assert "not queued" in out["schedule"]
 
 
 def test_analysis_workflow_drafted_off_reports_pending(scheduled: list[str]) -> None:

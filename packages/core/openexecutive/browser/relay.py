@@ -9,9 +9,9 @@ happened back (``POST /browser/steps/{id}``). The Executive's browser tools
 (``browser.tools``) put a step here and wait for that answer.
 
 Steps are only ever handed to the person whose turn asked for them, and only
-while their extension is asking (``connected``). A workflow run that paused
-because their browser wasn't connected (``browser.tools``,
-``WAITING_KEY``) is picked up the moment it asks again. Everything is held in this
+while their extension is asking or busy with a step it took (``connected``).
+A workflow run that paused because their browser wasn't connected
+(``browser.tools``, ``WAITING_KEY``) is picked up the moment it asks again. Everything is held in this
 process: an install runs one API process, and a step left over from before a
 restart is one nobody is waiting on.
 """
@@ -42,6 +42,10 @@ CONNECTED_S = 45.0
 STEP_TIMEOUT_S = 45.0
 # The longest one ask for a step waits for one to come.
 MAX_WAIT_S = 20.0
+# An extension doing a step doesn't ask for the next one until it answers, so
+# it still counts as connected for this long after taking a step that hasn't
+# answered yet (the browser ends a stuck extension call within 5 minutes).
+BUSY_S = 300.0
 # Steps waiting for one person at once: a turn runs its steps one by one, so
 # more means something is stuck.
 MAX_QUEUED = 8
@@ -77,6 +81,8 @@ class _Person:
     # Whether "Stay connected" is ticked in their extension, as it last said
     # when asking for a step (None: an extension too old to say).
     stay: bool | None = None
+    # The steps it took and hasn't answered yet, with when it took each.
+    busy: dict[str, float] = field(default_factory=dict)
 
 
 _people: dict[int, _Person] = {}
@@ -113,16 +119,43 @@ def _person(person_id: int) -> _Person:
     return entry
 
 
-def connected(person_id: int, *, now: float | None = None) -> bool:
-    """Whether this person's extension asked for steps lately."""
-    entry = _people.get(person_id)
-    if entry is None or not entry.seen:
+def _asking(entry: _Person | None, now: float) -> bool:
+    """Whether the extension asked for steps lately."""
+    return entry is not None and bool(entry.seen) and now - entry.seen <= CONNECTED_S
+
+
+def _busy(entry: _Person | None, now: float) -> bool:
+    """Whether the extension is still doing a step it took."""
+    if entry is None:
         return False
-    return ((now if now is not None else time.monotonic()) - entry.seen) <= CONNECTED_S
+    for step_id, taken in list(entry.busy.items()):
+        if now - taken > BUSY_S:
+            entry.busy.pop(step_id, None)
+    return bool(entry.busy)
+
+
+def connected(person_id: int, *, now: float | None = None) -> bool:
+    """Whether this person's extension asked for steps lately, or is busy
+    with one it took (it asks again once that one answers)."""
+    entry = _people.get(person_id)
+    at = now if now is not None else time.monotonic()
+    return _asking(entry, at) or _busy(entry, at)
 
 
 class NotConnected(Exception):
     """Nobody's extension is there to take the step."""
+
+
+class Busy(NotConnected):
+    """Their extension is connected but still doing a step it took, so it
+    isn't taking another now. A workflow run waits for it like any browser
+    that isn't there (``waiting_key``); a chat says it is busy (``BUSY``)."""
+
+
+BUSY = (
+    "Their browser is connected, but it is still busy with an earlier step that hasn't answered yet, so this "
+    "wasn't done. Wait a little, then try it again. Don't tell them their browser isn't connected."
+)
 
 
 async def run(person_id: int, action: str, args: dict[str, Any], *, timeout: float = STEP_TIMEOUT_S) -> dict[str, Any]:
@@ -133,6 +166,9 @@ async def run(person_id: int, action: str, args: dict[str, Any], *, timeout: flo
     if not connected(person_id):
         raise NotConnected
     entry = _person(person_id)
+    if not _asking(entry, time.monotonic()):
+        # Connected, but every one of its tabs is still doing a step.
+        raise Busy
     if len(entry.queue) >= MAX_QUEUED:
         return {"ok": False, "error": "The browser is still busy with earlier steps. Wait, then look again."}
     loop = asyncio.get_running_loop()
@@ -167,8 +203,12 @@ async def next_step(
     """The person's next step for their extension, waiting up to ``wait``
     seconds for one; None when none came. Asking marks them connected, and
     ``stay`` is what it says about "Stay connected"."""
-    was_connected = connected(person_id)
     entry = _person(person_id)
+    # Back from a long step counts as coming back: pick up what waited.
+    was_connected = _asking(entry, time.monotonic())
+    # A tab asking is a browser that is there: a step it was doing is done or
+    # lost (a reloaded tab), and is no reason to count it connected later.
+    entry.busy.clear()
     entry.stay = stay
     deadline = time.monotonic() + max(0.0, min(wait, MAX_WAIT_S))
     if not was_connected or time.monotonic() - entry.picked >= PICKUP_EVERY_S:
@@ -181,6 +221,7 @@ async def next_step(
             if step.future.done():
                 continue
             step.taken = True
+            entry.busy[step.id] = time.monotonic()
             if not entry.queue:
                 entry.ready.clear()
             return {"id": step.id, "action": step.action, "args": step.args}
@@ -212,6 +253,10 @@ def _clip(value: Any, depth: int = 0) -> Any:
 def finish(person_id: int, step_id: str, result: dict[str, Any]) -> bool:
     """What the extension did with a step it took. False when it is no step
     of theirs waiting for an answer."""
+    entry = _people.get(person_id)
+    if entry is not None:
+        # Answered, even too late for the turn: it is free for the next step.
+        entry.busy.pop(step_id, None)
     step = _steps.get(step_id)
     if step is None or step.person_id != person_id or not step.taken or step.future.done():
         return False

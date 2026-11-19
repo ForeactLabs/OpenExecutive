@@ -83,6 +83,58 @@ async def test_a_step_nobody_answers_times_out_with_a_plain_error() -> None:
     assert not browser_relay._steps
 
 
+def _ago(person_id: int, seconds: float) -> None:
+    """Move what the relay knows of this extension that far into the past."""
+    entry = browser_relay._people[person_id]
+    entry.seen -= seconds
+    entry.busy = {k: v - seconds for k, v in entry.busy.items()}
+
+
+async def test_an_extension_busy_with_a_step_stays_connected_and_says_busy() -> None:
+    await browser_relay.next_step(7, wait=0)
+    # It takes a step and gets stuck on it: no answer, and no more asking.
+    first = asyncio.create_task(browser_relay.run(7, "look", {}, timeout=0.05))
+    step = await browser_relay.next_step(7, wait=1)
+    assert step is not None
+    assert (await first)["ok"] is False
+    _ago(7, browser_relay.CONNECTED_S + 10)
+    assert browser_relay.connected(7)
+    with pytest.raises(browser_relay.Busy):
+        await browser_relay.run(7, "look", {})
+    assert not browser_relay._people[7].queue
+    # The chat hears it is busy, never that it isn't connected, and gets no Connect card.
+    session = _session()
+    token = current_session.set(session)
+    try:
+        out = json.loads(await browser_tools._handler("browser_look")({}))
+    finally:
+        current_session.reset(token)
+    assert out == {"error": browser_relay.BUSY} and not browser_tools.take_needed(session)
+    # Its late answer frees it, and it asks again.
+    assert not browser_relay.finish(7, step["id"], {"ok": True})
+    assert not browser_relay.connected(7)
+    await browser_relay.next_step(7, wait=0)
+    assert browser_relay.connected(7)
+    # A tab asking again (a reload lost the answer) means it isn't busy any more.
+    first = asyncio.create_task(browser_relay.run(7, "look", {}, timeout=0.05))
+    assert await browser_relay.next_step(7, wait=1) is not None
+    await first
+    await browser_relay.next_step(7, wait=0)
+    _ago(7, browser_relay.CONNECTED_S + 10)
+    assert not browser_relay.connected(7)
+
+
+async def test_a_step_that_never_answers_stops_counting_as_busy() -> None:
+    await browser_relay.next_step(7, wait=0)
+    first = asyncio.create_task(browser_relay.run(7, "look", {}, timeout=0.05))
+    await browser_relay.next_step(7, wait=1)
+    await first
+    _ago(7, browser_relay.BUSY_S + 1)
+    assert not browser_relay.connected(7)
+    with pytest.raises(browser_relay.NotConnected):
+        await browser_relay.run(7, "look", {})
+
+
 async def test_an_answer_is_cut_to_size_and_a_failure_always_says_why() -> None:
     await browser_relay.next_step(7, wait=0)
     run = asyncio.create_task(browser_relay.run(7, "look", {}))

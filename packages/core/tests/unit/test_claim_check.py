@@ -53,6 +53,27 @@ def test_word_check_skips_replies_that_claim_nothing() -> None:
     assert claim_check.may_claim("Done.")
     assert claim_check.may_claim("I'll treat the draft as closed.")
     assert claim_check.may_claim("Removed it from the brief")
+    # A repeat or a watch promised in so many words is checked too.
+    assert claim_check.may_claim("Your recap goes out every Friday at 4pm.")
+    assert claim_check.may_claim("Any email from Sam gets flagged; I'll ping you right away.")
+    assert claim_check.may_claim("Keeping an eye out for Sam's email.")
+    assert claim_check.may_claim("I’ll flag it the moment it lands.")
+    for timetable in ("Your recap goes out each Friday.", "It goes out weekly on Fridays.",
+                      "It goes out every other Friday.", "You get it every two weeks.",
+                      "The board pack goes out quarterly.", "I'll check every 30 minutes."):
+        assert claim_check.may_claim(timetable), timetable
+
+
+def test_judge_is_told_a_call_backs_only_what_it_made() -> None:
+    # A one-time step is no repeat, and a note in memory is no watch.
+    assert "scheduled once does not back a claim that something is sent or run" in claim_check._SYSTEM
+    assert "only the timetable that" in claim_check._SYSTEM
+    # A standing change still backs "from now on": that rule is about timetables.
+    assert 'still backs \"from now on\"' in claim_check._SYSTEM
+    assert "kept in memory does not back a claim that something" in claim_check._SYSTEM
+    # What does back them is named, so a true repeat or watch isn't redone.
+    for backs in ("workflow saved switched on", "add_watchlist_entry", "watch_for_email", "propose_watch"):
+        assert backs in claim_check._SYSTEM
 
 
 def test_claim_must_be_in_the_reply_word_for_word() -> None:

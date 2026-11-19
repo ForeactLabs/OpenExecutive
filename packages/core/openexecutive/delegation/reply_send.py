@@ -669,7 +669,9 @@ async def send_chat_draft(
     """Send the draft chat wrote as ``person`` (``delegation_drafts`` row
     ``row_id``), on their tap, exactly as it was written. ``confirm``
     ``{"thread_moved_on": true}`` is the second yes for a reply whose
-    conversation moved on. Returns the sent message's id; raises
+    conversation moved on; its ``seen_version`` is the version the tapped
+    card showed (``chat_draft_card.state``'s ``version``), so a card shown
+    before a change sends nothing. Returns the sent message's id; raises
     ``SendRefused``."""
     from openexecutive.audit import rows_for_person
 
@@ -681,6 +683,9 @@ async def send_chat_draft(
 
 
 _DRAFT_GONE = "That draft isn't in your Drafts any more: it was sent or deleted there."
+# A chat draft's ``sent_message_id`` once the Executive sent it: its own
+# mailbox gives no id back, and no message of theirs is it.
+SENT_BY_EXECUTIVE = "sent_by_executive"
 _CHAT_SENDING: set[int] = set()
 _BEING_CHANGED = "This email is being changed right now. Look at it again, then send it."
 
@@ -738,11 +743,22 @@ async def _send_chat_draft(
     if draft is None:
         drafts.mark_gone(row.id, now)
         raise SendRefused(409, "draft_gone", _DRAFT_GONE)
-    if draft.message.id != row.message_id:
+    # The version the tapped card showed (``seen_version``; its words and
+    # who it goes from change together), or who a row without the words
+    # showed it going from (``seen_from_executive``): a card shown before a
+    # change on another screen sends nothing it didn't show.
+    seen = confirm.get("seen_version")
+    seen_from = confirm.get("seen_from_executive")
+    stale_card = (isinstance(seen, str) and seen != row.message_id) or (
+        isinstance(seen_from, bool) and seen_from != row.from_executive
+    )
+    if draft.message.id != row.message_id or stale_card:
         # Changed in the mailbox since chat wrote it: Send under the chat
         # sends what the chat showed, so that version is theirs to send there.
         raise SendRefused(
-            409, "draft_changed", "The draft changed in your mailbox since it was written. Send it from there.",
+            409, "draft_changed", "The draft changed since you saw it, so nothing was sent. Look at it again."
+            if stale_card and draft.message.id == row.message_id
+            else "The draft changed in your mailbox since it was written. Send it from there.",
         )
 
     recipients = sorted({normalize_email(a) for a in [*draft.message.to, *draft.message.cc, *draft.message.bcc]})
@@ -807,6 +823,12 @@ async def _send_chat_draft(
             raise SendRefused(
                 409, "draft_changed", "The draft changed in your mailbox just now, so nothing was sent. Send it from there.",
             )
+        if row.from_executive:
+            # Switched on its card: it goes from the Executive's own mailbox,
+            # with them on cc, and their draft of it is taken out.
+            return await _send_chat_draft_from_executive(
+                person, row, client, current.message, recipients, thread_id,
+            )
         try:
             sent = await client.send_draft(row.draft_id)
         except GmailError as exc:
@@ -842,3 +864,72 @@ async def _send_chat_draft(
         return str(sent.id or "")
     finally:
         _CHAT_SENDING.discard(row.id)
+
+
+async def _send_chat_draft_from_executive(
+    person: Any, row: Any, client: Any, message: Any, recipients: list[str], thread_id: str,
+) -> str:
+    """Send the chat draft ``row`` (claimed for sending, read as ``message``)
+    from the Executive's own mailbox: its words and files as they are in
+    their Drafts, to whom it says, with them on cc (``send_from.executive_step``,
+    the same send as a reply card switched to the Executive). Their tap is
+    the OK for this one email. Their draft of it is then taken out. Returns
+    "" (the Executive's mailbox gives no id back); raises ``SendRefused``."""
+    from openexecutive.delegation import drafts
+    from openexecutive.delegation.card_drafts import _delete_quietly
+    from openexecutive.delegation.gmail import GmailError
+    from openexecutive.delegation.inbox import _audit
+    from openexecutive.delegation.send_from import executive_step
+    from openexecutive.orchestrator import take_the_lead
+
+    # Nothing has gone until ``carry_out``: anything that fails before it
+    # hands the draft back, so the card can send it again.
+    try:
+        attached = list(message.attachments)
+        if not attached and message.has_attachments:
+            attached = list(await client.list_attachments(message.id))
+        files = []
+        for item in attached:
+            info, data = await client.attachment_bytes(message.id, item.index)
+            files.append((info.name or "attachment", info.mime_type or "application/octet-stream", data))
+        step, tool = executive_step(
+            person, to=list(message.to), cc=list(message.cc), subject=message.subject,
+            body=message.text, attachments=files, bcc=list(message.bcc),
+        )
+    except GmailError as exc:
+        drafts.release_send(row.id)
+        raise SendRefused(
+            502, "gmail_error",
+            "Couldn't read the draft's files in your mailbox. Try again in a moment, or send it from your Drafts.",
+        ) from exc
+    except Exception:
+        drafts.release_send(row.id)
+        raise
+    try:
+        result = await take_the_lead.carry_out(
+            step, by_principal=bool(getattr(person, "is_principal", False)), own_card=True,
+        )
+    except Exception as exc:
+        # Left claimed, so another tap can't send it twice.
+        logger.warning("delegation.reply_send: the Executive's send of a chat draft failed (%s)", type(exc).__name__)
+        raise SendRefused(
+            502, "send_unconfirmed",
+            "Something went wrong, so it may not have gone. Check the Executive's Sent mail before trying again.",
+        ) from exc
+    if take_the_lead.result_failed(result):
+        drafts.release_send(row.id)
+        logger.warning("delegation.reply_send: the Executive's send of a chat draft failed: %s", result[:300])
+        raise SendRefused(502, "send_failed", f"It wasn't sent. {take_the_lead.failure_words(tool, result)}")
+    try:
+        drafts.mark_sent(person.id, row.draft_id, SENT_BY_EXECUTIVE)
+        _audit("delegation_chat_draft_sent", f"Sent an email chat wrote for person {person.id} from the Executive, on their tap", {
+            "person_id": person.id, "draft_row": row.id, "thread_id": thread_id or None,
+            "from_executive": True, "recipient_count": len(recipients),
+        })
+    except Exception as exc:
+        logger.warning("delegation.reply_send: recording a sent chat draft failed (%s)", type(exc).__name__)
+    # Their own draft of it would only wait there unsent. No history note
+    # (``_note_sent``): those come from the person's own words, and these
+    # are written for the Executive.
+    await _delete_quietly(client, row.draft_id)
+    return ""

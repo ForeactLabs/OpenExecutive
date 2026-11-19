@@ -39,7 +39,7 @@ test("an option or Or tell me shows only when this page can carry it out", () =>
 
 test("an email reply card reads like every other card", () => {
   const src = readFileSync(new URL("../src/components/RepliesWaiting.tsx", import.meta.url), "utf8");
-  for (const part of ['title="What happened"', 'title="What I\'ll do"', "See the reply", "<SayBox", '"Skip"', ", cc me`"]) {
+  for (const part of ['title="What happened"', 'title="What I\'ll do"', "See reply to ${firstNames(toList)}", "<SayBox", '"Skip"', ", cc me`"]) {
     assert.ok(src.includes(part), `the reply card has no ${part}`);
   }
   // A go said in Or tell me brings up the same confirm a tap on Send does.

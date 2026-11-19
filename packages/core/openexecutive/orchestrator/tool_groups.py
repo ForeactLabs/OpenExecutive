@@ -77,7 +77,8 @@ GROUPS: dict[str, tuple[str, tuple[str, ...]]] = {
         ),
     ),
     "workflows": (
-        "draft, save, list, suggest or run workflows",
+        "draft, save, list, suggest or run workflows; anything the person wants done again "
+        "and again on a schedule (a recap every Friday, a check each morning)",
         ("draft_workflow", "list_workflows", "run_workflow", "save_workflow", "suggest_workflow"),
     ),
     "files": (

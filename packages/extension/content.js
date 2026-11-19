@@ -660,8 +660,16 @@
       }
       // A frame for the page to draw without it before the screenshot, and
       // where its password, card and code fields are, for the background to
-      // black out in the picture.
-      requestAnimationFrame(() => setTimeout(() => reply({ ok: true, view: viewNow(), masks: msg.hide ? masks() : [] }), 30));
+      // black out in the picture. A page Chrome isn't drawing (a window
+      // behind others, a locked screen) gets no frame: it answers anyway.
+      let answered = false;
+      const answer = () => {
+        if (answered) return;
+        answered = true;
+        reply({ ok: true, view: viewNow(), masks: msg.hide ? masks() : [] });
+      };
+      requestAnimationFrame(() => setTimeout(answer, 30));
+      setTimeout(answer, 300);
       return true;
     }
     if (msg.type === "view") {
