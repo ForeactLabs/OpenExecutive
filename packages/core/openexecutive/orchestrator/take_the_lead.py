@@ -1151,9 +1151,14 @@ def rule_offers(
             # list, which counts Goes rules only where they apply on this
             # turn: no rule would let it go here.
             return []
+        # A recipient it can't read: no person or company rule covers them,
+        # and a connected app's check holds it whatever the rules say.
+        unreadable = any(not _EMAIL_RE.fullmatch(a) for a in addresses)
+        if asked and unreadable:
+            return []
         candidates = [(RULE_TOPIC, kind)]
         reached = new or recipients
-        if kind not in (DELETE, SHARE) and reached:
+        if kind not in (DELETE, SHARE) and reached and not unreadable:
             if len(reached) == 1:
                 candidates.append((RULE_PERSON, reached[0]))
             domains = {a.rsplit("@", 1)[1] for a in reached if "@" in a}
@@ -1443,17 +1448,18 @@ def _topics(
     return found
 
 
-def topics_in(text: str, recipients: Iterable[str] = ()) -> set[str]:
+def topics_in(text: str, recipients: Iterable[str] = (), *, on_error: frozenset[str] = frozenset(KINDS)) -> set[str]:
     """The topics (``KINDS``) of something sent as a person
     (``delegation.handle_it``): what ``text`` says, plus who it goes to
     (someone new, a lot of people), read by ``_topics`` as for any step.
-    Never raises: an error is every topic."""
+    Never raises: an error is ``on_error`` (every topic, for a Waits rule;
+    a caller asking what a Goes rule releases passes none)."""
     try:
         going = sorted({r.strip().lower() for r in recipients if r and r.strip()})
         return {k for k, _ in _topics("", {}, recipients=going, about=text, mcp=False)}
     except Exception:
-        logger.warning("take_the_lead: couldn't read a message's topics — every topic", exc_info=True)
-        return set(KINDS)
+        logger.warning("take_the_lead: couldn't read a message's topics", exc_info=True)
+        return set(on_error)
 
 
 def topics_of(tool: str, tool_input: dict[str, Any], *, mcp: bool = False, reaches: Iterable[str] = ()) -> set[str]:

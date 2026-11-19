@@ -2560,6 +2560,20 @@ def test_topic_rules_on_what_it_sends_as_you(owner: Any, balanced: None) -> None
     assert handle_it.content_hold("Here is the invoice for $450.") == "rule"
 
 
+def test_a_topic_read_that_fails_releases_nothing(
+    owner: Any, balanced: None, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _go("topic", "big_send")
+    assert handle_it.content_hold("About the lawsuit") == "sensitive"
+
+    def boom(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(ttl, "_topics", boom)
+    assert ttl.topics_in("About the lawsuit") == set(ttl.KINDS)
+    assert handle_it.content_hold("About the lawsuit") == "sensitive"
+
+
 def test_a_someone_new_waits_rule_holds_a_reply_as_you_on_hands_off(
     owner: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2629,6 +2643,9 @@ def test_someone_new_on_an_asked_step_offers_what_covers_everyone_new(
         {"kind": "person", "value": "a@far.example"},
         {"kind": "domain", "value": "far.example"},
     ]
+    # A recipient it can't read: nothing is offered.
+    unreadable = ("google_workspace__send_gmail_message", {"to": "dana @co.example", "body": "hi"})
+    assert ttl.rule_offers(*unreadable, ttl.SOMEONE_NEW, mcp=True, asked=True) == []
     # A share held for someone new reads only People: no rule would clear it.
     share = ("google_workspace__share_drive_file", {"file_id": "f1", "share_with": "a@far.example"})
     assert ttl.rule_offers(*share, ttl.SOMEONE_NEW, mcp=True, asked=True) == []

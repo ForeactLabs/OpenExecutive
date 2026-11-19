@@ -251,7 +251,7 @@ def content_hold(
     money_goes = take_the_lead.RULE_AMOUNT in kinds or take_the_lead.MONEY in released
     topics = {m.group(0).lower() for t in texts for m in _SENSITIVE_RE.finditer(t or "")}
     money = {t for t in topics if re.sub(r"\s+", " ", t) in MONEY_WORDS}
-    covered = {t for t in topics if take_the_lead.topics_in(t) & released}
+    covered = {t for t in topics if take_the_lead.topics_in(t, on_error=frozenset()) & released}
     if not money_goes and money:
         return "sensitive"
     if topics - money - covered:
