@@ -40,8 +40,8 @@ CLAIM_RE = re.compile(
     r"(?:it|this|that|the)|i['’]?ve|i have|i['’]?ll remind|will remind|reminder (?:is )?set|"
     r"won'?t (?:show|appear|include)|no longer|from now on|going forward|"
     r"(?:every|each)(?: other| \d+| two| few)? "
-    r"(?:day|week|month|morning|evening|weekday|monday|tuesday|wednesday|thursday|friday|saturday|sunday)s?|"
-    r"daily|weekly|monthly|keep(?:ing)? an eye|watching|"
+    r"(?:minute|hour|day|week|month|quarter|morning|evening|weekday|monday|tuesday|wednesday|thursday|friday|saturday|sunday)s?|"
+    r"hourly|daily|weekly|monthly|quarterly|keep(?:ing)? an eye|watching|"
     r"(?:i['’]?ll|i will) (?:flag|ping|let you know|tell you|schedule|watch|send))\b",
     re.IGNORECASE,
 )
