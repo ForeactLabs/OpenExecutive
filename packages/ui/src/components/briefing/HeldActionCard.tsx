@@ -41,7 +41,7 @@ export default function HeldActionCard({
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const nextTime = useNextTimeRule(parseOffers(held?.offers), onResolved, editing);
+  const nextTime = useNextTimeRule(parseOffers(held?.offers), onResolved, editing || Object.keys(held?.said ?? {}).length > 0);
 
   useEffect(() => {
     if (decisionId == null) return;

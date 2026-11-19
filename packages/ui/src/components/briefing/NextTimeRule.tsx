@@ -40,10 +40,11 @@ export function offerLine(offer: RuleOffer): string {
  * The box, its pick, and what Do it runs: `withRule(approve)` approves, then
  * adds the picked rule. While a rule just added (or why it wasn't) shows,
  * `resolved` waits for Close (or Undo) instead of dropping the card at once.
- * While the step is being edited the box is hidden and no rule is added:
- * the offers were worked out for the step as it was.
+ * Once the step is changed (being edited, or changed by what was said on
+ * the card) the box is hidden and no rule is added: the offers were worked
+ * out for the step as it was.
  */
-export function useNextTimeRule(offers: RuleOffer[], onResolved: () => void, editing = false) {
+export function useNextTimeRule(offers: RuleOffer[], onResolved: () => void, changed = false) {
   const [owner, setOwner] = useState(false);
   const offered = offers.length > 0;
   useEffect(() => {
@@ -58,7 +59,7 @@ export function useNextTimeRule(offers: RuleOffer[], onResolved: () => void, edi
       live = false;
     };
   }, [offered]);
-  const shown = offered && owner && !editing;
+  const shown = offered && owner && !changed;
   const [pick, setPick] = useState<number>(-1);
   const [added, setAdded] = useState<{ id: number | null; line: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
