@@ -105,7 +105,8 @@ def test_a_draft_the_person_sends_themselves_is_signed_as_they_say() -> None:
     # Executive signed it as itself and told them to fix the sign-off. The
     # rule stops sending in someone's name, not handing the asker their words.
     persona_text = build_system_blocks()[0]["text"]
-    assert "Never send an email, or post a Slack/Discord/Telegram" in persona_text
+    assert "Never send an email, save a draft in any mailbox, or post a" in persona_text
+    assert "write it as text in your reply (never in a mailbox)" in persona_text
     assert "draft an email, or post" not in persona_text
     assert "sign it with their own name" in persona_text
     assert "never anyone else's" in persona_text
