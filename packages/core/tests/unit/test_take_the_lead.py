@@ -202,6 +202,14 @@ def test_the_executives_own_account_is_not_someone_new(owner: Any) -> None:
     hit = ttl.check("google_workspace__send_gmail_message", mail, lead=_lead(), rules=[], mcp=True)
     assert hit is not None and hit.kind == "someone_new"
     assert hit.reason == "it goes to someone new (stranger@far.example)"
+    # Five teammates are not "a lot of people" because the step names its own account.
+    team = {"to": ", ".join(f"t{i}@co.example" for i in range(5)), "subject": "Hi", "body": "hi",
+            "user_google_email": own}
+    assert ttl.check("google_workspace__send_gmail_message", team, lead=_lead(someone_new=False), rules=[],
+                     mcp=True) is None
+    assert ttl._someone_new(["stranger@far.example", "unknown-slack:U07"]) == (
+        "it goes to someone new (stranger@far.example and 1 more)"
+    )
 
 
 def test_a_team_files_name_spends_nothing_and_who_it_reaches_still_counts(owner: Any) -> None:

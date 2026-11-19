@@ -1233,11 +1233,11 @@ def _mcp_deletes(tool: str, tool_input: dict[str, Any]) -> bool:
 def _someone_new(addresses: list[str]) -> str:
     """Why a step to someone new waits, naming who: "it goes to someone new
     (dana@co.example)". Only real addresses are named; one the step names by
-    an id the People list doesn't have reads "someone new"."""
+    an id the People list doesn't have is counted in "and N more"."""
     shown = [a for a in addresses if _EMAIL_RE.fullmatch(a)]
     if not shown:
         return "it goes to someone new"
-    more = len(shown) - 3
+    more = len(addresses) - len(shown[:3])
     return f"it goes to someone new ({', '.join(shown[:3])}{f' and {more} more' if more > 0 else ''})"
 
 
@@ -1261,15 +1261,17 @@ def check(
     named = sorted({
         a.lower() for a in [*_EMAIL_RE.findall(text), *addresses, *(extra_recipients or [])]
     })
+    # The Executive's own account (a Google step's ``user_google_email``)
+    # is no one the step reaches: not someone new, not one of a lot.
     recipients = sorted({
-        a.lower() for a in [*_reach_addresses(tool, tool_input), *(extra_recipients or [])]
+        a.lower() for a in [*_reach_addresses(tool, tool_input), *(extra_recipients or [])] if not _executive(a)
     })
     about = says(tool, tool_input, mcp=mcp)
     hit = _rule_hit(rules, text, named, money=about)
     if hit is not None:
         return hit
     deletes = tool in _DELETE_TOOLS or (mcp and _mcp_deletes(tool, tool_input))
-    new_people = [r for r in recipients if not _known(r)]
+    new_people = [r for r in recipients if not _known(r)] if lead.asks_first(SOMEONE_NEW) else []
     checks: list[tuple[str, bool, str]] = [
         (DELETE_SHARE, deletes, "it deletes, cancels or shares something"),
         (BIG_SEND, tool in _BROADCAST_TOOLS or len(recipients) > BIG_SEND_RECIPIENTS,
