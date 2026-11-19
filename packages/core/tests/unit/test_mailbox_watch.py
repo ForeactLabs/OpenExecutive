@@ -247,6 +247,22 @@ def test_only_its_owner_sees_an_email_watch(db: Path) -> None:
     assert slugs(every_watch=True) == ["stock-nwt", "email-sign-ups"]
 
 
+def test_someone_elses_email_watch_never_takes_a_name(db: Path) -> None:
+    # Sam has "email-sign-ups"; Jordan asks for the same thing and gets the
+    # next free name, without learning Sam's watch is there.
+    _email_watch(db, owner=OTHER)
+    assert mailbox.free_slug("email-sign-ups", OWNER) == "email-sign-ups-2"
+    _email_watch(db, slug="email-sign-ups-2", owner=OTHER)
+    assert mailbox.free_slug("email-sign-ups", OWNER) == "email-sign-ups-3"
+    assert mailbox.free_slug("x" * 61, OWNER) == "x" * 61
+    # A name on a watch they can see stays as it is (they change that one).
+    assert mailbox.free_slug("email-sign-ups", OTHER) == "email-sign-ups"
+    ms.insert_watchlist_item(slug="stock-nwt", signal_type="stock", target="NWT", db_path=db)
+    assert mailbox.free_slug("stock-nwt", OWNER) == "stock-nwt"
+    _email_watch(db, slug="y" * 61, owner=OTHER)
+    assert mailbox.free_slug("y" * 61, OWNER) == "y" * 59 + "-2"
+
+
 def test_company_wide_reads_leave_its_signals_out(db: Path) -> None:
     item = _email_watch(db)
     ms.insert_signal(Signal(

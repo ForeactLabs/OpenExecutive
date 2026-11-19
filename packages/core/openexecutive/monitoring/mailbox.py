@@ -32,6 +32,8 @@ KEYWORDS_KEY = "keywords"
 MAX_SENDERS = 10
 MAX_KEYWORDS = 10
 _KEYWORD_MAX_CHARS = 60
+# The longest watch name (``monitoring.validation.WATCHLIST_SLUG_RE``).
+_SLUG_MAX = 61
 _ADDRESS_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
@@ -61,6 +63,22 @@ def shown_to(item: WatchlistItem, person_id: int | None) -> bool:
     if not is_mailbox(item):
         return True
     return person_id is not None and owner_id(item) == person_id
+
+
+def free_slug(slug: str, person_id: int | None) -> str:
+    """``slug`` for a new watch set up by ``person_id``, or, when someone
+    else's email watch (which they can't see) already has it, the first
+    free ``slug-2``, ``slug-3``, ...: names are unique across the company,
+    but another person's email watch is never in the way, nor shown to be
+    there. A name on a watch they can see stays theirs to change."""
+    from openexecutive.monitoring import store
+
+    candidate, n = slug, 1
+    while (item := store.get_watchlist_item_by_slug(candidate)) is not None and not shown_to(item, person_id):
+        n += 1
+        suffix = f"-{n}"
+        candidate = f"{slug[: _SLUG_MAX - len(suffix)]}{suffix}"
+    return candidate
 
 
 def audit_privacy(item: WatchlistItem) -> dict[str, Any]:
@@ -120,6 +138,7 @@ __all__ = [
     "OWNER_KEY",
     "audit_privacy",
     "clean_trigger",
+    "free_slug",
     "is_mailbox",
     "matches",
     "owner_config",

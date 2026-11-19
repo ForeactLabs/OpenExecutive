@@ -433,6 +433,7 @@ async def create_watchlist_entry(body: WatchlistCreate, request: Request) -> Wat
             detail=f"unknown severity_ceiling {body.severity_ceiling!r}",
         )
 
+    slug = mailbox.free_slug(slug, _caller_person(request))
     if ms.get_watchlist_item_by_slug(slug) is not None:
         raise HTTPException(
             status_code=409,
