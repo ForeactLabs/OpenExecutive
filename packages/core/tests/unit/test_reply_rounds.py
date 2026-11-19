@@ -109,6 +109,8 @@ def test_a_working_note_before_a_lookup_leaves_the_answer() -> None:
     ("Looking at the contract, renewal is automatic.", "Looking at the contract, renewal is automatic."),
     ("Searching the CRM turned up nothing on Acme.", "Searching the CRM turned up nothing on Acme."),
     ("Now the bad news: Acme churned.", "Now the bad news: Acme churned."),
+    ("Acme renewed. Now the bad news is that Beta churned.", "Acme renewed. Now the bad news is that Beta churned."),
+    ("Time to hire has doubled since last year.", "Time to hire has doubled since last year."),
     ("Nothing on Acme yet. Checking the CRM now.", "Nothing on Acme yet."),
 ])
 def test_only_the_next_step_sentences_leave(text: str, kept: str) -> None:

@@ -1048,7 +1048,8 @@ WORKING_NOTE_MAX_CHARS = 300
 # nothing.", "Now the bad news: Acme churned.") is never one.
 _NEXT_STEP_RE = re.compile(
     r"^(?:(?:let me|let's) (?:check|look|pull|find|search|try|see|get|grab|open|read|dig)\b"
-    r"|now (?:to|for|on to|the|let me|i'll|i will)\b|next (?:to|let me|i'll|i will|the)\b|time to\b"
+    r"|now (?:to|for|on to|let me|i'll|i will)\b|next (?:to|let me|i'll|i will)\b"
+    r"|(?:now|next) the \w+(?: \w+)?[.!]?$|time to (?:check|look|search|pull|find|dig)\b"
     r"|i'll (?:check|look|search|pull|find|try)\b|i will (?:check|look|search|pull|find|try)\b"
     r"|(?:checking|looking|searching|pulling)\b.*\bnow[.!]?$)",
     re.IGNORECASE,
