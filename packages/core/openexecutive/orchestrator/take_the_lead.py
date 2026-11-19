@@ -2072,8 +2072,19 @@ def done_lately(
     finally:
         conn.close()
     steps = [Done(**dict(r)) for r in rows]
-    # A connected-app read did nothing for anyone.
-    return [s for s in steps if "__" not in s.tool or mcp_tool_acts(s.tool)][:DONE_LATELY_MAX]
+    # A waiting row counts only while its card is open: the decision says so,
+    # whichever way the card was closed (a row isn't moved on every path).
+    from openexecutive.memory.decision_ledger import OPEN_STATUSES, get_decision_instances
+
+    held = [s.decision_id for s in steps if s.status == _LATELY_WAITING and s.decision_id]
+    cards = get_decision_instances([int(i) for i in held], db_path=db_path) if held else {}
+    open_cards = {i for i, card in cards.items() if card.status in OPEN_STATUSES}
+    return [
+        s for s in steps
+        # A connected-app read did nothing for anyone.
+        if ("__" not in s.tool or mcp_tool_acts(s.tool))
+        and (s.status != _LATELY_WAITING or s.decision_id is None or s.decision_id in open_cards)
+    ][:DONE_LATELY_MAX]
 
 
 def done_lately_block(session: Any, *, now: datetime | None = None, db_path: Path | None = None) -> str:

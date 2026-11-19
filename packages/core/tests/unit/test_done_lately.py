@@ -84,15 +84,25 @@ def _step(
             conn.close()
 
 
+def _card() -> int:
+    from openexecutive.memory import decision_ledger
+
+    return decision_ledger.create_decision_instance(
+        decision_class=ttl.DECISION_CLASS, department="", originating_session_id=None, proposed_payload={},
+        idempotency_key=None, gate_mode="propose", approver_person_id=None, confidence=None,
+    )
+
+
 def test_a_sent_email_and_a_waiting_card_are_shown(monkeypatch: pytest.MonkeyPatch, roster: SimpleNamespace) -> None:
     _step(monkeypatch, roster.principal, subject="Thursday pickup at Elm Street")
-    _step(monkeypatch, roster.principal, status="waiting", decision_id=41, to="pat@example.com",
+    card = _card()
+    _step(monkeypatch, roster.principal, status="waiting", decision_id=card, to="pat@example.com",
           subject="Pallet wrap order")
 
     block = ttl.done_lately_block(_web(roster.principal))
 
     assert "done: Send gmail message, to sam@example.com, subject “Thursday pickup at Elm Street”" in block
-    assert "waiting on their OK (card 41)" in block and "pat@example.com" in block
+    assert f"waiting on their OK (card {card})" in block and "pat@example.com" in block
     assert "point them to that card rather than making another" in block
     assert "ask whether they want it sent again" in block
 
@@ -120,9 +130,21 @@ def test_only_their_own_steps_from_the_last_day(monkeypatch: pytest.MonkeyPatch,
 
 def test_a_card_still_open_shows_however_old(monkeypatch: pytest.MonkeyPatch, roster: SimpleNamespace) -> None:
     # A card's row keeps the time it was made until it is approved.
-    _step(monkeypatch, roster.principal, status="waiting", decision_id=41, subject="Open since Monday", hours_ago=30)
+    card = _card()
+    _step(monkeypatch, roster.principal, status="waiting", decision_id=card, subject="Open since Monday", hours_ago=30)
     block = ttl.done_lately_block(_web(roster.principal))
-    assert "waiting on their OK (card 41)" in block and "Open since Monday" in block
+    assert f"waiting on their OK (card {card})" in block and "Open since Monday" in block
+
+
+def test_a_card_closed_another_way_is_left_out(monkeypatch: pytest.MonkeyPatch, roster: SimpleNamespace) -> None:
+    # A card replaced by a newer one is closed on its decision; its log row
+    # may still say waiting.
+    from openexecutive.memory import decision_ledger
+
+    card = _card()
+    _step(monkeypatch, roster.principal, status="waiting", decision_id=card, subject="Replaced card")
+    decision_ledger.close_externally(card, reason="replaced by a newer card")
+    assert ttl.done_lately_block(_web(roster.principal)) == ""
 
 
 def test_never_in_a_conversation_others_read(monkeypatch: pytest.MonkeyPatch, roster: SimpleNamespace) -> None:
