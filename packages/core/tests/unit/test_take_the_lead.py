@@ -177,6 +177,24 @@ def test_words_inside_a_team_file_are_not_what_the_step_is_about(
     assert ttl.check(tool, tool_input, lead=_lead(), rules=[], mcp=True) is None
 
 
+def test_the_executives_own_account_is_not_someone_new(owner: Any) -> None:
+    """A Google step names the account it acts as (``user_google_email``),
+    the Executive's own: creating a sheet reaches no one."""
+    from openexecutive.config import get_settings
+
+    own = get_settings().exec_email_address
+    sheet = {"title": "Outreach log", "sheet_names": ["Log"], "user_google_email": own}
+    assert ttl.check("google_workspace__create_spreadsheet", sheet, lead=_lead(), rules=[], mcp=True) is None
+    assert ttl._team_only("google_workspace__create_spreadsheet", sheet)
+    note = {"to": own, "subject": "Note to self", "body": "hi", "user_google_email": own}
+    assert ttl.check("google_workspace__send_gmail_message", note, lead=_lead(), rules=[], mcp=True) is None
+    # Someone really new is named on the card.
+    mail = {"to": "stranger@far.example", "subject": "Hi", "body": "hi", "user_google_email": own}
+    hit = ttl.check("google_workspace__send_gmail_message", mail, lead=_lead(), rules=[], mcp=True)
+    assert hit is not None and hit.kind == "someone_new"
+    assert hit.reason == "it goes to someone new (stranger@far.example)"
+
+
 def test_a_team_files_name_spends_nothing_and_who_it_reaches_still_counts(owner: Any) -> None:
     named = {"spreadsheet_id": "s" * 30, "title": "Q3 budget $40,000", "values": [["x"]]}
     assert ttl.check("google_workspace__create_spreadsheet", named, lead=_lead(), rules=[], mcp=True) is None

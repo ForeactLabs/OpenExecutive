@@ -587,10 +587,25 @@ def _strings(value: Any) -> Iterator[str]:
             yield from _strings(v)
 
 
+def _executive(address: str) -> bool:
+    """Whether ``address`` is the Executive itself: the account its Google
+    (or Microsoft) tools act as (a Google step names that account in
+    ``user_google_email``). A step never reaches it. Never raises."""
+    from openexecutive.config import get_settings
+
+    try:
+        return address.strip().lower() == get_settings().exec_email_address.strip().lower()
+    except Exception:
+        return False
+
+
 def _known(address: str) -> bool:
-    """On the roster or a contact. Fails closed: unreadable is new."""
+    """The Executive itself, on the roster or a contact. Fails closed:
+    unreadable is new."""
     from openexecutive.people.store import find_person_by_address
 
+    if _executive(address):
+        return True
     try:
         return find_person_by_address(address, include_contacts=True) is not None
     except Exception:
@@ -621,10 +636,13 @@ def _team_only(tool: str, tool_input: dict[str, Any]) -> bool:
 
 
 def _all_team(addresses: list[str]) -> bool:
-    """Whether every address is a teammate's. Fails closed."""
+    """Whether every address is a teammate's or the Executive's own. Fails
+    closed."""
     from openexecutive.people.store import find_person_by_address
 
     for address in {a.lower() for a in addresses}:
+        if _executive(address):
+            continue
         try:
             person = find_person_by_address(address, include_contacts=True)
         except Exception:
@@ -1209,6 +1227,17 @@ def _mcp_deletes(tool: str, tool_input: dict[str, Any]) -> bool:
     return isinstance(action, str) and bool(_MCP_DELETE_RE.search(action))
 
 
+def _someone_new(addresses: list[str]) -> str:
+    """Why a step to someone new waits, naming who: "it goes to someone new
+    (dana@co.example)". Only real addresses are named; one the step names by
+    an id the People list doesn't have reads "someone new"."""
+    shown = [a for a in addresses if _EMAIL_RE.fullmatch(a)]
+    if not shown:
+        return "it goes to someone new"
+    more = len(shown) - 3
+    return f"it goes to someone new ({', '.join(shown[:3])}{f' and {more} more' if more > 0 else ''})"
+
+
 def check(
     tool: str,
     tool_input: dict[str, Any],
@@ -1237,6 +1266,7 @@ def check(
     if hit is not None:
         return hit
     deletes = tool in _DELETE_TOOLS or (mcp and _mcp_deletes(tool, tool_input))
+    new_people = [r for r in recipients if not _known(r)]
     checks: list[tuple[str, bool, str]] = [
         (DELETE_SHARE, deletes, "it deletes, cancels or shares something"),
         (BIG_SEND, tool in _BROADCAST_TOOLS or len(recipients) > BIG_SEND_RECIPIENTS,
@@ -1244,7 +1274,7 @@ def check(
         (MONEY, mentions_money(about), "it's about money"),
         (CONTRACTS, bool(_CONTRACTS_RE.search(about)), "it's about a contract or legal matter"),
         (PEOPLE_DECISIONS, bool(_PEOPLE_RE.search(about)), "it's about hiring or a people decision"),
-        (SOMEONE_NEW, any(not _known(r) for r in recipients), "it goes to someone new"),
+        (SOMEONE_NEW, bool(new_people), _someone_new(new_people)),
     ]
     for kind, matched, reason in checks:
         if matched and lead.asks_first(kind):
