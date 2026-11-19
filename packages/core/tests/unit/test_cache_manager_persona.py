@@ -99,7 +99,6 @@ def test_identity_addendum_forbids_impersonation() -> None:
     assert "(principal)" in persona_text
 
 
-
 def test_a_draft_the_person_sends_themselves_is_signed_as_they_say() -> None:
     # Asked for a draft "signed from me" to send from their own mailbox, the
     # Executive signed it as itself and told them to fix the sign-off. The
@@ -113,6 +112,8 @@ def test_a_draft_the_person_sends_themselves_is_signed_as_they_say() -> None:
     # A speaker it can't place gets a blank sign-off.
     assert "you know who they are from a verified sign-in" in persona_text
     assert "you send nothing" in persona_text
+
+
 def test_persona_holds_the_line_on_followups() -> None:
     blocks = build_system_blocks()
     persona_text = blocks[0]["text"]
