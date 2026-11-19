@@ -846,27 +846,41 @@ def test_a_burst_past_the_minutes_cap_waits_its_turn(monkeypatch) -> None:
     assert clock[0] >= 1060.0
 
 
-def test_a_flood_past_what_may_wait_is_still_dropped(monkeypatch) -> None:
-    # A looping bot: past the minute's cap and what may wait for the next
-    # minutes, the rest are dropped, so the triage spend stays capped.
+def _all_at_once(monkeypatch, *, bounded: bool) -> tuple[list[bool], int]:  # type: ignore[no-untyped-def]
+    """Every event arrives within the minute, past the cap and what may wait."""
     ap, clock = _paced(monkeypatch)
     extra = 25
     total = ap._RATE_LIMIT_PER_MIN + ap._MAX_WAITING + extra
     real_sleep = asyncio.sleep
 
-    async def flood() -> list[bool]:
+    async def run() -> list[bool]:
         arrived = asyncio.Event()
 
         async def held_sleep(seconds: float) -> None:
-            await arrived.wait()  # every event arrives within the minute
+            await arrived.wait()
             clock[0] += seconds
             await real_sleep(0)
 
         monkeypatch.setattr(ap.asyncio, "sleep", held_sleep)
-        tasks = [asyncio.ensure_future(ap._wait_for_slot()) for _ in range(total)]
+        tasks = [asyncio.ensure_future(ap._wait_for_slot(bounded=bounded)) for _ in range(total)]
         await real_sleep(0)
         arrived.set()
         return list(await asyncio.gather(*tasks))
 
-    ran = asyncio.run(flood())
-    assert ran.count(False) == extra and ap._waiting == 0
+    ran = asyncio.run(run())
+    assert ap._waiting == 0
+    return ran, extra
+
+
+def test_a_flood_past_what_may_wait_is_still_dropped(monkeypatch) -> None:
+    # A looping bot: past the minute's cap and what may wait for the next
+    # minutes, the rest are dropped, so the triage spend stays capped.
+    ran, extra = _all_at_once(monkeypatch, bounded=True)
+    assert ran.count(False) == extra
+
+
+def test_a_source_that_limits_itself_always_waits(monkeypatch) -> None:
+    # Nine email watches catching up at once (20 each a poll): past what may
+    # wait, they still wait, as their source has already read past them.
+    ran, _ = _all_at_once(monkeypatch, bounded=False)
+    assert all(ran)

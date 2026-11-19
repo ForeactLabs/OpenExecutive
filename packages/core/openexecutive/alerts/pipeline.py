@@ -91,17 +91,19 @@ _MAX_WAITING = 2 * _RATE_LIMIT_PER_MIN
 _waiting = 0
 
 
-async def _wait_for_slot() -> bool:
+async def _wait_for_slot(*, bounded: bool = True) -> bool:
     """Pace evaluations to ``_RATE_LIMIT_PER_MIN``: a burst past the cap
     waits for the next minute's room, as a dropped event never comes back
     (its source has marked it handed over: an email watch's email, a watch's
     change). False, dropped, only when ``_MAX_WAITING`` already wait: a
-    flood (a looping bot) still costs at most a few minutes of triage."""
+    flood (a looping bot) still costs at most a few minutes of triage.
+    Not ``bounded``: a source that limits itself (an email watch tells at
+    most ``PER_POLL`` a poll) always waits, never dropped."""
     global _waiting
     if (wait := _take_slot()) <= 0:
         return True
     with _rate_lock:
-        if _waiting >= _MAX_WAITING:
+        if bounded and _waiting >= _MAX_WAITING:
             return False
         _waiting += 1
     try:
@@ -280,7 +282,7 @@ async def evaluate_and_dispatch(
     """
     path = db_path or store.DB_PATH
 
-    if not await _wait_for_slot():
+    if not await _wait_for_slot(bounded=event.source not in PERSONAL_SOURCES):
         logger.warning(
             "alerts.pipeline rate-limited: dropping event source=%s ext_id=%s",
             event.source,

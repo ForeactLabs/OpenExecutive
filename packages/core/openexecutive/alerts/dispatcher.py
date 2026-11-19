@@ -46,13 +46,15 @@ _CHAT_DM_MIN_SEVERITY = "high"
 
 async def dispatch_slack_dm(alert: Alert) -> bool:
     """A high or urgent alert to its person's own chat app: the one it was
-    routed to, else the principal (always the principal for a private one),
+    routed to, else the principal (always the principal for a private one;
+    never for a personal card, ``PERSONAL_SOURCES``, which is its person's or
+    no one's),
     on the first of their Slack, Discord or Telegram DMs that sends
     (``people.reach``; ``scheduler.runner.deliver_to_person``, chat apps
     only). Not during their quiet hours, unless it is urgent and they let
     urgent things through; it still waits on Home. The channel keeps its old
     name, ``slack_dm``, in stored preferences."""
-    from openexecutive.alerts.models import SEVERITY_RANK, is_private_alert
+    from openexecutive.alerts.models import PERSONAL_SOURCES, SEVERITY_RANK, is_private_alert
     from openexecutive.people.channel import is_within_availability
     from openexecutive.people.store import find_principal_person, get_person
     from openexecutive.scheduler.runner import deliver_to_person
@@ -62,6 +64,10 @@ async def dispatch_slack_dm(alert: Alert) -> bool:
     try:
         principal = find_principal_person()
         person = get_person(alert.routed_to_person_id) if alert.routed_to_person_id is not None else None
+        if alert.source in PERSONAL_SOURCES and (person is None or person.archived):
+            # One person's own card goes to them or nowhere, never on to
+            # the principal (an email watch's sender and subject).
+            return False
         if person is None or person.archived or is_private_alert(alert):
             person = principal
         if person is None:
