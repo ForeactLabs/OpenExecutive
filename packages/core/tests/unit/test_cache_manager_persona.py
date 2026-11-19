@@ -110,7 +110,7 @@ def test_a_draft_the_person_sends_themselves_is_signed_as_they_say() -> None:
     assert "draft an email, or post" not in persona_text
     assert "sign it with their own name" in persona_text
     assert "never anyone else's" in persona_text
-    # A speaker it can't place (an unverified sender) gets a blank sign-off.
+    # A speaker it can't place gets a blank sign-off.
     assert "you know who they are" in persona_text
     assert "you send nothing" in persona_text
 def test_persona_holds_the_line_on_followups() -> None:
