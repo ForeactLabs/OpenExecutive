@@ -53,6 +53,16 @@ def test_word_check_skips_replies_that_claim_nothing() -> None:
     assert claim_check.may_claim("Done.")
     assert claim_check.may_claim("I'll treat the draft as closed.")
     assert claim_check.may_claim("Removed it from the brief")
+    # A repeat or a watch promised in so many words is checked too.
+    assert claim_check.may_claim("Your recap goes out every Friday at 4pm.")
+    assert claim_check.may_claim("Any email from Sam gets flagged; I'll ping you right away.")
+    assert claim_check.may_claim("Keeping an eye out for Sam's email.")
+
+
+def test_judge_is_told_a_call_backs_only_what_it_made() -> None:
+    # A one-time step is no repeat, and a note in memory is no watch.
+    assert "scheduled once does not back a claim that something repeats" in claim_check._SYSTEM
+    assert "kept in memory does not back a claim that something" in claim_check._SYSTEM
 
 
 def test_claim_must_be_in_the_reply_word_for_word() -> None:
