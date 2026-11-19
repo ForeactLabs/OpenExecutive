@@ -447,6 +447,7 @@ async def handle_save_workflow(tool_input: dict[str, Any]) -> str:
     stored = saved
 
     # Reconcile any cadence into the scheduler.
+    queued: int | None = None
     try:
         from openexecutive.workflows.dynamic_cadence import (
             cancel_cadence_rows,
@@ -455,7 +456,7 @@ async def handle_save_workflow(tool_input: dict[str, Any]) -> str:
 
         cancel_cadence_rows(stored.name)
         if stored.is_active and stored.cadence:
-            schedule_dynamic_workflow_cadence(stored)
+            queued = schedule_dynamic_workflow_cadence(stored)
     except Exception:
         logger.exception("save_workflow: cadence scheduling failed (non-fatal)")
 
@@ -476,10 +477,16 @@ async def handle_save_workflow(tool_input: dict[str, Any]) -> str:
 
     base = get_settings().ui_base_url.rstrip("/")
     deep_link = f"{base}/jobs/{stored.name}"
+    # First in the result, so a reply's "every Friday" is checked against
+    # what was saved (orchestrator.claim_check reads the result's start).
+    schedule = stored.cadence or "none: it runs only when started"
+    if stored.is_active and stored.cadence and queued is None:
+        schedule = f"{stored.cadence} (not queued: its first run couldn't be scheduled)"
     if not stored.is_active:
         # Tool workflows always; any other workflow only if drafted off.
         return json.dumps({
             "status": "saved_pending_review",
+            "schedule": schedule,
             "name": stored.name,
             "deep_link": deep_link,
             "note": (
@@ -488,7 +495,7 @@ async def handle_save_workflow(tool_input: dict[str, Any]) -> str:
                 "the link."
             ),
         })
-    return json.dumps({"status": "saved", "name": stored.name, "deep_link": deep_link})
+    return json.dumps({"status": "saved", "schedule": schedule, "name": stored.name, "deep_link": deep_link})
 
 
 WORKFLOW_AUTHORING_TOOLS: list[dict[str, Any]] = [

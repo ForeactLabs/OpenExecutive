@@ -177,10 +177,9 @@ def test_words_inside_a_team_file_are_not_what_the_step_is_about(
     assert ttl.check(tool, tool_input, lead=_lead(), rules=[], mcp=True) is None
 
 
-def test_a_team_files_name_and_who_it_reaches_still_count(owner: Any) -> None:
+def test_a_team_files_name_spends_nothing_and_who_it_reaches_still_counts(owner: Any) -> None:
     named = {"spreadsheet_id": "s" * 30, "title": "Q3 budget $40,000", "values": [["x"]]}
-    hit = ttl.check("google_workspace__create_spreadsheet", named, lead=_lead(), rules=[], mcp=True)
-    assert hit is not None and hit.kind == "money"
+    assert ttl.check("google_workspace__create_spreadsheet", named, lead=_lead(), rules=[], mcp=True) is None
     # An email is what it says, wherever it goes.
     mail = {"to": DANA, "subject": "Plan", "body": "It fits the $100 Starter plan."}
     hit = ttl.check("google_workspace__send_gmail_message", mail, lead=_lead(), rules=[], mcp=True)
@@ -200,22 +199,11 @@ def test_a_team_files_name_and_who_it_reaches_still_count(owner: Any) -> None:
     # Who approves a held write still sees every address it names: one
     # naming someone outside the team stays the principal's to approve.
     named = {"document_id": "d" * 30, "text": "Renewal terms from jane@client.example"}
-    assert ttl._writes_team_file("google_workspace__modify_doc_text", named)
+    assert ttl.says("google_workspace__modify_doc_text", named, mcp=True) == ""
     assert not ttl._team_only("google_workspace__modify_doc_text", named)
     # An address in a comment is a mention, which emails that person.
     comment = {"document_id": "d" * 30, "comment_content": "+bob@far.example please look"}
     assert not ttl._team_only("google_workspace__create_doc_comment", comment)
-
-
-def test_a_team_files_known_name_counts_when_the_step_gives_only_an_id(
-    owner: Any, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from openexecutive.orchestrator import card_details
-
-    monkeypatch.setattr(card_details, "file_name", lambda file_id: "Q3 budget $40,000" if file_id else "")
-    write = {"spreadsheet_id": "s" * 30, "range_name": "A1:B2", "values": [["Alex", "note"]]}
-    hit = ttl.check("google_workspace__modify_sheet_values", write, lead=_lead(), rules=[], mcp=True)
-    assert hit is not None and hit.kind == "money"
 
 
 @pytest.mark.parametrize(("tool", "tool_input", "kind"), [
@@ -2273,3 +2261,87 @@ def test_an_approved_step_never_stays_waiting_when_its_row_cant_be_rebuilt(
     ttl.resolved(decision_id, "approved", payload={"tool": send, "input": held, "mcp": True}, result="Email sent!")
     [row] = ttl.done([ttl.SCOPE_EXECUTIVE])
     assert row.status == "approved"
+
+
+# A step that only books, files or notes spends nothing (a $500
+# rule held a calendar invite about a $2,150/month lease).
+_LEASE = "Walk through the $2,150/month lease and sign the contract. Then hire a site manager."
+
+
+@pytest.mark.parametrize(("tool", "tool_input", "mcp"), [
+    ("create_calendar_event", {"title": "Lease review", "description": _LEASE, "attendee_emails": [SAM]}, False),
+    ("create_instant_meeting", {"title": _LEASE}, False),
+    ("assign_open_loop", {"person_id": 1, "text": _LEASE}, False),
+    ("google_workspace__manage_event", {"action": "create", "summary": "Lease", "description": _LEASE}, True),
+    ("microsoft_365__create-calendar-event", {"body": {"subject": "Lease", "body": {"content": _LEASE}}}, True),
+    ("asana__createTask", {"name": _LEASE}, True),
+    ("notion__create_note", {"text": _LEASE}, True),
+])
+def test_a_step_that_spends_nothing_meets_no_money_check_or_amount_rule(
+    owner: Any, tool: str, tool_input: dict[str, Any], mcp: bool,
+) -> None:
+    people_store.upsert_person(full_name="Sam Team", email=SAM)
+    assert ttl.says(tool, tool_input, mcp=mcp) == ""
+    ttl.add_rule(ttl.SCOPE_COMPANY, "amount", "500", created_by="t")
+    rules = ttl.list_rules([ttl.SCOPE_COMPANY])
+    assert ttl.check(tool, tool_input, lead=_lead(someone_new=False), rules=rules, mcp=mcp) is None
+
+
+def test_the_same_words_sent_or_paid_still_wait(owner: Any) -> None:
+    ttl.add_rule(ttl.SCOPE_COMPANY, "amount", "500", created_by="t")
+    rules = ttl.list_rules([ttl.SCOPE_COMPANY])
+    off = _lead(**dict.fromkeys(ttl.KINDS, False))
+    for tool, tool_input, mcp in [
+        ("message_person", {"person_id": 1, "text": _LEASE}, False),
+        ("google_workspace__send_gmail_message", {"to": DANA, "subject": "Lease", "body": _LEASE}, True),
+        ("slack__post_message", {"channel": "C1", "text": _LEASE}, True),
+        ("stripe__create_payment", {"amount": "$2,150", "description": "Lease"}, True),
+        ("xero__create-credit-note", {"total": "$5,000", "contact": "Acme"}, True),
+        ("stripe__create_billing_meter_event", {"value": "$5,000", "customer": "Acme"}, True),
+        ("quickbooks__create_task", {"text": _LEASE}, True),
+        ("hubspot__create_invoice_note", {"text": _LEASE}, True),
+        ("orb__ingest_event", {"value": "$5,000", "customer": "Acme"}, True),
+        ("teams__send_meeting_notes", {"to": DANA, "text": _LEASE}, True),
+        ("zoom__send_meeting_invite", {"to": DANA, "text": _LEASE}, True),
+        ("notion__share_note", {"email": DANA, "text": _LEASE}, True),
+        ("lago__create_event", {"value": "$5,000", "customer": "Acme"}, True),
+    ]:
+        hit = ttl.check(tool, tool_input, lead=off, rules=rules, mcp=mcp)
+        assert hit is not None and hit.kind == "rule", tool
+    hit = ttl.check("message_person", {"person_id": 1, "text": _LEASE}, lead=_lead(), rules=[])
+    assert hit is not None and hit.kind == ttl.MONEY
+
+
+def test_an_invite_to_someone_outside_the_team_is_read_in_full(owner: Any) -> None:
+    """An invite emails its description to every guest: one reaching a
+    contact says its words to them."""
+    client = people_store.upsert_person(full_name="Cleo Client", email="cleo@client.example", kind="contact")
+    ttl.add_rule(ttl.SCOPE_COMPANY, "amount", "500", created_by="t")
+    rules = ttl.list_rules([ttl.SCOPE_COMPANY])
+    off = _lead(**dict.fromkeys(ttl.KINDS, False))
+    for tool, tool_input, mcp in [
+        ("create_calendar_event", {"title": "Lease", "description": _LEASE, "attendee_person_ids": [client]}, False),
+        ("create_calendar_event", {"title": "Lease", "description": _LEASE,
+                                   "attendee_emails": ["cleo@client.example"]}, False),
+        ("google_workspace__manage_event", {"action": "create", "description": _LEASE,
+                                            "attendees": ["cleo@client.example"]}, True),
+    ]:
+        assert ttl.says(tool, tool_input, mcp=mcp), tool
+        hit = ttl.check(tool, tool_input, lead=off, rules=rules, mcp=mcp)
+        assert hit is not None and hit.kind == "rule", tool
+
+
+def test_a_words_or_person_rule_still_reads_an_invite(owner: Any) -> None:
+    ttl.add_rule(ttl.SCOPE_COMPANY, "words", "lease", created_by="t")
+    hit = ttl.check("create_calendar_event", {"title": "Sync", "description": _LEASE, "attendee_emails": [DANA]},
+                    lead=_lead(), rules=ttl.list_rules([ttl.SCOPE_COMPANY]))
+    assert hit is not None and hit.kind == "rule"
+
+
+def test_the_gate_lets_an_invite_about_money_go_under_an_amount_rule(owner: Any, balanced: None) -> None:
+    ttl.add_rule(ttl.SCOPE_COMPANY, "amount", "500", created_by="t")
+    hit = ttl._asked_hit("create_calendar_event", {"title": "Lease review", "description": _LEASE,
+                                                   "attendee_person_ids": [owner.id]}, mcp=False)
+    assert hit is None or hit.kind != "rule"
+    hit = ttl._asked_hit("message_person", {"person_id": owner.id, "text": _LEASE}, mcp=False)
+    assert hit is not None and hit.kind == "rule"

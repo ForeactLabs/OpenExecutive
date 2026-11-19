@@ -324,7 +324,10 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                     raise
     # ``goal_id``: the company goal the step was for (``for_goal``), so the
     # Goals page can say what it did for each goal this week.
-    for column in ("job_id", "to_person_id", "goal_id"):
+    # ``asked_by``: the person it did it for (who asked, or whose card was
+    # approved), so a new turn of theirs is shown what they asked for lately
+    # (``done_lately_block``).
+    for column in ("job_id", "to_person_id", "goal_id", "asked_by"):
         if column not in log_columns:
             try:
                 conn.execute(f"ALTER TABLE {LOG_TABLE} ADD COLUMN {column} INTEGER")  # noqa: S608
@@ -333,6 +336,10 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                     raise
     conn.execute(
         f"CREATE INDEX IF NOT EXISTS idx_{LOG_TABLE}_goal ON {LOG_TABLE}(goal_id, at)"  # noqa: S608
+    )
+    # Every private turn reads the speaker's own steps (``done_lately``).
+    conn.execute(
+        f"CREATE INDEX IF NOT EXISTS idx_{LOG_TABLE}_asked_by ON {LOG_TABLE}(asked_by, status, at)"  # noqa: S608
     )
     conn.execute(
         f"CREATE TABLE IF NOT EXISTS {JOBS_TABLE} ("  # noqa: S608
@@ -908,9 +915,12 @@ def words_match(value: str, lowered: str) -> bool:
     )
 
 
-def _rule_hit(rules: list[Rule], text: str, recipients: list[str]) -> Hit | None:
-    """The first Waits rule that ``text`` / ``recipients`` match."""
+def _rule_hit(rules: list[Rule], text: str, recipients: list[str], *, money: str | None = None) -> Hit | None:
+    """The first Waits rule that ``text`` / ``recipients`` match. An amount
+    rule reads ``money`` (what the step says or pays, ``says``), ``text``
+    when not given."""
     lowered = text.lower()
+    spends = amounts(text if money is None else money)
     for rule in rules:
         if rule.effect != EFFECT_WAIT:
             continue
@@ -928,7 +938,7 @@ def _rule_hit(rules: list[Rule], text: str, recipients: list[str]) -> Hit | None
                 return Hit("rule", f'your rule about "{value}" says to wait', rule.id)
         elif rule.kind == RULE_AMOUNT:
             limit = _number(value) or 0
-            if any(a >= limit for a in amounts(text)):
+            if any(a >= limit for a in spends):
                 return Hit("rule", f"your rule about amounts of {_money(value)} or more says to wait", rule.id)
     return None
 
@@ -1132,26 +1142,61 @@ def rule_text(rule: Rule) -> str:
     return f"anything with {rule.value}"
 
 
-def _team_file_name(tool_input: dict[str, Any]) -> str:
-    """A file step's file name: the one it gives, else the file's known
-    name by its id (``card_details.file_name``), else ""."""
-    from openexecutive.orchestrator import card_details
+# Steps that only book, file or note something: when they reach only the
+# team they spend no money, sign nothing and decide nothing about anyone,
+# whatever their text mentions (a team invite about a $2,150 lease). ``says``.
+_KEEPS_TOOLS = frozenset({"assign_open_loop", "cancel_calendar_event", "create_calendar_event", "create_instant_meeting"})
+_MCP_SENDS_RE = re.compile(r"(?:^|_)(?:send\w*|notify\w*|share\w*|e?mails?|gmail|messages?|reply|replies|forward|post|chat|dm|sms)(?=$|_)")
+# Calendar, meeting, task and note apps: only their steps can be a booking,
+# a task or a note that carries nothing. Any other app is read in full.
+_MCP_KEEPS_APP_RE = re.compile(
+    r"^(?:google_workspace|google_calendar|gcal|microsoft_365|ms365|outlook|teams|zoom|calendly|cal_com|"
+    r"asana|notion|linear|jira|trello|todoist|clickup|monday|basecamp|evernote|onenote|things|ticktick)$",
+)
+# Money in a tool's own name: a credit note or a usage event bills someone,
+# so it is read in full whatever app it is in.
+_MCP_MONEY_WORD_RE = re.compile(
+    r"(?:^|_)(?:pay\w*|credits?|invoices?|bills?|billing|refunds?|charges?|payouts?|transfers?|wires?|"
+    r"purchases?|orders?|subscriptions?|prices?|quotes?|expenses?|transactions?|ledgers?|journals?|"
+    r"accounts?|balances?|usage|meters?|deposits?|withdrawals?|budgets?|estimates?)(?=$|_)",
+)
+_MCP_KEEPS_RE = re.compile(
+    r"(?:^|_)(?:calendars?|events?|meetings?|invites?|tasks?|todos?|reminders?|notes?)(?=$|_)",
+)
 
-    return _first_text(tool_input, _MCP_NAME_KEYS) or card_details.file_name(card_details._file_of(tool_input))
+
+def _tool_words(tool: str) -> str:
+    """A connected tool's own name (after its server prefix) as lowercase
+    words joined by ``_``: "createEvent" and "create-event" read "create_event"."""
+    own = re.split(r"__|\.", tool or "")[-1]
+    return re.sub(r"[^a-z0-9]+", "_", re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", own).lower()).strip("_")
 
 
-def _writes_team_file(tool: str, tool_input: dict[str, Any]) -> bool:
-    """Whether a connected-app step writes into a file (a sheet, doc,
-    slides, Drive file) and reaches no one outside the team: no mail, no
-    event, and no one but a teammate in its share or recipient arguments
-    (``_reach_addresses``); an address written into the file's text doesn't
-    count. Who approves a held step is ``_team_only``'s, which counts every
-    address. Who could already open the file was settled when it was shared
-    (sharing waits on its own)."""
-    return (
-        _file_tool(tool) and not _MAIL_TOOL_RE.search(tool)
-        and _all_team(_reach_addresses(tool, tool_input))
-    )
+def says(tool: str, tool_input: dict[str, Any], *, mcp: bool = False) -> str:
+    """What a step says to someone or pays: the only part of it that can
+    spend money, agree to a contract or decide about a person. Money,
+    contracts, people decisions and amount rules (Waits and Goes) read only
+    this. A message or email: the words it sends. A booking, task, reminder
+    or note in a calendar, meeting, task or notes app, or a write into a
+    file, that reaches only the team: "", whatever its text mentions. One
+    that reaches anyone else sends them its words (an invite emails its
+    description), so it is read in full. A step whose name says it sends,
+    shares or bills (a credit note, a usage event), a payment, or an app it
+    can't place: all of it."""
+    text = "\n".join(_strings(tool_input))
+    if not mcp:
+        if tool not in _KEEPS_TOOLS:
+            return text
+        reach = [*_EMAIL_RE.findall(text), *_rule_targets(tool, tool_input)[0]]
+    else:
+        words = _tool_words(tool)
+        app = _tool_words(re.split(r"__|\.", tool or "")[0]) if "__" in (tool or "") or "." in (tool or "") else ""
+        if is_mail_send(tool) or _MCP_SENDS_RE.search(words) or _MCP_MONEY_WORD_RE.search(words):
+            return text
+        if not ((_MCP_KEEPS_APP_RE.match(app) and _MCP_KEEPS_RE.search(words)) or _file_tool(tool)):
+            return text
+        reach = _reach_addresses(tool, tool_input)
+    return "" if _all_team(reach) else text
 
 
 def _mcp_deletes(tool: str, tool_input: dict[str, Any]) -> bool:
@@ -1187,19 +1232,11 @@ def check(
     recipients = sorted({
         a.lower() for a in [*_reach_addresses(tool, tool_input), *(extra_recipients or [])]
     })
-    hit = _rule_hit(rules, text, named)
+    about = says(tool, tool_input, mcp=mcp)
+    hit = _rule_hit(rules, text, named, money=about)
     if hit is not None:
         return hit
     deletes = tool in _DELETE_TOOLS or (mcp and _mcp_deletes(tool, tool_input))
-    # What the step is about, for money, contracts and people decisions. A
-    # write into a company file that reaches only the team is about that
-    # file, not the words it puts in it: a price in a prospect's note or
-    # "sign-up" in a post draft is no payment or contract. Its name still
-    # counts ("Q3 budget"), the known one when the step gives only an id.
-    about = (
-        _team_file_name(tool_input)
-        if mcp and not deletes and _writes_team_file(tool, tool_input) else text
-    )
     checks: list[tuple[str, bool, str]] = [
         (DELETE_SHARE, deletes, "it deletes, cancels or shares something"),
         (BIG_SEND, tool in _BROADCAST_TOOLS or len(recipients) > BIG_SEND_RECIPIENTS,
@@ -1937,6 +1974,23 @@ def is_mail_send(tool: str) -> bool:
     )
 
 
+def asked_by_now() -> int | None:
+    """Who the step being logged is for: inside an approved step, the person
+    who asked for it (the owner when they approved their own); else the
+    owner or teammate whose own turn this is. None for unattended work.
+    Never raises."""
+    try:
+        from openexecutive.orchestrator import levels
+
+        if levels.is_approved():
+            requester = levels.approved_requester()
+            return requester if requester is not None else _principal_id()
+        return _team_asker_id()
+    except Exception:
+        logger.warning("take_the_lead: couldn't tell whom a step was for", exc_info=True)
+        return None
+
+
 def record(
     *, scope: str, source: str, tool: str, summary: str, status: str, why: str = "",
     decision_id: int | None = None, db_path: Path | None = None,
@@ -1956,10 +2010,11 @@ def record(
         try:
             conn.execute(
                 f"INSERT INTO {LOG_TABLE} (at, scope, source, tool, summary, status, why, decision_id, "  # noqa: S608
-                "mail_to, mail_subject, prompted_by, job_id, outcome, to_person_id, goal_id) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "mail_to, mail_subject, prompted_by, job_id, outcome, to_person_id, goal_id, asked_by) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (datetime.now(UTC).isoformat(), scope, source, tool, summary, status, why, decision_id,
-                 mail_to, mail_subject, prompted_by, job_id, _one_line(outcome, 160), to_person_id, goal_id),
+                 mail_to, mail_subject, prompted_by, job_id, _one_line(outcome, 160), to_person_id, goal_id,
+                 asked_by_now()),
             )
             conn.commit()
         finally:
@@ -1972,9 +2027,17 @@ def _set_log_status(decision_id: int, status: str, *, db_path: Path | None = Non
     try:
         conn = _connect(db_path)
         try:
-            conn.execute(
-                f"UPDATE {LOG_TABLE} SET status = ? WHERE decision_id = ?", (status, decision_id),  # noqa: S608
-            )
+            if status == "approved":
+                # It went now, not when its card was made (``done_lately``
+                # reads when a step went).
+                conn.execute(
+                    f"UPDATE {LOG_TABLE} SET status = ?, at = ? WHERE decision_id = ?",  # noqa: S608
+                    (status, datetime.now(UTC).isoformat(), decision_id),
+                )
+            else:
+                conn.execute(
+                    f"UPDATE {LOG_TABLE} SET status = ? WHERE decision_id = ?", (status, decision_id),  # noqa: S608
+                )
             conn.commit()
         finally:
             conn.close()
@@ -2000,6 +2063,7 @@ class Done:
     outcome: str = ""
     to_person_id: int | None = None
     goal_id: int | None = None
+    asked_by: int | None = None
 
 
 def done(scopes: list[str], *, days: int = 7, limit: int = 100, db_path: Path | None = None) -> list[Done]:
@@ -2020,6 +2084,113 @@ def done(scopes: list[str], *, days: int = 7, limit: int = 100, db_path: Path | 
     finally:
         conn.close()
     return [Done(**dict(r)) for r in rows]
+
+
+# How far back a turn's <done_lately> looks, and how many steps it lists.
+DONE_LATELY_WINDOW = timedelta(hours=24)
+DONE_LATELY_MAX = 12
+# A step that went (on its own, or once its card was approved), and one
+# whose card is still open. A failed or skipped one didn't happen: asking
+# again is a new ask.
+_LATELY_WENT = ("done", "approved")
+_LATELY_WAITING = "waiting"
+
+
+def done_lately(
+    person_id: int, *, now: datetime | None = None, db_path: Path | None = None,
+) -> list[Done]:
+    """The steps a person asked for in the last day that went, and those
+    whose card is still open however old, newest first: what a new turn of
+    theirs is shown, so the same ask again is taken as that one
+    (``done_lately_block``). A waiting row's time is when its card was made."""
+    from openexecutive.memory.decision_ledger import OPEN_STATUSES
+
+    since = ((now or datetime.now(UTC)) - DONE_LATELY_WINDOW).isoformat()
+    open_marks = ",".join("?" * len(OPEN_STATUSES))
+    conn = _connect(db_path)
+    try:
+        # A waiting row counts only while its card is open: the decision
+        # says so, whichever way the card was closed (a row isn't moved on
+        # every path). Filtered here so the limit counts only what shows.
+        rows = conn.execute(
+            f"SELECT l.* FROM {LOG_TABLE} l LEFT JOIN decision_instances d ON d.id = l.decision_id "  # noqa: S608
+            f"WHERE l.asked_by = ? AND ((l.status = ? AND (l.decision_id IS NULL OR d.status IN ({open_marks}))) "
+            "OR (l.status IN (?, ?) AND l.at >= ?)) ORDER BY l.at DESC, l.id DESC LIMIT ?",
+            (int(person_id), _LATELY_WAITING, *OPEN_STATUSES, *_LATELY_WENT, since, DONE_LATELY_MAX * 4),
+        ).fetchall()
+    finally:
+        conn.close()
+    steps = [Done(**dict(r)) for r in rows]
+    # A connected-app read did nothing for anyone.
+    return [s for s in steps if "__" not in s.tool or mcp_tool_acts(s.tool)][:DONE_LATELY_MAX]
+
+
+def done_lately_block(session: Any, *, now: datetime | None = None, db_path: Path | None = None) -> str:
+    """The body of the turn's ``<done_lately>`` block: what the speaker asked
+    for in any chat or app that went in the last day or waits on its card.
+    A new conversation otherwise starts blind, so the same ask sent again
+    sent a second email or made a second card. Only in a conversation
+    private to them (their steps are theirs alone). "" when there are none
+    or the lookup fails (it never blocks a turn)."""
+    try:
+        from openexecutive.memory.workspace_settings import get_user_timezone
+        from openexecutive.orchestrator.speaker import own_private_speaker
+        from openexecutive.utils.prompt_blocks import no_tags, plain
+
+        person = own_private_speaker(session)
+        if person is None:
+            return ""
+        steps = done_lately(person.id, now=now, db_path=db_path)
+        if not steps:
+            return ""
+        # Whose OK a card waits on: a teammate's may be the owner's or an
+        # approver's, and they can't act on it themselves.
+        from openexecutive.memory.decision_ledger import get_decision_instances
+        from openexecutive.people.store import get_person
+
+        held = [int(s.decision_id) for s in steps if s.status == _LATELY_WAITING and s.decision_id]
+        approvers = {
+            i: card.approver_person_id
+            for i, card in (get_decision_instances(held, db_path=db_path) if held else {}).items()
+        }
+        zone = get_user_timezone()
+        lines = []
+        for step in steps:
+            try:
+                when = datetime.fromisoformat(step.at.replace("Z", "+00:00"))
+                if when.tzinfo is None:
+                    when = when.replace(tzinfo=UTC)
+                at = when.astimezone(zone).strftime("%a %d %b %H:%M")
+            except ValueError:
+                at = step.at[:16]
+            what = _one_line(plain(step.summary), 160)
+            if step.mail_to:
+                what = f"{what}, to {_one_line(plain(step.mail_to), 160)}"
+                if step.mail_subject:
+                    what = f"{what}, subject “{_one_line(plain(step.mail_subject), 120)}”"
+            if step.status == _LATELY_WAITING:
+                approver = approvers.get(int(step.decision_id)) if step.decision_id else None
+                other = get_person(approver) if approver is not None and approver != person.id else None
+                whose = (
+                    f"{plain(' '.join((other.full_name or other.email or 'someone else').split()))}'s"
+                    if other is not None else "their"
+                )
+                card = f" (card {step.decision_id})" if step.decision_id else ""
+                state = f"waiting on {whose} OK{card}"
+            else:
+                state = "done"
+            lines.append(no_tags(f"- {at}, {state}: {what}"))
+    except Exception:
+        logger.warning("take_the_lead: couldn't list what the speaker asked for lately", exc_info=True)
+        return ""
+    return (
+        "What they asked you for lately, in any chat or app: what went in the last day, and cards still "
+        "waiting for an OK. When this message asks for the same thing again (the same email to the "
+        "same person, the same step), take it as that ask, not a new one. If it went, say in one line "
+        "when and to whom, and ask whether they want it sent again. If its card is waiting on their OK, "
+        "point them to that card rather than making another; if it waits on someone else's, say whose. When they say again or yes, do it. Anything else here, "
+        "leave alone and don't mention.\n" + "\n".join(lines)
+    )
 
 
 # Area → the authority scope whose holders may approve a held action of
@@ -2503,7 +2674,8 @@ def _hit(name: str, tool_input: dict[str, Any], *, mcp: bool) -> tuple[Hit | Non
         # A rule naming someone ("Always wait for Dana Price") meets mail to
         # their address too.
         text = "\n".join([text, *_names_of(recipients)])
-        rule = _rule_hit(rules, text, recipients)
+        spends = says(name, tool_input, mcp=mcp)
+        rule = _rule_hit(rules, text, recipients, money=spends)
         if rule is not None:
             return rule, None
         if _careful():
@@ -2521,7 +2693,7 @@ def _hit(name: str, tool_input: dict[str, Any], *, mcp: bool) -> tuple[Hit | Non
         # Only who it actually reaches counts for a person or company rule,
         # never an address written in the body.
         targets = sorted({a.lower() for a in addresses})
-        goes = goes_rules(rules, text, targets)
+        goes = goes_rules(rules, spends, targets)
         if goes:
             released = goes_kinds(goes)
             rest = Lead(scope=SCOPE_EXECUTIVE, ask_first={k: k not in released for k in KINDS})
@@ -2794,7 +2966,8 @@ def _asked_hit(name: str, tool_input: dict[str, Any], *, mcp: bool) -> Hit | Non
         # A rule naming someone ("Always wait for Dana Price") meets mail to
         # their address too.
         text = "\n".join([text, *_names_of(recipients)])
-        rule = _rule_hit(rules, text, recipients)
+        spends = says(name, tool_input, mcp=mcp)
+        rule = _rule_hit(rules, text, recipients, money=spends)
         if rule is not None:
             return rule
         careful = _careful_turn()

@@ -479,9 +479,12 @@ SCHEDULE_FOLLOWUP_TOOL: dict[str, Any] = {
         "else (channel_ref). One to someone else is sent when it runs, under the "
         "asker's Approvals like any send. Use "
         "ONLY when the user explicitly asks for a follow-up, reminder, check-in or "
-        "scheduled action, never to defer a normal reply. Give run_at in the company's "
-        "time zone, as the person said it (\"tomorrow 9am\" is 09:00 tomorrow), never "
-        "converted to UTC."
+        "scheduled action, never to defer a normal reply. It runs once: for "
+        "something that repeats (a recap every Friday, a check each morning), "
+        "save a workflow with that schedule instead (the workflows tools), never "
+        "a follow-up that promises to set up the next one. Give run_at in the "
+        "company's time zone, as the person said it (\"tomorrow 9am\" is 09:00 "
+        "tomorrow), never converted to UTC."
     ),
     "input_schema": {
         "type": "object",

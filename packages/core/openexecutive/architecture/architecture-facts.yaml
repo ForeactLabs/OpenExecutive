@@ -5152,6 +5152,15 @@ scheduler:
     rule, up to 10) asking the Executive to cancel_followup one the message
     shows is settled. The conversation review cannot do this for a chat that
     read mail (it skips those turns), which is the case that prompted it.
+    Every turn in a conversation private to the speaker also carries
+    <done_lately> (take_the_lead.done_lately_block): what they asked for,
+    in any chat or app, that went in the last day (done, approved) or still
+    waits on its card however old (waiting), from the Take the lead log by asked_by
+    (take_the_lead.asked_by_now), up to 12, connected-app reads left out.
+    The same ask again is that ask: the Executive says when it went and asks
+    whether to send it again, or points to the waiting card. A new chat otherwise started
+    blind, so a repeated ask sent a second email or made a second card.
+    Information only, no hold.
   monthly_value: |
     The owner's monthly tally (briefing/value_summary.py). A tick hook,
     `_maybe_send_monthly_value` → `value_summary.maybe_send_monthly`
@@ -12548,7 +12557,11 @@ delegation:
     effect wait (default, the column added 2026-11-09) or go; POST
     /take-the-lead/rules {kind, value, effect}, a Goes rule needs
     _provably_theirs like DELETE). Waits matches loosely (any recipient, a
-    name anywhere, an amount at or over the limit). Goes is strict, since
+    name anywhere, an amount at or over the limit). Money, contracts,
+    people decisions and amount rules (Waits and Goes) read only says():
+    what a step sends or pays. An invite, meeting, task, reminder, note or
+    file write that reaches only the team carries none (a $500 rule held an invite about a
+    $2,150 lease). Goes is strict, since
     it lets something go: there are recipients and every one is that
     address, the main address of the one People entry by that name
     (several: none; aliases don't count), or exactly @that domain (Waits
