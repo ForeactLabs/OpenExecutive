@@ -8,6 +8,7 @@ wording from coming back anywhere in the Executive's tools.
 """
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -19,13 +20,27 @@ _HANDS_IT_ON = re.compile(
 
 
 def test_no_refusal_tells_the_executive_someone_else_needs_to_do_it() -> None:
-    root = Path(openexecutive.__file__).parent / "orchestrator"
-    offenders = [
-        f"{path.name}:{n}"
-        for path in sorted(root.glob("*.py"))
-        for n, line in enumerate(path.read_text().splitlines(), 1)
-        if _HANDS_IT_ON.search(line)
-    ]
+    """Checked on whole string constants (``ast`` joins the literals a long
+    refusal is split across), in every module of the package; docstrings
+    aren't said to anyone."""
+    root = Path(openexecutive.__file__).parent
+    offenders = []
+    for path in sorted(root.rglob("*.py")):
+        tree = ast.parse(path.read_text(), str(path))
+        docstrings = {
+            id(n.body[0].value)
+            for n in ast.walk(tree)
+            if isinstance(n, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+            and n.body and isinstance(n.body[0], ast.Expr)
+        }
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and id(node) not in docstrings
+                and _HANDS_IT_ON.search(" ".join(node.value.split()))
+            ):
+                offenders.append(f"{path.relative_to(root)}:{node.lineno}")
     assert offenders == []
 
 
