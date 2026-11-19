@@ -197,6 +197,32 @@ def test_a_poll_reads_back_page_by_page_to_where_it_last_read(
     assert [s.source_external_id for s in signals] == ["first"]
 
 
+def test_a_backlog_comes_through_oldest_first_a_poll_at_a_time(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Back after a day away to 25 sign-ups: each poll tells at most PER_POLL
+    # (one triage call each), oldest first, and the next poll picks up where
+    # it stopped, never skipping one.
+    item = _email_watch(db)
+    set_at = datetime.fromisoformat(item.created_at)
+    _patch_mailbox(monkeypatch, _Mailbox([
+        gm.MailMessage(id=f"s{i:02d}", thread_id=f"t{i}", from_addr="noreply@app.example", from_name="App",
+                       subject="New sign up", received_at=(set_at + timedelta(minutes=i)).isoformat())
+        for i in range(25)
+    ], []))
+    told: list[str] = []
+    for _ in range(3):
+        fresh = ms.get_watchlist_item(item.id, db_path=db)
+        assert fresh is not None
+        signals = asyncio.run(mailbox_source.MailboxSource().poll(fresh, db_path=db))
+        for signal in signals:
+            ms.insert_signal(signal, db_path=db)  # the pipeline records each
+        told.append(",".join(s.source_external_id for s in signals))
+    assert told[0] == ",".join(f"s{i:02d}" for i in range(mailbox_source.PER_POLL))
+    assert told[1] == ",".join(f"s{i:02d}" for i in range(mailbox_source.PER_POLL, 25))
+    assert told[2] == ""  # the overlap re-reads only what was already told
+
+
 def test_a_later_poll_reads_from_a_little_before_the_last_read_that_worked(
     db: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

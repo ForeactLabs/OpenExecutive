@@ -33,6 +33,11 @@ logger = logging.getLogger(__name__)
 # up to this many emails at once.
 _READ_LIMIT = 50
 _MAX_PAGES = 20
+# New emails told per poll, oldest first. Each is a card and a triage call,
+# and triage takes about a minute's worth at once; the rest wait for the
+# next poll (the read point stops at the last one told), so a backlog after
+# a day disconnected comes through in order, a few minutes apart.
+PER_POLL = 20
 # Re-read this far before the last poll: mail the provider listed a little
 # late is still caught (the dedup key makes a re-read email a no-op).
 _OVERLAP = timedelta(minutes=10)
@@ -87,6 +92,10 @@ async def _read_back_to(client: Any, since: datetime) -> list[Any]:
     return received
 
 
+def _dedup_key(watch_id: int, message: Any) -> str:
+    return f"mailbox:{watch_id}:{message.id}"
+
+
 def summary_of(message: Any) -> str:
     """Who it is from and its subject, cleaned: one line, no links or
     addresses (``delegation.reminders.clean_text``)."""
@@ -128,37 +137,42 @@ class MailboxSource:
         since = _since(item, now)
         created = _parse(item.created_at) or since
         received = await _read_back_to(gmail_for(email), since)
-        # Read: the next poll starts from here, whatever comes of what it found
-        # (the dedup key makes a re-read email a no-op).
-        store.set_watchlist_config_key(item.id, READ_THROUGH_KEY, now.isoformat(), db_path=db_path)
-        signals: list[Signal] = []
+        found: list[tuple[datetime, Any]] = []
         for message in received:
             arrived = _parse(getattr(message, "received_at", "") or "")
             if arrived is not None and arrived < created:
                 continue
-            if not mailbox.matches(
+            if mailbox.matches(
                 item.trigger_json,
                 from_addr=normalize_email(getattr(message, "from_addr", "") or ""),
                 from_name=str(getattr(message, "from_name", "") or ""),
                 subject=str(getattr(message, "subject", "") or ""),
             ):
-                continue
+                found.append((arrived or now, message))
+        # Only what isn't told yet (the overlap re-reads a few), oldest first.
+        told = store.recorded_dedup_keys([_dedup_key(item.id, m) for _, m in found], db_path=db_path)
+        new = sorted(((at, m) for at, m in found if _dedup_key(item.id, m) not in told), key=lambda f: f[0])
+        # Read: the next poll starts from here, or, when more is new than one
+        # poll tells, from the last email it told (see PER_POLL).
+        read_to = new[PER_POLL - 1][0] if len(new) > PER_POLL else now
+        store.set_watchlist_config_key(item.id, READ_THROUGH_KEY, read_to.isoformat(), db_path=db_path)
+        signals: list[Signal] = []
+        for arrived, message in new[:PER_POLL]:
             link = mailbox_link(email, thread_id=message.thread_id or None, message_id=message.id)
             signals.append(Signal(
                 watchlist_id=item.id,
                 source_kind=SOURCE_KIND_MAILBOX,
                 source_external_id=message.id,
                 captured_at=now.isoformat(),
-                published_at=arrived.isoformat() if arrived is not None else None,
+                published_at=arrived.isoformat(),
                 normalized_summary=summary_of(message),
                 raw_payload={},
                 provenance_url=link if link.startswith("https://") else "https://mail.google.com/",
                 severity_hint=AlertSeverity.HIGH,
-                dedup_key=f"mailbox:{item.id}:{message.id}",
+                dedup_key=_dedup_key(item.id, message),
             ))
         if not signals:
-            n = len(received)
-            observe(item, "Nothing new matched." if n else "No new email.")
+            observe(item, "Nothing new matched." if received else "No new email.")
         return signals
 
     def matches_trigger(self, signal: Signal, item: WatchlistItem) -> bool:

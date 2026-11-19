@@ -1237,6 +1237,18 @@ def list_signals_for_watchlist(
     return [_row_to_signal_dict(row) for row in rows]
 
 
+def recorded_dedup_keys(keys: list[str], *, db_path: Path | None = None) -> set[str]:
+    """Which of ``keys`` are already in ``external_signals``."""
+    if not keys or not _resolve_db_path(db_path).exists():
+        return set()
+    with _get_conn(db_path) as conn:
+        rows = conn.execute(
+            f"SELECT dedup_key FROM external_signals WHERE dedup_key IN ({','.join('?' * len(keys))})",
+            keys,
+        ).fetchall()
+    return {str(row[0]) for row in rows}
+
+
 def list_held_signals(
     watchlist_id: int, db_path: Path | None = None,
 ) -> list[dict[str, Any]]:
