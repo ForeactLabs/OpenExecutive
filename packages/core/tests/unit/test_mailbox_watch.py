@@ -455,3 +455,45 @@ def test_an_inbox_watch_can_be_set_after_their_mail_was_read(db: Path) -> None:
     assert not lockdown.mail_touched_withholds("tune_watchlist_entry", {"slug": "email-sign-ups", "enabled": False})
     assert lockdown.mail_touched_withholds("tune_watchlist_entry", {"slug": "rss-acme", "enabled": False})
     assert lockdown.mail_touched_withholds("tune_watchlist_entry", "not a dict")
+
+
+def test_the_executives_own_row_of_an_email_watch_call_is_the_speakers_alone(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The dispatch row the Executive writes for every tool call quotes the
+    call's input and result: for a watch on the speaker's own inbox, who the
+    email is from and what it says. That row is theirs alone, like the rows
+    the watch writes itself; a company watch's row stays the company's."""
+    from openexecutive.orchestrator import artifact_records
+    from openexecutive.orchestrator.executive import _artifact_row_owner, _private_tool_row
+
+    _speaker(monkeypatch, OWNER)
+    monkeypatch.setattr(artifact_records, "current_viewer", lambda: SimpleNamespace(person_id=OWNER))
+
+    def row(name: str, tool_input: dict[str, Any], result: str) -> tuple[bool, int | None]:
+        return _private_tool_row(name, tool_input, result), _artifact_row_owner(name, tool_input, result)
+
+    add_input = {"slug": "email-offers", "signal_type": "mailbox", "target": "offers",
+                 "trigger": {"from": ["recruiter@acme.example"], "keywords": ["offer"]}}
+    added = asyncio.run(wt.handle_add_watchlist_entry(add_input))
+    slug = json.loads(added)["slug"]
+    assert row("add_watchlist_entry", add_input, added) == (True, OWNER)
+    # Before the handler ran (a failed call's row): the input alone says so.
+    assert row("add_watchlist_entry", add_input, None) == (True, OWNER)
+
+    tune_input = {"slug": slug, "trigger": {"keywords": ["offer letter"]}}
+    tuned = asyncio.run(wt.handle_tune_watchlist_entry(tune_input))
+    assert row("tune_watchlist_entry", tune_input, tuned) == (True, OWNER)
+
+    listed = asyncio.run(wt.handle_list_watchlist({}))
+    assert row("list_watchlist", {}, listed) == (True, OWNER)
+
+    removed = asyncio.run(wt.handle_remove_watchlist_entry({"slug": slug}))
+    assert json.loads(removed)["ok"] is True
+    assert row("remove_watchlist_entry", {"slug": slug}, removed) == (True, OWNER)
+
+    # A company watch: the row stays the company's.
+    ms.insert_watchlist_item(slug="news-acme", signal_type="query", target="acme", db_path=db)
+    assert row("list_watchlist", {}, asyncio.run(wt.handle_list_watchlist({}))) == (False, None)
+    company = {"slug": "news-acme", "notes": "launches only"}
+    assert row("tune_watchlist_entry", company, asyncio.run(wt.handle_tune_watchlist_entry(company))) == (False, None)

@@ -865,7 +865,7 @@ async def handle_remove_watchlist_entry(tool_input: dict[str, Any]) -> str:
         {"slug": slug, "watchlist_id": item.id, "removed": removed},
         mailbox.audit_privacy(item),
     )
-    return json.dumps({"ok": removed, "slug": slug})
+    return json.dumps({"ok": removed, "slug": slug, "signal_type": item.signal_type})
 
 
 async def handle_tune_watchlist_entry(tool_input: dict[str, Any]) -> str:
@@ -961,7 +961,30 @@ async def handle_tune_watchlist_entry(tool_input: dict[str, Any]) -> str:
         {"slug": slug, "watchlist_id": item.id, "changes": changes},
         mailbox.audit_privacy(item),
     )
-    return json.dumps({"ok": True, "slug": slug, "changes": changes})
+    return json.dumps({"ok": True, "slug": slug, "signal_type": item.signal_type, "changes": changes})
+
+
+def speakers_own_row(tool_name: str, tool_input: Any, result: Any = None) -> bool:
+    """Whether the Executive's dispatch row for a watch-list call is the
+    speaker's alone: it sets up or changes a watch on their own inbox, or
+    its result names one (every result here names the kind of each watch
+    it touched). Such a row quotes who the email is from and what it says,
+    like every row the watch writes itself (``mailbox.audit_privacy``).
+    Never raises; False when unsure."""
+    if tool_name not in WATCHLIST_TOOL_HANDLERS:
+        return False
+    from openexecutive.delegation.lockdown import own_inbox_watch
+
+    if own_inbox_watch(tool_name, tool_input):
+        return True
+    try:
+        data = json.loads(result) if isinstance(result, str) else None
+    except ValueError:
+        return False
+    if not isinstance(data, dict):
+        return False
+    touched = [data, *(w for w in data.get("watchlist") or [] if isinstance(w, dict))]
+    return any(w.get("signal_type") == SOURCE_KIND_MAILBOX for w in touched)
 
 
 WATCHLIST_TOOL_HANDLERS: dict[str, Callable[[dict[str, Any]], Awaitable[str]]] = {
@@ -983,4 +1006,5 @@ __all__ = [
     "handle_list_watchlist",
     "handle_remove_watchlist_entry",
     "handle_tune_watchlist_entry",
+    "speakers_own_row",
 ]

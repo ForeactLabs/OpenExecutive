@@ -219,6 +219,7 @@ from openexecutive.orchestrator.turn_inbox import (
 from openexecutive.orchestrator.watchlist_tools import (
     WATCHLIST_TOOL_HANDLERS,
     WATCHLIST_TOOLS,
+    speakers_own_row,
 )
 from openexecutive.orchestrator.web_search_tool import (
     WEB_SEARCH_TOOL_NAME,
@@ -693,7 +694,7 @@ def builtin_tool_names() -> frozenset[str]:
     })
 
 
-def _private_tool_row(tool_name: str) -> bool:
+def _private_tool_row(tool_name: str, tool_input: Any = None, result: Any = None) -> bool:
     """Whether a tool's dispatch audit row is private to the principal: Act as
     me reads the speaker's own mailbox, and the fact tools' input quotes the
     principal verbatim and ties a fact to their chat session and turn, which
@@ -707,13 +708,18 @@ def _private_tool_row(tool_name: str) -> bool:
         # An installed extension's tool that quotes the speaker's own data
         # (orchestrator/extensions.py, private_row).
         or extensions.private_row(tool_name)
+        # A watch on the speaker's own inbox (watchlist_tools.speakers_own_row).
+        or speakers_own_row(tool_name, tool_input, result)
     )
 
 
-def _artifact_row_owner(tool_name: str) -> int | None:
-    """The person a document tool's dispatch row belongs to alone (its input
-    and result quote the speaker's own documents), else None."""
-    if tool_name not in DRAFT_ARTIFACT_TOOL_HANDLERS:
+def _artifact_row_owner(tool_name: str, tool_input: Any = None, result: Any = None) -> int | None:
+    """The person a dispatch row belongs to alone, else None: a document
+    tool's input and result quote the speaker's own documents, and a
+    watch-list call on their own inbox quotes their mail."""
+    if tool_name not in DRAFT_ARTIFACT_TOOL_HANDLERS and not speakers_own_row(
+        tool_name, tool_input, result
+    ):
         return None
     from openexecutive.orchestrator.artifact_records import current_viewer
 
@@ -3483,9 +3489,9 @@ class Executive:
                             },
                             # Act as me reads the speaker's own mailbox; the
                             # fact tools carry the principal's own words.
-                            private=_private_tool_row(tu["name"])
+                            private=_private_tool_row(tu["name"], tu["input"])
                             or tu["name"] in DRAFT_ARTIFACT_TOOL_HANDLERS,
-                            private_to_person=_artifact_row_owner(tu["name"]),
+                            private_to_person=_artifact_row_owner(tu["name"], tu["input"]),
                         )
                         # Hand the model an error tool_result and move on. No
                         # chip: summarize_action must never see an exception.
@@ -3544,9 +3550,9 @@ class Executive:
                         },
                         # A document tool quotes the speaker's own
                         # documents: the row is theirs alone.
-                        private=_private_tool_row(tu["name"])
+                        private=_private_tool_row(tu["name"], tu["input"], result)
                         or tu["name"] in DRAFT_ARTIFACT_TOOL_HANDLERS,
-                        private_to_person=_artifact_row_owner(tu["name"]),
+                        private_to_person=_artifact_row_owner(tu["name"], tu["input"], result),
                     )
 
             if mcp_tool_uses and self._mcp_gateway is not None:
