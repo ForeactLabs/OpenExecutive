@@ -816,28 +816,57 @@ def test_a_step_the_grounding_rewrote_loses_its_buttons_words(monkeypatch: pytes
     assert pipeline._ground_decision(decision, event, []).action_label == "Email Dana and Sam"
 
 
-def test_a_burst_past_the_minutes_cap_waits_its_turn_never_dropped(monkeypatch) -> None:
-    # Four email watches catching up at once: 80 evaluations in a minute.
-    # The cap paces them; every one is still evaluated.
+def _paced(monkeypatch):  # type: ignore[no-untyped-def]
+    """The pacing with a fake clock: a sleep moves it on and yields."""
     from openexecutive.alerts import pipeline as ap
 
     clock = [1000.0]
-    slept: list[float] = []
+    real_sleep = asyncio.sleep
 
     async def fake_sleep(seconds: float) -> None:
-        slept.append(seconds)
         clock[0] += seconds
+        await real_sleep(0)
 
     monkeypatch.setattr(ap.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(ap.asyncio, "sleep", fake_sleep)
     monkeypatch.setattr(ap, "_recent_event_ts", ap.deque(maxlen=ap._RATE_LIMIT_PER_MIN))
+    monkeypatch.setattr(ap, "_waiting", 0)
+    return ap, clock
 
-    async def burst() -> int:
-        done = 0
-        for _ in range(ap._RATE_LIMIT_PER_MIN + 20):
-            await ap._wait_for_slot()
-            done += 1
-        return done
 
-    assert asyncio.run(burst()) == ap._RATE_LIMIT_PER_MIN + 20
-    assert slept and clock[0] >= 1060.0
+def test_a_burst_past_the_minutes_cap_waits_its_turn(monkeypatch) -> None:
+    # Four email watches catching up at once: 80 evaluations in a minute.
+    # The cap paces them into the next minute; every one is evaluated.
+    ap, clock = _paced(monkeypatch)
+
+    async def burst() -> list[bool]:
+        return list(await asyncio.gather(*(ap._wait_for_slot() for _ in range(ap._RATE_LIMIT_PER_MIN + 20))))
+
+    assert all(asyncio.run(burst()))
+    assert clock[0] >= 1060.0
+
+
+def test_a_flood_past_what_may_wait_is_still_dropped(monkeypatch) -> None:
+    # A looping bot: past the minute's cap and what may wait for the next
+    # minutes, the rest are dropped, so the triage spend stays capped.
+    ap, clock = _paced(monkeypatch)
+    extra = 25
+    total = ap._RATE_LIMIT_PER_MIN + ap._MAX_WAITING + extra
+    real_sleep = asyncio.sleep
+
+    async def flood() -> list[bool]:
+        arrived = asyncio.Event()
+
+        async def held_sleep(seconds: float) -> None:
+            await arrived.wait()  # every event arrives within the minute
+            clock[0] += seconds
+            await real_sleep(0)
+
+        monkeypatch.setattr(ap.asyncio, "sleep", held_sleep)
+        tasks = [asyncio.ensure_future(ap._wait_for_slot()) for _ in range(total)]
+        await real_sleep(0)
+        arrived.set()
+        return list(await asyncio.gather(*tasks))
+
+    ran = asyncio.run(flood())
+    assert ran.count(False) == extra and ap._waiting == 0

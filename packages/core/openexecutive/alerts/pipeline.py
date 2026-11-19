@@ -29,7 +29,7 @@ _background_tasks: set[asyncio.Task[Any]] = set()
 
 # Simple rolling-window pacing of event evaluations (``_wait_for_slot``).
 # Cost guard against runaway cost from a misbehaving integration: a burst
-# waits its turn, never dropped. Single-process only.
+# waits its turn, a flood past ``_MAX_WAITING`` is dropped. Single-process only.
 _RATE_LIMIT_PER_MIN = 60
 _recent_event_ts: deque[float] = deque(maxlen=_RATE_LIMIT_PER_MIN)
 _rate_lock = threading.Lock()
@@ -85,13 +85,33 @@ def _take_slot() -> float:
         return 0.0
 
 
-async def _wait_for_slot() -> None:
-    """Pace evaluations to ``_RATE_LIMIT_PER_MIN``: one past the cap waits
-    for the next minute's room, never dropped. A dropped event never comes
-    back (its source has marked it handed over: an email watch's email, a
-    watch's change), so the cap only spreads a burst out."""
-    while (wait := _take_slot()) > 0:
-        await asyncio.sleep(wait)
+# Evaluations past the cap that may wait for the next minutes' room; past
+# that, a runaway source is dropped (the cost guard).
+_MAX_WAITING = 2 * _RATE_LIMIT_PER_MIN
+_waiting = 0
+
+
+async def _wait_for_slot() -> bool:
+    """Pace evaluations to ``_RATE_LIMIT_PER_MIN``: a burst past the cap
+    waits for the next minute's room, as a dropped event never comes back
+    (its source has marked it handed over: an email watch's email, a watch's
+    change). False, dropped, only when ``_MAX_WAITING`` already wait: a
+    flood (a looping bot) still costs at most a few minutes of triage."""
+    global _waiting
+    if (wait := _take_slot()) <= 0:
+        return True
+    with _rate_lock:
+        if _waiting >= _MAX_WAITING:
+            return False
+        _waiting += 1
+    try:
+        while wait > 0:
+            await asyncio.sleep(wait)
+            wait = _take_slot()
+        return True
+    finally:
+        with _rate_lock:
+            _waiting -= 1
 
 
 def _make_private(
@@ -260,7 +280,20 @@ async def evaluate_and_dispatch(
     """
     path = db_path or store.DB_PATH
 
-    await _wait_for_slot()
+    if not await _wait_for_slot():
+        logger.warning(
+            "alerts.pipeline rate-limited: dropping event source=%s ext_id=%s",
+            event.source,
+            event.external_id,
+        )
+        return (
+            TriageDecision(
+                alert=False,
+                dedup_key=f"rate-limited-{event.source}-{event.external_id}",
+                reason_if_suppressed="rate_limited",
+            ),
+            None,
+        )
 
     prefs = preferences.get_preferences(db_path=path)
     if event.as_written:
