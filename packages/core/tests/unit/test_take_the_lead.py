@@ -2629,6 +2629,11 @@ def test_someone_new_on_an_asked_step_offers_what_covers_everyone_new(
         {"kind": "person", "value": "a@far.example"},
         {"kind": "domain", "value": "far.example"},
     ]
+    # A share held for someone new reads only People: no rule would clear it.
+    share = ("google_workspace__share_drive_file", {"file_id": "f1", "share_with": "a@far.example"})
+    assert ttl.rule_offers(*share, ttl.SOMEONE_NEW, mcp=True, asked=True) == []
+    calendar = ("google_workspace__manage_calendar", {"action": "share", "email": "a@far.example"})
+    assert ttl.rule_offers(*calendar, ttl.SOMEONE_NEW, mcp=True, asked=True) == []
     applies["on"] = False
     assert ttl.rule_offers(*one, ttl.SOMEONE_NEW, mcp=True, asked=True) == []
 

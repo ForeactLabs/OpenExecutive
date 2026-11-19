@@ -1128,12 +1128,16 @@ def rule_offers(
     if kind not in KINDS:
         return []
     try:
-        from openexecutive.orchestrator.mcp_gateway import _goes_rules_apply
+        from openexecutive.orchestrator.mcp_gateway import _goes_rules_apply, goes_rules_clear
         from openexecutive.people.identity import FREEMAIL_DOMAINS
 
         if asked and not _goes_rules_apply():
             # Goes rules don't count on this turn (Careful, or words from
             # outside): no rule would let it go.
+            return []
+        if asked and mcp and not goes_rules_clear(tool, tool_input):
+            # The connected-app check that held it reads only People (a
+            # share): no rule would let it go.
             return []
 
         rules = list_rules([SCOPE_COMPANY])

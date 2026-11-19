@@ -12595,7 +12595,9 @@ delegation:
     what goes out as a person (handle_it.content_hold) reads its topics
     with topics_in(text, recipients), the same _topics, so a Someone new
     Waits rule holds a reply on Hands-off too. Held cards carry offers
-    (rule_offers): Goes rules verified by re-running _balanced with them.
+    (rule_offers): Goes rules verified by re-running _balanced with them;
+    on a connected-app hold, only where mcp_gateway.goes_rules_clear says
+    the check that held it reads Goes (never a share).
     Goes only lifts the level's topic holds:
     levels.decide's always-card reasons (STRANGER, outside content giving
     orders, NOT_OWNER, SHARED) are decided before and never see it.

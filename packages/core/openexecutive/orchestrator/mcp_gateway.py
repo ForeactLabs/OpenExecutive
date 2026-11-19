@@ -957,6 +957,24 @@ def _goes_rules_apply() -> bool:
         return False
 
 
+def goes_rules_clear(tool: str, arguments: dict[str, Any]) -> bool:
+    """Whether a Goes rule could clear this call's someone-new hold: the
+    checks that read the egress list with Goes (mail, invites, Outlook
+    replies and events). Never a share (``_check_drive_share``,
+    ``_check_calendar_share``, an Outlook share), which reads only People,
+    nor a call ``_check_mailed_text`` holds, which no rule changes. What a
+    held card may offer asks this (``take_the_lead.rule_offers``). Never
+    raises: an error is no."""
+    try:
+        normalized = _normalize_tool_name(tool)
+        if tool == _CALENDAR_SHARE_TOOL or _is_drive_share_tool(tool) or normalized in _M365_DRIVE_SHARE_TOOLS:
+            return False
+        return _check_mailed_text(tool, arguments) is None
+    except Exception:
+        logger.warning("mcp_gateway: couldn't tell whether a Goes rule could clear a call", exc_info=True)
+        return False
+
+
 # The one send that may reach an address off the roster: the fixed
 # acknowledgement ``integrations.roster_intake.send_email_ack`` sends an
 # unknown sender. Set only around that call; admits one send with exactly
