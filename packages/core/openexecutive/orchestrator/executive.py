@@ -2810,7 +2810,7 @@ class Executive:
                     current_messages.append({"role": "assistant", "content": response_content})
                     # Written again whole, as on the claim check's round below.
                     yield {"type": "rewrite"}
-                    streamed_tail, rounds = "", []
+                    streamed_tail, rounds, cut_text = "", [], ""
                     again: list[dict[str, Any]] = [{"type": "text", "text": web_searches.SEARCH_AGAIN_NOTE}]
                     current_messages.append({"role": "user", "content": again})
                     continue

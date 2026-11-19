@@ -64,11 +64,17 @@ def _result_error(block: dict[str, Any]) -> str | None:
     return None
 
 
+# The errors a search in the next step can get past. A bad query
+# (invalid_tool_input, query_too_long) would fail the same way again.
+RETRYABLE_ERRORS = frozenset({"max_uses_exceeded", "unavailable", "too_many_requests"})
+
+
 def search_failed(blocks: list[dict[str, Any]]) -> bool:
     """Whether a web search in this round's blocks came back with an error
-    (too many searches in one step, or the search down)."""
+    the next step can get past (too many searches in one step, or the
+    search down)."""
     return any(
-        b.get("type") == "web_search_tool_result" and _result_error(b) is not None for b in blocks
+        b.get("type") == "web_search_tool_result" and _result_error(b) in RETRYABLE_ERRORS for b in blocks
     )
 
 

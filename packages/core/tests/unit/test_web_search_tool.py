@@ -343,4 +343,7 @@ def test_a_web_search_is_a_look_for_the_after_reply_checks() -> None:
     ]
     assert web_search_tool.search_failed(blocks)
     assert not web_search_tool.search_failed(blocks[:2])
+    bad_query = {"type": "web_search_tool_result", "tool_use_id": "s3",
+                 "content": {"type": "web_search_tool_result_error", "error_code": "query_too_long"}}
+    assert not web_search_tool.search_failed([bad_query])
     assert "web_search midwest diesel" in claim_check.render_calls(calls)
