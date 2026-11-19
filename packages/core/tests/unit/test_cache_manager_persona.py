@@ -111,6 +111,7 @@ def test_a_draft_the_person_sends_themselves_is_signed_as_they_say() -> None:
     assert "never anyone else's" in persona_text
     # A speaker it can't place gets a blank sign-off.
     assert "they are the `<current_speaker>` named in this turn" in persona_text
+    assert '(otherwise leave "[Your name]")' in persona_text
     assert "you send nothing" in persona_text
 
 
