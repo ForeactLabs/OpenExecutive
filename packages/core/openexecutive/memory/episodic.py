@@ -1886,27 +1886,24 @@ def cancel_scheduled_action(action_id: int, db_path: Path | None = None) -> str:
         ).fetchone()
         if row is None:
             return "not_found"
-        current = row["status"]
-        if current == "running":
-            ended = conn.execute(
-                "UPDATE scheduled_actions SET repeat = NULL "
-                "WHERE id = ? AND status = 'running' AND repeat IS NOT NULL AND repeat != ''",
-                (action_id,),
-            )
-            return "cancelled" if ended.rowcount else "not_cancellable"
-        if current != "pending":
-            return "not_cancellable"
-        # Guard the write too: the scheduler's claim can flip the row to
-        # 'running' between the SELECT and here, and a cancel must never
-        # overwrite a claimed row (the dispatch would go ahead regardless).
+        # Guard the write: the scheduler's claim can flip the row to
+        # 'running' at any moment, and a cancel must never overwrite a
+        # claimed row (the dispatch would go ahead regardless).
         cursor = conn.execute(
             "UPDATE scheduled_actions SET status = 'cancelled' "
             "WHERE id = ? AND status = 'pending'",
             (action_id,),
         )
-        if cursor.rowcount == 0:
-            return "not_cancellable"
-        return "cancelled"
+        if cursor.rowcount:
+            return "cancelled"
+        # Claimed (before or after the read above): a repeat ends after this
+        # occurrence.
+        ended = conn.execute(
+            "UPDATE scheduled_actions SET repeat = NULL "
+            "WHERE id = ? AND status = 'running' AND repeat IS NOT NULL AND repeat != ''",
+            (action_id,),
+        )
+        return "cancelled" if ended.rowcount else "not_cancellable"
 
 
 # Intent-text shapes of the ad-hoc reminders the removed talent /
