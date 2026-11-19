@@ -913,7 +913,12 @@ async def commit_interview(body: OnboardCommitRequest, request: Request) -> Comp
             from openexecutive.memory import workspace_settings
 
             may_set = _caller_is_principal_or_unclaimed(request)
-            if may_set and workspace_settings.get_workspace().timezone is None:
+            # No zone in effect: none stored and no USER_TIMEZONE either.
+            unset = (
+                workspace_settings.get_workspace().timezone is None
+                and workspace_settings.get_user_timezone().key == "UTC"
+            )
+            if may_set and unset:
                 workspace_settings.set_timezone(body.timezone)
                 audit_log(
                     "workspace_settings_changed",

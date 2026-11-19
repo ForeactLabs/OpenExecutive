@@ -1762,3 +1762,20 @@ def test_a_teammates_setup_leaves_the_companys_clock_alone(
     body = {**_commit_body(sid), "timezone": "Asia/Tokyo"}
     assert client.post("/onboard/interview/commit", json=body).status_code == 200
     assert saved == []
+
+
+def test_setup_keeps_a_clock_the_server_was_configured_with(
+    client: TestClient, seeded: list[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """USER_TIMEZONE is a clock someone set too: setup leaves it in effect."""
+    from zoneinfo import ZoneInfo
+
+    from openexecutive.memory import workspace_settings as ws
+
+    saved = _zone_calls(monkeypatch, None)
+    monkeypatch.setattr(ws, "_configured_timezone", lambda: ZoneInfo("Europe/London"))
+    seeded.append(_draft())
+    sid = _start(client)
+    body = {**_commit_body(sid), "timezone": "America/Los_Angeles"}
+    assert client.post("/onboard/interview/commit", json=body).status_code == 200
+    assert saved == []
