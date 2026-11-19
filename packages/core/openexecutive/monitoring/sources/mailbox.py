@@ -45,6 +45,11 @@ _SUMMARY_MAX = 200
 NOT_CONNECTED = "Couldn't read your inbox. Connect your mailbox under Act as me, and it will try again."
 NO_OWNER = "This watch has no inbox to read."
 READ_THROUGH_KEY = mailbox.READ_THROUGH_KEY
+# ``config_json`` key: where the last poll that told emails read to, and the
+# dedup keys of those emails. It becomes the read point only once all of
+# them are recorded, so a tick cut off before it recorded them (a restart, a
+# locked database) reads them again rather than skipping them.
+PENDING_KEY = "read_pending"
 
 
 def _parse(value: str | None) -> datetime | None:
@@ -57,13 +62,28 @@ def _parse(value: str | None) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
-def _since(item: WatchlistItem, now: datetime) -> datetime:
+def _read_through(item: WatchlistItem, *, db_path: Path | None) -> datetime | None:
+    """Where the last read that worked read to (``READ_THROUGH_KEY``), moved
+    on to the last poll's point (``PENDING_KEY``) once every email that poll
+    told is recorded."""
+    config = item.config_json or {}
+    read = _parse(str(config.get(READ_THROUGH_KEY) or ""))
+    pending = config.get(PENDING_KEY)
+    if not isinstance(pending, dict):
+        return read
+    through = _parse(str(pending.get("through") or ""))
+    keys = [str(k) for k in pending.get("keys") or []]
+    if through is None or len(store.recorded_dedup_keys(keys, db_path=db_path)) < len(set(keys)):
+        return read
+    return through if read is None else max(read, through)
+
+
+def _since(item: WatchlistItem, now: datetime, read: datetime | None) -> datetime:
     """From when to read: a little before the last read that worked
-    (``READ_THROUGH_KEY``), else from when the watch was set. Not the last
-    poll: a poll that couldn't read (inbox not connected, the mail service
-    down) must not move it on, or the mail that came meanwhile is skipped."""
+    (``read``), else from when the watch was set. Not the last poll: a poll
+    that couldn't read (inbox not connected, the mail service down) must
+    not move it on, or the mail that came meanwhile is skipped."""
     created = _parse(item.created_at) or now
-    read = _parse(str((item.config_json or {}).get(READ_THROUGH_KEY) or ""))
     return max(created, read - _OVERLAP) if read is not None else created
 
 
@@ -133,7 +153,8 @@ class MailboxSource:
             observe(item, NOT_CONNECTED)
             return []
         now = datetime.now(UTC)
-        since = _since(item, now)
+        read = _read_through(item, db_path=db_path)
+        since = _since(item, now, read)
         created = _parse(item.created_at) or since
         received = await _read_back_to(gmail_for(email), since)
         found: list[tuple[datetime, Any]] = []
@@ -152,9 +173,19 @@ class MailboxSource:
         told = store.recorded_dedup_keys([_dedup_key(item.id, m) for _, m in found], db_path=db_path)
         new = sorted(((at, m) for at, m in found if _dedup_key(item.id, m) not in told), key=lambda f: f[0])
         # Read: the next poll starts from here, or, when more is new than one
-        # poll tells, from the last email it told (see PER_POLL).
+        # poll tells, from the last email it told (see PER_POLL). With
+        # nothing to tell, at once; else once what it tells is recorded.
         read_to = new[PER_POLL - 1][0] if len(new) > PER_POLL else now
-        store.set_watchlist_config_key(item.id, READ_THROUGH_KEY, read_to.isoformat(), db_path=db_path)
+        if new:
+            if read is not None:
+                store.set_watchlist_config_key(item.id, READ_THROUGH_KEY, read.isoformat(), db_path=db_path)
+            store.set_watchlist_config_key(item.id, PENDING_KEY, {
+                "through": read_to.isoformat(),
+                "keys": [_dedup_key(item.id, m) for _, m in new[:PER_POLL]],
+            }, db_path=db_path)
+        else:
+            store.set_watchlist_config_key(item.id, READ_THROUGH_KEY, read_to.isoformat(), db_path=db_path)
+            store.set_watchlist_config_key(item.id, PENDING_KEY, None, db_path=db_path)
         signals: list[Signal] = []
         for arrived, message in new[:PER_POLL]:
             link = mailbox_link(email, thread_id=message.thread_id or None, message_id=message.id)

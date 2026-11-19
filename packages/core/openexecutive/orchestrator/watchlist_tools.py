@@ -627,11 +627,12 @@ def _for_ids(tool: str, tool_input: dict[str, Any]) -> dict[str, int | None] | s
 
 
 async def handle_add_watchlist_entry(tool_input: dict[str, Any]) -> str:
-    from openexecutive.delegation.lockdown import outside_reach_refusal, own_inbox_watch
+    from openexecutive.delegation.lockdown import outside_reach_reason, outside_reach_refusal
 
     tool = "add_watchlist_entry"
-    # A watch on their own inbox fetches nothing outside (lockdown.own_inbox_watch).
-    if not own_inbox_watch(tool, tool_input) and (refused := outside_reach_refusal(tool)) is not None:
+    # A watch on their own inbox fetches nothing outside, so their own mail
+    # read never holds it (lockdown.own_inbox_watch); a sender's words do.
+    if outside_reach_reason(tool, tool_input) and (refused := outside_reach_refusal(tool)) is not None:
         return refused
     validated = await _validated_target(tool, tool_input)
     if isinstance(validated, str):
@@ -869,11 +870,12 @@ async def handle_remove_watchlist_entry(tool_input: dict[str, Any]) -> str:
 
 
 async def handle_tune_watchlist_entry(tool_input: dict[str, Any]) -> str:
-    from openexecutive.delegation.lockdown import outside_reach_refusal, own_inbox_watch
+    from openexecutive.delegation.lockdown import outside_reach_reason, outside_reach_refusal
 
     tool = "tune_watchlist_entry"
-    # A watch on their own inbox fetches nothing outside (lockdown.own_inbox_watch).
-    if not own_inbox_watch(tool, tool_input) and (refused := outside_reach_refusal(tool)) is not None:
+    # A watch on their own inbox fetches nothing outside, so their own mail
+    # read never holds it (lockdown.own_inbox_watch); a sender's words do.
+    if outside_reach_reason(tool, tool_input) and (refused := outside_reach_refusal(tool)) is not None:
         return refused
     try:
         slug = str(tool_input["slug"]).strip()

@@ -141,6 +141,10 @@ SENDER_WITHHELD_TOOLS: frozenset[str] = frozenset({
     "send_slack_dm",
     "send_telegram_message",
     "remove_watchlist_entry",
+    # A watch on the person's own inbox runs after their own mail was read
+    # (``lockdown.own_inbox_watch``); the sender may not set or change one.
+    "add_watchlist_entry",
+    "tune_watchlist_entry",
 })
 
 # The headings ``knowledge.retriever.retrieve`` puts over synced excerpts: a
