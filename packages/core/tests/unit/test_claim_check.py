@@ -57,6 +57,7 @@ def test_word_check_skips_replies_that_claim_nothing() -> None:
     assert claim_check.may_claim("Your recap goes out every Friday at 4pm.")
     assert claim_check.may_claim("Any email from Sam gets flagged; I'll ping you right away.")
     assert claim_check.may_claim("Keeping an eye out for Sam's email.")
+    assert claim_check.may_claim("I’ll flag it the moment it lands.")
 
 
 def test_judge_is_told_a_call_backs_only_what_it_made() -> None:
@@ -64,7 +65,7 @@ def test_judge_is_told_a_call_backs_only_what_it_made() -> None:
     assert "scheduled once does not back a claim that something repeats" in claim_check._SYSTEM
     assert "kept in memory does not back a claim that something" in claim_check._SYSTEM
     # What does back them is named, so a true repeat or watch isn't redone.
-    for backs in ("saved workflow with a schedule", "add_watchlist_entry", "watch_for_email"):
+    for backs in ("workflow saved switched on", "add_watchlist_entry", "watch_for_email"):
         assert backs in claim_check._SYSTEM
 
 
