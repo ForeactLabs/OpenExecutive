@@ -102,10 +102,10 @@ def test_a_working_note_before_a_lookup_leaves_the_answer() -> None:
 
 def test_a_note_with_nothing_after_it_is_the_reply() -> None:
     reply = _reply([
-        FinalMsg([TextBlock("Checking the sheet."), ToolUseBlock("tu1", "read_sheet", {})], "tool_use"),
+        FinalMsg([TextBlock("Checking the sheet now."), ToolUseBlock("tu1", "read_sheet", {})], "tool_use"),
         FinalMsg([], "end_turn"),
     ])
-    assert reply == "Checking the sheet."
+    assert reply == "Checking the sheet now."
 
 
 def test_an_answer_written_before_an_action_stays() -> None:
@@ -126,6 +126,16 @@ def test_a_short_answer_with_a_figure_before_a_lookup_stays() -> None:
         FinalMsg([TextBlock("Costs were $800k.")], "end_turn"),
     ])
     assert reply == "Revenue was $1.2M last quarter.\n\nCosts were $800k."
+
+
+def test_a_short_answer_before_a_lookup_stays() -> None:
+    # "Is the Acme NDA signed?": the yes comes before finding the file.
+    reply = _reply([
+        FinalMsg([TextBlock("Yes, Acme signed it last week."),
+                  ToolUseBlock("tu1", "call_tool", {"name": "search_drive_files", "arguments": {}})], "tool_use"),
+        FinalMsg([TextBlock("Here's the signed copy.")], "end_turn"),
+    ])
+    assert reply == "Yes, Acme signed it last week.\n\nHere's the signed copy."
 
 
 def test_the_rest_of_a_cut_sentence_stays() -> None:

@@ -1041,6 +1041,12 @@ def _round_separator(tail: str, text: str) -> str:
 
 # Longest text before a tool call that is still a working note.
 WORKING_NOTE_MAX_CHARS = 300
+# A sentence that says what it does next: how a working note reads.
+_NEXT_STEP_RE = re.compile(
+    r"(?:^|[.!?]\s+)(?:let me|let's|now\b|next\b|first\b|then\b|time to|checking|looking|searching|pulling|"
+    r"i'll (?:check|look|search|pull|find|try)|i will (?:check|look|search|pull|find|try))",
+    re.IGNORECASE,
+)
 # A call that only looks something up (whole name segments, as in "search_gmail_messages").
 _LOOKUP_CALL_RE = re.compile(
     r"(?:^|_)(?:search|read|get|list|find|lookup|query|fetch|consult|retrieve|recall|open)(?:_|$)", re.IGNORECASE
@@ -1067,13 +1073,15 @@ def _only_looks(tool_uses: list[dict[str, Any]]) -> bool:
 
 def _is_working_note(text: str) -> bool:
     """Whether a round's text before its tool calls is a working note ("Now
-    the live data.", "Let me check the folder."): a line or two, no list,
-    table or figure. Longer text, or a figure ("Revenue was $1.2M."), is
-    part of the answer and stays."""
+    the live data.", "Let me check the folder."): a line or two that says
+    what it does next, with no list, table or figure. Longer text, a figure
+    ("Revenue was $1.2M.") or an answer ("Yes, Acme signed it.") is part of
+    the answer and stays."""
     note = text.strip()
     return (
         bool(note) and len(note) <= WORKING_NOTE_MAX_CHARS
         and "\n" not in note and "|" not in note and not any(c.isdigit() for c in note)
+        and _NEXT_STEP_RE.search(note) is not None
     )
 
 
