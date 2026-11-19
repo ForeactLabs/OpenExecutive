@@ -2555,7 +2555,8 @@ def test_a_topic_goes_rule_releases_its_words_in_what_it_sends_on_its_own(owner:
 def test_topic_rules_on_what_it_sends_as_you(owner: Any, balanced: None) -> None:
     _go("topic", "contracts")
     assert handle_it.content_hold("The contract is attached.") is None
-    assert handle_it.content_hold("The contract is attached, password inside.") == "sensitive"
+    # A password is no topic: only the topics wait.
+    assert handle_it.content_hold("The contract is attached, password inside.") is None
     assert handle_it.content_hold("Here is the invoice for $450.") == "sensitive"
     _go("topic", "money")
     assert handle_it.content_hold("Here is the invoice for $450.") is None

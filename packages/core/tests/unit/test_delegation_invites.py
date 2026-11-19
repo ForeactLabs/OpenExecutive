@@ -459,12 +459,12 @@ def test_a_goes_company_rule_lets_a_sensitive_title_go(person: Any, models: dict
     from openexecutive.orchestrator import take_the_lead as ttl
 
     _on(person)
-    wire = _mailbox(event=_event(title="Wire approval"))
+    wire = _mailbox(event=_event(title="Wire approval for $5,000"))
     assert _scan(person, wire).handled == 0
     (card,) = invites.cards(person)
     assert card.waited_because == handle_it.REASONS["sensitive"]
     ttl.add_rule(ttl.SCOPE_COMPANY, "domain", DANA.split("@")[1], created_by="t", effect=ttl.EFFECT_GO)
-    again = _mailbox(_invite("i2", "ti2"), event=_event("ev2", title="Wire approval"))
+    again = _mailbox(_invite("i2", "ti2"), event=_event("ev2", title="Wire approval for $5,000"))
     assert _scan(person, again).handled == 1 and again.answers == [("ev2", True)]
 
 

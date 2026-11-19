@@ -271,11 +271,11 @@ def test_the_send_path_rechecks_a_stranger(owner: Any, models: dict[str, Any]) -
 
 
 @pytest.mark.parametrize(("body", "code"), [
-    ("Hi Dana, the slides are at https://files.example.com/x", "link"),
-    ("Hi Dana, any news on the 20% figure?", "amount"),
+    ("Hi Dana, the slides are at https://files.example.com/x", None),
+    ("Hi Dana, any news on the $2,000 refund?", "sensitive"),
     ("Hi Dana, any news on the contract?", "sensitive"),
 ])
-def test_on_balanced_a_link_amount_or_topic_waits(owner: Any, body: str, code: str) -> None:
+def test_on_balanced_only_a_topic_waits(owner: Any, body: str, code: str | None) -> None:
     _on(owner, "balanced")
     assert _check(owner, _nudge(body=body)) == code
     _on(owner, "hands_off")

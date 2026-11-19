@@ -12307,17 +12307,18 @@ delegation:
     auto-send per thread per day, delegation_handled: the loop guard, a
     card too), in_a_row (last own message in the thread was an auto-send).
     No daily cap and no length limit. Below Hands-off also stranger (not team, contact or past
-    correspondent), sensitive (SENSITIVE topics in the email, its subject or
-    the reply), link and amount (handle_it.content_hold, also on follow-ups
-    and, topic only, invite titles); Hands-off sends them. The owner's
-    rules (take_the_lead_rules, company scope) apply here too, inside
-    content_hold: a Waits rule (take_the_lead.rule_waits, against the texts
-    and the reply's recipients) holds as reason "rule" on every level; below
-    Hands-off Goes rules (take_the_lead.goes_rules, amounts read in the
-    reply too, link_texts) release by kind: person/domain all topic holds,
-    amount the money words and amounts; never link or credentials
-    (CREDENTIALS). Words rules only wait (GOES_RULE_KINDS). Unreadable
-    rules hold, on Hands-off too. The per-mode limits are gone.
+    correspondent), and sensitive: on Balanced, one of the seven topics in
+    the email, its subject, the reply or who it goes to
+    (handle_it.content_hold -> take_the_lead.held_topic, also on follow-ups
+    and, topic only, invite titles); Hands-off sends them. No word list,
+    link or password check of its own: the same topics and Goes rules as
+    any other step (take_the_lead._released, shared with _balanced). The
+    owner's rules (take_the_lead_rules, company scope) apply here too,
+    inside content_hold: a Waits rule (take_the_lead.rule_waits, against
+    the texts and the reply's recipients) holds as reason "rule" on every
+    level; on Balanced Goes rules release by kind (goes_kinds, amounts read
+    in the reply too, sent_texts). Words rules only wait. Unreadable rules
+    hold, on Hands-off too. The per-mode limits are gone.
     Only when it passes, a last look (delegation.injection_check.held_back:
     one tool-less classifier-model call reading the sender's new words as
     plain text in an <email> block, up to 20,000 chars) asks whether they

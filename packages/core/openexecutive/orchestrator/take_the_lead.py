@@ -4253,24 +4253,49 @@ def _reached(name: str, tool_input: dict[str, Any], addresses: Iterable[str], *,
     return sorted({a.lower() for a in found if a and not _executive(a)})
 
 
+def _released(
+    rules: list[Rule], text: str, addresses: Iterable[str], *, words_text: str | None = None,
+) -> tuple[set[str], list[Rule]]:
+    """The topics the company's Goes rules let go on Balanced, and the rules
+    that matched. A person or company rule covers a topic only when it
+    covers everyone reached; one that covers just the new people among
+    them lets only Someone new go (someone it knows needs no rule to be
+    reached, but a contract to them is still a contract)."""
+    everyone = sorted({a.lower() for a in addresses})
+    goes = goes_rules(rules, text, everyone, words_text=words_text)
+    released = set(goes_kinds(goes))
+    new = sorted({a.lower() for a in new_people(everyone)})
+    if new and new != everyone:
+        reach = [r for r in goes_rules(rules, text, new, words_text=words_text) if r.kind in (RULE_PERSON, RULE_DOMAIN)]
+        if reach:
+            released.add(SOMEONE_NEW)
+            goes = [*goes, *reach]
+    return released, goes
+
+
+def held_topic(rules: list[Rule], text: str, recipients: Iterable[str], *, words_text: str | None = None) -> str | None:
+    """Balanced for what goes out as a person (``delegation.handle_it``):
+    the first topic (``KINDS``) its words are about that waits, or None.
+    The same topics and Goes rules as any other step (``_balanced``); who
+    it may go to is the sender's own check (``handle_it``), so
+    ``recipients`` only decide which person or company rules match. Never
+    raises: an error is every topic."""
+    try:
+        going = sorted({r.strip().lower() for r in recipients if r and r.strip()})
+        released, _ = _released(rules, text, going, words_text=words_text)
+        held = topics_in(text) - released
+    except Exception:
+        logger.warning("take_the_lead: couldn't read what a message's rules let go", exc_info=True)
+        return KINDS[0]
+    return next((k for k in KINDS if k in held), None)
+
+
 def _balanced(
     name: str, tool_input: dict[str, Any], rules: list[Rule], *, addresses: list[str], spends: str, mcp: bool,
 ) -> tuple[Hit | None, Rule | None]:
     """Unattended work on Balanced: the seven topics wait unless a Goes rule
-    lets them go (``goes_kinds``), everything else goes. A person or
-    company rule covers a topic only when it covers everyone the step
-    reaches; one that covers just the new people among them lets only
-    Someone new go (someone it knows needs no rule to be reached, but a
-    contract to them is still a contract)."""
-    everyone = sorted({a.lower() for a in addresses})
-    goes = goes_rules(rules, spends, everyone)
-    released = set(goes_kinds(goes))
-    new = sorted({a.lower() for a in new_people(addresses)})
-    if new and new != everyone:
-        reach = [r for r in goes_rules(rules, spends, new) if r.kind in (RULE_PERSON, RULE_DOMAIN)]
-        if reach:
-            released.add(SOMEONE_NEW)
-            goes = [*goes, *reach]
+    lets them go (``_released``), everything else goes."""
+    released, goes = _released(rules, spends, addresses)
     lead = Lead(scope=SCOPE_EXECUTIVE, ask_first={k: k not in released for k in KINDS})
     held = check(name, tool_input, lead=lead, rules=[], mcp=mcp)
     if held is not None or not goes:
