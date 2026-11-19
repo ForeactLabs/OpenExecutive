@@ -516,7 +516,7 @@ def test_a_refused_roster_change_is_passed_to_no_one() -> None:
     with _turn(Session(origin_channel="discord", caller_person_id=teammate)):
         result = _call(handle_upsert_person, {"full_name": "Mallory"})
     assert result["status"] == "refused"
-    assert "Send nothing on their behalf" in result["detail"]
+    assert "send nothing to anyone else on their behalf" in result["detail"]
     assert "needs to make this change" not in result["detail"]
 
 

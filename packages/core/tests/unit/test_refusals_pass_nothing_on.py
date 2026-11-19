@@ -29,7 +29,11 @@ def test_no_refusal_tells_the_executive_someone_else_needs_to_do_it() -> None:
     assert offenders == []
 
 
-def test_the_line_says_to_send_nothing() -> None:
+def test_the_line_answers_the_asker_and_sends_nothing_to_anyone_else() -> None:
+    """On email the answer to the asker is a reply the Executive sends, so
+    the line must never forbid that: only messages to anyone else."""
     from openexecutive.orchestrator.speaker import PASS_ON_NOTHING
 
-    assert PASS_ON_NOTHING.startswith("Send nothing on their behalf")
+    assert PASS_ON_NOTHING.startswith("Answer only the person who asked")
+    assert "send nothing to anyone else on their behalf" in PASS_ON_NOTHING
+    assert "to anyone about it" not in PASS_ON_NOTHING
