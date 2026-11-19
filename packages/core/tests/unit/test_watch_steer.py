@@ -490,3 +490,45 @@ def test_a_watch_card_names_its_watch(db: Path) -> None:
     )
     assert other is not None
     assert proposal_item(other).watch_title is None
+
+
+def test_steering_an_email_watch_is_logged_for_its_owner_alone(
+    client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An email watch's card steers its notes like any watch (the notes are
+    read before an email is told), and the row it logs names the owner's
+    mail, so it is theirs alone."""
+    from openexecutive.monitoring import mailbox
+
+    slug = "email-from-acme-1a2b3c"
+    wid = ms.insert_watchlist_item(
+        slug=slug, signal_type="mailbox", target="acme", notes="", db_path=db,
+        config={mailbox.OWNER_KEY: 7},
+    )
+    assert wid is not None
+    from openexecutive.api.routes import chat as chat_route
+    from openexecutive.orchestrator.artifact_records import Viewer
+
+    monkeypatch.setattr(alerts_route, "_caller_viewer", lambda request: Viewer(person_id=7))
+    monkeypatch.setattr(chat_route, "_resolve_caller_person_id", lambda request: 7)
+    aid = alert_store.insert_alert(
+        source="mailbox", external_id="m1", severity="medium",
+        headline="Acme: renewal terms", body="b",
+        topic_tags=["external:mailbox", f"external:{slug}"], dedup_key=f"watch:{slug}#m1",
+        routed_to_person_id=7, db_path=db,
+    )
+    assert aid is not None
+    assert watch_slug_of(alert_store.get_alert(aid, db_path=db)) == slug
+    rows: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        "openexecutive.audit.log_event", lambda event, *a, **k: rows.append((event, k)),
+    )
+    _plan(monkeypatch, {"notes": "- Skip invoices.", "reply": "Got it.", "close_card_ids": []})
+
+    res = client.post(f"/alerts/{aid}/say", json={"text": "Skip invoices."})
+    assert res.status_code == 200, res.text
+    item = ms.get_watchlist_item_by_slug(slug, db_path=db)
+    assert item is not None and "Skip invoices" in item.notes
+    steered = [k for e, k in rows if e == "watch_steered"]
+    assert steered and steered[0]["private"] is True
+    assert steered[0]["private_to_person"] == 7

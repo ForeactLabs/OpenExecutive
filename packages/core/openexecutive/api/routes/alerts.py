@@ -882,6 +882,7 @@ async def _steer(alert_id: int, text: str, request: Request) -> SteerResponse:
             closed.append(card_id)
 
     from openexecutive.audit import log_event as audit_log
+    from openexecutive.monitoring import mailbox
 
     audit_log(
         "watch_steered",
@@ -894,6 +895,9 @@ async def _steer(alert_id: int, text: str, request: Request) -> SteerResponse:
             "closed_alert_ids": closed,
             "by": api_caller.actor(request),
         },
+        # An email watch's rows are its owner's alone, like every other row
+        # about it.
+        **mailbox.audit_privacy(item),
     )
     return SteerResponse(
         reply=plan.reply,
