@@ -142,11 +142,11 @@ def test_a_cut_that_wrote_nothing_keeps_the_break_after_earlier_text() -> None:
     from tests.unit.test_reply_rounds import _reply
 
     text = _reply([
-        FinalMsg([TextBlock("Let me pull the numbers."), ToolUseBlock("t1", "nothing_here", {})], "tool_use"),
+        FinalMsg([TextBlock("By month:\n- Oct: $10k"), ToolUseBlock("t1", "nothing_here", {})], "tool_use"),
         FinalMsg([], "max_tokens"),
         FinalMsg([TextBlock("Revenue grew 12%.")], "end_turn"),
     ])
-    assert text == "Let me pull the numbers.\n\nRevenue grew 12%."
+    assert text == "By month:\n- Oct: $10k\n\nRevenue grew 12%."
 
 
 def test_a_cut_call_before_a_trailing_reasoning_block_never_runs() -> None:

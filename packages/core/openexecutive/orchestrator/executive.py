@@ -58,6 +58,7 @@ from openexecutive.orchestrator import (
     turn_progress,
 )
 from openexecutive.orchestrator import pushback as pushback_mod
+from openexecutive.orchestrator import web_search_tool as web_searches
 from openexecutive.orchestrator.action_chips import summarize_action
 from openexecutive.orchestrator.activity_labels import (
     fallback_activity,
@@ -1036,6 +1037,33 @@ def _round_separator(tail: str, text: str) -> str:
     if tail.endswith("\n") or text.startswith("\n"):
         return "\n"
     return "\n\n"
+
+
+# Longest text before a tool call that is still a working note.
+WORKING_NOTE_MAX_CHARS = 300
+
+
+def _is_working_note(text: str) -> bool:
+    """Whether a round's text before its tool calls is a working note ("Now
+    the live data.", "Let me check the folder."): a line or two, no list or
+    table. Longer text is part of the answer and stays."""
+    note = text.strip()
+    return bool(note) and len(note) <= WORKING_NOTE_MAX_CHARS and "\n" not in note and "|" not in note
+
+
+def _without_notes(rounds: list[tuple[str, bool]]) -> str | None:
+    """The reply without its working notes, when it had any, else None.
+    ``rounds`` is each round's streamed text (its separator first) and
+    whether the round went on to call tools. A note stays when no round
+    after it wrote anything: then it is all the reply there is."""
+    last_text = max((i for i, (text, _) in enumerate(rounds) if text.strip()), default=-1)
+    kept = [
+        text for i, (text, called) in enumerate(rounds)
+        if not (called and i < last_text and _is_working_note(text))
+    ]
+    if len(kept) == len(rounds):
+        return None
+    return "".join(kept).lstrip()
 
 
 class Executive:
@@ -2459,6 +2487,12 @@ class Executive:
         # tool call, then its answer) starts a new paragraph, so the two
         # never run together ("...stock.Yes. ITEM-1...").
         streamed_tail = ""
+        # Each round's streamed text (its separator first) and whether it went
+        # on to call tools, since the reply was last written again: the
+        # working notes among them leave the reply at the end (_without_notes).
+        rounds: list[tuple[str, bool]] = []
+        # Set once a failed web search got its one more round this turn.
+        searched_again = False
         # Set by a round cut off mid-text: the next round's text carries it
         # on, so that round alone gets no paragraph break before its text.
         run_on = False
@@ -2503,6 +2537,7 @@ class Executive:
             full_text = ""
             # The separator streamed before this round's text (_round_separator).
             round_sep = 0
+            round_sep_text = ""
             carries_on, run_on = run_on, False
             tool_uses: list[dict[str, Any]] = []
             response_content: list[dict[str, Any]] = []
@@ -2573,6 +2608,7 @@ class Executive:
                                 yield separator
                                 streamed_tail = separator
                                 round_sep = len(separator)
+                                round_sep_text = separator
                         full_text += event.delta.text
                         streamed_tail = (streamed_tail + event.delta.text)[-2:]
                         yield event.delta.text
@@ -2620,6 +2656,10 @@ class Executive:
                     response_content.append(replay)
             if turn_sources is not None:
                 record_web_sources(turn_sources, final_msg.content)
+            rounds.append((round_sep_text + full_text, final_msg.stop_reason == "tool_use"))
+            # A web search is a look, like any read: the after-reply check
+            # sees it with the turn's other calls.
+            claim_calls.extend(web_searches.searched(response_content))
 
             if web_search_queries:
                 session_id = getattr(current_session.get(), "session_id", None)
@@ -2723,18 +2763,49 @@ class Executive:
                         # refusal, not on what the refused round began.
                         yield ("\n\n" if streamed_tail else "") + REFUSED_REPLY
                     return
+                # A web search that didn't run (the limit for one step, or the
+                # search down) gets one more round, once a turn, to search
+                # for what is still open: the limit starts over each step.
+                if (
+                    not (searched_again or handing_over or repeating)
+                    and web_searches.search_failed(response_content)
+                ):
+                    searched_again = True
+                    audit_log(
+                        "search_again",
+                        "A web search didn't run; one more round",
+                        session_id=getattr(current_session.get(), "session_id", None),
+                        turn_id=turn_id,
+                        actor="executive",
+                        details={"iteration": iteration},
+                        private=private_turn,
+                    )
+                    current_messages.append({"role": "assistant", "content": response_content})
+                    # Written again whole, as on the claim check's round below.
+                    yield {"type": "rewrite"}
+                    streamed_tail, rounds = "", []
+                    again: list[dict[str, Any]] = [{"type": "text", "text": web_searches.SEARCH_AGAIN_NOTE}]
+                    current_messages.append({"role": "user", "content": again})
+                    continue
                 # Do what it says: a reply that claims a change no call this
                 # turn made gets one more round to make it or say it can't.
-                if claim_checked or handing_over or repeating:
-                    return
-                claim_checked = True
-                reply_text = cut_text + "\n".join(
-                    str(b.get("text", "")) for b in response_content if b.get("type") == "text"
-                )
-                claim = await claim_check.unbacked_claim(
-                    claim_check.last_person_message(messages), reply_text, claim_calls,
-                )
+                claim: str | None = None
+                if not (claim_checked or handing_over or repeating):
+                    claim_checked = True
+                    reply_text = cut_text + "\n".join(
+                        str(b.get("text", "")) for b in response_content if b.get("type") == "text"
+                    )
+                    claim = await claim_check.unbacked_claim(
+                        claim_check.last_person_message(messages), reply_text, claim_calls,
+                    )
                 if claim is None:
+                    # The reply is the answer alone: a working note written
+                    # before a lookup ("Now the live data.") leaves it, on
+                    # every page and channel showing it (``rewrite``).
+                    clean = _without_notes(rounds)
+                    if clean is not None:
+                        yield {"type": "rewrite"}
+                        yield clean
                     return
                 audit_log(
                     "claim_check",
@@ -2752,7 +2823,7 @@ class Executive:
                 # (an email, a chat app) drops it before it is sent, and the
                 # web chat swaps it out on ``rewrite``.
                 yield {"type": "rewrite"}
-                streamed_tail = ""
+                streamed_tail, rounds = "", []
                 nudge: list[dict[str, Any]] = [
                     {"type": "text", "text": claim_check.nudge(claim)}
                 ]
