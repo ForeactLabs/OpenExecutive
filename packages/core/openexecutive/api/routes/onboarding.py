@@ -919,7 +919,8 @@ async def commit_interview(body: OnboardCommitRequest, request: Request) -> Comp
                 and workspace_settings.get_user_timezone().key == "UTC"
             )
             if may_set and unset:
-                workspace_settings.set_timezone(body.timezone)
+                # Off the event loop: a zone change re-times pending rows.
+                await asyncio.to_thread(workspace_settings.set_timezone, body.timezone)
                 audit_log(
                     "workspace_settings_changed",
                     f"Workspace settings changed: time zone default → {body.timezone} (setup)",
