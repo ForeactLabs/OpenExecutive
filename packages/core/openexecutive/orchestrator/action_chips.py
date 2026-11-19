@@ -19,6 +19,7 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
+from openexecutive.memory import workspace_settings
 from openexecutive.orchestrator import tool_labels
 
 logger = logging.getLogger(__name__)
@@ -158,14 +159,12 @@ def _humanize_iso(iso_ts: str) -> str:
     back to the raw ISO string if parsing fails — the chip is best-
     effort, never blocking.
     """
-    try:
-        dt = datetime.fromisoformat(iso_ts.replace("Z", "+00:00"))
-    except (ValueError, TypeError):
+    # A time with no offset is the company's time, as the tools that
+    # store it read it (workspace_settings.company_time).
+    dt = workspace_settings.company_time(iso_ts)
+    if dt is None:
         return iso_ts
-    if dt.tzinfo is None:
-        # Treat naive timestamps as UTC — matches the convention used by
-        # schedule_followup / suggest_workflow callers that normalize to UTC.
-        dt = dt.replace(tzinfo=UTC)
+    dt = dt.astimezone(workspace_settings.get_user_timezone())
     delta_s = (dt - datetime.now(UTC)).total_seconds()
     if delta_s < 0:
         return "just now"

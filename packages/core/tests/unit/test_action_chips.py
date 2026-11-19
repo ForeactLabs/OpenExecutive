@@ -97,6 +97,33 @@ def test_schedule_followup_chip() -> None:
     assert "slack_dm" in chip["summary"]
 
 
+def test_schedule_followup_chip_reads_a_time_without_offset_as_company_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run_at with no offset is the company's time, as the tool stores it:
+    30 minutes ahead in New York is "in 30m", not hours off or "just now"."""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    from openexecutive.memory import workspace_settings
+
+    zone = ZoneInfo("America/New_York")
+    monkeypatch.setattr(workspace_settings, "get_user_timezone", lambda: zone)
+    soon = (datetime.now(zone) + timedelta(minutes=31)).replace(tzinfo=None)
+    chip = summarize_action(
+        tool_name="schedule_followup",
+        tool_input={
+            "run_at": soon.isoformat(timespec="minutes"),
+            "channel": "slack_dm",
+            "channel_ref": "U123",
+            "intent": "check on Q3",
+        },
+        tool_result=json.dumps({"status": "scheduled", "id": 42}),
+    )
+    assert chip is not None
+    assert "in 30m" in chip["summary"] or "in 29m" in chip["summary"]
+
+
 def test_suggest_workflow_chip() -> None:
     chip = summarize_action(
         tool_name="suggest_workflow",
