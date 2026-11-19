@@ -64,6 +64,13 @@ export function useNextTimeRule(offers: RuleOffer[], onResolved: () => void, cha
   const [added, setAdded] = useState<{ id: number | null; line: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const addedRef = useRef(false);
+  const [closed, setClosed] = useState(false);
+
+  // Close (or a done Undo): the note goes, whether or not the card does.
+  function dismiss() {
+    setClosed(true);
+    onResolved();
+  }
 
   // `went`: whether the step was carried out (an Approve through the chat
   // can come back still waiting); no rule is added when it wasn't.
@@ -95,13 +102,13 @@ export function useNextTimeRule(offers: RuleOffer[], onResolved: () => void, cha
     if (added?.id == null) return;
     try {
       await deleteCompanyLeadRule(added.id);
-      onResolved();
+      dismiss();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't remove the rule.");
     }
   }
 
-  const box = shown && !added && !error ? (
+  const box = shown && !added && !error && !closed ? (
     <fieldset className="mt-3 rounded-xl border border-line bg-surface p-3">
       <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-fg-subtle">Next time</legend>
       <div className="flex flex-col gap-1.5">
@@ -126,7 +133,7 @@ export function useNextTimeRule(offers: RuleOffer[], onResolved: () => void, cha
     </fieldset>
   ) : null;
 
-  const done = added ? (
+  const done = closed ? null : added ? (
     <div className="mt-3 rounded-xl bg-accent/10 px-4 py-3">
       <p className="text-[15px] text-fg break-words">
         Done. New rule: {added.line} goes on its own.
@@ -137,7 +144,7 @@ export function useNextTimeRule(offers: RuleOffer[], onResolved: () => void, cha
             Undo rule
           </button>
         )}
-        <button type="button" onClick={onResolved} className="min-h-touch text-sm text-fg-muted hover:underline">
+        <button type="button" onClick={dismiss} className="min-h-touch text-sm text-fg-muted hover:underline">
           Close
         </button>
       </div>
@@ -147,7 +154,7 @@ export function useNextTimeRule(offers: RuleOffer[], onResolved: () => void, cha
     <div className="mt-3 rounded-xl bg-surface px-4 py-3">
       <p className="text-[15px] text-fg break-words">Done.</p>
       <p className="mt-1 text-sm text-red-500">{error}</p>
-      <button type="button" onClick={onResolved} className="mt-2 min-h-touch text-sm text-fg-muted hover:underline">
+      <button type="button" onClick={dismiss} className="mt-2 min-h-touch text-sm text-fg-muted hover:underline">
         Close
       </button>
     </div>
