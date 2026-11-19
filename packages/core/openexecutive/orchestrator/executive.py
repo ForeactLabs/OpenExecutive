@@ -58,6 +58,7 @@ from openexecutive.orchestrator import (
     turn_progress,
 )
 from openexecutive.orchestrator import pushback as pushback_mod
+from openexecutive.orchestrator import web_search_tool as web_searches
 from openexecutive.orchestrator.action_chips import summarize_action
 from openexecutive.orchestrator.activity_labels import (
     fallback_activity,
@@ -1036,6 +1037,127 @@ def _round_separator(tail: str, text: str) -> str:
     if tail.endswith("\n") or text.startswith("\n"):
         return "\n"
     return "\n\n"
+
+
+# Longest text before a tool call that is still a working note.
+WORKING_NOTE_MAX_CHARS = 300
+# A sentence that only says what it does next: how a working note reads
+# ("Now the live data.", "Let me check the folder.", "Checking the sheet
+# now."). Matched whole: a short sentence with no comma, colon or figure,
+# so a sentence that carries a finding ("Searching the CRM turned up
+# nothing.", "Now the bad news: Acme churned.") is never one.
+_NEXT_STEP_RE = re.compile(
+    r"^(?:(?:let me|let's) (?:check|look|pull|find|search|try|see|get|grab|open|read|dig)\b"
+    r"|now (?:to|for|on to|let me|i'll|i will)\b|next (?:to|let me|i'll|i will)\b"
+    r"|(?:now|next) the \w+(?: \w+)?[.!]?$|time to (?:check|look|search|pull|find|dig)\b"
+    r"|i'll (?:check|look|search|pull|find|try)\b|i will (?:check|look|search|pull|find|try)\b"
+    r"|(?:checking|looking|searching|pulling)\b.*\bnow[.!]?$)",
+    re.IGNORECASE,
+)
+# Longest sentence a working note's step can be.
+NEXT_STEP_MAX_CHARS = 80
+_SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+")
+# A call that only looks something up (whole name segments, as in "search_gmail_messages").
+_LOOKUP_CALL_RE = re.compile(
+    r"(?:^|_)(?:search|read|get|list|find|lookup|query|fetch|consult|retrieve|recall|open)(?:_|$)", re.IGNORECASE
+)
+# Calls that neither look nor act: they don't change what a round is.
+_NEUTRAL_CALLS = frozenset({"show_progress"})
+
+
+def _only_looks(tool_uses: list[dict[str, Any]]) -> bool:
+    """Whether every call a round made only looks something up: a connected
+    app's call (call_tool) or a group's (use_tool) by the tool it runs. A
+    round that also acts (a send, a save) wrote its text as part of the
+    answer ("Runway is 14 months." before the email with it)."""
+    names = []
+    for tu in tool_uses:
+        name = str(tu.get("name", ""))
+        given = tu.get("input")
+        if name in ("call_tool", "use_tool") and isinstance(given, dict):
+            name = str(given.get("name") or name)
+        if name not in _NEUTRAL_CALLS:
+            names.append(name)
+    return bool(names) and all(_LOOKUP_CALL_RE.search(n) for n in names)
+
+
+def _is_next_step(sentence: str) -> bool:
+    return (
+        len(sentence) <= NEXT_STEP_MAX_CHARS
+        and not any(c.isdigit() or c in ",:;" for c in sentence)
+        and _NEXT_STEP_RE.match(sentence) is not None
+    )
+
+
+def _less_notes(text: str) -> str | None:
+    """A round's text before its lookups without its working-note
+    sentences (``_is_next_step``), when it had any, else None. Only a line
+    or two with no list or table is looked at, so "Yes, Acme signed it. Let
+    me pull the signed copy." keeps its answer."""
+    note = text.strip()
+    if not note or len(note) > WORKING_NOTE_MAX_CHARS or "\n" in note or "|" in note:
+        return None
+    sentences = _SENTENCE_END_RE.split(note)
+    kept = [
+        s for s in sentences if not _is_next_step(s)
+    ]
+    if len(kept) == len(sentences):
+        return None
+    if not kept:
+        return ""
+    # Its paragraph break before it (the round's separator) stays.
+    return text[: len(text) - len(text.lstrip())] + " ".join(kept)
+
+
+def _without_notes(rounds: list[tuple[str, bool]]) -> str | None:
+    """The reply without its working notes, when it had any, else None.
+    ``rounds`` is each round's streamed text (its separator first) and
+    whether the round went on only to look something up (``_only_looks``,
+    and not the rest of a cut round's text). A note stays when no round
+    after it wrote anything: then it is all the reply there is."""
+    last_text = max((i for i, (text, _) in enumerate(rounds) if text.strip()), default=-1)
+    out = ""
+    changed = cut = False
+    for i, (text, looked) in enumerate(rounds):
+        rest = _less_notes(text) if looked and i < last_text else None
+        if cut and out.strip() and text and not out[-1:].isspace() and not text[:1].isspace():
+            # Text after a web search in the same round follows the note
+            # with nothing between; with the note gone it needs its break.
+            out += _round_separator(out[-2:], text)
+        cut = rest is not None
+        if rest is None:
+            out += text
+        else:
+            changed = True
+            out += rest
+    if not changed:
+        return None
+    return out.lstrip()
+
+
+def _round_parts(
+    lead: str, text: str, content: list[dict[str, Any]], looked: bool, carries_on: bool
+) -> list[tuple[str, bool]]:
+    """A round's text for ``_without_notes``, split where it ran a web
+    search: a web search runs inside the round, so the text before one was
+    written before a lookup, like the text before a lookup call. ``lead`` is
+    the round's separator, ``looked`` whether its calls only look
+    (``_only_looks``) and ``carries_on`` whether it starts with the rest of
+    a cut round's text."""
+    parts: list[str] = []
+    current = ""
+    for block in content:
+        if block.get("type") == "text":
+            current += str(block.get("text", ""))
+        elif block.get("type") == "server_tool_use" and block.get("name") == WEB_SEARCH_TOOL_NAME and current:
+            parts.append(current)
+            current = ""
+    if not parts or "".join(parts) + current != text:
+        return [(lead + text, looked)]
+    out = [(part, not (i == 0 and carries_on)) for i, part in enumerate(parts)]
+    out[0] = (lead + out[0][0], out[0][1])
+    out.append((current, looked))
+    return out
 
 
 class Executive:
@@ -2468,6 +2590,13 @@ class Executive:
         # tool call, then its answer) starts a new paragraph, so the two
         # never run together ("...stock.Yes. ITEM-1...").
         streamed_tail = ""
+        # Each round's streamed text (its separator first) and whether it went
+        # on only to look something up, since the reply was last written
+        # again: the working notes among them leave the reply at the end
+        # (_without_notes).
+        rounds: list[tuple[str, bool]] = []
+        # Set once a failed web search got its one more round this turn.
+        searched_again = False
         # Set by a round cut off mid-text: the next round's text carries it
         # on, so that round alone gets no paragraph break before its text.
         run_on = False
@@ -2512,6 +2641,7 @@ class Executive:
             full_text = ""
             # The separator streamed before this round's text (_round_separator).
             round_sep = 0
+            round_sep_text = ""
             carries_on, run_on = run_on, False
             tool_uses: list[dict[str, Any]] = []
             response_content: list[dict[str, Any]] = []
@@ -2582,6 +2712,7 @@ class Executive:
                                 yield separator
                                 streamed_tail = separator
                                 round_sep = len(separator)
+                                round_sep_text = separator
                         full_text += event.delta.text
                         streamed_tail = (streamed_tail + event.delta.text)[-2:]
                         yield event.delta.text
@@ -2629,6 +2760,16 @@ class Executive:
                     response_content.append(replay)
             if turn_sources is not None:
                 record_web_sources(turn_sources, final_msg.content)
+            rounds.extend(_round_parts(
+                round_sep_text,
+                full_text,
+                response_content,
+                final_msg.stop_reason == "tool_use" and not carries_on and _only_looks(tool_uses),
+                carries_on,
+            ))
+            # A web search is a look, like any read: the after-reply check
+            # sees it with the turn's other calls.
+            claim_calls.extend(web_searches.searched(response_content))
 
             if web_search_queries:
                 session_id = getattr(current_session.get(), "session_id", None)
@@ -2732,18 +2873,49 @@ class Executive:
                         # refusal, not on what the refused round began.
                         yield ("\n\n" if streamed_tail else "") + REFUSED_REPLY
                     return
+                # A web search stopped by the limit for one step gets one more
+                # round, once a turn, to search for what is still open: the
+                # limit starts over each step.
+                if (
+                    not (searched_again or handing_over or repeating)
+                    and web_searches.search_failed(response_content)
+                ):
+                    searched_again = True
+                    audit_log(
+                        "search_again",
+                        "A web search didn't run; one more round",
+                        session_id=getattr(current_session.get(), "session_id", None),
+                        turn_id=turn_id,
+                        actor="executive",
+                        details={"iteration": iteration},
+                        private=private_turn,
+                    )
+                    current_messages.append({"role": "assistant", "content": response_content})
+                    # Written again whole, as on the claim check's round below.
+                    yield {"type": "rewrite"}
+                    streamed_tail, rounds, cut_text = "", [], ""
+                    again: list[dict[str, Any]] = [{"type": "text", "text": web_searches.SEARCH_AGAIN_NOTE}]
+                    current_messages.append({"role": "user", "content": again})
+                    continue
                 # Do what it says: a reply that claims a change no call this
                 # turn made gets one more round to make it or say it can't.
-                if claim_checked or handing_over or repeating:
-                    return
-                claim_checked = True
-                reply_text = cut_text + "\n".join(
-                    str(b.get("text", "")) for b in response_content if b.get("type") == "text"
-                )
-                claim = await claim_check.unbacked_claim(
-                    claim_check.last_person_message(messages), reply_text, claim_calls,
-                )
+                claim: str | None = None
+                if not (claim_checked or handing_over or repeating):
+                    claim_checked = True
+                    reply_text = cut_text + "\n".join(
+                        str(b.get("text", "")) for b in response_content if b.get("type") == "text"
+                    )
+                    claim = await claim_check.unbacked_claim(
+                        claim_check.last_person_message(messages), reply_text, claim_calls,
+                    )
                 if claim is None:
+                    # The reply is the answer alone: a working note written
+                    # before a lookup ("Now the live data.") leaves it, on
+                    # every page and channel showing it (``rewrite``).
+                    clean = _without_notes(rounds)
+                    if clean is not None:
+                        yield {"type": "rewrite"}
+                        yield clean
                     return
                 audit_log(
                     "claim_check",
@@ -2761,7 +2933,7 @@ class Executive:
                 # (an email, a chat app) drops it before it is sent, and the
                 # web chat swaps it out on ``rewrite``.
                 yield {"type": "rewrite"}
-                streamed_tail = ""
+                streamed_tail, rounds = "", []
                 nudge: list[dict[str, Any]] = [
                     {"type": "text", "text": claim_check.nudge(claim)}
                 ]

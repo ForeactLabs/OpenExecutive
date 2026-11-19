@@ -21,6 +21,16 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# The end of every refusal the person asking hears: said to them plainly, and
+# passed to no one. A message or card about it to the owner would put their
+# ask on someone else's list, so no refusal tells the Executive that someone
+# else "needs to" do it.
+PASS_ON_NOTHING = (
+    "Answer only the person who asked (on email, your reply to them is that answer); "
+    "send nothing to anyone else on their behalf: no message, card or alert about it. "
+    "A run nobody is watching still says in its own result that this step didn't happen."
+)
+
 
 def _session() -> Any:
     from openexecutive.orchestrator.schedule_tools import current_session

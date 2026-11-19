@@ -336,6 +336,7 @@ def _gate(tool: str, *, teammates: bool = False) -> tuple[str | None, bool, Any]
     their People row); ``held`` is True on the principal's email, where the
     change waits for their confirming reply."""
     from openexecutive.orchestrator.people_tools import is_principal_on_verified_surface
+    from openexecutive.orchestrator.speaker import PASS_ON_NOTHING
 
     session = _session()
     if not getattr(session, "unattended", False):
@@ -356,9 +357,9 @@ def _gate(tool: str, *, teammates: bool = False) -> tuple[str | None, bool, Any]
         tool,
         f"refused: {who} can change what the Executive keeps as fact, and this "
         "request did not come from a conversation that confirms who is asking. "
-        "Tell whoever asked that the principal needs to tell you — in the web "
-        "app, in their own Slack or Discord, or by email from their own address "
-        "(which they then confirm by reply).",
+        "Tell whoever asked, plainly, that the principal can tell you — in the "
+        "web app, in their own Slack or Discord, or by email from their own "
+        f"address (which they then confirm by reply). {PASS_ON_NOTHING}",
         refused=True, **_caller_context(session),
     ), False, None
 

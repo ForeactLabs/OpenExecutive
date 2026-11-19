@@ -429,11 +429,14 @@ async def handle_update_department_goal(tool_input: dict[str, Any]) -> str:
     # Marking a goal done takes it out of every review, so nothing regrades
     # a wrong call. Only the principal makes it, as with a new goal.
     if status_in == "done" and not _principal_asked():
+        from openexecutive.orchestrator.speaker import PASS_ON_NOTHING
+
         return _bad(
             "refused: only the principal can mark a goal done, and this request "
             "did not come from a conversation that confirms it is them. Tell "
-            "whoever asked that the principal needs to do it — on the Goals "
-            "page, or by asking in the web app or their own Slack or Discord.",
+            "whoever asked, plainly, that the principal can do it on the Goals "
+            "page, or by asking in the web app or their own Slack or Discord. "
+            f"{PASS_ON_NOTHING}",
             department_slug=slug, goal_id=goal_id, refused=True,
         )
 
@@ -467,11 +470,13 @@ async def handle_update_department_goal(tool_input: dict[str, Any]) -> str:
         and status_in not in (None, "done")
         and not _principal_asked()
     ):
+        from openexecutive.orchestrator.speaker import PASS_ON_NOTHING
+
         return _bad(
             "refused: this goal is marked done, and only the principal can "
-            "reopen it. Tell whoever asked that the principal needs to do it — "
+            "reopen it. Tell whoever asked, plainly, that the principal can do it "
             "on the Goals page, or by asking in the web app or their own Slack "
-            "or Discord.",
+            f"or Discord. {PASS_ON_NOTHING}",
             department_slug=slug, goal_id=goal_id, refused=True,
         )
 
@@ -682,11 +687,13 @@ async def handle_create_goal(tool_input: dict[str, Any]) -> str:
     # so only they set one: never an inbound email, a teammate, or a run
     # nobody is watching.
     if not _principal_asked():
+        from openexecutive.orchestrator.speaker import PASS_ON_NOTHING
+
         return _bad(
             "refused: only the principal can set a goal, and this request did "
             "not come from a conversation that confirms it is them. Tell whoever "
-            "asked that the principal needs to add it — in the web app, or by "
-            "asking there or in their own Slack or Discord.",
+            "asked, plainly, that the principal can add it in the web app, or by "
+            f"asking there or in their own Slack or Discord. {PASS_ON_NOTHING}",
             refused=True, **_caller_context(),
         )
 

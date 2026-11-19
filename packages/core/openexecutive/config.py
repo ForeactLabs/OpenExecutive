@@ -960,8 +960,11 @@ class Settings(BaseSettings):
     # for research (e.g. "skim Ford IR", "check Lucid news"). Set
     # ENABLE_WEB_SEARCH=false to opt out and avoid per-search charges.
     enable_web_search: bool = Field(True, alias="ENABLE_WEB_SEARCH")
-    # Cap on web searches per specialist/Executive turn. Each search is billed,
-    # so the fan-out cost scales with this (7 specialists x N searches). Most
+    # Cap on web searches per model request (one step of a specialist or
+    # Executive turn; each step gets a fresh count, and a chat turn whose
+    # last step hit the cap gets one more step to search again). Each
+    # search is billed, so the fan-out cost scales with this (7 specialists
+    # x N searches). Most
     # findings come from the first one or two searches; default 2 keeps the
     # bulk of the value at a fraction of the search spend. Raise via
     # WEB_SEARCH_MAX_USES for deeper digs.

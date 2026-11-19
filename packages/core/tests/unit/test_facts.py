@@ -210,6 +210,11 @@ def test_remember_fact_refuses_anyone_but_the_verified_principal(monkeypatch: py
     finally:
         current_session.reset(token)
     assert out["error"].startswith("refused")
+    # Said plainly and passed to no one, so a teammate's ask never becomes
+    # a message on the owner's list.
+    from openexecutive.orchestrator.speaker import PASS_ON_NOTHING
+
+    assert PASS_ON_NOTHING in out["error"]
     assert facts.list_facts(include_inactive=True) == []
 
 
