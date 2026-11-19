@@ -734,7 +734,7 @@ async def _run_lead(
         STATUS_FAILED if failed else STATUS_APPROVED_WITH_EDIT if changed else STATUS_APPROVED_UNCHANGED,
         final_payload={**payload, "result": result[:2000]},
     )
-    take_the_lead.resolved(instance.id, "failed" if failed else "approved")
+    take_the_lead.resolved(instance.id, "failed" if failed else "approved", payload=payload, result=result)
     _clear_decision_alert(instance.id, "dismissed" if failed else "ack")
     if failed:
         logger.warning("decisions/approve: step %d failed: %s", instance.id, result[:300])

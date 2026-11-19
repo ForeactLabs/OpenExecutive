@@ -59,6 +59,8 @@ class WaitingDraft:
     # email): what Home's Right now keys and opens it by.
     row_id: int = 0
     thread_id: str = ""
+    # Switched on its card to go from the Executive.
+    from_executive: bool = False
 
 
 # (person id, row id) -> (to, subject) as the last ``settle_waiting`` read them from the
@@ -160,6 +162,8 @@ class DraftRow:
     created_at: str
     gone_at: str
     replaced_by: int | None = None
+    # Switched on its card to go from the Executive (``chat_draft_card.switch``).
+    from_executive: bool = False
 
 
 def get_row(row_id: int, *, db_path: Path | None = None) -> DraftRow | None:
@@ -168,7 +172,7 @@ def get_row(row_id: int, *, db_path: Path | None = None) -> DraftRow | None:
     try:
         row = conn.execute(
             "SELECT id, person_id, source, thread_id, draft_id, message_id, sent_message_id, "
-            f"created_at, gone_at, replaced_by FROM {DRAFTS_TABLE} WHERE id = ?",  # noqa: S608 — constant table name
+            f"created_at, gone_at, replaced_by, from_executive FROM {DRAFTS_TABLE} WHERE id = ?",  # noqa: S608 — constant table name
             (row_id,),
         ).fetchone()
     finally:
@@ -180,6 +184,7 @@ def get_row(row_id: int, *, db_path: Path | None = None) -> DraftRow | None:
         draft_id=str(row[4] or ""), message_id=str(row[5] or ""), sent_message_id=str(row[6] or ""),
         created_at=str(row[7] or ""), gone_at=str(row[8] or ""),
         replaced_by=int(row[9]) if row[9] is not None else None,
+        from_executive=bool(row[10]),
     )
 
 
@@ -388,18 +393,19 @@ def _waiting(person_id: int, since: datetime, db_path: Path | None) -> list[tupl
 
 def _waiting_rows(
     person_id: int, since: datetime, db_path: Path | None
-) -> list[tuple[int, str, str, str]]:
-    """``(row id, draft id, created_at, thread id or "")``, newest first."""
+) -> list[tuple[int, str, str, str, bool]]:
+    """``(row id, draft id, created_at, thread id or "", from the
+    Executive)``, newest first."""
     where, params = _waiting_sql(person_id, since)
     conn = _connect(db_path)
     try:
         rows = conn.execute(
-            f"SELECT id, draft_id, created_at, thread_id {where} ORDER BY id DESC LIMIT ?",  # noqa: S608
+            f"SELECT id, draft_id, created_at, thread_id, from_executive {where} ORDER BY id DESC LIMIT ?",  # noqa: S608
             (*params, _SETTLE_MAX),
         ).fetchall()
     finally:
         conn.close()
-    return [(int(r[0]), str(r[1] or ""), str(r[2] or ""), str(r[3] or "")) for r in rows]
+    return [(int(r[0]), str(r[1] or ""), str(r[2] or ""), str(r[3] or ""), bool(r[4])) for r in rows]
 
 
 def waiting_drafts(
@@ -409,10 +415,11 @@ def waiting_drafts(
     newest first, each with who it goes to and its subject when a settle
     pass has read them (empty until one has)."""
     out = []
-    for row_id, _, created_at, thread_id in _waiting_rows(person_id, since, db_path):
+    for row_id, _, created_at, thread_id, from_executive in _waiting_rows(person_id, since, db_path):
         to, subject = _seen.get((person_id, row_id), ((), ""))
         out.append(WaitingDraft(
             created_at=created_at, to=to, subject=subject, row_id=row_id, thread_id=thread_id,
+            from_executive=from_executive,
         ))
     return out
 
@@ -424,17 +431,25 @@ def latest_waiting(person_id: int, since: datetime, *, db_path: Path | None = No
     return waiting[0][0] if waiting else None
 
 
-def set_version(row_id: int, old: str, new: str, *, db_path: Path | None = None) -> bool:
+def set_version(
+    row_id: int, old: str, new: str, *, executive: bool | None = None, db_path: Path | None = None,
+) -> bool:
     """The chat draft ``row_id`` was rewritten from its card on the person's
     tap: it is now the version ``new`` (Gmail's message id for the edited
-    draft, or Outlook's change key), so Send under the chat sends it. Only
-    while it is still ``old`` and waiting (compare-and-set); False otherwise."""
+    draft, or Outlook's change key), so Send under the chat sends it, and
+    when ``executive`` is given, it now goes from the Executive (True) or
+    from its person (False). Only while it is still ``old`` and waiting
+    (compare-and-set); False otherwise."""
     conn = _connect(db_path)
     try:
+        sets = "message_id = ?"
+        params: list[object] = [new]
+        if executive is not None:
+            sets, params = sets + ", from_executive = ?", [*params, 1 if executive else 0]
         cur = conn.execute(
-            f"UPDATE {DRAFTS_TABLE} SET message_id = ? "  # noqa: S608 — constant table name
+            f"UPDATE {DRAFTS_TABLE} SET {sets} "  # noqa: S608 — constant table name and columns
             "WHERE id = ? AND message_id = ? AND gone_at IS NULL AND sent_message_id IS NULL",
-            (new, row_id, old),
+            (*params, row_id, old),
         )
         conn.commit()
         return cur.rowcount > 0
@@ -508,7 +523,7 @@ async def settle_waiting(
     gone = 0
     # Still in their Drafts: (row id, created_at, every recipient, subject).
     present: list[tuple[int, str, tuple[str, ...], str]] = []
-    for row_id, draft_id, created_at, thread_id in waiting:
+    for row_id, draft_id, created_at, thread_id, _from in waiting:
         if not valid_id(draft_id):
             continue  # nothing to look up
         try:

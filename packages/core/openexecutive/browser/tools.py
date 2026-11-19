@@ -310,9 +310,10 @@ AWAY_NO_SHOW_PAGE = (
     "browser. Link the page in your reply instead."
 )
 NOT_CONNECTED_AWAY = (
-    "They aren't at their computer, and the browser there isn't connected right now, so you can't use it "
-    "yet. Tell them: on their computer, open Chrome, click the Open Executive extension's icon and turn on "
-    "Stay connected while Chrome is open, leave Chrome open, and ask again."
+    "The browser on their computer isn't connected right now, so you can't use it yet. Tell them: on their "
+    "computer, open Chrome, click the Open Executive extension's icon and turn on Stay connected while Chrome "
+    "is open, leave Chrome open, and ask again. Not being at their computer isn't the reason: you use that "
+    "browser from wherever they ask once it is connected, so never say it is because they're away from it."
 )
 
 
@@ -752,6 +753,9 @@ async def _hand_over(person_id: int, given: dict[str, Any], window: str | None) 
         args["window"] = window
     try:
         result = await browser_relay.run(person_id, "hand_over", args)
+    except browser_relay.Busy:
+        browser_handover.finish(handover.id, person_id, "stop")
+        return json.dumps({"error": browser_relay.BUSY})
     except browser_relay.NotConnected:
         browser_handover.finish(handover.id, person_id, "stop")
         _mark_needed()
@@ -907,8 +911,10 @@ def _handler(name: str) -> Any:
             args["hold"] = True
         try:
             result = await browser_relay.run(person_id, action, args)
-        except browser_relay.NotConnected:
+        except browser_relay.NotConnected as gone:
             if levels.is_approved():
+                if isinstance(gone, browser_relay.Busy):
+                    return json.dumps({"error": browser_relay.BUSY})
                 return json.dumps({"error": "Their browser isn't connected, so this wasn't done."})
             return extensions.workflow_wait(browser_relay.waiting_key(person_id), "your browser")
         held_now = result.get("held") is True or (result.get("sending_site") is True and name in ACTS)
@@ -978,6 +984,8 @@ def _handler(name: str) -> Any:
                     args["element"] = element[:200]
         try:
             result = await browser_relay.run(person_id, action, args)
+        except browser_relay.Busy:
+            return json.dumps({"error": browser_relay.BUSY})
         except browser_relay.NotConnected:
             _mark_needed()
             return json.dumps({"error": NOT_CONNECTED_AWAY if away else not_connected()})

@@ -555,7 +555,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     .catch(() => undefined);
 });
 
-async function run(step, relayTab) {
+async function run(step, relayTab, late = { on: false }) {
   const { action } = step;
   let args = step.args || {};
   await restored;
@@ -722,6 +722,9 @@ async function run(step, relayTab) {
     await shotsRestored;
     forgetShot(tab.id);
   }
+  // Answered "didn't finish" already: the Executive has moved on, so a step
+  // that got this far late does nothing on the page.
+  if (late.on) return { ok: false, error: "Too late." };
   const out = await sendToPage(tab.id, { type: "act", action, args });
   if (!out || typeof out !== "object") return { ok: false, error: "The page didn't answer. Look again." };
   if (action === "look" && out.ok) {
@@ -732,6 +735,24 @@ async function run(step, relayTab) {
     if (shot) out.screenshot = shot;
   }
   return out;
+}
+
+// Every step answers within this long, even one stuck in Chrome, so the tab
+// asking for steps goes on asking (the server waits a little longer).
+const STEP_MS = 40000;
+
+// `start(late)` runs the step; once it has answered "didn't finish", `late.on`
+// tells it not to act on the page any more.
+function withinStepTime(start) {
+  const late = { on: false };
+  let timer;
+  const cut = new Promise((done) => {
+    timer = setTimeout(() => {
+      late.on = true;
+      done({ ok: false, error: "The browser didn't finish that step in time. Look at the page again before going on." });
+    }, STEP_MS);
+  });
+  return Promise.race([start(late), cut]).finally(() => clearTimeout(timer));
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
@@ -750,7 +771,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
         return { ok: false, error: "Not from a connected Open Executive site." };
       }
       try {
-        return await run(msg.step || {}, sender.tab);
+        return await withinStepTime((late) => run(msg.step || {}, sender.tab, late));
       } catch (e) {
         return { ok: false, error: `The browser couldn't do that (${String(e && e.message ? e.message : e).slice(0, 120)}).` };
       }

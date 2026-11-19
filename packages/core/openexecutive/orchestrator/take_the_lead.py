@@ -3037,9 +3037,40 @@ def _as_text(result: Any) -> str:
     return result if isinstance(result, str) else json.dumps(result, default=str)
 
 
-def resolved(decision_id: int, status: str) -> None:
-    """Mirror an approval or decline into the log."""
-    _set_log_status(decision_id, status)
+def resolved(
+    decision_id: int, status: str, *, payload: dict[str, Any] | None = None, result: str = "",
+    db_path: Path | None = None,
+) -> None:
+    """Mirror an approval or decline into the log. Every held step's card
+    ends here, whichever screen or chat app approved it. An approved one
+    (``payload``: the call as it went, edits included; ``result``: what came
+    back) reads as what went out and when: its time becomes now, its
+    addresses, subject and outcome the sent ones'. Best effort."""
+    if status != "approved" or payload is None:
+        _set_log_status(decision_id, status, db_path=db_path)
+        return
+    tool = str(payload.get("tool") or "")
+    raw_input = payload.get("input")
+    tool_input: dict[str, Any] = raw_input if isinstance(raw_input, dict) else {}
+    mcp = bool(payload.get("mcp"))
+    mail_to, mail_subject = (mail_sent(tool, tool_input) if mcp else None) or ("", "")
+    try:
+        conn = _connect(db_path)
+        try:
+            conn.execute(
+                f"UPDATE {LOG_TABLE} SET status = ?, at = ?, summary = ?, mail_to = ?, mail_subject = ?, "  # noqa: S608
+                "outcome = ?, to_person_id = ? WHERE decision_id = ?",
+                (status, datetime.now(UTC).isoformat(), summarize(tool, tool_input, mcp=mcp, quote=False),
+                 mail_to, mail_subject, _one_line(outcome_of(tool, tool_input, result, mcp=mcp), 160),
+                 _message_target(tool, tool_input), decision_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        # Whatever else failed, the step went: it never stays "waiting".
+        logger.warning("take_the_lead: couldn't update what it did", exc_info=True)
+        _set_log_status(decision_id, status, db_path=db_path)
 
 
 # --------------------------------------------------------------------------- #

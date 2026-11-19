@@ -286,6 +286,7 @@ class GoogleMail:
         html: bool = False,
         cc: list[str] | None = None,
         attachments: list[tuple[str, str, bytes]] | None = None,
+        bcc: list[str] | None = None,
     ) -> dict[str, Any]:
         arguments: dict[str, Any] = {
             "user_google_email": mailbox,
@@ -295,6 +296,8 @@ class GoogleMail:
         }
         if cc:
             arguments["cc"] = ", ".join(cc)
+        if bcc:
+            arguments["bcc"] = ", ".join(bcc)
         if attachments:
             # workspace-mcp's own attachment shape.
             arguments["attachments"] = [

@@ -464,6 +464,10 @@ class ChatDraftSendIn(BaseModel):
 
     # The second yes for a reply whose conversation moved on since.
     thread_moved_on: bool = False
+    # The version the card showed (GET /delegation/drafts/{row} ``version``).
+    version: str | None = Field(default=None, max_length=512)
+    # Who a row without the words (Home) showed it going from.
+    from_executive: bool | None = None
 
 
 class ChatDraftSentOut(BaseModel):
@@ -1177,6 +1181,14 @@ class ChatDraftOut(BaseModel):
     body: str = ""
     changed_sentences: list[str] = []
     note: str = ""
+    # The names of the files attached to it.
+    files: list[str] = []
+    # Who it goes from: the caller, or (switched on its card) the Executive,
+    # with the caller on cc; and the Executive's name for the card's From.
+    from_executive: bool = False
+    executive_name: str = ""
+    # The version shown, for Send (``ChatDraftSendIn.version``).
+    version: str = ""
 
 
 def _draft_refused(refused: Any) -> HTTPException:
@@ -1230,6 +1242,23 @@ async def change_chat_draft(request: Request, row_id: int, body: ReplyChangeIn) 
     return ChatDraftOut(**saved, changed_sentences=new, note=note)
 
 
+@router.put("/delegation/drafts/{row_id}/from", response_model=ChatDraftOut)
+async def update_chat_draft_from(request: Request, row_id: int, body: ReplyFromUpdate) -> ChatDraftOut:
+    """Send a draft chat wrote as the caller from the Executive's own
+    mailbox, with them on cc, or from them again
+    (``delegation.chat_draft_card.switch``): its words rewritten once for
+    the new sender, in their Drafts too. Sends nothing."""
+    from openexecutive.delegation.chat_draft_card import switch
+    from openexecutive.delegation.reply_send import SendRefused
+
+    person = _caller(request)
+    try:
+        saved = await switch(person, row_id, executive=body.executive, caller=api_caller.caller(request))
+    except SendRefused as refused:
+        raise _draft_refused(refused) from None
+    return ChatDraftOut(**saved)
+
+
 @router.post("/delegation/drafts/{row_id}/send", response_model=ChatDraftSentOut)
 async def send_chat_draft(request: Request, row_id: int, body: ChatDraftSendIn) -> ChatDraftSentOut:
     """Send a draft chat wrote as the caller, on their tap, exactly as it was
@@ -1242,7 +1271,11 @@ async def send_chat_draft(request: Request, row_id: int, body: ChatDraftSendIn) 
     try:
         await send(
             person, row_id, caller=api_caller.caller(request),
-            confirm={"thread_moved_on": True} if body.thread_moved_on else None,
+            confirm={
+                **({"thread_moved_on": True} if body.thread_moved_on else {}),
+                **({"seen_version": body.version} if body.version else {}),
+                **({"seen_from_executive": body.from_executive} if body.from_executive is not None else {}),
+            },
         )
     except SendRefused as refused:
         raise HTTPException(

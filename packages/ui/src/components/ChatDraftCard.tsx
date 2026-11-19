@@ -9,11 +9,13 @@ import {
   deleteChatDraft,
   getChatDraft,
   sendChatDraft,
+  setChatDraftFrom,
   setChatDraftText,
   type ChatDraft,
   type ChatDraftState,
 } from "@/lib/api";
-import { highlightPieces } from "@/lib/replyCards";
+import EmailWords from "@/components/EmailWords";
+import FromSwitch from "@/components/FromSwitch";
 
 // The chat: an email the Executive wrote as you (Act as me), shown under its
 // reply with who it goes to, its subject and its text, read from your Drafts
@@ -21,7 +23,10 @@ import { highlightPieces } from "@/lib/replyCards";
 // it, the start of the text as it was saved). Change it right here: "Edit the
 // words myself", a tone pill, or "Tell me what to change…". Each rewrites
 // this one card and the draft in your Drafts, and lightly marks the new
-// sentences. Send sends that draft from your own mailbox; the server checks
+// sentences. From switches it to go from the Executive, with you on cc (its
+// words written once for that sender), and back, as a reply card's From
+// does. Send sends that draft from your own mailbox, or from the
+// Executive's once switched; the server checks
 // again first (the caller is you, Act as me on, the draft unchanged in your
 // mailbox). Changed it there? Send it from there. A version a newer one in
 // this conversation replaced folds to a line.
@@ -38,6 +43,7 @@ const DONE: Record<string, string> = {
 // Codes after which the card reads the draft again: it moved on meanwhile.
 const STALE = new Set(["draft_gone", "draft_changed", "already_sent", "already_handled"]);
 const SENDING = "Sending…";
+const SWITCHING = "Switching who it's from…";
 const DELETING = "Deleting…";
 
 // One tap each: what the pill asks the Executive to change.
@@ -98,6 +104,9 @@ export default function ChatDraftCard({
   const [changed, setChanged] = useState<string[]>([]);
   const [note, setNote] = useState("");
 
+  const fromExecutive = now?.status === "open" && now.from_executive === true;
+  const executiveName = (now?.status === "open" && now.executive_name) || "Executive";
+
   const load = useCallback(async () => {
     try {
       setNow(await getChatDraft(draft.row));
@@ -149,12 +158,16 @@ export default function ChatDraftCard({
     setWorking(SENDING);
     setError(null);
     try {
-      const result = await sendChatDraft(draft.row, threadMovedOn);
+      const result = await sendChatDraft(
+        draft.row,
+        threadMovedOn,
+        now?.status === "open" ? { version: now.version, fromExecutive } : {},
+      );
       if (result.status === "confirm") {
         setConfirm(result.message);
       } else {
         setConfirm(null);
-        setDone("✓ Sent from your mailbox.");
+        setDone(fromExecutive ? `✓ Sent from ${executiveName}, cc you.` : "✓ Sent from your mailbox.");
       }
     } catch (err) {
       const code = err instanceof ReplySendError ? err.code : "";
@@ -193,7 +206,7 @@ export default function ChatDraftCard({
     return (
       <article className="mt-3 rounded-2xl border border-line bg-surface-elevated p-4 opacity-70 sm:p-5">
         <div className="text-xs font-semibold uppercase tracking-wide text-accent">
-          {status === "replaced" ? "Email as you · earlier version" : "Email as you"}
+          {status === "replaced" ? "Email · earlier version" : "Email"}
         </div>
         <Who to={draft.to} cc={[]} subject={draft.subject} />
         <p className="mt-2 text-sm text-fg-muted">
@@ -219,8 +232,23 @@ export default function ChatDraftCard({
 
   return (
     <article className="mt-3 rounded-2xl border border-line bg-surface-elevated p-4 sm:p-5">
-      <div className="text-xs font-semibold uppercase tracking-wide text-accent">Email as you</div>
-      <Who to={to} cc={cc} subject={subject} />
+      <div className="text-xs font-semibold uppercase tracking-wide text-accent">
+        {fromExecutive ? `Email from ${executiveName}` : "Email as you"}
+      </div>
+      {canChange && (
+        <FromSwitch
+          fromExecutive={fromExecutive}
+          executiveName={executiveName}
+          disabled={busy || editing !== null}
+          onPick={(executive) => void rewrite(SWITCHING, () => setChatDraftFrom(draft.row, executive))}
+        />
+      )}
+      {working === SWITCHING && (
+        <p className="mt-1 text-xs text-fg-subtle" aria-live="polite">
+          {SWITCHING}
+        </p>
+      )}
+      <Who to={to} cc={fromExecutive ? [...cc, "you"] : cc} subject={subject} />
       {files.length > 0 && (
         <div className="mt-2">
           <div className="text-xs text-fg-muted">
@@ -267,22 +295,7 @@ export default function ChatDraftCard({
           </div>
         </div>
       ) : (
-        body && (
-          <p className="mt-2 whitespace-pre-wrap text-sm text-fg break-words">
-            {changed.length > 0
-              ? highlightPieces(body, changed).map((piece, i) =>
-                  piece.changed ? (
-                    <mark key={i} className="rounded bg-accent/15 px-0.5 text-fg">
-                      {piece.text}
-                    </mark>
-                  ) : (
-                    <span key={i}>{piece.text}</span>
-                  ),
-                )
-              : body}
-            {cut && "…"}
-          </p>
-        )
+        body && <EmailWords text={body} changed={changed} className="mt-2 text-sm" after={cut ? "…" : null} />
       )}
       {cut && <p className="mt-1 text-xs text-fg-muted">The rest is in your Drafts.</p>}
       {note && editing === null && (
@@ -308,7 +321,9 @@ export default function ChatDraftCard({
             )}
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <Button variant="primary" onClick={() => void send(confirm !== null)} disabled={busy}>
-                {working === SENDING ? SENDING : confirm ? "Send anyway" : "Send"}
+                {working === SENDING
+                  ? SENDING
+                  : `${confirm ? "Send anyway" : "Send"}${fromExecutive ? ` from ${executiveName}, cc me` : ""}`}
               </Button>
               {canChange ? (
                 <button

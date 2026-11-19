@@ -7,6 +7,7 @@ import remarkGfm from "remark-gfm";
 import AnswerSourcesFooter from "@/components/AnswerSourcesFooter";
 import BrandMark from "@/components/BrandMark";
 import type { AnswerSources } from "@/lib/answerSources";
+import { htmlLinks } from "@/lib/htmlLinks";
 import type { ActionTaken } from "@/lib/api";
 import { dropReplaced, groupActions, opensDetails, type ChipGroup } from "@/lib/actionChips";
 import { linkCardMentions } from "@/lib/cardMentions";
@@ -376,7 +377,7 @@ export default function Message({
                 ) : null,
             }}
           >
-            {linkCardMentions(content)}
+            {linkCardMentions(htmlLinks(content))}
           </ReactMarkdown>
           {isStreaming && !paused && (
             <span className="inline-block w-0.5 h-4 bg-accent cursor-blink ml-0.5 align-text-bottom rounded-full" />

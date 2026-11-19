@@ -16,7 +16,7 @@ import {
 } from "@/lib/api";
 import { clockLabel, draftRowId, rowTarget, rowWhen, type PointTarget } from "@/lib/rightNow";
 import FeatureName from "@/components/FeatureName";
-import { mailboxName, namesFromLine, safeGmailLink } from "@/lib/replyCards";
+import { firstNamesFromLine, mailboxName, namesFromLine, safeGmailLink } from "@/lib/replyCards";
 
 import { buildNarrativeSeed, type ContinueHandler } from "./shared";
 
@@ -27,7 +27,7 @@ import { buildNarrativeSeed, type ContinueHandler } from "./shared";
 // something. Built from the records on every load, never written by a
 // model, so a row reads the same each time. An email row has View email and
 // Reply (GET /delegation/mail, POST /delegation/mail/reply), a draft row has
-// Send, Open (the same card as under the chat, to change it first) and
+// Send, See draft to <name> (the same card as under the chat, to change it first) and
 // Don't send, which deletes it (/delegation/drafts/{row}), a chat row
 // opens the message in its app, and every row has a ✕ (POST
 // /today/right-now/dismiss) that keeps it gone until something newer lands
@@ -72,11 +72,11 @@ function ListRow({ row, actions }: { row: RightNowRow; actions?: RowActions }) {
   const draftId = draftRowId(row);
   if (row.kind === "draft" && draftId !== null) {
     // A draft in their own mailbox reads like a reply card: As you, the
-    // subject, who it goes to by name, and the same Send, Open, Don't send.
+    // subject, who it goes to by name, and the same Send, See draft, Don't send.
     return (
       <li className="py-4 sm:py-5">
         <div className="flex items-baseline gap-2">
-          <FeatureName feature="act_as_me" className="shrink-0 text-[12px]" />
+          {!row.from_executive && <FeatureName feature="act_as_me" className="shrink-0 text-[12px]" />}
           <p className="min-w-0 flex-1 text-base sm:text-[17px] font-semibold leading-snug text-fg break-words">
             <span className="sr-only">{KIND_LABEL[row.kind]}: </span>
             {row.subject}
@@ -84,6 +84,7 @@ function ListRow({ row, actions }: { row: RightNowRow; actions?: RowActions }) {
           {when && <span className="shrink-0 text-sm tabular-nums text-fg-subtle">{when}</span>}
         </div>
         <p className="mt-1 text-sm text-fg-muted break-words">To {namesFromLine(row.who)}</p>
+        {row.from_executive && row.note && <p className="text-sm text-fg-muted">{row.note}</p>}
         <DraftActions
           row={row}
           draftId={draftId}
@@ -149,7 +150,14 @@ const DRAFT_DONE: Record<string, string> = {
   you_replied: "You've already replied in this conversation.",
 };
 
-// A draft row's buttons: Send and Don't send right here, or Open to read and
+/** A draft's way in, named for who it goes to: "See draft to Kyle", or just
+ * "See draft" when nobody is named. */
+function seeDraft(who: string): string {
+  const names = firstNamesFromLine(who);
+  return names ? `See draft to ${names}` : "See draft";
+}
+
+// A draft row's buttons: Send and Don't send right here, or See draft to read and
 // change it first. Anything Send needs a second yes for, or a draft changed in
 // the mailbox, opens the draft so its card can say so.
 function DraftActions({
@@ -186,12 +194,12 @@ function DraftActions({
     setError(null);
     try {
       if (what === "send") {
-        const result = await sendChatDraft(draftId);
+        const result = await sendChatDraft(draftId, false, { fromExecutive: Boolean(row.from_executive) });
         if (result.status === "confirm") {
           setOpen(true);
           return;
         }
-        finish("✓ Sent from your mailbox.");
+        finish(row.from_executive ? "✓ Sent, cc you." : "✓ Sent from your mailbox.");
       } else {
         const state = await deleteChatDraft(draftId);
         if (state.status === "gone") finish("✓ Deleted from your Drafts.");
@@ -236,7 +244,9 @@ function DraftActions({
         <Button variant="primary" disabled={busy !== null} onClick={() => void run("send")}>
           {busy === "send" ? "Sending…" : "Send"}
         </Button>
-        <Button variant="secondary" disabled={busy !== null} onClick={() => setOpen(true)}>Open</Button>
+        <Button variant="secondary" disabled={busy !== null} onClick={() => setOpen(true)}>
+          {seeDraft(row.who)}
+        </Button>
         <Button variant="ghost" className="ml-auto" disabled={busy !== null} onClick={() => void run("delete")}>
           {busy === "delete" ? "Removing…" : "Don't send"}
         </Button>
