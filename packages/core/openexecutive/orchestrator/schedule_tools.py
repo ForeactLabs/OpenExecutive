@@ -903,9 +903,9 @@ async def handle_schedule_followup(tool_input: dict[str, Any]) -> str:
         return json.dumps({"error": f"run_at {run_at_raw!r} can't be read. {COMPANY_TIME_HINT}"})
     repeat = " ".join(str(tool_input.get("repeat") or "").split()) or None
     if repeat is not None:
-        from openexecutive.departments.cadence import _parse_cadence_spec
+        from openexecutive.departments.cadence import is_valid_cadence_spec
 
-        if _parse_cadence_spec(repeat, datetime.now(UTC)) is None:
+        if not is_valid_cadence_spec(repeat):
             return json.dumps({
                 "error": f"repeat {repeat!r} can't be read: use 'daily@HH:MM' or 'weekly@DOW@HH:MM'.",
             })
@@ -2631,14 +2631,6 @@ async def handle_suggest_workflow(tool_input: dict[str, Any]) -> str:
     parsed = company_time(run_at_raw)
     if parsed is None:
         return json.dumps({"error": f"run_at {run_at_raw!r} can't be read. {COMPANY_TIME_HINT}"})
-    repeat = " ".join(str(tool_input.get("repeat") or "").split()) or None
-    if repeat is not None:
-        from openexecutive.departments.cadence import _parse_cadence_spec
-
-        if _parse_cadence_spec(repeat, datetime.now(UTC)) is None:
-            return json.dumps({
-                "error": f"repeat {repeat!r} can't be read: use 'daily@HH:MM' or 'weekly@DOW@HH:MM'.",
-            })
     parsed_utc = parsed.astimezone(UTC)
 
     now = datetime.now(UTC)

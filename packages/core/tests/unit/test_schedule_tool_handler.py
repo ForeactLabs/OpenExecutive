@@ -244,3 +244,11 @@ def test_an_unreadable_repeat_is_sent_back(session_with_telegram_ref: Session) -
         "repeat": "every monday",
     })
     assert "can't be read" in payload["error"]
+
+
+@pytest.mark.parametrize("spec", ["daily@25:00", "weekly@mon@09:75"])
+def test_a_time_of_day_that_doesnt_exist_is_sent_back(session_with_telegram_ref: Session, spec: str) -> None:
+    payload = _call({
+        "run_at": _future_iso(), "channel": "telegram", "channel_ref": "42", "intent": "x", "repeat": spec,
+    })
+    assert "can't be read" in payload["error"]
