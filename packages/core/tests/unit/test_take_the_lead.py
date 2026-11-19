@@ -2295,6 +2295,10 @@ def test_the_same_words_sent_or_paid_still_wait(owner: Any) -> None:
         ("google_workspace__send_gmail_message", {"to": DANA, "subject": "Lease", "body": _LEASE}, True),
         ("slack__post_message", {"channel": "C1", "text": _LEASE}, True),
         ("stripe__create_payment", {"amount": "$2,150", "description": "Lease"}, True),
+        ("xero__create-credit-note", {"total": "$5,000", "contact": "Acme"}, True),
+        ("stripe__create_billing_meter_event", {"value": "$5,000", "customer": "Acme"}, True),
+        ("quickbooks__create_task", {"text": _LEASE}, True),
+        ("hubspot__create_invoice_note", {"text": _LEASE}, True),
     ]:
         hit = ttl.check(tool, tool_input, lead=off, rules=rules, mcp=mcp)
         assert hit is not None and hit.kind == "rule", tool

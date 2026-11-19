@@ -1140,6 +1140,17 @@ def rule_text(rule: Rule) -> str:
 # mentions (a calendar invite about a $2,150 lease). ``says``.
 _KEEPS_TOOLS = frozenset({"assign_open_loop", "cancel_calendar_event", "create_calendar_event", "create_instant_meeting"})
 _MCP_SENDS_RE = re.compile(r"(?:^|_)(?:e?mails?|gmail|messages?|reply|replies|forward|post|chat|dm|sms)(?=$|_)")
+# A money app, or money in a tool's own name: a credit note or a usage
+# event there bills someone, so it is read in full.
+_MCP_MONEY_APP_RE = re.compile(
+    r"^(?:stripe|xero|quickbooks|qbo|paypal|square|ramp|brex|mercury|bill(?:_com)?|netsuite|freshbooks|"
+    r"wave|chargebee|recurly|paddle|wise|plaid|gusto|rippling|expensify|shopify|sage|zuora)(?:$|_)",
+)
+_MCP_MONEY_WORD_RE = re.compile(
+    r"(?:^|_)(?:pay\w*|credits?|invoices?|bills?|billing|refunds?|charges?|payouts?|transfers?|wires?|"
+    r"purchases?|orders?|subscriptions?|prices?|quotes?|expenses?|transactions?|ledgers?|journals?|"
+    r"accounts?|balances?|usage|meters?|deposits?|withdrawals?|budgets?|estimates?)(?=$|_)",
+)
 _MCP_KEEPS_RE = re.compile(
     r"(?:^|_)(?:calendars?|events?|meetings?|invites?|tasks?|todos?|reminders?|notes?)(?=$|_)",
 )
@@ -1159,13 +1170,18 @@ def says(tool: str, tool_input: dict[str, Any], *, mcp: bool = False) -> str:
     this. A message or email: the words it sends. A step that only books,
     notes or files something (an invite, a meeting, a task, a reminder, a
     note, a write into a file that reaches only the team): "", whatever its
-    text mentions. Any other step, a payment or an app it can't place:
-    all of it."""
+    text mentions, unless it is in a money app or names money (a credit
+    note, a billing event). Any other step, a payment or an app it can't
+    place: all of it."""
     text = "\n".join(_strings(tool_input))
     if not mcp:
         return "" if tool in _KEEPS_TOOLS else text
     words = _tool_words(tool)
-    if is_mail_send(tool) or _MCP_SENDS_RE.search(words):
+    app = _tool_words(re.split(r"__|\.", tool or "")[0]) if "__" in (tool or "") or "." in (tool or "") else ""
+    if (
+        is_mail_send(tool) or _MCP_SENDS_RE.search(words)
+        or _MCP_MONEY_APP_RE.match(app) or _MCP_MONEY_WORD_RE.search(words)
+    ):
         return text
     if _MCP_KEEPS_RE.search(words):
         return ""
