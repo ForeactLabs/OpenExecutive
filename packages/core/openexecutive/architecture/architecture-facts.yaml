@@ -12583,8 +12583,11 @@ delegation:
     also takes subdomains); an amount rule
     needs an amount in what it sends and every amount under the limit, and
     fails closed on a percentage or a currency sign it can't parse. A delete
-    always waits under a person or company Goes rule; only a Deleting or
-    cancelling topic rule lets it go. A topic rule (RULE_TOPIC, value one of
+    or a share always waits under a person or company Goes rule; only a
+    Deleting or cancelling, or a Sharing, topic rule lets it go (the drive
+    share check reads the plain roster, never Goes). A person or company
+    rule covers someone new only when everyone the step reaches is covered;
+    with a known contact on it too, it releases Someone new alone. A topic rule (RULE_TOPIC, value one of
     KINDS) matches topics_of (the same _topics check() reads); Waits wins.
     One answer everywhere: new_people (the egress list) and lets_go (a
     topic Goes rule, where mcp_gateway._goes_rules_apply) are what the

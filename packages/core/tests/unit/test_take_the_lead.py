@@ -2500,15 +2500,83 @@ def test_a_card_offers_only_rules_that_would_let_it_go(owner: Any, balanced: Non
     assert {"kind": "amount", "value": "500"} not in ttl.rule_offers(*step, ttl.MONEY, mcp=False)
 
 
-def test_a_card_offers_the_person_and_company_but_never_for_a_delete(owner: Any, balanced: None) -> None:
-    offers = ttl.rule_offers(*_SHARE, ttl.SHARE, mcp=True)
-    # Sharing and someone new: a sharing rule alone doesn't let it go, the
-    # person or their company covers both.
+def test_a_card_offers_the_person_and_company_but_never_for_a_delete_or_a_share(
+    owner: Any, balanced: None, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.orchestrator import mcp_gateway
+
+    monkeypatch.setattr(mcp_gateway, "_goes_rules_apply", lambda: True)
+    mail = ("google_workspace__send_gmail_message", {"to": "lee@far.example", "subject": "Hi", "body": "Thanks"})
+    offers = ttl.rule_offers(*mail, ttl.SOMEONE_NEW, mcp=True)
     assert {"kind": "person", "value": "lee@far.example"} in offers
     assert {"kind": "domain", "value": "far.example"} in offers
-    assert {"kind": "topic", "value": "share"} not in offers
+    # A share to someone new: a person or company rule never lets a share go,
+    # and one sharing rule alone doesn't cover someone new, so nothing is
+    # offered.
+    assert ttl.rule_offers(*_SHARE, ttl.SHARE, mcp=True) == []
+    people_store.upsert_person(full_name="Lee Far", email="lee@far.example", kind="contact")
+    assert ttl.rule_offers(*_SHARE, ttl.SHARE, mcp=True) == [{"kind": "topic", "value": "share"}]
     assert ttl.rule_offers(*_DELETE, ttl.DELETE, mcp=True) == [{"kind": "topic", "value": "delete"}]
     assert ttl.rule_offers(*_SHARE, "training", mcp=True) == []
+
+
+def test_an_unattended_card_offers_nothing_for_someone_new_where_goes_rules_dont_count(
+    owner: Any, balanced: None, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.orchestrator import mcp_gateway
+
+    monkeypatch.setattr(mcp_gateway, "_goes_rules_apply", lambda: False)
+    mail = ("google_workspace__send_gmail_message", {"to": "lee@far.example", "subject": "Hi", "body": "Thanks"})
+    assert ttl.rule_offers(*mail, ttl.SOMEONE_NEW, mcp=True) == []
+
+
+def test_a_person_or_company_rule_never_lets_a_share_go(owner: Any, balanced: None) -> None:
+    from openexecutive.orchestrator import mcp_gateway
+
+    _go("person", "lee@far.example")
+    _go("domain", "far.example")
+    hit, _ = ttl._hit(*_SHARE, mcp=True)
+    assert hit is not None
+    assert "lee@far.example" not in mcp_gateway._roster_allow_set()
+
+
+def test_a_topic_goes_rule_releases_its_words_in_what_it_sends_on_its_own(owner: Any, balanced: None) -> None:
+    assert handle_it.content_hold("Please sign the contract") == "sensitive"
+    _go("topic", "money")
+    # A money rule doesn't cover a contract.
+    assert handle_it.content_hold("Please sign the NDA") == "sensitive"
+    _go("topic", "contracts")
+    assert handle_it.content_hold("Please sign the contract") is None
+
+
+def test_a_scheduled_message_off_the_roster_runs_only_with_a_someone_new_rule_where_goes_rules_count(
+    owner: Any, balanced: None, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.orchestrator import mcp_gateway
+
+    applies = {"on": True}
+    monkeypatch.setattr(mcp_gateway, "_goes_rules_apply", lambda: applies["on"])
+    assert schedule_tools._off_roster_runs() is False
+    _go("topic", "someone_new")
+    assert schedule_tools._off_roster_runs() is True
+    applies["on"] = False  # Careful, or a turn Goes rules don't count on
+    assert schedule_tools._off_roster_runs() is False
+    applies["on"] = True
+    ttl.add_rule(ttl.SCOPE_COMPANY, "topic", "someone_new", created_by="t")
+    assert schedule_tools._off_roster_runs() is False
+
+
+def test_a_company_rule_for_one_person_doesnt_let_a_contract_to_a_known_contact_go(
+    owner: Any, balanced: None,
+) -> None:
+    people_store.upsert_person(full_name="Cleo Client", email="cleo@client.example", kind="contact")
+    _go("domain", "far.example")
+    mail = (
+        "google_workspace__send_gmail_message",
+        {"to": "lee@far.example, cleo@client.example", "subject": "Contract", "body": "Please sign the contract"},
+    )
+    hit, _ = ttl._hit(*mail, mcp=True)
+    assert hit is not None
 
 
 def test_someone_new_on_an_asked_step_offers_what_covers_everyone_new(

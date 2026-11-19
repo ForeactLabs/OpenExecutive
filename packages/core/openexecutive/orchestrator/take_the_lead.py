@@ -19,7 +19,7 @@ Everything else, in order:
   except on Careful;
 - Hands-off runs everything else;
 - a Goes rule (``rule_goes``) lets it go where Balanced would hold it:
-  a person or company rule everything but a delete, an amount rule the
+  a person or company rule everything but a delete or a share, an amount rule the
   money, a topic rule its topic (``lets_go``);
 - Balanced holds the seven ``KINDS`` (money, contracts, people decisions,
   deleting or cancelling, sharing, someone new, big sends; ``check``) and
@@ -1142,9 +1142,14 @@ def rule_offers(
         recipients = [a for a in addresses if "@" in a]
         new = sorted({a.lower() for a in new_people(addresses)})
         spends = says(tool, tool_input, mcp=mcp)
+        if mcp and new and not _goes_rules_apply():
+            # A connected app's step to someone new also meets the egress
+            # list, which counts Goes rules only where they apply on this
+            # turn: no rule would let it go here.
+            return []
         candidates = [(RULE_TOPIC, kind)]
         reached = new or recipients
-        if kind != DELETE and reached:
+        if kind not in (DELETE, SHARE) and reached:
             if len(reached) == 1:
                 candidates.append((RULE_PERSON, reached[0]))
             domains = {a.rsplit("@", 1)[1] for a in reached if "@" in a}
@@ -1179,11 +1184,12 @@ def rule_offers(
 
 
 # What a Goes rule lets go where Balanced would ask: a person or company
-# rule, anything only to them but a delete; an amount rule, the money; a
+# rule, anything only to them but a delete or a share (only a Sharing
+# topic rule lets a share go); an amount rule, the money; a
 # topic rule, its topic.
 _GOES_KINDS: dict[str, frozenset[str]] = {
-    RULE_PERSON: frozenset(KINDS) - {DELETE},
-    RULE_DOMAIN: frozenset(KINDS) - {DELETE},
+    RULE_PERSON: frozenset(KINDS) - {DELETE, SHARE},
+    RULE_DOMAIN: frozenset(KINDS) - {DELETE, SHARE},
     RULE_AMOUNT: frozenset({MONEY}),
 }
 
@@ -4242,16 +4248,22 @@ def _balanced(
     name: str, tool_input: dict[str, Any], rules: list[Rule], *, addresses: list[str], spends: str, mcp: bool,
 ) -> tuple[Hit | None, Rule | None]:
     """Unattended work on Balanced: the seven topics wait unless a Goes rule
-    lets them go (``goes_kinds``), everything else goes. Only who it
-    actually reaches counts for a person or company rule; someone it knows
-    who is reached along with them needs no rule of their own."""
+    lets them go (``goes_kinds``), everything else goes. A person or
+    company rule covers a topic only when it covers everyone the step
+    reaches; one that covers just the new people among them lets only
+    Someone new go (someone it knows needs no rule to be reached, but a
+    contract to them is still a contract)."""
+    everyone = sorted({a.lower() for a in addresses})
+    goes = goes_rules(rules, spends, everyone)
+    released = set(goes_kinds(goes))
     new = sorted({a.lower() for a in new_people(addresses)})
-    targets = new or sorted({a.lower() for a in addresses})
-    goes = goes_rules(rules, spends, targets)
-    if goes:
-        released = goes_kinds(goes)
-        rest = Lead(scope=SCOPE_EXECUTIVE, ask_first={k: k not in released for k in KINDS})
-        held = check(name, tool_input, lead=rest, rules=[], mcp=mcp)
-        return (held, None) if held is not None else (None, goes[0])
-    asks = Lead(scope=SCOPE_EXECUTIVE, ask_first=dict.fromkeys(KINDS, True))
-    return check(name, tool_input, lead=asks, rules=[], mcp=mcp), None
+    if new and new != everyone:
+        reach = [r for r in goes_rules(rules, spends, new) if r.kind in (RULE_PERSON, RULE_DOMAIN)]
+        if reach:
+            released.add(SOMEONE_NEW)
+            goes = [*goes, *reach]
+    lead = Lead(scope=SCOPE_EXECUTIVE, ask_first={k: k not in released for k in KINDS})
+    held = check(name, tool_input, lead=lead, rules=[], mcp=mcp)
+    if held is not None or not goes:
+        return held, None
+    return None, goes[0]

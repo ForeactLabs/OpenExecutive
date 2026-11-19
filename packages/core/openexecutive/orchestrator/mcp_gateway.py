@@ -889,9 +889,10 @@ def _check_attachment_urls(tool: str, arguments: dict[str, Any]) -> str | None:
 def _roster_allow_set(*, goes: bool = False) -> RosterAllow:
     """The set of lowercased addresses the Executive may reach outbound.
 
-    ``goes``: who a company Goes rule lets go counts too
-    (``_goes_rules_apply``), and a Someone new topic rule lets anyone go
-    (``take_the_lead.goes_reach``).
+    ``goes``: for a send or an invite, who a company Goes rule lets go
+    counts too (``_goes_rules_apply``), and a Someone new topic rule lets
+    anyone go (``take_the_lead.goes_reach``). Never for a share: a person
+    or company rule never lets a share go (``take_the_lead._GOES_KINDS``).
 
     Derived from the People roster plus the Executive's own address — the single
     egress allow-list shared by the Gmail, Calendar, and Drive gates so they
@@ -3221,7 +3222,7 @@ def _check_drive_share(tool: str, arguments: dict[str, Any]) -> str | None:
     that lets a grantee slip through an unrecognized field, and the Executive can
     re-issue the share without the incidental mention.
     """
-    allow = _roster_allow_set(goes=True)
+    allow = _roster_allow_set()
 
     # Typed-flag form first: a boolean/int "make public" flag carries no string
     # for the scan below to catch, so check sharing-scope keys against a
