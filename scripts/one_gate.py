@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The one gate, checked over the whole code.
 
-THE RULES (CLAUDE.md, "The Rules - No New Gates"): role says what someone
+THE RULES (the rules section of CLAUDE.md): role says what someone
 can do, the Approvals level says whether a step runs or waits, and only Your
 rules and In training cap the level. Nothing else may hold or refuse a step.
 
@@ -123,9 +123,33 @@ class Hit:
         return f"{self.path}:{self.line} {self.kind}: {self.what}"
 
 
-def _pair(node: ast.AST) -> tuple[str, str] | None:
-    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
-        return node.value.id, node.attr
+def _pair(node: ast.AST, aliases: dict[str, str] | None = None) -> tuple[str, str] | None:
+    """``(module, name)`` for ``module.name``, ``alias.name`` (``import x as
+    alias``) or ``a.b.module.name``."""
+    if not isinstance(node, ast.Attribute):
+        return None
+    base = node.value
+    if isinstance(base, ast.Name):
+        return (aliases or {}).get(base.id, base.id), node.attr
+    if isinstance(base, ast.Attribute):
+        return base.attr, node.attr
+    return None
+
+
+def _aliases(tree: ast.AST) -> dict[str, str]:
+    """Local names bound to a module under another name (``as om``)."""
+    out: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                if alias.asname:
+                    out[alias.asname] = alias.name.rsplit(".", 1)[-1]
+    return out
+
+
+def _held_status(value: ast.AST | None) -> str | None:
+    if isinstance(value, ast.Constant) and value.value in HELD_STATUSES:
+        return str(value.value)
     return None
 
 
@@ -151,6 +175,8 @@ def scan_source(path: str, source: str) -> list[Hit]:
     def add(node: ast.AST, kind: str, what: str) -> None:
         hits.append(Hit(path, getattr(node, "lineno", 0), kind, what))
 
+    aliases = _aliases(tree)
+
     for top in tree.body:
         targets = top.targets if isinstance(top, ast.Assign) else [top.target] if isinstance(top, ast.AnnAssign) else []
         for target in targets:
@@ -159,15 +185,28 @@ def scan_source(path: str, source: str) -> list[Hit]:
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
-            name, pair = _called(node), _pair(node.func)
+            name, pair = _called(node), _pair(node.func, aliases)
             if name in CARD_CALLS or pair in CARD_ATTRS:
                 add(node, "card", name if pair is None else ".".join(pair))
             elif name in TRAINING_CALLS:
                 add(node, "training", name)
             elif name in RULE_CALLS or pair in RULE_ATTRS:
                 add(node, "rules", name if pair is None else ".".join(pair))
+            # Result(status="held"), dict(status="refused")
+            for kw in node.keywords:
+                if kw.arg == "status" and (held := _held_status(kw.value)):
+                    add(node, "waiting", f"status {held}")
+        elif isinstance(node, ast.Assign):
+            # r["status"] = "refused"
+            held = _held_status(node.value)
+            for target in node.targets:
+                if (
+                    held and isinstance(target, ast.Subscript)
+                    and isinstance(target.slice, ast.Constant) and target.slice.value == "status"
+                ):
+                    add(node, "waiting", f"status {held}")
         elif isinstance(node, ast.Attribute):
-            pair = _pair(node)
+            pair = _pair(node, aliases)
             if pair is not None and pair[1] in LEVEL_NAMES.get(pair[0], ()):
                 add(node, "level", ".".join(pair))
         elif isinstance(node, ast.ImportFrom):

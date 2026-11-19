@@ -171,3 +171,36 @@ def test_finds_a_word_list_by_what_it_is_called() -> None:
     assert _kinds('_STOPWORDS = {"a", "the", "of", "and", "to"}\n') == []
     assert _kinds('_SENSITIVE = ("a", "b")\n') == []
     assert _kinds('_BLOCK_TAGS = ("p", "div", "li", "ul", "ol")\n') == []
+
+
+def test_other_ways_of_writing_a_held_result() -> None:
+    for src in (
+        'def f():\n    return Result(status="held")\n',
+        'def f(r):\n    r["status"] = "refused"\n',
+        'def f():\n    return dict(status="waiting_for_approval")\n',
+    ):
+        assert [k for k, _ in _kinds(src)] == ["waiting"], src
+
+
+def test_an_import_alias_or_dotted_path_still_reads_the_level() -> None:
+    src = (
+        "from openexecutive.orchestrator import outside_mode as om\n"
+        "def f():\n    return om.get_mode() == om.TRUST\n"
+    )
+    assert ("level", "outside_mode.TRUST") in _kinds(src)
+    src = "import openexecutive.orchestrator.outside_mode\ndef f(m):\n    return m == openexecutive.orchestrator.outside_mode.ASK\n"
+    assert ("level", "outside_mode.ASK") in _kinds(src)
+
+
+def test_moving_a_listed_hold_into_a_renamed_file_is_the_same_entry() -> None:
+    old = f"{PKG}delegation/inbox.py | named | def _refusal | remove"
+    new = f"{PKG}delegation/inbox_watch.py | named | def _refusal | remove"
+    moved = {
+        "changed": {one_gate.KNOWN, PKG + "delegation/inbox_watch.py"},
+        "renamed": {PKG + "delegation/inbox_watch.py"},
+        "added_lines": {one_gate.KNOWN: [new]},
+        "removed_lines": {one_gate.KNOWN: [old]},
+    }
+    assert _check(**moved) == "PASS"
+    # Into a file that was already there, it is a new entry.
+    assert _check(**{**moved, "renamed": set()}) == "FAIL"

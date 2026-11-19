@@ -207,7 +207,7 @@ STUB_EXEMPT = {"scripts/pr_checks.py", TESTS + "unit/test_pr_checks.py"}
 # Approvals is the only gate: every hold or refusal for who is asking goes
 # through orchestrator/levels.py (decide, hold, card_or). A new line elsewhere
 # that refuses a person, caps how often something runs, or answers 403 is a
-# second gate. Input checks carry the marker; anything else needs the waiver.
+# second gate. Input checks carry the marker; there is no waiver.
 LEVELS_PY = PKG + "orchestrator/levels.py"
 GATE_MARKER = "# input-safety"
 GATE_RE = re.compile(
@@ -491,7 +491,7 @@ def check_one_gate(c: Change) -> Result:
             "FAIL",
             "a new refusal or hold outside orchestrator/levels.py (Approvals is the only "
             f"gate; end an input check with '{GATE_MARKER}'). There is no waiver: a role "
-            "that cannot do something is on the administration list in CLAUDE.md, and "
+            "that cannot do something is administration (the rules in CLAUDE.md), and "
             "run-or-wait is take_the_lead.gate with levels.decide: " + " | ".join(hits[:5]),
         )
     return Result("one-gate", "PASS", "no new refusal or hold outside Approvals")
@@ -510,12 +510,19 @@ def check_one_gate_code(c: Change) -> Result:
     name = "one-gate-code"
     # Entries the change adds to the list, by what they name (a reworded note
     # is no new entry). The change that first writes the list adds them all.
+    # A hold moved, as it is, into a file the change renames or adds is the
+    # same entry under its new path.
     grown: list[str] = []
     if one_gate.KNOWN not in c.added:
         left = Counter(k for k, _ in one_gate.parse_known("\n".join(c.removed_lines.get(one_gate.KNOWN, []))))
+        unpathed = Counter(k.split(" | ", 1)[1] for k in left.elements())
         for key, _ in one_gate.parse_known("\n".join(c.added_lines.get(one_gate.KNOWN, []))):
+            path, rest = key.split(" | ", 1)
             if left[key] > 0:
                 left[key] -= 1
+                unpathed[rest] -= 1
+            elif path in (c.renamed | c.added) and unpathed[rest] > 0:
+                unpathed[rest] -= 1
             else:
                 grown.append(key)
     if grown:
