@@ -2299,6 +2299,8 @@ def test_the_same_words_sent_or_paid_still_wait(owner: Any) -> None:
         ("stripe__create_billing_meter_event", {"value": "$5,000", "customer": "Acme"}, True),
         ("quickbooks__create_task", {"text": _LEASE}, True),
         ("hubspot__create_invoice_note", {"text": _LEASE}, True),
+        ("orb__ingest_event", {"value": "$5,000", "customer": "Acme"}, True),
+        ("lago__create_event", {"value": "$5,000", "customer": "Acme"}, True),
     ]:
         hit = ttl.check(tool, tool_input, lead=off, rules=rules, mcp=mcp)
         assert hit is not None and hit.kind == "rule", tool
