@@ -90,6 +90,19 @@ def test_an_email_matches_by_sender_and_both_means_both() -> None:
     assert not mailbox.matches(both, from_addr="sam@acme.example", from_name="Sam", subject="The contract")
 
 
+def test_a_keyword_matches_whole_words_only() -> None:
+    # "AI newsletters": every Gmail sender is not an AI newsletter, nor is
+    # "Patch notes" from Pat.
+    ai = {"keywords": ["AI"]}
+    assert not mailbox.matches(ai, from_addr="jane@gmail.com", from_name="Jane", subject="Lunch")
+    assert mailbox.matches(ai, from_addr="news@x.example", from_name="X", subject="This week in AI")
+    assert not mailbox.matches({"keywords": ["pat"]}, from_addr="a@b.example", from_name="", subject="Patch notes")
+    assert not mailbox.matches({"keywords": ["hr"]}, from_addr="a@b.example", from_name="", subject="Chrome, three")
+    # Punctuation is a space, and an address's parts are words.
+    assert mailbox.matches({"keywords": ["sign up"]}, from_addr="a@b.example", from_name="", subject="Sign-up: Dana")
+    assert mailbox.matches({"keywords": ["stripe"]}, from_addr="billing@stripe.com", from_name="", subject="Receipt")
+
+
 def test_an_empty_trigger_matches_nothing() -> None:
     assert not mailbox.matches({}, from_addr="a@b.example", from_name="A", subject="anything")
 

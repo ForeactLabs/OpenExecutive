@@ -41,6 +41,7 @@ _KEYWORD_MAX_CHARS = 60
 # The longest watch name (``monitoring.validation.WATCHLIST_SLUG_RE``).
 _SLUG_MAX = 61
 _ADDRESS_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_NON_WORD_RE = re.compile(r"[\W_]+")
 
 
 def is_mailbox(item: WatchlistItem) -> bool:
@@ -127,10 +128,17 @@ def matches(trigger: dict[str, Any], *, from_addr: str, from_name: str, subject:
     if senders and (from_addr or "").strip().lower() not in senders:
         return False
     if keywords:
-        haystack = " ".join((subject or "", from_name or "", from_addr or "")).lower()
-        if not any(k in haystack for k in keywords):
+        # Whole words only, punctuation as a space: "ai" is not in "gmail",
+        # "sign up" is in "Sign-up:", and "stripe" is in "billing@stripe.com".
+        haystack = f" {_plain_words(' '.join((subject or '', from_name or '', from_addr or '')))} "
+        if not any(f" {k} " in haystack for k in map(_plain_words, keywords) if k):
             return False
     return True
+
+
+def _plain_words(text: str) -> str:
+    """``text`` lowercased, with every run of non-word characters one space."""
+    return " ".join(_NON_WORD_RE.split(text.lower())).strip()
 
 
 __all__ = [
