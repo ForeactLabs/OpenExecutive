@@ -9,8 +9,12 @@ wording from coming back anywhere in the Executive's tools.
 from __future__ import annotations
 
 import ast
+import asyncio
+import json
 import re
 from pathlib import Path
+
+import pytest
 
 import openexecutive
 
@@ -52,3 +56,26 @@ def test_the_line_answers_the_asker_and_sends_nothing_to_anyone_else() -> None:
     assert PASS_ON_NOTHING.startswith("Answer only the person who asked")
     assert "send nothing to anyone else on their behalf" in PASS_ON_NOTHING
     assert "to anyone about it" not in PASS_ON_NOTHING
+
+
+def test_the_decision_and_goal_refusals_answer_only_the_asker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Called the way a turn that may not do it calls them."""
+    from openexecutive.orchestrator import decision_tools, department_tools, levels
+    from openexecutive.orchestrator.speaker import PASS_ON_NOTHING
+
+    for module in (decision_tools, department_tools):
+        monkeypatch.setattr(module, "_audit", lambda *a, **k: None)
+        for name in ("_principal_asked", "_team_asked"):
+            monkeypatch.setattr(module, name, lambda: False, raising=False)
+    monkeypatch.setattr(department_tools, "_department_turn", lambda: None, raising=False)
+    monkeypatch.setattr(department_tools, "_teammate_with_goals", lambda _input: False, raising=False)
+    monkeypatch.setattr(levels, "owner_approved", lambda: False, raising=False)
+
+    outcome = json.loads(asyncio.run(decision_tools.handle_record_decision_outcome(
+        {"decision_id": 1, "outcome": "It worked."}
+    )))
+    goal = json.loads(asyncio.run(department_tools.handle_create_goal(
+        {"area": "sales", "title": "Close ten deals"}
+    )))
+    assert PASS_ON_NOTHING in outcome["error"]
+    assert PASS_ON_NOTHING in goal["error"]

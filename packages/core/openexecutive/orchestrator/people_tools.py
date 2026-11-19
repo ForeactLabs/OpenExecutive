@@ -812,7 +812,7 @@ def _roster_refusal_reason(session: Any) -> str | None:
             "owner — the People page refuses them for the same reason. If it is the "
             "owner, they should sign in with the email on their own People entry, or, "
             "if that entry has none yet, run the setup interview again (it adds the "
-            "email they signed in with) and then ask again."
+            f"email they signed in with) and then ask again. {PASS_ON_NOTHING}"
         )
     return (
         "Only the company's owner can add, change or remove people or set "
