@@ -244,6 +244,11 @@ def test_an_occurrence_that_stands_down_keeps_the_repeat(session_with_telegram_r
     pending = episodic.list_scheduled_actions(status="pending")
     assert len(pending) == 1 and pending[0].id != first.id and pending[0].repeat == "weekly@mon@09:00"
 
+    # A stop nobody would want repeated (the creator left) ends the series.
+    nxt = pending[0]
+    episodic.mark_action_cancelled(nxt.id, "the person who scheduled it is no longer on the team", ends_repeat=True)
+    assert episodic.list_scheduled_actions(status="pending") == []
+
 
 def test_a_one_time_follow_up_does_not_come_back(session_with_telegram_ref: Session) -> None:
     from openexecutive.memory import episodic

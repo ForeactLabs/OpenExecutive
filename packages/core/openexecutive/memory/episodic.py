@@ -1810,13 +1810,16 @@ def _queue_next(conn: sqlite3.Connection, action_id: int) -> int | None:
 
 
 def mark_action_cancelled(
-    action_id: int, reason: str, db_path: Path | None = None, *, goes_on: bool = False,
+    action_id: int, reason: str, db_path: Path | None = None, *, ends_repeat: bool = False,
 ) -> bool:
     """Retire a claimed action without running it, recording why in
     ``last_error`` (e.g. a department check-in in a solo workspace). Unlike
     ``cancel_scheduled_action`` this also moves a ``running`` row — for the
-    runner, which holds the claim. ``goes_on``: only this occurrence stands
-    down (it was already handled), so a repeating one queues its next."""
+    runner, which holds the claim. Only this occurrence stands down (already
+    handled, the creator's month used up, …): a repeating one queues its
+    next. ``ends_repeat`` stops the series too, for a stop nobody would want
+    repeated (the creator left the team); a person's own cancel is
+    ``cancel_scheduled_action``."""
     with _get_conn(_resolve_db_path(db_path)) as conn:
         cursor = conn.execute(
             "UPDATE scheduled_actions SET status = 'cancelled', last_error = ? "
@@ -1824,7 +1827,7 @@ def mark_action_cancelled(
             (reason[:500], action_id),
         )
         done = cursor.rowcount > 0
-        if done and goes_on:
+        if done and not ends_repeat:
             _queue_next(conn, action_id)
         return done
 

@@ -1481,8 +1481,7 @@ def _skip_already_handled(action: ScheduledAction, why: str) -> None:
     from openexecutive.memory.episodic import mark_action_cancelled
 
     assert action.id is not None
-    # Only this one stands down: a repeating follow-up comes back next time.
-    mark_action_cancelled(action.id, f"skipped: already handled ({why})", goes_on=True)
+    mark_action_cancelled(action.id, f"skipped: already handled ({why})")
     logger.info("scheduler: action %d skipped: already handled", action.id)
     audit_log(
         "scheduled_action",
@@ -1545,7 +1544,7 @@ async def _run_teammate_followup(
 
     if creator is None or creator.archived or creator.kind != "team":
         reason = "the person who scheduled it is no longer on the team"
-        mark_action_cancelled(action.id, reason)
+        mark_action_cancelled(action.id, reason, ends_repeat=True)
         logger.info("scheduler: action %d cancelled: %s", action.id, reason)
         _audit("cancelled", f"cancelled: {reason}")
         return True
