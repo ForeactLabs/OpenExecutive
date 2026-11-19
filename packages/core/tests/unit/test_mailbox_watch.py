@@ -115,9 +115,14 @@ class _Mailbox:
     messages: list[Any]
     asked: list[datetime]
 
-    async def received_since(self, after: datetime, *, limit: int = 25) -> list[Any]:
-        self.asked.append(after)
-        return list(self.messages)
+    async def received_since(self, after: datetime, *, before: datetime | None = None, limit: int = 25) -> list[Any]:
+        if before is None:
+            self.asked.append(after)
+        newest_first = sorted(
+            (m for m in self.messages if before is None or datetime.fromisoformat(m.received_at) < before),
+            key=lambda m: m.received_at, reverse=True,
+        )
+        return newest_first[:limit]
 
 
 def _person(**kw: Any) -> Any:
@@ -164,6 +169,27 @@ def test_every_matching_email_since_the_watch_was_set_is_its_own_signal(
     assert first.raw_payload == {} and "555" not in json.dumps(first.model_dump(mode="json"))
     # Read from when it was set, the first time.
     assert box.asked == [set_at]
+
+
+def test_a_poll_reads_back_page_by_page_to_where_it_last_read(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A day disconnected, then 130 emails: the newest page alone would miss
+    # the sign-up that came first.
+    item = _email_watch(db)
+    set_at = datetime.fromisoformat(item.created_at)
+    mail = [
+        gm.MailMessage(id=f"n{i}", thread_id=f"t{i}", from_addr="news@shop.example", from_name="Shop",
+                       subject="Sale", received_at=(set_at + timedelta(minutes=10 + i)).isoformat())
+        for i in range(130)
+    ]
+    mail.append(gm.MailMessage(id="first", thread_id="tf", from_addr="noreply@app.example", from_name="App",
+                               subject="New sign up", received_at=(set_at + timedelta(minutes=1)).isoformat()))
+    _patch_mailbox(monkeypatch, _Mailbox(mail, []))
+
+    signals = asyncio.run(mailbox_source.MailboxSource().poll(item, db_path=db))
+
+    assert [s.source_external_id for s in signals] == ["first"]
 
 
 def test_a_later_poll_reads_from_a_little_before_the_last_read_that_worked(

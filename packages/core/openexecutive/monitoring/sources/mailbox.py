@@ -28,9 +28,11 @@ from openexecutive.monitoring.sources.base import observe
 
 logger = logging.getLogger(__name__)
 
-# Mail read per poll. A watch is checked every few minutes, so this is far
-# more than one gap's worth.
+# Mail read per page, and pages per poll: a poll reads back page by page to
+# where it last read, so a busy inbox or a day disconnected loses nothing,
+# up to this many emails at once.
 _READ_LIMIT = 50
+_MAX_PAGES = 20
 # Re-read this far before the last poll: mail the provider listed a little
 # late is still caught (the dedup key makes a re-read email a no-op).
 _OVERLAP = timedelta(minutes=10)
@@ -59,6 +61,28 @@ def _since(item: WatchlistItem, now: datetime) -> datetime:
     created = _parse(item.created_at) or now
     read = _parse(str((item.config_json or {}).get(READ_THROUGH_KEY) or ""))
     return max(created, read - _OVERLAP) if read is not None else created
+
+
+async def _read_back_to(client: Any, since: datetime) -> list[Any]:
+    """Every inbox email since ``since``: the newest page, then the page
+    before its oldest email, and so on until a page comes back short (up to
+    ``_MAX_PAGES``). A page boundary is read twice (the mail services count
+    in whole seconds); each email is kept once."""
+    received: list[Any] = []
+    seen: set[str] = set()
+    before: datetime | None = None
+    for _ in range(_MAX_PAGES):
+        page = await client.received_since(since, before=before, limit=_READ_LIMIT)
+        new = [m for m in page if m.id not in seen]
+        seen.update(m.id for m in new)
+        received += new
+        stamps = [t for m in page if (t := _parse(getattr(m, "received_at", "") or "")) is not None]
+        if len(page) < _READ_LIMIT or not new or not stamps:
+            break
+        before = min(stamps) + timedelta(seconds=1)
+    else:
+        logger.warning("email watch: more than %d emails since %s; read the newest", _READ_LIMIT * _MAX_PAGES, since)
+    return received
 
 
 def summary_of(message: Any) -> str:
@@ -101,7 +125,7 @@ class MailboxSource:
         now = datetime.now(UTC)
         since = _since(item, now)
         created = _parse(item.created_at) or since
-        received = await gmail_for(email).received_since(since, limit=_READ_LIMIT)
+        received = await _read_back_to(gmail_for(email), since)
         # Read: the next poll starts from here, whatever comes of what it found
         # (the dedup key makes a re-read email a no-op).
         store.set_watchlist_config_key(item.id, READ_THROUGH_KEY, now.isoformat(), db_path=db_path)
