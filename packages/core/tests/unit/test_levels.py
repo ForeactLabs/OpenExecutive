@@ -280,3 +280,26 @@ def test_a_held_browser_step_never_keeps_the_page_the_model_named(monkeypatch: p
         # Another tool's keys are left as they are.
         levels.hold("message_person", {"_x": 1}, mcp=False, reason=levels.OUTSIDE)
     assert seen == [{"ref": 4}, step, {"_x": 1}]
+
+
+def test_a_card_someone_else_approves_says_whose(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A contact's or an unattended run's step waits on someone who isn't in
+    the conversation: the model is told whose OK it waits on, never to say
+    "your tap" to a person with no card."""
+    from openexecutive.memory import decision_ledger
+    from openexecutive.orchestrator import speaker as speaker_mod
+
+    owner = people_store.upsert_person(full_name="Olivia Owner", is_principal=True, email="olivia@example.com")
+    people_registry.invalidate()
+    card = decision_ledger.create_decision_instance(
+        decision_class="take_the_lead", department="", originating_session_id=None, proposed_payload={},
+        idempotency_key=None, gate_mode="propose", approver_person_id=owner, confidence=None,
+    )
+
+    monkeypatch.setattr(speaker_mod, "speaker", lambda session=None: None)
+    message = json.loads(levels.waiting_result(card, "it's new"))["message"]
+    assert "for Olivia Owner" in message and "waiting on Olivia Owner's OK" in message
+
+    monkeypatch.setattr(speaker_mod, "speaker", lambda session=None: SimpleNamespace(id=owner))
+    message = json.loads(levels.waiting_result(card, "it's new"))["message"]
+    assert "for them (in this chat" in message and "waiting for their tap" in message

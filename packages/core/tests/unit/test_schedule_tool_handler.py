@@ -229,6 +229,22 @@ def test_a_repeating_follow_up_comes_back_until_cancelled(session_with_telegram_
     assert [a for a in episodic.list_scheduled_actions(status="pending")] == []
 
 
+def test_an_occurrence_that_stands_down_keeps_the_repeat(session_with_telegram_ref: Session) -> None:
+    """A run that finds it was already handled skips only that time."""
+    from openexecutive.memory import episodic
+    from openexecutive.scheduler import runner
+
+    payload = _call({
+        "run_at": _future_iso(), "channel": "telegram", "channel_ref": "42",
+        "intent": "Nudge the team about the open orders.", "repeat": "weekly@mon@09:00",
+    })
+    first = episodic.get_scheduled_action(payload["id"])
+    assert first is not None
+    runner._skip_already_handled(first, "they talked about it this week")
+    pending = episodic.list_scheduled_actions(status="pending")
+    assert len(pending) == 1 and pending[0].id != first.id and pending[0].repeat == "weekly@mon@09:00"
+
+
 def test_a_one_time_follow_up_does_not_come_back(session_with_telegram_ref: Session) -> None:
     from openexecutive.memory import episodic
 

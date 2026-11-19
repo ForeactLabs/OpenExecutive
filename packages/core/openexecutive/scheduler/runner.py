@@ -1481,7 +1481,8 @@ def _skip_already_handled(action: ScheduledAction, why: str) -> None:
     from openexecutive.memory.episodic import mark_action_cancelled
 
     assert action.id is not None
-    mark_action_cancelled(action.id, f"skipped: already handled ({why})")
+    # Only this one stands down: a repeating follow-up comes back next time.
+    mark_action_cancelled(action.id, f"skipped: already handled ({why})", goes_on=True)
     logger.info("scheduler: action %d skipped: already handled", action.id)
     audit_log(
         "scheduled_action",

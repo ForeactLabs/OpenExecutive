@@ -334,16 +334,16 @@ def _made_by() -> Callable[[str], str]:
     def made_by(name: str) -> str:
         try:
             owner = get_owner(name)
+            if owner is None:
+                return "someone on the team"
+            if me is not None and owner == me:
+                return "you"
+            if owner not in names:
+                person = get_person(owner)
+                names[owner] = " ".join(((person.full_name or "") if person else "").split()) or "someone on the team"
+            return names[owner]
         except Exception:
             return "someone on the team"
-        if owner is None:
-            return "someone on the team"
-        if me is not None and owner == me:
-            return "you"
-        if owner not in names:
-            person = get_person(owner)
-            names[owner] = " ".join(((person.full_name or "") if person else "").split()) or "someone on the team"
-        return names[owner]
 
     return made_by
 
