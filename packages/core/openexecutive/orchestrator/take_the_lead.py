@@ -1439,18 +1439,17 @@ def _topics(
     return found
 
 
-def topics_in(text: str) -> set[str]:
-    """The topics words alone can show (money, contracts, people
-    decisions), as ``check`` reads them: for what goes out as a person
-    (``delegation.handle_it``)."""
-    found = set()
-    if mentions_money(text):
-        found.add(MONEY)
-    if _CONTRACTS_RE.search(text):
-        found.add(CONTRACTS)
-    if _PEOPLE_RE.search(text):
-        found.add(PEOPLE_DECISIONS)
-    return found
+def topics_in(text: str, recipients: Iterable[str] = ()) -> set[str]:
+    """The topics (``KINDS``) of something sent as a person
+    (``delegation.handle_it``): what ``text`` says, plus who it goes to
+    (someone new, a lot of people), read by ``_topics`` as for any step.
+    Never raises: an error is every topic."""
+    try:
+        going = sorted({r.strip().lower() for r in recipients if r and r.strip()})
+        return {k for k, _ in _topics("", {}, recipients=going, about=text, mcp=False)}
+    except Exception:
+        logger.warning("take_the_lead: couldn't read a message's topics — every topic", exc_info=True)
+        return set(KINDS)
 
 
 def topics_of(tool: str, tool_input: dict[str, Any], *, mcp: bool = False, reaches: Iterable[str] = ()) -> set[str]:
@@ -4266,4 +4265,7 @@ def _balanced(
     held = check(name, tool_input, lead=lead, rules=[], mcp=mcp)
     if held is not None or not goes:
         return held, None
-    return None, goes[0]
+    # What let it go: the first rule that released a topic the step has
+    # (a topic rule matches every step, so one about something else isn't it).
+    topics = topics_of(name, tool_input, mcp=mcp, reaches=addresses)
+    return None, next((r for r in goes if goes_kinds([r]) & topics), None)

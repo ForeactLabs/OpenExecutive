@@ -220,7 +220,8 @@ def content_hold(
     covers all of them, an amount rule the money (a link or credentials
     always wait). ``texts`` are read for rules, topics and amounts,
     ``link_texts`` (what it would send) for links and Goes amounts,
-    ``recipients`` for person and domain rules. Unreadable rules hold, on
+    ``recipients`` for person and domain rules and for the Someone new
+    and Big sends topics. Unreadable rules hold, on
     Hands-off too."""
     from openexecutive.orchestrator import take_the_lead
 
@@ -231,7 +232,7 @@ def content_hold(
     except Exception:
         logger.warning("delegation.handle_it: couldn't read the rules — holding", exc_info=True)
         return "rule"
-    if take_the_lead.rule_waits(rules, joined, going, topics=take_the_lead.topics_in(joined)) is not None:
+    if take_the_lead.rule_waits(rules, joined, going, topics=take_the_lead.topics_in(joined, going)) is not None:
         return "rule"
     if hands_off(db_path=db_path):
         return None

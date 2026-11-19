@@ -2549,6 +2549,41 @@ def test_a_topic_goes_rule_releases_its_words_in_what_it_sends_on_its_own(owner:
     assert handle_it.content_hold("Please sign the contract") is None
 
 
+def test_topic_rules_on_what_it_sends_as_you(owner: Any, balanced: None) -> None:
+    _go("topic", "contracts")
+    assert handle_it.content_hold("The contract is attached.") is None
+    assert handle_it.content_hold("The contract is attached, password inside.") == "sensitive"
+    assert handle_it.content_hold("Here is the invoice for $450.") == "sensitive"
+    _go("topic", "money")
+    assert handle_it.content_hold("Here is the invoice for $450.") is None
+    ttl.add_rule(ttl.SCOPE_COMPANY, "topic", "money", created_by="t")
+    assert handle_it.content_hold("Here is the invoice for $450.") == "rule"
+
+
+def test_a_someone_new_waits_rule_holds_a_reply_as_you_on_hands_off(
+    owner: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.orchestrator import outside_mode
+
+    monkeypatch.setattr(outside_mode, "get_mode", lambda **_: outside_mode.TRUST)
+    assert handle_it.content_hold("Thanks!", recipients=("stranger@acme.io",)) is None
+    ttl.add_rule(ttl.SCOPE_COMPANY, "topic", "someone_new", created_by="t")
+    assert handle_it.content_hold("Thanks!", recipients=("stranger@acme.io",)) == "rule"
+    assert handle_it.content_hold("Thanks!", recipients=(owner.email,)) is None
+    many = tuple(f"p{i}@co.example" for i in range(ttl.BIG_SEND_RECIPIENTS + 1))
+    assert ttl.BIG_SEND in ttl.topics_in("Thanks!", many)
+
+
+def test_an_unrelated_topic_rule_is_not_what_let_a_step_go(owner: Any, balanced: None) -> None:
+    _go("topic", "contracts")
+    note = ("message_person", {"person_id": owner.id, "text": "Status: all good"})
+    hit, why = ttl._hit(*note, mcp=False)
+    assert hit is None and why is None
+    signed = ("message_person", {"person_id": owner.id, "text": "Please sign the contract"})
+    hit, why = ttl._hit(*signed, mcp=False)
+    assert hit is None and isinstance(why, ttl.Rule) and why.value == "contracts"
+
+
 def test_a_scheduled_message_off_the_roster_runs_only_with_a_someone_new_rule_where_goes_rules_count(
     owner: Any, balanced: None, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
