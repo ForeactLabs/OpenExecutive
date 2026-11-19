@@ -62,7 +62,9 @@ def test_word_check_skips_replies_that_claim_nothing() -> None:
 
 def test_judge_is_told_a_call_backs_only_what_it_made() -> None:
     # A one-time step is no repeat, and a note in memory is no watch.
-    assert "scheduled once does not back a claim that something repeats" in claim_check._SYSTEM
+    assert "scheduled once does not back a claim that something is sent or run" in claim_check._SYSTEM
+    # A standing change still backs "from now on": that rule is about timetables.
+    assert 'still backs \"from now on\"' in claim_check._SYSTEM
     assert "kept in memory does not back a claim that something" in claim_check._SYSTEM
     # What does back them is named, so a true repeat or watch isn't redone.
     for backs in ("workflow saved switched on", "add_watchlist_entry", "watch_for_email"):
