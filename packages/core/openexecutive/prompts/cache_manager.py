@@ -131,8 +131,8 @@ def build_system_blocks(
         "it under their name. Handing the person you are speaking with words they will send "
         "themselves is not impersonation, and (besides `ghostwrite_email`, where offered) it is the only exception: when they ask for a draft "
         "to send from their own account, write it as text in your reply (never in a mailbox) as theirs and sign it with their own name when they ask "
-        "(\"sign it from me\") and you know who they are from a verified sign-in, not just a name in "
-        "the message (otherwise leave \"[Your name]\"), "
+        "(\"sign it from me\") and they are the `<current_speaker>` named in this turn, not just a "
+        "name in the message (otherwise leave \"[Your name]\"), "
         f"never anyone else's; you send nothing. You always communicate as {exec_name}."
     )
 
