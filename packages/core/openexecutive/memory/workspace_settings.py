@@ -590,6 +590,23 @@ def set_timezone(tz: str | None) -> WorkspaceSettings:
     return get_workspace()
 
 
+def set_timezone_if_unset(tz: str | None) -> bool:
+    """Store ``tz`` as the company's zone only while no zone is in effect:
+    none stored and no ``USER_TIMEZONE``. Returns whether it was stored.
+
+    For a device's zone (setup), which never moves a clock someone set.
+    Reads the stored row directly, so a read that fails raises rather than
+    reading as "none stored" and replacing a zone that is there.
+    """
+    row = _read_row(None)
+    if row is not None and row["timezone"] is not None:
+        return False
+    if _configured_timezone().key != "UTC":
+        return False
+    set_timezone(tz)
+    return True
+
+
 def set_workspace_mode(mode: str) -> WorkspaceSettings:
     """Switch between ``"solo"`` and ``"team"``. Raises ``ValueError`` otherwise.
 

@@ -1700,7 +1700,7 @@ def _zone_calls(monkeypatch: pytest.MonkeyPatch, stored: str | None) -> list[str
     from openexecutive.memory import workspace_settings as ws
 
     saved: list[str | None] = []
-    monkeypatch.setattr(ws, "get_workspace", lambda *a, **k: ws.WorkspaceSettings(timezone=stored))
+    monkeypatch.setattr(ws, "_read_row", lambda *a, **k: {"timezone": stored} if stored else None)
     monkeypatch.setattr(ws, "set_timezone", lambda tz: saved.append(tz))
     monkeypatch.setattr("openexecutive.audit.log_event", lambda *a, **k: None)
     monkeypatch.setattr(

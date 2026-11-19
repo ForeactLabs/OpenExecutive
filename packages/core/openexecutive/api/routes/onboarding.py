@@ -913,14 +913,10 @@ async def commit_interview(body: OnboardCommitRequest, request: Request) -> Comp
             from openexecutive.memory import workspace_settings
 
             may_set = _caller_is_principal_or_unclaimed(request)
-            # No zone in effect: none stored and no USER_TIMEZONE either.
-            unset = (
-                workspace_settings.get_workspace().timezone is None
-                and workspace_settings.get_user_timezone().key == "UTC"
-            )
-            if may_set and unset:
-                # Off the event loop: a zone change re-times pending rows.
-                await asyncio.to_thread(workspace_settings.set_timezone, body.timezone)
+            # Off the event loop: a zone change re-times pending rows.
+            if may_set and await asyncio.to_thread(
+                workspace_settings.set_timezone_if_unset, body.timezone
+            ):
                 audit_log(
                     "workspace_settings_changed",
                     f"Workspace settings changed: time zone default → {body.timezone} (setup)",
