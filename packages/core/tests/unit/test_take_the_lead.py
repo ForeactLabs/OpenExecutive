@@ -2543,3 +2543,16 @@ def test_a_person_goes_rule_covers_a_connected_apps_mail_to_them(owner: Any, bal
     # Someone else on it: the rule doesn't cover them.
     both = (mail[0], {**mail[1], "cc": "kim@other.example"})
     assert ttl._hit(*both, mcp=True)[0] is not None
+
+
+def test_the_executives_own_account_keeps_a_team_step_with_its_holder(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Mail to a teammate that also names the Executive's own sign-in stays
+    inside the team, so it goes to the teammate holding that range."""
+    _team(monkeypatch)
+    board = _holder("Bo Board", "bo@co.example", AuthorityScope.BOARD_COMMS)
+    step = {"to": "bo@co.example", "user_google_email": "ceo.test@example.com", "body": "Note to all investors"}
+    assert ttl._team_only("google_workspace__send_gmail_message", step)
+    decision_id = ttl.hold("google_workspace__send_gmail_message", step, ttl.Hit("big_send", "held"),
+                           source="reflection", mcp=True)
+    decision = ledger.get_decision_instance(decision_id)
+    assert decision is not None and decision.approver_person_id == board
