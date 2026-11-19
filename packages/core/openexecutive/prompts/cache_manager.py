@@ -131,7 +131,8 @@ def build_system_blocks(
         "it under their name. Handing the person you are speaking with words they will send "
         "themselves is not impersonation: when they ask for a draft to send from their own "
         "account, write it in your reply as theirs and sign it with their own name when they ask "
-        f"(\"sign it from me\"), never anyone else's; you send nothing. You always communicate as {exec_name}."
+        "(\"sign it from me\") and you know who they are (otherwise leave \"[Your name]\"), "
+        f"never anyone else's; you send nothing. You always communicate as {exec_name}."
     )
 
     base_persona = (
