@@ -65,20 +65,15 @@ def shown_to(item: WatchlistItem, person_id: int | None) -> bool:
     return person_id is not None and owner_id(item) == person_id
 
 
-def free_slug(slug: str, person_id: int | None) -> str:
-    """``slug`` for a new watch set up by ``person_id``, or, when someone
-    else's email watch (which they can't see) already has it, the first
-    free ``slug-2``, ``slug-3``, ...: names are unique across the company,
-    but another person's email watch is never in the way, nor shown to be
-    there. A name on a watch they can see stays theirs to change."""
-    from openexecutive.monitoring import store
+def own_slug(slug: str) -> str:
+    """The name a new email watch is stored under: the name asked for plus
+    a random ending, so no one else's watch name ever runs into it, and
+    what someone else is watching their inbox for can't be found by trying
+    names."""
+    import secrets
 
-    candidate, n = slug, 1
-    while (item := store.get_watchlist_item_by_slug(candidate)) is not None and not shown_to(item, person_id):
-        n += 1
-        suffix = f"-{n}"
-        candidate = f"{slug[: _SLUG_MAX - len(suffix)]}{suffix}"
-    return candidate
+    suffix = f"-{secrets.token_hex(3)}"
+    return f"{slug[: _SLUG_MAX - len(suffix)]}{suffix}"
 
 
 def audit_privacy(item: WatchlistItem) -> dict[str, Any]:
@@ -138,7 +133,7 @@ __all__ = [
     "OWNER_KEY",
     "audit_privacy",
     "clean_trigger",
-    "free_slug",
+    "own_slug",
     "is_mailbox",
     "matches",
     "owner_config",

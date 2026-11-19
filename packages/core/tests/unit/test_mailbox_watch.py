@@ -247,20 +247,13 @@ def test_only_its_owner_sees_an_email_watch(db: Path) -> None:
     assert slugs(every_watch=True) == ["stock-nwt", "email-sign-ups"]
 
 
-def test_someone_elses_email_watch_never_takes_a_name(db: Path) -> None:
-    # Sam has "email-sign-ups"; Jordan asks for the same thing and gets the
-    # next free name, without learning Sam's watch is there.
-    _email_watch(db, owner=OTHER)
-    assert mailbox.free_slug("email-sign-ups", OWNER) == "email-sign-ups-2"
-    _email_watch(db, slug="email-sign-ups-2", owner=OTHER)
-    assert mailbox.free_slug("email-sign-ups", OWNER) == "email-sign-ups-3"
-    assert mailbox.free_slug("x" * 61, OWNER) == "x" * 61
-    # A name on a watch they can see stays as it is (they change that one).
-    assert mailbox.free_slug("email-sign-ups", OTHER) == "email-sign-ups"
-    ms.insert_watchlist_item(slug="stock-nwt", signal_type="stock", target="NWT", db_path=db)
-    assert mailbox.free_slug("stock-nwt", OWNER) == "stock-nwt"
-    _email_watch(db, slug="y" * 61, owner=OTHER)
-    assert mailbox.free_slug("y" * 61, OWNER) == "y" * 59 + "-2"
+def test_an_email_watch_never_shares_a_name() -> None:
+    # Stored with a random ending: no one else's watch runs into it, and its
+    # name can't be found by trying names.
+    first, second = mailbox.own_slug("email-sign-ups"), mailbox.own_slug("email-sign-ups")
+    assert first.startswith("email-sign-ups-") and first != second
+    long = mailbox.own_slug("y" * 61)
+    assert len(long) == 61 and long.startswith("y" * 54 + "-")
 
 
 def test_company_wide_reads_leave_its_signals_out(db: Path) -> None:
@@ -353,7 +346,8 @@ def test_the_executive_watches_the_speakers_own_inbox(
     _speaker(monkeypatch, OWNER)
     out = _add(trigger={"keywords": ["sign up"]}, config={"mailbox_of": OTHER})
     assert out["ok"] is True, out
-    row = ms.get_watchlist_item_by_slug("email-sign-ups", db_path=db)
+    assert out["slug"].startswith("email-sign-ups-")  # mailbox.own_slug
+    row = ms.get_watchlist_item_by_slug(out["slug"], db_path=db)
     assert row is not None
     assert row.config_json["mailbox_of"] == OWNER and row.config_json["enrich"] is False
     assert row.trigger_json == {"keywords": ["sign up"]}
@@ -364,7 +358,7 @@ def test_the_executive_watches_the_speakers_own_inbox(
 def test_an_email_watch_needs_a_sender_or_a_word(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _speaker(monkeypatch, OWNER)
     assert "error" in _add(trigger={})
-    assert ms.get_watchlist_item_by_slug("email-sign-ups", db_path=db) is None
+    assert ms.list_watchlist(db_path=db, every_watch=True) == []
 
 
 def test_an_unconnected_inbox_says_how_to_connect(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:

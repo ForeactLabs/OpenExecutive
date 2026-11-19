@@ -364,18 +364,20 @@ def test_an_email_watch_reads_the_callers_inbox_and_only_they_see_it(
     assert made.status_code == 201, made.text
     assert made.json()["config_json"]["mailbox_of"] == sam_id
     assert made.json()["tells_you_when"] == "An email comes in that mentions “sign up”"
+    slug = made.json()["slug"]
+    assert slug.startswith("email-sign-ups-")  # its own name, never anyone else's
 
-    assert [w["slug"] for w in client.get("/watchlist", headers=as_sam).json()] == ["email-sign-ups"]
+    assert [w["slug"] for w in client.get("/watchlist", headers=as_sam).json()] == [slug]
     assert client.get("/watchlist", headers=as_owner).json() == []
-    for path in ("/watchlist/email-sign-ups", "/watchlist/email-sign-ups/signals"):
+    for path in (f"/watchlist/{slug}", f"/watchlist/{slug}/signals"):
         assert client.get(path, headers=as_owner).status_code == 404
         assert client.get(path, headers=as_sam).status_code == 200
-    assert client.patch("/watchlist/email-sign-ups", json={"enabled": False}, headers=as_owner).status_code == 404
-    assert client.delete("/watchlist/email-sign-ups", headers=as_owner).status_code == 404
+    assert client.patch(f"/watchlist/{slug}", json={"enabled": False}, headers=as_owner).status_code == 404
+    assert client.delete(f"/watchlist/{slug}", headers=as_owner).status_code == 404
 
     # A trigger that can never match is refused, on create and on change.
-    empty = client.patch("/watchlist/email-sign-ups", json={"trigger": {"only_big": True}}, headers=as_sam)
+    empty = client.patch(f"/watchlist/{slug}", json={"trigger": {"only_big": True}}, headers=as_sam)
     assert empty.status_code == 422
     no_words = client.post("/watchlist", json={**body, "slug": "email-x", "trigger": {}}, headers=as_sam)
     assert no_words.status_code == 422
-    assert client.delete("/watchlist/email-sign-ups", headers=as_sam).status_code == 204
+    assert client.delete(f"/watchlist/{slug}", headers=as_sam).status_code == 204

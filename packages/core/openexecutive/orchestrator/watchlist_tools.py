@@ -475,7 +475,8 @@ async def _validated_target(
     if not isinstance(trigger, dict):
         return _err(tool, "trigger must be a JSON object")
 
-    slug = mailbox.free_slug(slug, _speaker_id())
+    if signal_type == SOURCE_KIND_MAILBOX:
+        slug = mailbox.own_slug(slug)
     if ms.get_watchlist_item_by_slug(slug) is not None:
         return _err(tool, f"slug {slug!r} already exists; use tune_watchlist_entry to modify")
 
