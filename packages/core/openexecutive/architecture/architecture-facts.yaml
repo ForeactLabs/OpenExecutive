@@ -5595,8 +5595,8 @@ chat:
     or table: "Now the live data.") leaves it once a later round writes
     the answer, sent as a rewrite with the clean text; a note with
     nothing after it stays. Each web search is a look for the after-reply
-    checks (web_search_tool.searched). A round whose web search didn't run
-    (WEB_SEARCH_MAX_USES per step, or a search error) gets one more round,
+    checks (web_search_tool.searched). A round whose web search hit the
+    per-step WEB_SEARCH_MAX_USES limit gets one more round,
     once a turn, to search again and write the whole reply again
     (SEARCH_AGAIN_NOTE, search_again audit row). Why: simulated-week research
     replies (11-18) kept working notes, were rewritten as "didn't look"

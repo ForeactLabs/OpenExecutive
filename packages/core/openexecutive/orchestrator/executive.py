@@ -2840,9 +2840,9 @@ class Executive:
                         # refusal, not on what the refused round began.
                         yield ("\n\n" if streamed_tail else "") + REFUSED_REPLY
                     return
-                # A web search that didn't run (the limit for one step, or the
-                # search down) gets one more round, once a turn, to search
-                # for what is still open: the limit starts over each step.
+                # A web search stopped by the limit for one step gets one more
+                # round, once a turn, to search for what is still open: the
+                # limit starts over each step.
                 if (
                     not (searched_again or handing_over or repeating)
                     and web_searches.search_failed(response_content)
