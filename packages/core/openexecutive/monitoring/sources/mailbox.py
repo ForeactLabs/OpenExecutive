@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from openexecutive.alerts.models import AlertSeverity
-from openexecutive.monitoring import mailbox
+from openexecutive.monitoring import mailbox, store
 from openexecutive.monitoring.models import SOURCE_KIND_MAILBOX, Signal, WatchlistItem
 from openexecutive.monitoring.sources.base import observe
 
@@ -37,6 +37,8 @@ _OVERLAP = timedelta(minutes=10)
 _SUMMARY_MAX = 200
 NOT_CONNECTED = "Couldn't read your inbox. Connect your mailbox under Act as me, and it will try again."
 NO_OWNER = "This watch has no inbox to read."
+# ``config_json`` key: when the last read that worked began.
+READ_THROUGH_KEY = "read_through"
 
 
 def _parse(value: str | None) -> datetime | None:
@@ -50,9 +52,13 @@ def _parse(value: str | None) -> datetime | None:
 
 
 def _since(item: WatchlistItem, now: datetime) -> datetime:
+    """From when to read: a little before the last read that worked
+    (``READ_THROUGH_KEY``), else from when the watch was set. Not the last
+    poll: a poll that couldn't read (inbox not connected, the mail service
+    down) must not move it on, or the mail that came meanwhile is skipped."""
     created = _parse(item.created_at) or now
-    polled = _parse(item.last_polled_at)
-    return max(created, polled - _OVERLAP) if polled is not None else created
+    read = _parse(str((item.config_json or {}).get(READ_THROUGH_KEY) or ""))
+    return max(created, read - _OVERLAP) if read is not None else created
 
 
 def summary_of(message: Any) -> str:
@@ -96,6 +102,9 @@ class MailboxSource:
         since = _since(item, now)
         created = _parse(item.created_at) or since
         received = await gmail_for(email).received_since(since, limit=_READ_LIMIT)
+        # Read: the next poll starts from here, whatever comes of what it found
+        # (the dedup key makes a re-read email a no-op).
+        store.set_watchlist_config_key(item.id, READ_THROUGH_KEY, now.isoformat(), db_path=db_path)
         signals: list[Signal] = []
         for message in received:
             arrived = _parse(getattr(message, "received_at", "") or "")

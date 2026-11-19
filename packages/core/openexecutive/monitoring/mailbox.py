@@ -63,11 +63,19 @@ def shown_to(item: WatchlistItem, person_id: int | None) -> bool:
 
 
 def tells(item: WatchlistItem) -> int | None:
-    """Who an email watch's cards go to: the person it was set to tell, else
-    its owner. None for every other watch (they route as they always have)."""
+    """Who an email watch's cards go to: the person it was set to tell while
+    they are on the team, else its owner. None for every other watch (they
+    route as they always have)."""
     if not is_mailbox(item):
         return None
-    return item.route_to_person_id if item.route_to_person_id is not None else owner_id(item)
+    told = item.route_to_person_id
+    if told is not None and told != owner_id(item):
+        from openexecutive.people.store import get_person
+
+        person = get_person(told)
+        if person is not None and not person.archived:
+            return told
+    return owner_id(item)
 
 
 def audit_privacy(item: WatchlistItem) -> dict[str, Any]:

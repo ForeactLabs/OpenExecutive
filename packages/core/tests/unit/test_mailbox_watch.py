@@ -166,14 +166,26 @@ def test_every_matching_email_since_the_watch_was_set_is_its_own_signal(
     assert box.asked == [set_at]
 
 
-def test_a_later_poll_reads_from_a_little_before_the_last_one(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_later_poll_reads_from_a_little_before_the_last_read_that_worked(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     item = _email_watch(db)
-    polled = datetime.fromisoformat(item.created_at) + timedelta(hours=1)
-    item = item.model_copy(update={"last_polled_at": polled.isoformat()})
     box = _Mailbox([], [])
     _patch_mailbox(monkeypatch, box)
     asyncio.run(mailbox_source.MailboxSource().poll(item, db_path=db))
-    assert box.asked == [polled - timedelta(minutes=10)]
+    item = ms.get_watchlist_item(item.id, db_path=db)
+    read = datetime.fromisoformat(item.config_json[mailbox_source.READ_THROUGH_KEY])
+    # Polls that couldn't read (inbox disconnected for hours) don't move it on.
+    _patch_mailbox(monkeypatch, box, status="needs_reconnect")
+    later = item.model_copy(update={
+        "created_at": (read - timedelta(days=1)).isoformat(),
+        "last_polled_at": (read + timedelta(hours=2)).isoformat(),
+    })
+    asyncio.run(mailbox_source.MailboxSource().poll(later, db_path=db))
+    assert ms.get_watchlist_item(item.id, db_path=db).config_json[mailbox_source.READ_THROUGH_KEY] == read.isoformat()
+    _patch_mailbox(monkeypatch, box)
+    asyncio.run(mailbox_source.MailboxSource().poll(later, db_path=db))
+    assert box.asked[-1] == read - timedelta(minutes=10)
 
 
 def test_an_unconnected_inbox_is_not_read(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -216,7 +228,9 @@ def test_company_wide_reads_leave_its_signals_out(db: Path) -> None:
     assert len(ms.list_signals_for_watchlist(item.id, db_path=db)) == 1
 
 
-def test_every_email_is_its_own_personal_card_for_the_owner(db: Path) -> None:
+def test_every_email_is_its_own_personal_card_for_the_owner(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    people = {OTHER: SimpleNamespace(id=OTHER, archived=False)}
+    monkeypatch.setattr("openexecutive.people.store.get_person", lambda pid: people.get(pid))
     item = _email_watch(db)
     signal = Signal(
         watchlist_id=item.id, source_kind=SOURCE_KIND_MAILBOX, source_external_id="m1",
@@ -234,6 +248,9 @@ def test_every_email_is_its_own_personal_card_for_the_owner(db: Path) -> None:
     # Set to tell someone else: it tells them.
     told = item.model_copy(update={"route_to_person_id": OTHER})
     assert _signal_to_alert_event(signal, told).routed_to_person_id == OTHER
+    # Once they leave the team, it tells its owner again, never anyone else.
+    people[OTHER].archived = True
+    assert _signal_to_alert_event(signal, told).routed_to_person_id == OWNER
 
 
 def test_its_audit_rows_are_its_owners() -> None:
