@@ -70,3 +70,15 @@ async def test_a_kept_reply_that_began_with_a_newline_prints_once(capsys: pytest
     stream = _kept_if_unwritten(_stream("\nI saved the doc.", {"type": "rewrite"}), Executive._THINKING)
     assert await cli.print_reply(stream) == "\nI saved the doc."
     assert "Corrected" not in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+async def test_a_reply_with_its_working_notes_left_out_prints_once(capsys: pytest.CaptureFixture[str]) -> None:
+    """Leaving out a note corrects nothing, so the terminal doesn't print the answer again."""
+    final = await cli.print_reply(_stream(
+        "Nothing in the mailbox. Now the live data.", "\n\nRunway is 14 months.",
+        {"type": "rewrite"}, "Nothing in the mailbox.\n\nRunway ", "is 14 months.",
+    ))
+    out = capsys.readouterr().out
+    assert final == "Nothing in the mailbox.\n\nRunway is 14 months."
+    assert "Corrected" not in out and out.count("Runway is 14 months.") == 1
