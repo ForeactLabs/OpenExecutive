@@ -2671,6 +2671,16 @@ def test_a_direct_message_to_someone_new_offers_nothing_where_goes_rules_dont_co
     assert ttl.rule_offers(*dm, ttl.SOMEONE_NEW, mcp=False) == []
 
 
+def test_a_topic_waits_rule_sees_who_a_booking_invites(owner: Any) -> None:
+    ids = [
+        people_store.upsert_person(full_name=f"P{i}", email=f"p{i}@co.example")
+        for i in range(ttl.BIG_SEND_RECIPIENTS + 1)
+    ]
+    booking = ("create_calendar_event", {"title": "Sync", "attendee_person_ids": ids})
+    assert ttl.BIG_SEND in ttl.topics_of(*booking)
+    assert ttl.SOMEONE_NEW in ttl.topics_of("create_calendar_event", {"title": "Sync", "attendee_person_ids": [9999]})
+
+
 def test_just_above() -> None:
     assert [ttl._just_above(x) for x in (450, 1200, 8000, 10, 99.5)] == ["500", "1500", "10000", "15", "100"]
 

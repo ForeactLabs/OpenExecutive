@@ -1465,11 +1465,13 @@ def topics_in(text: str, recipients: Iterable[str] = (), *, on_error: frozenset[
 
 
 def topics_of(tool: str, tool_input: dict[str, Any], *, mcp: bool = False, reaches: Iterable[str] = ()) -> set[str]:
-    """The topics (``KINDS``) a step is about, for topic rules. Never
+    """The topics (``KINDS``) a step is about, for topic rules: who it
+    reaches includes everyone a booking invites (``_rule_targets``). Never
     raises: an error is every topic."""
     try:
+        invited, _ = _rule_targets(tool, tool_input)
         recipients = sorted({
-            a.lower() for a in [*_reach_addresses(tool, tool_input), *reaches] if not _executive(a)
+            a.lower() for a in [*_reach_addresses(tool, tool_input), *invited, *reaches] if not _executive(a)
         })
         about = says(tool, tool_input, mcp=mcp)
         return {k for k, _ in _topics(tool, tool_input, recipients=recipients, about=about, mcp=mcp)}
