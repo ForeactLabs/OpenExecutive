@@ -38,7 +38,7 @@ from openexecutive.alerts.pipeline import schedule_evaluation
 from openexecutive.audit import log_event as audit_log
 from openexecutive.config import get_settings
 from openexecutive.memory.episodic import insert_scheduled_action
-from openexecutive.monitoring import store
+from openexecutive.monitoring import mailbox, store
 from openexecutive.monitoring.enrichment import build_company_context, enrich_signal
 from openexecutive.monitoring.models import (
     EVENT_QUIET_FIND,
@@ -339,7 +339,12 @@ def _signal_to_alert_event(
         # One watch = one open alert: repeats of the same watch coalesce
         # into the existing card (alerts.pipeline) while the signal-level
         # dedup_key keeps every observation in external_signals.
-        dedup_hint=f"watch:{item.slug}",
+        # An email watch's card is one email, so every email that matches
+        # is its own card and reaches the person (``#`` keeps the watch's
+        # slug readable: ``briefing.ranking.watch_slug_of``).
+        dedup_hint=(
+            f"watch:{item.slug}#{signal.source_external_id}" if mailbox.is_mailbox(item) else f"watch:{item.slug}"
+        ),
         # A watch that belongs to a department (set by the research policy
         # from the department's watched entities, or by hand) sends its
         # alerts to that department's head and tags them department:<slug>
@@ -347,7 +352,7 @@ def _signal_to_alert_event(
         # instead of the principal's. The slug goes in ``department`` — a
         # tag hint — never in ``channel``, which triage would read as the
         # room the event came from and answer with a team-room broadcast.
-        routed_to_person_id=item.route_to_person_id,
+        routed_to_person_id=mailbox.tells(item) if mailbox.is_mailbox(item) else item.route_to_person_id,
         department=item.route_to_department,
     )
 
@@ -410,6 +415,7 @@ async def promote_signal_to_alert(
             # embed a token in the link; we don't want it in audit.
             "provenance_url": _safe_url(signal.provenance_url),
         },
+        **mailbox.audit_privacy(item),
     )
     return True
 
@@ -552,6 +558,7 @@ def _audit_received(signal_id: int, item: WatchlistItem, signal: Signal) -> None
             "severity_hint": signal.severity_hint.value,
             "dedup_key": signal.dedup_key,
         },
+        **mailbox.audit_privacy(item),
     )
 
 
@@ -594,6 +601,7 @@ def _audit_deferred(item: WatchlistItem, tally: _PollTally) -> None:
                 for s in deferred[:10]
             ],
         },
+        **mailbox.audit_privacy(item),
     )
 
 
@@ -620,6 +628,7 @@ def _audit_suppressed(
             "dedup_key": signal.dedup_key,
             "outcome": outcome,
         },
+        **mailbox.audit_privacy(item),
     )
 
 
@@ -643,6 +652,7 @@ def _note_for_brief(item: WatchlistItem, signal: Signal) -> None:
             "source_kind": signal.source_kind,
             "provenance_url": _safe_url(signal.provenance_url),
         },
+        **mailbox.audit_privacy(item),
     )
 
 
@@ -1284,7 +1294,7 @@ async def run_external_monitor_scan(
     settings = get_settings()
     cap_total = settings.external_monitor_max_signals_per_scan
 
-    items = store.list_watchlist(enabled_only=True, db_path=db_path)
+    items = store.list_watchlist(enabled_only=True, every_watch=True, db_path=db_path)
     if not items:
         return 0
 
@@ -1368,6 +1378,7 @@ async def run_external_monitor_scan(
                     "duration_ms": duration_ms,
                     "failed": failed,
                 },
+                **mailbox.audit_privacy(item),
             )
 
     try:

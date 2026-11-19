@@ -351,7 +351,8 @@ async def watches() -> str:
     from openexecutive.api.routes.watchlist import list_watchlist
 
     await _require_person()
-    rows = await asyncio.to_thread(list_watchlist)
+    # Through the route, so an email watch shows to its owner alone.
+    rows = await _through_route(list_watchlist)
     return _json([r.model_dump(mode="json") for r in rows])
 
 

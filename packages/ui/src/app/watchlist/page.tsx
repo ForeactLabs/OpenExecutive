@@ -69,6 +69,11 @@ const SIGNAL_TYPES: { value: WatchlistSignalType; label: string; hint: string }[
     label: "Web search",
     hint: "What to search for, e.g. Acme Corp layoffs OR restructuring OR funding",
   },
+  {
+    value: "mailbox",
+    label: "Email",
+    hint: "What to watch your inbox for, e.g. sign-up emails. Say who it's from or a word in its subject below.",
+  },
 ];
 
 // query runs an LLM web search every poll, so it bills per tick — unlike the
@@ -434,7 +439,9 @@ function WatchForm({ initial, onCreated }: WatchFormProps) {
                         signalType === "query" ||
                         signalType === "page_watch"
                       ? '{"keywords": ["layoffs", "downtime"]}'
-                      : "{}"
+                      : signalType === "mailbox"
+                        ? '{"from": ["pat@example.com"], "keywords": ["sign up"]}'
+                        : "{}"
               }
               rows={3}
               className={`${fieldCls} font-mono text-sm`}

@@ -31,6 +31,11 @@ SOURCE_KIND_EDGAR = "edgar"
 # and emits a Signal when it changes vs the last poll; watches feed-less pages
 # (pricing, careers, leadership). Stateful (see monitoring.store page_watch_state).
 SOURCE_KIND_PAGE_WATCH = "page_watch"
+# One person's own inbox (Act as me's mailbox: Gmail or Outlook): tells them
+# every time an email comes in from a sender they named, or whose subject or
+# sender says one of their words. Private to that person
+# (``monitoring.mailbox``); never a company-wide watch.
+SOURCE_KIND_MAILBOX = "mailbox"
 
 # page_watch fetch-source marker. Every page_watch row is now fetched with the
 # keyless httpx fetcher; rows written before the xcrawl scrape path was removed

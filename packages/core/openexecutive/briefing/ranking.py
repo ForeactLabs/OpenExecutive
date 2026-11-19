@@ -48,7 +48,7 @@ _ACTION_SEVERITIES = frozenset({"high", "urgent"})
 # it here is what silently kept its low/medium signals out of the Monitoring
 # lane — they fell through to ``"action"`` instead.
 _EXTERNAL_SOURCES = frozenset({
-    "stock", "vendor_status", "rss", "watchlist", "query", "edgar", "page_watch",
+    "stock", "vendor_status", "rss", "watchlist", "query", "edgar", "page_watch", "mailbox",
 })
 
 
@@ -192,7 +192,8 @@ def watch_slug_of(alert: Any) -> str | None:
     dedup = str(getattr(alert, "dedup_key", "") or "")
     if not dedup.startswith("watch:"):
         return None
-    slug = dedup[len("watch:"):]
+    # An email watch's card is one email: ``watch:<slug>#<email id>``.
+    slug = dedup[len("watch:"):].split("#", 1)[0]
     tagged = watch_slug_from_tags(list(getattr(alert, "topic_tags", None) or []))
     return slug if slug and tagged == slug else None
 

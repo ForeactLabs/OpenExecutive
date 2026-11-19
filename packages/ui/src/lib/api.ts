@@ -6542,7 +6542,8 @@ export type WatchlistSignalType =
   | "vendor_status"
   | "query"
   | "edgar"
-  | "page_watch";
+  | "page_watch"
+  | "mailbox";
 export type WatchlistCadence = "real_time" | "15min" | "hourly" | "daily" | "weekly";
 export type WatchlistMode = "active" | "dry_run";
 export type WatchlistSeverity = "low" | "medium" | "high" | "urgent";

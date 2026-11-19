@@ -389,7 +389,7 @@ async def _find_watch_suggestions(request: Any) -> list[Item]:
     from openexecutive.api.routes import watchlist
 
     out = []
-    for w in await _call(watchlist.list_watchlist):
+    for w in await _call(watchlist.list_watchlist, request):
         try:
             watchlist._pending_suggestion_or_409(w.slug)
         except Exception:

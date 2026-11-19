@@ -40,6 +40,7 @@ from openexecutive.monitoring.models import (
     OUTCOME_ALERTED,
     OUTCOME_HELD_DIGEST,
     OUTCOME_SUPPRESSED_BASELINE,
+    SOURCE_KIND_MAILBOX,
     Signal,
     WatchlistDecline,
     WatchlistItem,
@@ -450,8 +451,16 @@ def list_watchlist(
     *,
     enabled_only: bool = False,
     signal_type: str | None = None,
+    for_person: int | None = None,
+    every_watch: bool = False,
     db_path: Path | None = None,
 ) -> list[WatchlistItem]:
+    """The watches, oldest first. An email watch is its owner's alone
+    (``monitoring.mailbox``), so it is listed only ``for_person`` its owner,
+    or with ``every_watch`` (the scan that checks them); every other watch
+    is the company's and always listed."""
+    from openexecutive.monitoring import mailbox
+
     resolved = _resolve_db_path(db_path)
     if not resolved.exists():
         return []
@@ -468,7 +477,8 @@ def list_watchlist(
             f"SELECT * FROM watchlist {where} ORDER BY id",
             params,
         ).fetchall()
-    return [_row_to_watchlist(row) for row in rows]
+    items = [_row_to_watchlist(row) for row in rows]
+    return items if every_watch else [i for i in items if mailbox.shown_to(i, for_person)]
 
 
 def mark_polled(
@@ -1147,12 +1157,13 @@ def list_recent_signals(
     db_path: Path | None = None,
 ) -> list[dict[str, Any]]:
     """Read recent signals — used by the reflection context extension in PR-C
-    and by the audit/debug endpoints."""
+    and by the audit/debug endpoints. The company's only: an email watch's
+    signals are its owner's (``monitoring.mailbox``)."""
     resolved = _resolve_db_path(db_path)
     if not resolved.exists():
         return []
-    clauses: list[str] = []
-    params: list[Any] = []
+    clauses: list[str] = ["source_kind != ?"]
+    params: list[Any] = [SOURCE_KIND_MAILBOX]
     if since is not None:
         clauses.append("captured_at >= ?")
         params.append(since.isoformat())

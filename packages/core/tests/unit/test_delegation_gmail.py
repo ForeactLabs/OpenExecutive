@@ -353,6 +353,8 @@ def test_the_only_send_is_an_existing_draft_by_its_id() -> None:
         "answer_invite",
         # A contact's newest mail, for their signature (people.contact_keeper): read-only.
         "latest_from", "recent_from",
+        # An email watch on the watch list (monitoring.sources.mailbox): read-only.
+        "received_since",
     }
     # Gmail's send endpoints (/settings/sendAs is a read, and allowed): the
     # draft one, once, and never messages.send, which sends any text.

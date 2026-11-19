@@ -32,6 +32,9 @@ _RATE_LIMIT_PER_MIN = 60
 _recent_event_ts: deque[float] = deque(maxlen=_RATE_LIMIT_PER_MIN)
 _rate_lock = threading.Lock()
 
+# Where a personal card (``PERSONAL_SOURCES``) may go: to its person only.
+_PERSONAL_CHANNELS = frozenset({AlertChannel.WEB, AlertChannel.PERSISTED, AlertChannel.SLACK_DM})
+
 
 # Severities that justify re-dispatching a coalesced alert (a repeat that
 # escalated the open situation into "look now" territory).
@@ -280,6 +283,12 @@ async def evaluate_and_dispatch(
         effective_channels = [
             c for c in effective_channels if c != AlertChannel.COMPANY_BROADCAST
         ]
+    if event.source in PERSONAL_SOURCES:
+        # A card that is one person's alone (an email watch's sender and
+        # subject, say) reaches only them: the page, their own DM. Never a
+        # room, and never the Executive's own mailbox, whatever triage made
+        # of its words.
+        effective_channels = [c for c in effective_channels if c in _PERSONAL_CHANNELS]
 
     # A producer that knows the stable identity of the situation (a watch
     # slug) wins over the model's free-text key.

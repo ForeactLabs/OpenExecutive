@@ -220,13 +220,17 @@ async def test_needs_you_is_homes_cards_for_the_caller() -> None:
 
 
 @pytest.mark.asyncio
-async def test_watches_list_the_watchlist() -> None:
+async def test_watches_list_the_watchlist_through_its_route() -> None:
+    # Through the route, so an email watch shows to its owner alone.
+    request = object()
+    route = Mock(return_value=[_Dumpable({"slug": "acme"})])
     with patch.object(
         mcp_server, "_require_person", AsyncMock(return_value=mcp_server.McpCaller(1, True))
-    ), patch(
-        "openexecutive.api.routes.watchlist.list_watchlist", return_value=[_Dumpable({"slug": "acme"})]
+    ), patch.object(mcp_server, "_http_request", return_value=request), patch(
+        "openexecutive.api.routes.watchlist.list_watchlist", new=route
     ):
         assert json.loads(await mcp_server.watches()) == [{"slug": "acme"}]
+    route.assert_called_once_with(request)
 
 
 @pytest.mark.asyncio
@@ -395,7 +399,9 @@ def test_a_teammate_reads_them_but_a_service_does_not(
 
 def test_a_service_reads_no_watches(roster: dict[str, int]) -> None:
     rows = [_Dumpable({"slug": "acme"})]
-    with patch("openexecutive.api.routes.watchlist.list_watchlist", return_value=rows):
+    with patch("openexecutive.api.routes.watchlist.list_watchlist", return_value=rows), patch.object(
+        mcp_server, "_http_request", return_value=object()
+    ):
         assert json.loads(_read("watches", Caller("user", TEAMMATE))) == [{"slug": "acme"}]
         for nobody in (Caller("service"), Caller("user", "stranger@else.example")):
             with pytest.raises(mcp_server.CallerRefused):
