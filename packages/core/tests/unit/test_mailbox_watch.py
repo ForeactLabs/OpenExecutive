@@ -228,9 +228,7 @@ def test_company_wide_reads_leave_its_signals_out(db: Path) -> None:
     assert len(ms.list_signals_for_watchlist(item.id, db_path=db)) == 1
 
 
-def test_every_email_is_its_own_personal_card_for_the_owner(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    people = {OTHER: SimpleNamespace(id=OTHER, archived=False)}
-    monkeypatch.setattr("openexecutive.people.store.get_person", lambda pid: people.get(pid))
+def test_every_email_is_its_own_personal_card_for_the_owner(db: Path) -> None:
     item = _email_watch(db)
     signal = Signal(
         watchlist_id=item.id, source_kind=SOURCE_KIND_MAILBOX, source_external_id="m1",
@@ -245,12 +243,11 @@ def test_every_email_is_its_own_personal_card_for_the_owner(db: Path, monkeypatc
     )) == "email-sign-ups"
     assert event.routed_to_person_id == OWNER
     assert event.source in PERSONAL_SOURCES
-    # Set to tell someone else: it tells them.
-    told = item.model_copy(update={"route_to_person_id": OTHER})
-    assert _signal_to_alert_event(signal, told).routed_to_person_id == OTHER
-    # Once they leave the team, it tells its owner again, never anyone else.
-    people[OTHER].archived = True
-    assert _signal_to_alert_event(signal, told).routed_to_person_id == OWNER
+    # Set to tell someone else, or a department: it still tells only its
+    # owner (text in an email it read can't send their mail to anyone).
+    told = item.model_copy(update={"route_to_person_id": OTHER, "route_to_department": "sales"})
+    event = _signal_to_alert_event(signal, told)
+    assert (event.routed_to_person_id, event.department) == (OWNER, "")
 
 
 def test_its_audit_rows_are_its_owners() -> None:

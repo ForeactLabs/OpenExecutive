@@ -14,8 +14,9 @@ With both, an email must meet both. With neither, it matches nothing (a
 watch on every email is what the inbox itself is).
 
 Private, like the mail it reads: only its owner sees it on the watch list
-and in the Executive's tools (``shown_to``), its cards are theirs alone
-(``alerts.models.PERSONAL_SOURCES``), and its audit rows are private to them
+and in the Executive's tools (``shown_to``), its cards go to them and no one
+else, whoever the watch was set to tell (``alerts.models.PERSONAL_SOURCES``,
+``monitoring.pipeline``), and its audit rows are private to them
 (``audit_privacy``). Privacy hides it from everyone else; it never stops it.
 """
 from __future__ import annotations
@@ -60,22 +61,6 @@ def shown_to(item: WatchlistItem, person_id: int | None) -> bool:
     if not is_mailbox(item):
         return True
     return person_id is not None and owner_id(item) == person_id
-
-
-def tells(item: WatchlistItem) -> int | None:
-    """Who an email watch's cards go to: the person it was set to tell while
-    they are on the team, else its owner. None for every other watch (they
-    route as they always have)."""
-    if not is_mailbox(item):
-        return None
-    told = item.route_to_person_id
-    if told is not None and told != owner_id(item):
-        from openexecutive.people.store import get_person
-
-        person = get_person(told)
-        if person is not None and not person.archived:
-            return told
-    return owner_id(item)
 
 
 def audit_privacy(item: WatchlistItem) -> dict[str, Any]:
@@ -140,5 +125,4 @@ __all__ = [
     "owner_config",
     "owner_id",
     "shown_to",
-    "tells",
 ]

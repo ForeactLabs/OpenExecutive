@@ -236,7 +236,8 @@ class _Names:
 
 def _view(item: WatchlistItem, names: _Names) -> dict[str, Any]:
     told = names.last_told.get(item.id or 0)
-    person_name, person_role = names.person(item.route_to_person_id)
+    # An email watch tells its owner alone (monitoring.pipeline), so it is for "You".
+    person_name, person_role = names.person(None if mailbox.is_mailbox(item) else item.route_to_person_id)
     return {
         **item.model_dump(),
         "title": watch_title(item),

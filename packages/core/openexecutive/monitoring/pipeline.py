@@ -352,8 +352,11 @@ def _signal_to_alert_event(
         # instead of the principal's. The slug goes in ``department`` — a
         # tag hint — never in ``channel``, which triage would read as the
         # room the event came from and answer with a team-room broadcast.
-        routed_to_person_id=mailbox.tells(item) if mailbox.is_mailbox(item) else item.route_to_person_id,
-        department=item.route_to_department,
+        # An email watch's cards are its owner's alone: their mail never
+        # reaches anyone else, whoever or whichever department the watch was
+        # set to tell.
+        routed_to_person_id=mailbox.owner_id(item) if mailbox.is_mailbox(item) else item.route_to_person_id,
+        department="" if mailbox.is_mailbox(item) else item.route_to_department,
     )
 
 

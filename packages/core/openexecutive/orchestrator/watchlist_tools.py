@@ -174,7 +174,8 @@ ADD_WATCHLIST_ENTRY_TOOL: dict[str, Any] = {
                     "The People id of the teammate this watch is for: what "
                     "it finds is told to them. Leave out for the person "
                     "asking (a teammate's own watch tells them; otherwise "
-                    "the principal)."
+                    "the principal). An email watch always tells the person "
+                    "whose inbox it reads, so it has no effect on one."
                 ),
             },
             "route_to_specialist": {
@@ -293,7 +294,10 @@ TUNE_WATCHLIST_ENTRY_TOOL: dict[str, Any] = {
             },
             "for_person_id": {
                 "type": ["integer", "null"],
-                "description": "People id of the teammate it is for; null means the principal.",
+                "description": (
+                    "People id of the teammate it is for; null means the principal. "
+                    "No effect on an email watch, which tells only the person whose inbox it reads."
+                ),
             },
             "cadence": {
                 "type": "string",

@@ -718,6 +718,8 @@ export default function WatchDetailPage() {
               <Row
                 label="It is for"
                 action={
+                  // An email watch tells only the person whose inbox it reads.
+                  item.signal_type !== "mailbox" &&
                   editing !== "for" && (
                     <button type="button" className={linkBtn} onClick={() => setEditing("for")}>
                       Change
