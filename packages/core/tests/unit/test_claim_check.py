@@ -58,6 +58,9 @@ def test_word_check_skips_replies_that_claim_nothing() -> None:
     assert claim_check.may_claim("Any email from Sam gets flagged; I'll ping you right away.")
     assert claim_check.may_claim("Keeping an eye out for Sam's email.")
     assert claim_check.may_claim("I’ll flag it the moment it lands.")
+    for timetable in ("Your recap goes out each Friday.", "It goes out weekly on Fridays.",
+                      "It goes out every other Friday.", "You get it every two weeks."):
+        assert claim_check.may_claim(timetable), timetable
 
 
 def test_judge_is_told_a_call_backs_only_what_it_made() -> None:

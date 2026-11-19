@@ -39,8 +39,9 @@ CLAIM_RE = re.compile(
     r"sent|moved|archived|cleared|fixed|taken care of|handled|treat(?:ed|ing)? "
     r"(?:it|this|that|the)|i['’]?ve|i have|i['’]?ll remind|will remind|reminder (?:is )?set|"
     r"won'?t (?:show|appear|include)|no longer|from now on|going forward|"
-    r"every (?:day|week|month|morning|evening|weekday|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|"
-    r"each (?:day|week|month|morning|evening)|keep(?:ing)? an eye|watching|"
+    r"(?:every|each)(?: other| \d+| two| few)? "
+    r"(?:day|week|month|morning|evening|weekday|monday|tuesday|wednesday|thursday|friday|saturday|sunday)s?|"
+    r"daily|weekly|monthly|keep(?:ing)? an eye|watching|"
     r"(?:i['’]?ll|i will) (?:flag|ping|let you know|tell you|schedule|watch|send))\b",
     re.IGNORECASE,
 )
