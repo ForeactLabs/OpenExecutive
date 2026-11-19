@@ -66,7 +66,7 @@ def _result_error(block: dict[str, Any]) -> str | None:
 
 def search_failed(blocks: list[dict[str, Any]]) -> bool:
     """Whether a web search in this round's blocks came back with an error
-    (the per-step limit reached, or the search unavailable)."""
+    (too many searches in one step, or the search down)."""
     return any(
         b.get("type") == "web_search_tool_result" and _result_error(b) is not None for b in blocks
     )
