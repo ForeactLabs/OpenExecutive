@@ -12307,8 +12307,9 @@ delegation:
     auto-send per thread per day, delegation_handled: the loop guard, a
     card too), in_a_row (last own message in the thread was an auto-send).
     No daily cap and no length limit. Below Hands-off also stranger (not team, contact or past
-    correspondent), and sensitive: on Balanced, one of the seven topics in
-    the email, its subject, the reply or who it goes to
+    correspondent), and sensitive: on Balanced, a topic the words of the
+    email, its subject or the reply are about (who it goes to is the
+    recipients check above)
     (handle_it.content_hold -> take_the_lead.held_topic, also on follow-ups
     and, topic only, invite titles); Hands-off sends them. No word list,
     link or password check of its own: the same topics and Goes rules as

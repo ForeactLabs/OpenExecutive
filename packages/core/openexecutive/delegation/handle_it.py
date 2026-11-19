@@ -133,7 +133,7 @@ REASONS: dict[str, str] = {
     "work_stranger": "I did what they asked, and they aren't in your People, so it waits for you to look.",
     # Meeting invites (delegation.invites).
     "stranger": "Below Hands-off it acts on its own only for people you know.",
-    "sensitive": "On Balanced, mail about money, a contract or hiring, or to someone new or a lot of people, waits for you.",
+    "sensitive": "On Balanced, mail about money, a contract or hiring waits for you.",
     "rule": "One of your rules says this waits for you.",
     "clash": "It clashes with something already on your calendar.",
     "calendar_unread": "It couldn't check your calendar for clashes, so it asked instead.",
@@ -169,9 +169,10 @@ def content_hold(
     (``sensitive``) unless a Goes rule lets it go
     (``take_the_lead.held_topic``), as for any other step. ``texts`` are
     read for rules and topics, ``sent_texts`` (what it would send) for
-    Goes amounts, ``recipients`` for person and company rules and for the
-    Someone new and Big sends topics. Unreadable rules hold, on Hands-off
-    too."""
+    Goes amounts, ``recipients`` for Waits rules (Someone new and Big sends
+    among them) and for which person and company Goes rules match. Who it
+    may go to is the sender's own check. Unreadable rules hold, on
+    Hands-off too."""
     from openexecutive.orchestrator import take_the_lead
 
     going = [r.strip().lower() for r in recipients if r and r.strip()]

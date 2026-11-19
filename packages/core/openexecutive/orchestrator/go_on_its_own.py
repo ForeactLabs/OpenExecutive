@@ -47,7 +47,7 @@ _AS_YOU_BECAUSE: dict[str, str] = {
     "level": "Approvals is on Careful",
     "stranger": "they went to someone outside People",
     "work_stranger": "they went to someone outside People",
-    "sensitive": "they were about money, a contract, hiring or someone new",
+    "sensitive": "they were about money, a contract or hiring",
     "rule": "one of your rules says to wait",
     "unsure": "it wasn't sure enough",
     "suspicious": "the email tried to give it instructions",
