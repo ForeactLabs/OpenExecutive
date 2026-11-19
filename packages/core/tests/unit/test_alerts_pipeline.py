@@ -814,3 +814,30 @@ def test_a_step_the_grounding_rewrote_loses_its_buttons_words(monkeypatch: pytes
 
     monkeypatch.setattr(grounding, "ground_alert_text", keep)
     assert pipeline._ground_decision(decision, event, []).action_label == "Email Dana and Sam"
+
+
+def test_a_burst_past_the_minutes_cap_waits_its_turn_never_dropped(monkeypatch) -> None:
+    # Four email watches catching up at once: 80 evaluations in a minute.
+    # The cap paces them; every one is still evaluated.
+    from openexecutive.alerts import pipeline as ap
+
+    clock = [1000.0]
+    slept: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        slept.append(seconds)
+        clock[0] += seconds
+
+    monkeypatch.setattr(ap.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(ap.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(ap, "_recent_event_ts", ap.deque(maxlen=ap._RATE_LIMIT_PER_MIN))
+
+    async def burst() -> int:
+        done = 0
+        for _ in range(ap._RATE_LIMIT_PER_MIN + 20):
+            await ap._wait_for_slot()
+            done += 1
+        return done
+
+    assert asyncio.run(burst()) == ap._RATE_LIMIT_PER_MIN + 20
+    assert slept and clock[0] >= 1060.0

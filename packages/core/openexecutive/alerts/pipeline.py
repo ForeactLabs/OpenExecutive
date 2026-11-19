@@ -27,8 +27,9 @@ logger = logging.getLogger(__name__)
 # mid-flight (mirrors memory.episodic._background_tasks).
 _background_tasks: set[asyncio.Task[Any]] = set()
 
-# Simple rolling-window rate limiter on event evaluations. Cost guard against
-# runaway cost from a misbehaving integration. Single-process only.
+# Simple rolling-window pacing of event evaluations (``_wait_for_slot``).
+# Cost guard against runaway cost from a misbehaving integration: a burst
+# waits its turn, never dropped. Single-process only.
 _RATE_LIMIT_PER_MIN = 60
 _recent_event_ts: deque[float] = deque(maxlen=_RATE_LIMIT_PER_MIN)
 _rate_lock = threading.Lock()
@@ -70,17 +71,27 @@ def _with_department_tag(tags: list[str], channel: str | None) -> list[str]:
     return list(tags) if tag in tags else [*tags, tag]
 
 
-def _rate_limited() -> bool:
-    """Returns True when the per-minute cap has been hit."""
+def _take_slot() -> float:
+    """Take one of the minute's evaluations: 0 when taken, else the seconds
+    until one frees up."""
     now = time.monotonic()
     with _rate_lock:
         cutoff = now - 60.0
         while _recent_event_ts and _recent_event_ts[0] < cutoff:
             _recent_event_ts.popleft()
         if len(_recent_event_ts) >= _RATE_LIMIT_PER_MIN:
-            return True
+            return max(_recent_event_ts[0] - cutoff, 0.01)
         _recent_event_ts.append(now)
-        return False
+        return 0.0
+
+
+async def _wait_for_slot() -> None:
+    """Pace evaluations to ``_RATE_LIMIT_PER_MIN``: one past the cap waits
+    for the next minute's room, never dropped. A dropped event never comes
+    back (its source has marked it handed over: an email watch's email, a
+    watch's change), so the cap only spreads a burst out."""
+    while (wait := _take_slot()) > 0:
+        await asyncio.sleep(wait)
 
 
 def _make_private(
@@ -249,20 +260,7 @@ async def evaluate_and_dispatch(
     """
     path = db_path or store.DB_PATH
 
-    if _rate_limited():
-        logger.warning(
-            "alerts.pipeline rate-limited: dropping event source=%s ext_id=%s",
-            event.source,
-            event.external_id,
-        )
-        return (
-            TriageDecision(
-                alert=False,
-                dedup_key=f"rate-limited-{event.source}-{event.external_id}",
-                reason_if_suppressed="rate_limited",
-            ),
-            None,
-        )
+    await _wait_for_slot()
 
     prefs = preferences.get_preferences(db_path=path)
     if event.as_written:
