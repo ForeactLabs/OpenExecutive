@@ -785,7 +785,9 @@ def _names_a_contact(payloads: tuple[Any, ...]) -> bool:
 
 
 def _roster_refusal_reason(session: Any) -> str | None:
-    """None when this turn may change the roster, else what to tell the asker."""
+    """None when this turn may change the roster, else what to tell the asker.
+    Said plainly to the person who asked, and passed to no one: the
+    Executive never messages anyone or makes a card about it for them."""
     from openexecutive.people.store import is_principal_or_self
 
     from_web = bool(getattr(session, "from_web_chat", False))
@@ -793,8 +795,9 @@ def _roster_refusal_reason(session: Any) -> str | None:
         return (
             "Only the company's owner can change the People list, and this request "
             "did not come from somewhere I can confirm it is them. Tell whoever "
-            "asked that the owner needs to make this change, from the web app or "
-            "their own Slack or Discord."
+            "asked, plainly, that the owner can make this change from the web app or "
+            "their own Slack or Discord. Send nothing on their behalf: no message, "
+            "card or alert to anyone about it."
         )
     caller = getattr(session, "caller_person_id", None)
     try:
@@ -814,7 +817,8 @@ def _roster_refusal_reason(session: Any) -> str | None:
     return (
         "Only the company's owner can add, change or remove people or set "
         "department heads, and this request came from someone else. Tell them "
-        "the owner needs to make this change."
+        "that plainly; they ask the owner themselves. Send nothing on their "
+        "behalf: no message, card or alert to the owner about it."
     )
 
 
