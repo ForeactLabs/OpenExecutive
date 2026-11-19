@@ -203,11 +203,12 @@ _MCP_REMOVE_RE = re.compile(r"(delete|remove|trash|cancel|clear|archive)", re.IG
 _MCP_SHARE_RE = re.compile(r"(share|permission)", re.IGNORECASE)
 
 # "Sign" is signing something, not an account: signing up (sign-ups,
-# signup), a sign-in or sign-out page, or signing in to an app. A bare "sign
-# in" ("sign in the box", "sign in person") is still signing.
+# signup), a sign-in, sign-on or sign-out page, signing in to, into or on to
+# an app, or signing out. A bare "sign in" or "sign on" ("sign in the box",
+# "sign on the dotted line") is still signing.
 _CONTRACTS_RE = re.compile(
     r"\b(contracts?|agreements?|"
-    r"sign(?:ed)?(?![-\s]?ups?\b|-?(?:ins?|outs?)\b|\s+in\s+to\b|\s+out\s+of\b)|"
+    r"sign(?:ed)?(?![-\s]?ups?\b|-?(?:ins?|outs?|ons?)\b|\s+(?:in|on)\s+to\b|\s+into\b|\s+out\b)|"
     r"signature|nda|terms|legal|lawyers?|"
     r"liabilit\w*|lawsuit)\b",
     re.IGNORECASE,
