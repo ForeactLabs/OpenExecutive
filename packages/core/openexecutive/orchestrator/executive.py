@@ -1041,16 +1041,20 @@ def _round_separator(tail: str, text: str) -> str:
 
 # Longest text before a tool call that is still a working note.
 WORKING_NOTE_MAX_CHARS = 300
-# A sentence that says what it does next: how a working note reads ("Now
-# the live data.", "Let me check the folder."). Anchored to the sentence's
-# start, and "now"/"next" only with a step after them ("Now that Acme
-# signed, ..." is an answer).
+# A sentence that only says what it does next: how a working note reads
+# ("Now the live data.", "Let me check the folder.", "Checking the sheet
+# now."). Matched whole: a short sentence with no comma, colon or figure,
+# so a sentence that carries a finding ("Searching the CRM turned up
+# nothing.", "Now the bad news: Acme churned.") is never one.
 _NEXT_STEP_RE = re.compile(
-    r"^(?:let me|let's|now,? (?:to|for|on to|let|i'll|i will|checking|looking|searching|the)\b|"
-    r"next,? (?:to|let|i'll|i will|checking|looking|searching|the)\b|time to|checking|looking (?:up|for|into|at)|"
-    r"searching|pulling|i'll (?:check|look|search|pull|find|try)|i will (?:check|look|search|pull|find|try))",
+    r"^(?:(?:let me|let's) (?:check|look|pull|find|search|try|see|get|grab|open|read|dig)\b"
+    r"|now (?:to|for|on to|the|let me|i'll|i will)\b|next (?:to|let me|i'll|i will|the)\b|time to\b"
+    r"|i'll (?:check|look|search|pull|find|try)\b|i will (?:check|look|search|pull|find|try)\b"
+    r"|(?:checking|looking|searching|pulling)\b.*\bnow[.!]?$)",
     re.IGNORECASE,
 )
+# Longest sentence a working note's step can be.
+NEXT_STEP_MAX_CHARS = 80
 _SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+")
 # A call that only looks something up (whole name segments, as in "search_gmail_messages").
 _LOOKUP_CALL_RE = re.compile(
@@ -1076,17 +1080,25 @@ def _only_looks(tool_uses: list[dict[str, Any]]) -> bool:
     return bool(names) and all(_LOOKUP_CALL_RE.search(n) for n in names)
 
 
+def _is_next_step(sentence: str) -> bool:
+    return (
+        len(sentence) <= NEXT_STEP_MAX_CHARS
+        and not any(c.isdigit() or c in ",:;" for c in sentence)
+        and _NEXT_STEP_RE.match(sentence) is not None
+    )
+
+
 def _less_notes(text: str) -> str | None:
     """A round's text before its lookups without its working-note
-    sentences, when it had any, else None. Only a line or two with no list
-    or table is looked at, and a sentence with a figure always stays, so
-    "Yes, Acme signed it. Let me pull the signed copy." keeps its answer."""
+    sentences (``_is_next_step``), when it had any, else None. Only a line
+    or two with no list or table is looked at, so "Yes, Acme signed it. Let
+    me pull the signed copy." keeps its answer."""
     note = text.strip()
     if not note or len(note) > WORKING_NOTE_MAX_CHARS or "\n" in note or "|" in note:
         return None
     sentences = _SENTENCE_END_RE.split(note)
     kept = [
-        s for s in sentences if not (_NEXT_STEP_RE.match(s) and not any(c.isdigit() for c in s))
+        s for s in sentences if not _is_next_step(s)
     ]
     if len(kept) == len(sentences):
         return None
