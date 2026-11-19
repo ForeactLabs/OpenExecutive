@@ -12544,7 +12544,11 @@ delegation:
     effect wait (default, the column added 2026-11-09) or go; POST
     /take-the-lead/rules {kind, value, effect}, a Goes rule needs
     _provably_theirs like DELETE). Waits matches loosely (any recipient, a
-    name anywhere, an amount at or over the limit). Goes is strict, since
+    name anywhere, an amount at or over the limit). Money, contracts,
+    people decisions and amount rules (Waits and Goes) read only says():
+    what a step sends or pays. An invite, meeting, task, reminder, note or
+    team-only file write carries none (a $500 rule held an invite about a
+    $2,150 lease). Goes is strict, since
     it lets something go: there are recipients and every one is that
     address, the main address of the one People entry by that name
     (several: none; aliases don't count), or exactly @that domain (Waits

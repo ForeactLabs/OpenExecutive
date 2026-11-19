@@ -908,9 +908,12 @@ def words_match(value: str, lowered: str) -> bool:
     )
 
 
-def _rule_hit(rules: list[Rule], text: str, recipients: list[str]) -> Hit | None:
-    """The first Waits rule that ``text`` / ``recipients`` match."""
+def _rule_hit(rules: list[Rule], text: str, recipients: list[str], *, money: str | None = None) -> Hit | None:
+    """The first Waits rule that ``text`` / ``recipients`` match. An amount
+    rule reads ``money`` (what the step says or pays, ``says``), ``text``
+    when not given."""
     lowered = text.lower()
+    spends = amounts(text if money is None else money)
     for rule in rules:
         if rule.effect != EFFECT_WAIT:
             continue
@@ -928,7 +931,7 @@ def _rule_hit(rules: list[Rule], text: str, recipients: list[str]) -> Hit | None
                 return Hit("rule", f'your rule about "{value}" says to wait', rule.id)
         elif rule.kind == RULE_AMOUNT:
             limit = _number(value) or 0
-            if any(a >= limit for a in amounts(text)):
+            if any(a >= limit for a in spends):
                 return Hit("rule", f"your rule about amounts of {_money(value)} or more says to wait", rule.id)
     return None
 
@@ -1132,26 +1135,43 @@ def rule_text(rule: Rule) -> str:
     return f"anything with {rule.value}"
 
 
-def _team_file_name(tool_input: dict[str, Any]) -> str:
-    """A file step's file name: the one it gives, else the file's known
-    name by its id (``card_details.file_name``), else ""."""
-    from openexecutive.orchestrator import card_details
+# Steps that only book, file or note something for the team: they spend no
+# money, sign nothing and decide nothing about anyone, whatever their text
+# mentions (a calendar invite about a $2,150 lease). ``says``.
+_KEEPS_TOOLS = frozenset({"assign_open_loop", "cancel_calendar_event", "create_calendar_event", "create_instant_meeting"})
+_MCP_SENDS_RE = re.compile(r"(?:^|_)(?:e?mails?|gmail|messages?|reply|replies|forward|post|chat|dm|sms)(?=$|_)")
+_MCP_KEEPS_RE = re.compile(
+    r"(?:^|_)(?:calendars?|events?|meetings?|invites?|tasks?|todos?|reminders?|notes?)(?=$|_)",
+)
 
-    return _first_text(tool_input, _MCP_NAME_KEYS) or card_details.file_name(card_details._file_of(tool_input))
+
+def _tool_words(tool: str) -> str:
+    """A connected tool's own name (after its server prefix) as lowercase
+    words joined by ``_``: "createEvent" and "create-event" read "create_event"."""
+    own = re.split(r"__|\.", tool or "")[-1]
+    return re.sub(r"[^a-z0-9]+", "_", re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", own).lower()).strip("_")
 
 
-def _writes_team_file(tool: str, tool_input: dict[str, Any]) -> bool:
-    """Whether a connected-app step writes into a file (a sheet, doc,
-    slides, Drive file) and reaches no one outside the team: no mail, no
-    event, and no one but a teammate in its share or recipient arguments
-    (``_reach_addresses``); an address written into the file's text doesn't
-    count. Who approves a held step is ``_team_only``'s, which counts every
-    address. Who could already open the file was settled when it was shared
-    (sharing waits on its own)."""
-    return (
-        _file_tool(tool) and not _MAIL_TOOL_RE.search(tool)
-        and _all_team(_reach_addresses(tool, tool_input))
-    )
+def says(tool: str, tool_input: dict[str, Any], *, mcp: bool = False) -> str:
+    """What a step says to someone or pays: the only part of it that can
+    spend money, agree to a contract or decide about a person. Money,
+    contracts, people decisions and amount rules (Waits and Goes) read only
+    this. A message or email: the words it sends. A step that only books,
+    notes or files something (an invite, a meeting, a task, a reminder, a
+    note, a write into a file that reaches only the team): "", whatever its
+    text mentions. Any other step, a payment or an app it can't place:
+    all of it."""
+    text = "\n".join(_strings(tool_input))
+    if not mcp:
+        return "" if tool in _KEEPS_TOOLS else text
+    words = _tool_words(tool)
+    if is_mail_send(tool) or _MCP_SENDS_RE.search(words):
+        return text
+    if _MCP_KEEPS_RE.search(words):
+        return ""
+    if _file_tool(tool) and _all_team(_reach_addresses(tool, tool_input)):
+        return ""
+    return text
 
 
 def _mcp_deletes(tool: str, tool_input: dict[str, Any]) -> bool:
@@ -1187,19 +1207,11 @@ def check(
     recipients = sorted({
         a.lower() for a in [*_reach_addresses(tool, tool_input), *(extra_recipients or [])]
     })
-    hit = _rule_hit(rules, text, named)
+    about = says(tool, tool_input, mcp=mcp)
+    hit = _rule_hit(rules, text, named, money=about)
     if hit is not None:
         return hit
     deletes = tool in _DELETE_TOOLS or (mcp and _mcp_deletes(tool, tool_input))
-    # What the step is about, for money, contracts and people decisions. A
-    # write into a company file that reaches only the team is about that
-    # file, not the words it puts in it: a price in a prospect's note or
-    # "sign-up" in a post draft is no payment or contract. Its name still
-    # counts ("Q3 budget"), the known one when the step gives only an id.
-    about = (
-        _team_file_name(tool_input)
-        if mcp and not deletes and _writes_team_file(tool, tool_input) else text
-    )
     checks: list[tuple[str, bool, str]] = [
         (DELETE_SHARE, deletes, "it deletes, cancels or shares something"),
         (BIG_SEND, tool in _BROADCAST_TOOLS or len(recipients) > BIG_SEND_RECIPIENTS,
@@ -2503,7 +2515,8 @@ def _hit(name: str, tool_input: dict[str, Any], *, mcp: bool) -> tuple[Hit | Non
         # A rule naming someone ("Always wait for Dana Price") meets mail to
         # their address too.
         text = "\n".join([text, *_names_of(recipients)])
-        rule = _rule_hit(rules, text, recipients)
+        spends = says(name, tool_input, mcp=mcp)
+        rule = _rule_hit(rules, text, recipients, money=spends)
         if rule is not None:
             return rule, None
         if _careful():
@@ -2521,7 +2534,7 @@ def _hit(name: str, tool_input: dict[str, Any], *, mcp: bool) -> tuple[Hit | Non
         # Only who it actually reaches counts for a person or company rule,
         # never an address written in the body.
         targets = sorted({a.lower() for a in addresses})
-        goes = goes_rules(rules, text, targets)
+        goes = goes_rules(rules, spends, targets)
         if goes:
             released = goes_kinds(goes)
             rest = Lead(scope=SCOPE_EXECUTIVE, ask_first={k: k not in released for k in KINDS})
@@ -2794,7 +2807,8 @@ def _asked_hit(name: str, tool_input: dict[str, Any], *, mcp: bool) -> Hit | Non
         # A rule naming someone ("Always wait for Dana Price") meets mail to
         # their address too.
         text = "\n".join([text, *_names_of(recipients)])
-        rule = _rule_hit(rules, text, recipients)
+        spends = says(name, tool_input, mcp=mcp)
+        rule = _rule_hit(rules, text, recipients, money=spends)
         if rule is not None:
             return rule
         careful = _careful_turn()
