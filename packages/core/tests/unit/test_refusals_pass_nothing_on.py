@@ -79,3 +79,15 @@ def test_the_decision_and_goal_refusals_answer_only_the_asker(monkeypatch: pytes
     )))
     assert PASS_ON_NOTHING in outcome["error"]
     assert PASS_ON_NOTHING in goal["error"]
+
+
+def test_the_unverified_roster_refusal_answers_only_the_asker() -> None:
+    """An inbound email or a channel nobody is verified on."""
+    from types import SimpleNamespace
+
+    from openexecutive.orchestrator.people_tools import _roster_refusal_reason
+    from openexecutive.orchestrator.speaker import PASS_ON_NOTHING
+
+    for session in (None, SimpleNamespace(origin_channel="email", email_from="x@example.com", caller_person_id=None)):
+        reason = _roster_refusal_reason(session)
+        assert reason is not None and PASS_ON_NOTHING in reason
