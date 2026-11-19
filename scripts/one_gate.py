@@ -29,6 +29,11 @@ there is as wrong as a new one), and finds any of these outside the gate:
 - ``named``     defines a function whose name says it holds, refuses,
                 withholds or gates (``content_hold``, ``_refusal``,
                 ``_meeting_gate``, ``read_only_withholds`` ...)
+- ``words``     keeps a module-level list of five or more words or tools
+                whose name says what it holds back (``SENSITIVE``,
+                ``_PRIVACY_SENSITIVE_TAGS``, ``PRIVATE_TURN_WITHHELD_TOOLS``,
+                ``_BLOCKED_WORDS``, ``CHAT_TOOL_DENY_PATTERNS`` ...): a word
+                list that holds is a gate whatever its function is called
 
 ``KNOWN`` (``scripts/one_gate_known.txt``) lists what the code holds today,
 each with what happens to it. ``pr_checks.py``'s ``one-gate`` fails a change
@@ -88,6 +93,20 @@ NAMED_RE = re.compile(
     r"forbid|forbidden|gate|gated|withhold|withholds|withheld)(?:_|$)"
 )
 
+WORDS_RE = re.compile(
+    r"(?:^|_)(?:SENSITIVE|PRIVACY|PRIVATE|BLOCKED|DENY|DENIED|BANNED|RISKY|CREDENTIALS|FORBIDDEN|"
+    r"WITHHELD|HELD|HOLD|HOLDS|REFUSED)(?:_|$)"
+)
+WORDS_MIN = 5
+
+
+def _word_list(value: ast.AST | None) -> bool:
+    if isinstance(value, ast.Call) and value.args:
+        value = value.args[0]
+    if not isinstance(value, (ast.Set, ast.Tuple, ast.List)):
+        return False
+    return sum(isinstance(e, ast.Constant) and isinstance(e.value, str) for e in value.elts) >= WORDS_MIN
+
 
 @dataclass(frozen=True)
 class Hit:
@@ -131,6 +150,12 @@ def scan_source(path: str, source: str) -> list[Hit]:
 
     def add(node: ast.AST, kind: str, what: str) -> None:
         hits.append(Hit(path, getattr(node, "lineno", 0), kind, what))
+
+    for top in tree.body:
+        targets = top.targets if isinstance(top, ast.Assign) else [top.target] if isinstance(top, ast.AnnAssign) else []
+        for target in targets:
+            if isinstance(target, ast.Name) and WORDS_RE.search(target.id.upper()) and _word_list(top.value):
+                add(top, "words", target.id)
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):

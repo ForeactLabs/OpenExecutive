@@ -5,8 +5,10 @@
 # path | kind | what | what happens to it
 packages/core/openexecutive/alerts/approvals.py | named | def record_held_action | keep: card bookkeeping
 packages/core/openexecutive/alerts/approvals.py | named | def held_action_id | keep: card bookkeeping
+packages/core/openexecutive/alerts/dispatcher.py | words | _PRIVACY_SENSITIVE_TAGS | remove: fold into the gate
 packages/core/openexecutive/alerts/one_card.py | named | def held_topic | keep: card bookkeeping
 packages/core/openexecutive/alerts/replan.py | named | def plan_refusal | remove: fold into the gate
+packages/core/openexecutive/alerts/review.py | words | _SENSITIVE_TAGS | remove: fold into the gate
 packages/core/openexecutive/api/caller.py | named | def caller_gate | keep: sign-in
 packages/core/openexecutive/api/caller.py | named | def refuse | keep: sign-in
 packages/core/openexecutive/api/caller.py | named | def gate | keep: sign-in
@@ -27,6 +29,7 @@ packages/core/openexecutive/api/routes/today.py | named | def _held_back | keep:
 packages/core/openexecutive/api/routes/today.py | named | def get_held_back | keep: not a step (lines a brief left out)
 packages/core/openexecutive/api/routes/workflows.py | named | def _refuse_unless_creator | remove: fold into the gate
 packages/core/openexecutive/api/routes/workflows.py | named | def refuse_principal_only_run | remove: fold into the gate
+packages/core/openexecutive/audit/redaction.py | words | _SENSITIVE_SUBSTRINGS | keep: not a step (hides secrets in logs)
 packages/core/openexecutive/briefing/grounding.py | named | def recent_held_back | keep: not a step (lines a brief left out)
 packages/core/openexecutive/briefing/grounding.py | named | def refusal | remove: fold into the gate
 packages/core/openexecutive/briefing/live_signals.py | named | def _outbound_blocked | keep: not a step (counts refused sends)
@@ -47,6 +50,8 @@ packages/core/openexecutive/delegation/action_cards.py | training | training_hol
 packages/core/openexecutive/delegation/action_cards.py | training | in_training | remove: fold into the gate
 packages/core/openexecutive/delegation/action_cards.py | waiting | status waiting | remove: fold into the gate
 packages/core/openexecutive/delegation/action_cards.py | training | in_training | remove: fold into the gate
+packages/core/openexecutive/delegation/handle_it.py | words | SENSITIVE | remove: fold into the gate
+packages/core/openexecutive/delegation/handle_it.py | words | CREDENTIALS | remove: fold into the gate
 packages/core/openexecutive/delegation/handle_it.py | level | outside_mode.TRUST | remove: fold into the gate
 packages/core/openexecutive/delegation/handle_it.py | named | def content_hold | remove: fold into the gate
 packages/core/openexecutive/delegation/handle_it.py | rules | take_the_lead.rule_waits | remove: fold into the gate
@@ -75,6 +80,8 @@ packages/core/openexecutive/delegation/invites.py | training | training_hold | r
 packages/core/openexecutive/delegation/invites.py | training | in_training | remove: fold into the gate
 packages/core/openexecutive/delegation/invites.py | level | outside_mode.TRUST | remove: fold into the gate
 packages/core/openexecutive/delegation/invites.py | training | in_training | remove: fold into the gate
+packages/core/openexecutive/delegation/lockdown.py | words | MAIL_TOUCHED_WITHHELD_TOOLS | remove: fold into the gate
+packages/core/openexecutive/delegation/lockdown.py | words | MAIL_PRIVATE_WITHHELD_TOOLS | remove: fold into the gate
 packages/core/openexecutive/delegation/lockdown.py | named | def mail_touched_withholds | remove: fold into the gate
 packages/core/openexecutive/delegation/lockdown.py | named | def mail_lock_holds | remove: fold into the gate
 packages/core/openexecutive/delegation/lockdown.py | level | outside_mode.ASK | remove: fold into the gate
@@ -116,6 +123,7 @@ packages/core/openexecutive/integrations/email_poller.py | named | def replay_he
 packages/core/openexecutive/integrations/fact_confirmation.py | waiting | status held | remove: fold into the gate
 packages/core/openexecutive/integrations/mail_sources.py | named | def replay_held_mail | keep: not a step (replays held mail)
 packages/core/openexecutive/integrations/response_gate.py | named | def _parse_gate_output | keep: not a step (is a thread reply for it)
+packages/core/openexecutive/integrations/slack_bot.py | words | _HELD_EVENT_KEYS | keep: not a step (event fields)
 packages/core/openexecutive/integrations/slack_bot.py | named | def _hold_unknown_sender | remove: fold into the gate
 packages/core/openexecutive/integrations/slack_bot.py | named | def _replies_to_gate_history | keep: not a step (is a thread reply for it)
 packages/core/openexecutive/integrations/slack_bot.py | named | def _replay_held | keep: not a step (replays held mail)
@@ -149,6 +157,7 @@ packages/core/openexecutive/orchestrator/app_control.py | level | outside_mode.A
 packages/core/openexecutive/orchestrator/app_control.py | waiting | status waiting_for_approval | remove: fold into the gate
 packages/core/openexecutive/orchestrator/app_control.py | card | create_decision_instance | remove: fold into the gate
 packages/core/openexecutive/orchestrator/artifact_records.py | named | def runs_refused_for_nobody | remove: fold into the gate
+packages/core/openexecutive/orchestrator/broadcast_tools.py | words | _PRIVACY_SENSITIVE_TERMS | remove: fold into the gate
 packages/core/openexecutive/orchestrator/broadcast_tools.py | named | def _privacy_refusal | remove: fold into the gate
 packages/core/openexecutive/orchestrator/broadcast_tools.py | waiting | status refused | remove: fold into the gate
 packages/core/openexecutive/orchestrator/calendar_tools.py | named | def raw_booking_refusal | remove: fold into the gate
@@ -173,6 +182,7 @@ packages/core/openexecutive/orchestrator/file_refs.py | named | def _hold_as_mai
 packages/core/openexecutive/orchestrator/file_tools.py | named | def folder_refusal | remove: fold into the gate
 packages/core/openexecutive/orchestrator/mail_file_save.py | named | def _held | remove: fold into the gate
 packages/core/openexecutive/orchestrator/mail_read_tools.py | named | def _id_refusal | keep: input (not a mail id)
+packages/core/openexecutive/orchestrator/mcp_gateway.py | words | _BLOCKED_APPS_SCRIPT_TOOLS | remove: fold into the gate
 packages/core/openexecutive/orchestrator/mcp_gateway.py | named | def _refuse | remove: fold into the gate
 packages/core/openexecutive/orchestrator/mcp_gateway.py | named | def _is_blocked_m365_auth_tool | remove: fold into the gate
 packages/core/openexecutive/orchestrator/mcp_gateway.py | level | levels.turn_level | remove: fold into the gate
@@ -201,11 +211,15 @@ packages/core/openexecutive/orchestrator/router.py | named | def hold_for | look
 packages/core/openexecutive/orchestrator/schedule_tools.py | named | def _hold_outbound | keep: the recipient's own quiet hours
 packages/core/openexecutive/orchestrator/schedule_tools.py | waiting | status held | keep: the recipient's own quiet hours
 packages/core/openexecutive/orchestrator/schedule_tools.py | named | def tools_withheld_in_mode | remove: fold into the gate
+packages/core/openexecutive/orchestrator/schedule_tools.py | words | UNATTENDED_WITHHELD_TOOLS | remove: fold into the gate
 packages/core/openexecutive/orchestrator/schedule_tools.py | named | def unattended_withheld_error | remove: fold into the gate
+packages/core/openexecutive/orchestrator/schedule_tools.py | words | PRIVATE_TURN_WITHHELD_TOOLS | remove: fold into the gate
+packages/core/openexecutive/orchestrator/schedule_tools.py | words | PRIVATE_TURN_MCP_TOOLS | remove: fold into the gate
 packages/core/openexecutive/orchestrator/schedule_tools.py | named | def private_turn_withholds | remove: fold into the gate
 packages/core/openexecutive/orchestrator/schedule_tools.py | named | def private_turn_withheld_error | remove: fold into the gate
 packages/core/openexecutive/orchestrator/schedule_tools.py | named | def read_only_withholds | remove: fold into the gate
 packages/core/openexecutive/orchestrator/schedule_tools.py | named | def read_only_withheld_error | remove: fold into the gate
+packages/core/openexecutive/orchestrator/schedule_tools.py | words | SHARED_CHAT_WITHHELD_TOOLS | remove: fold into the gate
 packages/core/openexecutive/orchestrator/schedule_tools.py | named | def shared_chat_withholds | remove: fold into the gate
 packages/core/openexecutive/orchestrator/schedule_tools.py | named | def shared_chat_withheld_error | remove: fold into the gate
 packages/core/openexecutive/orchestrator/schedule_tools.py | named | def withheld_tool_error | remove: fold into the gate

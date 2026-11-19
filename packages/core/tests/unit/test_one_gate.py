@@ -157,3 +157,17 @@ def test_the_repo_matches_its_list() -> None:
     new, gone = one_gate.compare(one_gate.scan_tree(root), one_gate.load_known(root))
     assert new == [], [str(h) for h in new[:10]]
     assert gone == [], gone[:10]
+
+
+def test_finds_a_word_list_by_what_it_is_called() -> None:
+    """A list of words that holds is a gate, whatever the function using it
+    is called (the group alerts' _violates_privacy_invariant)."""
+    src = '_PRIVACY_SENSITIVE_TAGS = frozenset({"board", "comp", "legal", "hr", "layoffs"})\n'
+    assert _kinds(src) == [("words", "_PRIVACY_SENSITIVE_TAGS")]
+    assert _kinds('SHARED_CHAT_WITHHELD_TOOLS = ("a", "b", "c", "d", "e")\n') == [
+        ("words", "SHARED_CHAT_WITHHELD_TOOLS")
+    ]
+    # Stop words, a short list, or a list of other things are not.
+    assert _kinds('_STOPWORDS = {"a", "the", "of", "and", "to"}\n') == []
+    assert _kinds('_SENSITIVE = ("a", "b")\n') == []
+    assert _kinds('_BLOCK_TAGS = ("p", "div", "li", "ul", "ol")\n') == []
