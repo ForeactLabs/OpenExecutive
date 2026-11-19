@@ -83,7 +83,7 @@ _SYSTEM = (
     "never that it will go out. A fact or note kept in memory does not back "
     "a claim that something is being watched, or that the person will be "
     "told or flagged when something arrives; a call that set up a watch "
-    "does (watch_for_email, add_watchlist_entry, or propose_watch when its "
+    "does (add_watchlist_entry, or propose_watch when its "
     "result says it was added), checking as often as that watch says. A "
     "watch left as a suggestion backs only \"suggested\". A promise that a one-time "
     "step will set up the next one is an unbacked claim.\n\n"

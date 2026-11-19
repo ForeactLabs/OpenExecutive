@@ -141,6 +141,39 @@ def test_a_step_that_cant_be_carried_out_is_told_not_dropped() -> None:
         assert tool in levels.TURN_OWN and not levels.carriable(tool, mcp=False)
 
 
+_SPEAKERS_OWN: dict[str, dict[str, Any]] = {
+    "keep_figure": {"subject": "Pine View net to owner", "figure": "$330,241", "source": "DCA statement"},
+    "remember_fact": {"fact": "We close the books on Fridays"},
+    "forget_fact": {"fact_id": 1},
+    "update_company_profile": {"field": "industry", "value": "Logistics"},
+    "cancel_followup": {"action_id": 1},
+    "move_followup": {"action_id": 1, "run_at": "2030-01-01T10:00:00Z"},
+    "leave_out_of_brief": {"item": "the weekly numbers"},
+    "mark_draft_sent": {"draft_id": 1},
+    "record_decision_outcome": {"decision_id": 1, "outcome": "It worked"},
+    "answer_card": {"card_id": 1, "action": "approve"},
+    "do_in_app": {"app": "Notes", "action": "open"},
+}
+
+
+@pytest.mark.parametrize("tool", sorted(_SPEAKERS_OWN))
+async def test_a_step_only_its_speaker_can_do_never_goes_on_a_card(tool: str) -> None:
+    # A tap carries a step out with nobody speaking, and each of these checks
+    # who is speaking: approved from a card, it was turned down every time
+    # (a "Keep figure" card that failed on Do it). So it is the turn's own.
+    from openexecutive.orchestrator import take_the_lead
+    from openexecutive.orchestrator.take_the_lead import result_failed
+
+    assert tool in levels.TURN_OWN and not levels.carriable(tool, mcp=False)
+    out = await take_the_lead.carry_out({"tool": tool, "input": _SPEAKERS_OWN[tool], "held": True}, by_principal=True)
+    assert result_failed(out) or '"refused"' in out
+
+
+def test_an_app_link_is_for_the_turn_that_asked() -> None:
+    # It checks no one, so a card would "succeed" and the link reach nobody.
+    assert "open_in_app" in levels.TURN_OWN and not levels.carriable("open_in_app", mcp=False)
+
+
 def test_a_look_up_or_a_card_is_never_put_on_a_card() -> None:
     # Its answer is for the turn that asked, gone by the time anyone taps.
     assert not levels.carriable("google_workspace__search_gmail_messages", mcp=True)

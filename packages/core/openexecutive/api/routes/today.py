@@ -457,14 +457,19 @@ def _handled_item(h: dict[str, Any], now: datetime) -> HandledItem:
     )
 
 
-def _handled_overnight(now: datetime, *, include_private: bool = False) -> list[HandledItem]:
+def _handled_overnight(
+    now: datetime, *, include_private: bool = False, owned_by: int | None = None,
+) -> list[HandledItem]:
     """What the alert review completed since the last delivered morning brief.
-    Rows private to the principal only for the principal's own view."""
+    Rows private to the principal only for the principal's own view, and one
+    person's own rows only for theirs (``owned_by``)."""
     try:
         from openexecutive.briefing import brief_state
 
         since = brief_state.since_for("principal_brief_morning", now=now)
-        handled = brief_state.handled_since(since, limit=20, include_private=include_private)
+        handled = brief_state.handled_since(
+            since, limit=20, include_private=include_private, owned_by=owned_by,
+        )
         return [_handled_item(h, now) for h in handled]
     except Exception:
         logger.debug("today: handled_overnight unavailable", exc_info=True)
@@ -1449,7 +1454,9 @@ def _build_today(
         departments=dept_items,
         people=person_items,
         proposals=proposal_items,
-        handled_overnight=_handled_overnight(now, include_private=include_private),
+        handled_overnight=_handled_overnight(
+            now, include_private=include_private, owned_by=getattr(viewer, "person_id", None),
+        ),
     )
 
     # In-flight commitments (pending follow-ups / nudges) + people we're

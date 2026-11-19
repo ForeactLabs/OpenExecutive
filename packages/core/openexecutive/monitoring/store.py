@@ -40,6 +40,7 @@ from openexecutive.monitoring.models import (
     OUTCOME_ALERTED,
     OUTCOME_HELD_DIGEST,
     OUTCOME_SUPPRESSED_BASELINE,
+    SOURCE_KIND_MAILBOX,
     Signal,
     WatchlistDecline,
     WatchlistItem,
@@ -450,8 +451,16 @@ def list_watchlist(
     *,
     enabled_only: bool = False,
     signal_type: str | None = None,
+    for_person: int | None = None,
+    every_watch: bool = False,
     db_path: Path | None = None,
 ) -> list[WatchlistItem]:
+    """The watches, oldest first. An email watch is its owner's alone
+    (``monitoring.mailbox``), so it is listed only ``for_person`` its owner,
+    or with ``every_watch`` (the scan that checks them); every other watch
+    is the company's and always listed."""
+    from openexecutive.monitoring import mailbox
+
     resolved = _resolve_db_path(db_path)
     if not resolved.exists():
         return []
@@ -468,7 +477,8 @@ def list_watchlist(
             f"SELECT * FROM watchlist {where} ORDER BY id",
             params,
         ).fetchall()
-    return [_row_to_watchlist(row) for row in rows]
+    items = [_row_to_watchlist(row) for row in rows]
+    return items if every_watch else [i for i in items if mailbox.shown_to(i, for_person)]
 
 
 def mark_polled(
@@ -603,11 +613,28 @@ def update_watchlist_fields(
     params: list[Any] = list(fields.values())
     params.append(item_id)
     with _get_conn(db_path) as conn:
+        if fields.get("enabled"):
+            _email_watch_reads_from_now(conn, item_id)
         cursor = conn.execute(
             f"UPDATE watchlist SET {sets} WHERE id = ?",
             params,
         )
         return int(cursor.rowcount)
+
+
+def _email_watch_reads_from_now(conn: sqlite3.Connection, item_id: int) -> None:
+    """When an email watch that was off is turned back on, it reads from
+    now: the person turned it off, so the mail that came meanwhile is not
+    news. (A watch that was on but couldn't read, its inbox disconnected,
+    still catches up: only turning it off moves this.)"""
+    from openexecutive.monitoring.mailbox import READ_FROM_KEY, READ_THROUGH_KEY
+
+    now = datetime.now(UTC).isoformat()
+    conn.execute(
+        "UPDATE watchlist SET config_json = json_set(config_json, ?, ?, ?, ?) "
+        "WHERE id = ? AND enabled = 0 AND signal_type = ?",
+        (f"$.{READ_THROUGH_KEY}", now, f"$.{READ_FROM_KEY}", now, item_id, SOURCE_KIND_MAILBOX),
+    )
 
 
 def remove_watchlist_config_key(
@@ -697,6 +724,8 @@ def set_enabled(
     db_path: Path | None = None,
 ) -> bool:
     with _get_conn(db_path) as conn:
+        if enabled:
+            _email_watch_reads_from_now(conn, item_id)
         cursor = conn.execute(
             "UPDATE watchlist SET enabled = ? WHERE id = ?",
             (1 if enabled else 0, item_id),
@@ -1147,12 +1176,13 @@ def list_recent_signals(
     db_path: Path | None = None,
 ) -> list[dict[str, Any]]:
     """Read recent signals — used by the reflection context extension in PR-C
-    and by the audit/debug endpoints."""
+    and by the audit/debug endpoints. The company's only: an email watch's
+    signals are its owner's (``monitoring.mailbox``)."""
     resolved = _resolve_db_path(db_path)
     if not resolved.exists():
         return []
-    clauses: list[str] = []
-    params: list[Any] = []
+    clauses: list[str] = ["source_kind != ?"]
+    params: list[Any] = [SOURCE_KIND_MAILBOX]
     if since is not None:
         clauses.append("captured_at >= ?")
         params.append(since.isoformat())
@@ -1224,6 +1254,18 @@ def list_signals_for_watchlist(
             (watchlist_id, limit),
         ).fetchall()
     return [_row_to_signal_dict(row) for row in rows]
+
+
+def recorded_dedup_keys(keys: list[str], *, db_path: Path | None = None) -> set[str]:
+    """Which of ``keys`` are already in ``external_signals``."""
+    if not keys or not _resolve_db_path(db_path).exists():
+        return set()
+    with _get_conn(db_path) as conn:
+        rows = conn.execute(
+            f"SELECT dedup_key FROM external_signals WHERE dedup_key IN ({','.join('?' * len(keys))})",
+            keys,
+        ).fetchall()
+    return {str(row[0]) for row in rows}
 
 
 def list_held_signals(

@@ -138,6 +138,19 @@ class ReviewSettings:
             return cls()
 
 
+def _off_limits(alert: Alert) -> bool:
+    """Whether the review leaves this card alone, as a candidate, as
+    evidence for another and as a merge target: a source its own code keeps
+    (``TTL_EXEMPT_SOURCES``), or a card that is one person's alone, the
+    principal's (``is_private_alert``) or its own person's
+    (``PERSONAL_SOURCES``, an email watch's sender and subject). The review
+    routes, nudges and writes audit rows for the team, so it never touches
+    those: their person handles them."""
+    from openexecutive.alerts.models import PERSONAL_SOURCES, is_private_alert
+
+    return alert.source in TTL_EXEMPT_SOURCES or alert.source in PERSONAL_SOURCES or is_private_alert(alert)
+
+
 # --------------------------------------------------------------------------- #
 # 1. Candidates
 # --------------------------------------------------------------------------- #
@@ -152,18 +165,12 @@ def select_candidates(
 ) -> list[Alert]:
     """Live alerts worth a second look: old enough, not recently reviewed,
     not an exempt source. Oldest first, capped at ``max_per_scan``."""
-    from openexecutive.alerts.models import is_private_alert
-
     live = lifecycle.list_live_alerts(limit=500, db_path=db_path, now=now)
     min_age = timedelta(hours=max(0, settings.min_age_hours))
     interval = timedelta(hours=max(0, settings.interval_hours))
     out: list[Alert] = []
     for a in live:
-        if a.source in TTL_EXEMPT_SOURCES:
-            continue
-        # Private to the principal: the review routes, nudges and drafts for
-        # the team, so it never touches one — the principal handles it.
-        if is_private_alert(a):
+        if _off_limits(a):
             continue
         created = parse_aware(a.created_at)
         if created is None or now - created < min_age:
@@ -369,15 +376,13 @@ def gather_evidence(
         except Exception:
             logger.debug("alert_review: watch evidence failed", exc_info=True)
 
-    from openexecutive.alerts.models import is_private_alert
-
     pool = all_live if all_live is not None else lifecycle.list_live_alerts(limit=200, db_path=db_path, now=now)
     tags = set(alert.topic_tags or [])
     for other in pool:
         if other.id == alert.id:
             continue
-        # A private alert is never evidence for one the team may act on.
-        if is_private_alert(other):
+        # One person's card is never evidence for one the team may act on.
+        if _off_limits(other):
             continue
         other_created = parse_aware(other.created_at)
         if other_created is None or other_created <= created:
@@ -801,7 +806,7 @@ def _apply_merge(ctx: _MoveContext) -> bool:
     survivor = alert_store.get_alert(v.superseded_by_alert_id, db_path=ctx.db_path)
     if (
         survivor is None or not lifecycle.is_live(survivor, ctx.now)
-        or survivor.source in TTL_EXEMPT_SOURCES
+        or _off_limits(survivor)
         or not alert_store.mark_superseded(ctx.alert_id, survivor.id or -1, db_path=ctx.db_path)
     ):
         return False
@@ -1033,7 +1038,7 @@ async def apply_verdict(
     Each move is a small handler above; this is the dispatcher.
     """
     assert alert.id is not None
-    if alert.source in TTL_EXEMPT_SOURCES:
+    if _off_limits(alert):
         return ""  # never touched (candidates already exclude these; belt and braces)
 
     roster = evidence.get("roster") or []

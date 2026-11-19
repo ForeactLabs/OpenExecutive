@@ -72,7 +72,7 @@ def test_judge_is_told_a_call_backs_only_what_it_made() -> None:
     assert 'still backs \"from now on\"' in claim_check._SYSTEM
     assert "kept in memory does not back a claim that something" in claim_check._SYSTEM
     # What does back them is named, so a true repeat or watch isn't redone.
-    for backs in ("workflow saved switched on", "add_watchlist_entry", "watch_for_email", "propose_watch"):
+    for backs in ("workflow saved switched on", "add_watchlist_entry", "propose_watch"):
         assert backs in claim_check._SYSTEM
 
 

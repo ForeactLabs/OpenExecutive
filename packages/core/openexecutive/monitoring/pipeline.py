@@ -38,7 +38,7 @@ from openexecutive.alerts.pipeline import schedule_evaluation
 from openexecutive.audit import log_event as audit_log
 from openexecutive.config import get_settings
 from openexecutive.memory.episodic import insert_scheduled_action
-from openexecutive.monitoring import store
+from openexecutive.monitoring import mailbox, store
 from openexecutive.monitoring.enrichment import build_company_context, enrich_signal
 from openexecutive.monitoring.models import (
     EVENT_QUIET_FIND,
@@ -339,7 +339,12 @@ def _signal_to_alert_event(
         # One watch = one open alert: repeats of the same watch coalesce
         # into the existing card (alerts.pipeline) while the signal-level
         # dedup_key keeps every observation in external_signals.
-        dedup_hint=f"watch:{item.slug}",
+        # An email watch's card is one email, so every email that matches
+        # is its own card and reaches the person (``#`` keeps the watch's
+        # slug readable: ``briefing.ranking.watch_slug_of``).
+        dedup_hint=(
+            f"watch:{item.slug}#{signal.source_external_id}" if mailbox.is_mailbox(item) else f"watch:{item.slug}"
+        ),
         # A watch that belongs to a department (set by the research policy
         # from the department's watched entities, or by hand) sends its
         # alerts to that department's head and tags them department:<slug>
@@ -347,8 +352,11 @@ def _signal_to_alert_event(
         # instead of the principal's. The slug goes in ``department`` — a
         # tag hint — never in ``channel``, which triage would read as the
         # room the event came from and answer with a team-room broadcast.
-        routed_to_person_id=item.route_to_person_id,
-        department=item.route_to_department,
+        # An email watch's cards are its owner's alone: their mail never
+        # reaches anyone else, whoever or whichever department the watch was
+        # set to tell.
+        routed_to_person_id=mailbox.owner_id(item) if mailbox.is_mailbox(item) else item.route_to_person_id,
+        department="" if mailbox.is_mailbox(item) else item.route_to_department,
     )
 
 
@@ -410,6 +418,7 @@ async def promote_signal_to_alert(
             # embed a token in the link; we don't want it in audit.
             "provenance_url": _safe_url(signal.provenance_url),
         },
+        **mailbox.audit_privacy(item),
     )
     return True
 
@@ -552,6 +561,7 @@ def _audit_received(signal_id: int, item: WatchlistItem, signal: Signal) -> None
             "severity_hint": signal.severity_hint.value,
             "dedup_key": signal.dedup_key,
         },
+        **mailbox.audit_privacy(item),
     )
 
 
@@ -594,6 +604,7 @@ def _audit_deferred(item: WatchlistItem, tally: _PollTally) -> None:
                 for s in deferred[:10]
             ],
         },
+        **mailbox.audit_privacy(item),
     )
 
 
@@ -620,6 +631,7 @@ def _audit_suppressed(
             "dedup_key": signal.dedup_key,
             "outcome": outcome,
         },
+        **mailbox.audit_privacy(item),
     )
 
 
@@ -643,6 +655,7 @@ def _note_for_brief(item: WatchlistItem, signal: Signal) -> None:
             "source_kind": signal.source_kind,
             "provenance_url": _safe_url(signal.provenance_url),
         },
+        **mailbox.audit_privacy(item),
     )
 
 
@@ -1073,6 +1086,11 @@ async def _poll_one_watchlist_item(
     tally.deferred_skew = skew
     tally.race_tick = lost_race is not None
     cap_logged = False
+    # An email watch's emails are never charged to the scan budget nor
+    # dropped by it: each is one email the person asked to hear about, and
+    # its source has already read past them (``sources.mailbox``), so a
+    # dropped one would never come back.
+    charged = not mailbox.is_mailbox(item)
     for signal in capped:
         baseline_entry = lost_race is not None and lost_race.covers(signal)
         # The three guards below apply only to entries that are NOT baseline;
@@ -1082,7 +1100,7 @@ async def _poll_one_watchlist_item(
         if not baseline_entry and _is_future(signal, fetched_at, skew):
             tally.deferred.append(signal)  # not recorded: see _is_future
             continue
-        if not baseline_entry and budget.exhausted:
+        if not baseline_entry and charged and budget.exhausted:
             # Skip (don't break): baseline-covered entries later in the
             # list must still be recorded, or they'd replay next tick.
             if not cap_logged:
@@ -1103,7 +1121,7 @@ async def _poll_one_watchlist_item(
             continue
 
         tally.written += 1
-        if not baseline_entry:
+        if not baseline_entry and charged:
             budget.admit()
         _audit_received(signal_id, item, signal)
 
@@ -1284,7 +1302,7 @@ async def run_external_monitor_scan(
     settings = get_settings()
     cap_total = settings.external_monitor_max_signals_per_scan
 
-    items = store.list_watchlist(enabled_only=True, db_path=db_path)
+    items = store.list_watchlist(enabled_only=True, every_watch=True, db_path=db_path)
     if not items:
         return 0
 
@@ -1302,8 +1320,8 @@ async def run_external_monitor_scan(
     budget = _ScanBudget(remaining=cap_total)
     poll_start = datetime.now(UTC)
     for item in items:
-        if budget.exhausted:
-            break
+        if budget.exhausted and not mailbox.is_mailbox(item):
+            continue
         # Billed standing-query adapter has its own kill switch — skip those
         # rows entirely (no poll, no mark_polled) when disabled.
         if (
@@ -1368,6 +1386,7 @@ async def run_external_monitor_scan(
                     "duration_ms": duration_ms,
                     "failed": failed,
                 },
+                **mailbox.audit_privacy(item),
             )
 
     try:

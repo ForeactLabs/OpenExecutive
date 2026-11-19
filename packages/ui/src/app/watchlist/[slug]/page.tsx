@@ -32,7 +32,7 @@ import { PageSpinner } from "@/components/ui/Spinner";
 
 const fieldCls =
   "w-full px-3.5 py-2.5 text-[15px] rounded-xl bg-surface border border-line text-fg placeholder:text-fg-subtle focus:outline-none focus:ring-2 focus:ring-accent/40";
-const KEYWORD_KINDS = new Set(["rss", "vendor_status", "page_watch", "query"]);
+const KEYWORD_KINDS = new Set(["rss", "vendor_status", "page_watch", "query", "mailbox"]);
 
 /** Relative time for display, e.g. "3h ago", "just now". */
 function formatRelTime(iso: string | null): string {
@@ -185,6 +185,9 @@ function TriggerEditor({
       ? start.forms.filter((f): f is string => typeof f === "string").map((f) => f.toUpperCase())
       : EDGAR_DEFAULT_FORMS,
   );
+  const [senders, setSenders] = useState(
+    Array.isArray(start.from) ? start.from.filter((a) => typeof a === "string").join(", ") : "",
+  );
   const [onlyBig, setOnlyBig] = useState(start.only_big === true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -202,6 +205,12 @@ function TriggerEditor({
     } else if (KEYWORD_KINDS.has(kind)) {
       const list = words.split(",").map((w) => w.trim()).filter(Boolean).slice(0, 20);
       if (list.length) next.keywords = list;
+    }
+    if (kind === "mailbox") {
+      // Who it is from, or a word in its subject: at least one.
+      const from = senders.split(",").map((a) => a.trim()).filter((a) => a.includes("@")).slice(0, 10);
+      if (from.length) next.from = from;
+      return next.from || next.keywords ? next : null;
     }
     if (onlyBig) next.only_big = true;
     return next;
@@ -256,9 +265,23 @@ function TriggerEditor({
           ))}
         </fieldset>
       )}
+      {kind === "mailbox" && (
+        <label className="block text-sm text-fg-muted">
+          From these addresses (commas between them)
+          <input
+            value={senders}
+            onChange={(e) => setSenders(e.target.value)}
+            maxLength={1000}
+            placeholder="e.g. pat@example.com"
+            className={`${fieldCls} mt-1.5`}
+          />
+        </label>
+      )}
       {KEYWORD_KINDS.has(kind) && (
         <label className="block text-sm text-fg-muted">
-          Only when it mentions one of these words (commas between them; leave empty for everything)
+          {kind === "mailbox"
+            ? "That mention one of these words in the subject or sender (commas between them)"
+            : "Only when it mentions one of these words (commas between them; leave empty for everything)"}
           <input
             value={words}
             onChange={(e) => setWords(e.target.value)}
@@ -268,14 +291,18 @@ function TriggerEditor({
           />
         </label>
       )}
-      {kind !== "stock" && (
+      {kind !== "stock" && kind !== "mailbox" && (
         <label className="flex min-h-10 items-center gap-2.5 text-[15px] text-fg">
           <input type="checkbox" checked={onlyBig} onChange={(e) => setOnlyBig(e.target.checked)} />
           Only big changes
         </label>
       )}
       <p className="text-sm text-fg-subtle">
-        {draft ? `It will tell you when ${lowerFirst(triggerInWords(kind, draft))}.` : "Pick at least one, with a number between 0 and 100."}
+        {draft
+          ? `It will tell you when ${lowerFirst(triggerInWords(kind, draft))}.`
+          : kind === "mailbox"
+            ? "Add who it's from or a word in its subject."
+            : "Pick at least one, with a number between 0 and 100."}
       </p>
       {err && <p className="text-sm text-rose-500">{err}</p>}
       <div className="flex flex-wrap gap-2">
@@ -691,6 +718,8 @@ export default function WatchDetailPage() {
               <Row
                 label="It is for"
                 action={
+                  // An email watch tells only the person whose inbox it reads.
+                  item.signal_type !== "mailbox" &&
                   editing !== "for" && (
                     <button type="button" className={linkBtn} onClick={() => setEditing("for")}>
                       Change

@@ -965,6 +965,31 @@ class DelegateOutlook:
             })
         return [self._parse(m) for m in data.get("value") or [] if isinstance(m, dict)]
 
+    async def received_since(
+        self, after: datetime, *, before: datetime | None = None, limit: int = 25,
+    ) -> list[MailMessage]:
+        """Mail that reached the inbox since ``after`` (and before
+        ``before``, when given), Focused and Other, not the person's own,
+        newest first, at most ``limit`` (capped at 50). An email watch
+        reads this, a page at a time."""
+        def stamp(when: datetime) -> str:
+            return when.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        window = f"receivedDateTime ge {stamp(after)}"
+        if before is not None:
+            window += f" and receivedDateTime lt {stamp(before)}"
+        async with self._client() as client:
+            await self._sent_folder_id(client)
+            data = await self._get(client, "/mailFolders/inbox/messages", {
+                "$filter": window,
+                "$orderby": "receivedDateTime desc",
+                "$top": max(1, min(int(limit), 50)),
+                "$select": _SELECT,
+                "$expand": _EXPAND,
+            })
+        parsed = [self._parse(m) for m in data.get("value") or [] if isinstance(m, dict)]
+        return [m for m in parsed if normalize_email(m.from_addr) != self.mailbox]
+
     async def get_message(self, message_id: str) -> MailMessage:
         if not valid_id(message_id):
             raise GmailError("invalid message id")

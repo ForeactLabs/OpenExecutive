@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from openexecutive.alerts import dispatcher, preferences, store
 from openexecutive.alerts.models import (
     PERSONAL_SOURCES,
+    PRIVATE_ALERT_TAG,
     AlertChannel,
     AlertEvent,
     AlertSeverity,
@@ -26,11 +27,17 @@ logger = logging.getLogger(__name__)
 # mid-flight (mirrors memory.episodic._background_tasks).
 _background_tasks: set[asyncio.Task[Any]] = set()
 
-# Simple rolling-window rate limiter on event evaluations. Cost guard against
-# runaway cost from a misbehaving integration. Single-process only.
+# Simple rolling-window pacing of event evaluations (``_wait_for_slot``).
+# Cost guard against runaway cost from a misbehaving integration: a burst
+# waits its turn, a flood past ``_MAX_WAITING`` is dropped. Single-process only.
 _RATE_LIMIT_PER_MIN = 60
 _recent_event_ts: deque[float] = deque(maxlen=_RATE_LIMIT_PER_MIN)
 _rate_lock = threading.Lock()
+
+# Where a personal card (``PERSONAL_SOURCES``) may go: to its person only.
+# Not WEB: ``dispatch_web`` pushes the whole card to every open browser
+# (``_make_private`` leaves it out for the same reason).
+_PERSONAL_CHANNELS = frozenset({AlertChannel.PERSISTED, AlertChannel.SLACK_DM})
 
 
 # Severities that justify re-dispatching a coalesced alert (a repeat that
@@ -64,17 +71,49 @@ def _with_department_tag(tags: list[str], channel: str | None) -> list[str]:
     return list(tags) if tag in tags else [*tags, tag]
 
 
-def _rate_limited() -> bool:
-    """Returns True when the per-minute cap has been hit."""
+def _take_slot() -> float:
+    """Take one of the minute's evaluations: 0 when taken, else the seconds
+    until one frees up."""
     now = time.monotonic()
     with _rate_lock:
         cutoff = now - 60.0
         while _recent_event_ts and _recent_event_ts[0] < cutoff:
             _recent_event_ts.popleft()
         if len(_recent_event_ts) >= _RATE_LIMIT_PER_MIN:
-            return True
+            return max(_recent_event_ts[0] - cutoff, 0.01)
         _recent_event_ts.append(now)
-        return False
+        return 0.0
+
+
+# Evaluations past the cap that may wait for the next minutes' room; past
+# that, a runaway source is dropped (the cost guard).
+_MAX_WAITING = 2 * _RATE_LIMIT_PER_MIN
+_waiting = 0
+
+
+async def _wait_for_slot(*, bounded: bool = True) -> bool:
+    """Pace evaluations to ``_RATE_LIMIT_PER_MIN``: a burst past the cap
+    waits for the next minute's room, as a dropped event never comes back
+    (its source has marked it handed over: an email watch's email, a watch's
+    change). False, dropped, only when ``_MAX_WAITING`` already wait: a
+    flood (a looping bot) still costs at most a few minutes of triage.
+    Not ``bounded``: a source that limits itself (an email watch tells at
+    most ``PER_POLL`` a poll) always waits, never dropped."""
+    global _waiting
+    if (wait := _take_slot()) <= 0:
+        return True
+    with _rate_lock:
+        if bounded and _waiting >= _MAX_WAITING:
+            return False
+        _waiting += 1
+    try:
+        while wait > 0:
+            await asyncio.sleep(wait)
+            wait = _take_slot()
+        return True
+    finally:
+        with _rate_lock:
+            _waiting -= 1
 
 
 def _make_private(
@@ -84,8 +123,6 @@ def _make_private(
     stored but never pushed live or broadcast, and deduplicated only against
     other private alerts (coalescing into a shared card would copy its body
     there)."""
-    from openexecutive.alerts.models import PRIVATE_ALERT_TAG
-
     principal_id: int | None = None
     try:
         from openexecutive.people.store import find_principal_person
@@ -245,7 +282,7 @@ async def evaluate_and_dispatch(
     """
     path = db_path or store.DB_PATH
 
-    if _rate_limited():
+    if not await _wait_for_slot(bounded=event.source not in PERSONAL_SOURCES):
         logger.warning(
             "alerts.pipeline rate-limited: dropping event source=%s ext_id=%s",
             event.source,
@@ -267,7 +304,12 @@ async def evaluate_and_dispatch(
         triaged = await _triage(event, path)
         if not triaged.alert:
             return triaged, None
-        decision = triaged
+        # Whether a card is the principal's alone is the producer's to say
+        # (``event.private``), never triage's: it reads words from outside
+        # (an email's subject, a web page), which must not route a card.
+        decision = triaged.model_copy(update={
+            "topic_tags": [t for t in triaged.topic_tags if t != PRIVATE_ALERT_TAG],
+        })
     if event.raised_by:
         decision = _label_team_raised(decision, event.raised_by)
 
@@ -280,6 +322,12 @@ async def evaluate_and_dispatch(
         effective_channels = [
             c for c in effective_channels if c != AlertChannel.COMPANY_BROADCAST
         ]
+    if event.source in PERSONAL_SOURCES:
+        # A card that is one person's alone (an email watch's sender and
+        # subject, say) reaches only them: their page, their own DM. Never a
+        # room, and never the Executive's own mailbox, whatever triage made
+        # of its words.
+        effective_channels = [c for c in effective_channels if c in _PERSONAL_CHANNELS]
 
     # A producer that knows the stable identity of the situation (a watch
     # slug) wins over the model's free-text key.

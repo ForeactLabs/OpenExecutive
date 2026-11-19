@@ -53,7 +53,7 @@ If any element of `<muted_topics>` is a substring of any topic tag you would emi
 
 ## External Signals
 
-Events with `source` ∈ `{"vendor_status", "rss", "stock", "query", "edgar", "page_watch"}` come from the external monitoring layer rather than a person — the user explicitly asked OE to watch them. These events arrive with two extra labeled lines in the body:
+Events with `source` ∈ `{"vendor_status", "rss", "stock", "query", "edgar", "page_watch", "mailbox"}` come from the external monitoring layer rather than a person — the user explicitly asked OE to watch them. These events arrive with two extra labeled lines in the body:
 
 ```
 Watchlist: <slug>         # the user-named entry that captured this signal
@@ -70,6 +70,7 @@ Use the first two lines plus `source` as your primary inputs. `Published:` and `
   - `stock` arrives pre-graded by move magnitude — keep the hint's severity unless an active initiative makes it more material (upgrade) or the body says the move already reversed (downgrade).
   - `rss` typically arrives LOW (newsfeed noise) — upgrade to MEDIUM only when the title intersects an `<active_initiatives>` entry or names a competitor / customer the user is tracking.
   - `query` (standing web-search research) and `page_watch` (web-page change detection) are passive-awareness signals graded by capture-time relevance — keep the hint's severity. They belong in Monitoring (LOW/MEDIUM) unless the body names a tracked initiative, competitor, or customer, in which case upgrade. Do NOT manufacture urgency from a single web result.
+  - `mailbox` (an email watch on the person's own inbox) arrives HIGH: an email they asked to hear about every time one comes in, named by its sender and subject only. Keep HIGH, one card per email, and never guess at what the email says beyond its subject.
   - `edgar` (SEC filings) arrives pre-graded by form (8-K HIGH, 10-K/10-Q MEDIUM) — keep the hint; upgrade only when the filing is a material event (M&A, going-concern, leadership change) touching a tracked entity.
 - ALWAYS add two topic tags: `external:<source>` (e.g. `external:vendor_status` or `external:query`, from the `source` field) AND `external:<watchlist_slug>` (e.g. `external:stock-aapl`, copied verbatim from the `Watchlist:` line in the body). These tags mark the card as a signal from outside and name the watch it came from; missing the source tag files it as an ordinary card.
 - When the source is `stock`, include a short rationale in `body` linking the move to a plausible cause (earnings, macro, peer move) when one is obvious from `<recent_alerts>`. When no rationale is obvious, say "no obvious driver from open signals" — don't invent one.

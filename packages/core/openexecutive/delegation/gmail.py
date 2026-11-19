@@ -1291,6 +1291,25 @@ class DelegateGmail:
                 continue  # deleted since it was listed
         return messages
 
+    async def received_since(
+        self, after: datetime, *, before: datetime | None = None, limit: int = 25,
+    ) -> list[MailMessage]:
+        """Mail that reached the inbox since ``after`` (and before
+        ``before``, when given), every tab (a sign-up notice lands in
+        Updates), not the person's own, newest first, at most ``limit``
+        (capped at 50). An email watch reads this, a page at a time."""
+        query = f"in:inbox -in:chats -from:me after:{int(after.timestamp())}"
+        if before is not None:
+            query += f" before:{int(before.timestamp())}"
+        found = await self.list_message_ids(query, max_results=max(1, min(int(limit), 50)))
+        messages: list[MailMessage] = []
+        for message_id, _thread in found:
+            try:
+                messages.append(await self.get_message(message_id))
+            except GmailNotFound:
+                continue  # deleted since it was listed
+        return messages
+
     async def get_message(self, message_id: str) -> MailMessage:
         if not valid_id(message_id):
             raise GmailError("invalid message id")

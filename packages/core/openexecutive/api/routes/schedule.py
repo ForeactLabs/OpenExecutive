@@ -130,13 +130,16 @@ def _workflows() -> list[ScheduleItem]:
     return items
 
 
-def _watches() -> list[ScheduleItem]:
+def _watches(caller: int | None = None) -> list[ScheduleItem]:
     from openexecutive.monitoring import store as monitoring_store
     from openexecutive.monitoring.describe import check_minutes, checks_every, watch_title
 
     try:
         waiting = {w.id for w in monitoring_store.list_pending_suggestions()}
-        watches = [w for w in monitoring_store.list_watchlist(enabled_only=True) if w.id not in waiting]
+        # The team's watches, and the caller's own email watches.
+        watches = [
+            w for w in monitoring_store.list_watchlist(enabled_only=True, for_person=caller) if w.id not in waiting
+        ]
     except Exception:
         logger.warning("schedule: reading the watch list failed", exc_info=True)
         return []
@@ -243,7 +246,7 @@ def build_schedule(request: Request) -> ScheduleResponse:
         return ScheduleResponse(counts={k: 0 for k in KINDS})
     items = _follow_ups_and_standing(request, caller)
     if on_team:
-        items += _workflows() + _watches()
+        items += _workflows() + _watches(caller)
     items += _always(owner=owner, on_team=on_team)
     items.sort(key=_sort_key)
     counts: dict[str, int] = {k: 0 for k in KINDS}

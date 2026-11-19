@@ -1029,6 +1029,42 @@ def test_baseline_is_not_truncated_by_scan_cap(
     assert len(promoted) == 2  # cap=2 enforced on the non-baseline path
 
 
+def test_an_email_watch_is_never_dropped_by_the_scan_budget(
+    db: Path,
+    install_fake_source,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A busy feed uses up the scan budget; an email watch's emails still
+    all get through. Its source has already read past them, so one the cap
+    dropped would never come back."""
+    from openexecutive.monitoring import mailbox
+
+    promoted = _install_promotion_recorder(monkeypatch)
+    _patch_settings(monkeypatch, external_monitor_max_signals_per_scan=1)
+    _insert_feed(db, "a-busy-feed")
+    install_fake_source([
+        _make_signal(dedup_key=f"vendor_status:n{i}", published_at=_iso_days_ago(0.1)) for i in range(3)
+    ])
+    ms.insert_watchlist_item(
+        slug="b-sign-up-emails", signal_type="mailbox", target="sign-up emails",
+        config=mailbox.owner_config({}, 7), trigger={"keywords": ["sign up"]}, db_path=db,
+    )
+    emails = _FakeSource([
+        _make_signal(dedup_key=f"mailbox:2:m{i}", published_at=_iso_days_ago(0.1)).model_copy(
+            update={"source_kind": "mailbox", "source_external_id": f"m{i}"},
+        )
+        for i in range(3)
+    ])
+    monkeypatch.setitem(SOURCE_REGISTRY, "mailbox", emails)  # type: ignore[arg-type]
+
+    asyncio.run(mp.run_external_monitor_scan(db_path=db))
+
+    assert sorted(e.external_id for e in promoted) == [
+        "mailbox:2:m0", "mailbox:2:m1", "mailbox:2:m2", "vendor_status:n0",
+    ]
+    assert all(e.routed_to_person_id == 7 for e in promoted if e.external_id.startswith("mailbox:"))
+
+
 def test_baselined_at_backfilled_for_previously_polled_rows(tmp_path: Path) -> None:
     """Upgrading a DB whose watchlist rows were already being polled must
     treat them as baselined — they surfaced their feed long ago, and a

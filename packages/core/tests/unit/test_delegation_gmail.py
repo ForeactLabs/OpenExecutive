@@ -353,6 +353,8 @@ def test_the_only_send_is_an_existing_draft_by_its_id() -> None:
         "answer_invite",
         # A contact's newest mail, for their signature (people.contact_keeper): read-only.
         "latest_from", "recent_from",
+        # An email watch on the watch list (monitoring.sources.mailbox): read-only.
+        "received_since",
     }
     # Gmail's send endpoints (/settings/sendAs is a read, and allowed): the
     # draft one, once, and never messages.send, which sends any text.
@@ -1019,3 +1021,27 @@ def test_the_script_saves_the_mailbox_they_signed_in_to(tmp_path: Path) -> None:
     assert script.mailbox_field(EMAIL, "x@y.example") == gm.mailbox_field(EMAIL, "x@y.example")
     script.write_credential(tmp_path, EMAIL, payload)
     assert gm.mailbox_of(EMAIL, directory=tmp_path) == "olivia.home@gmail.com"
+
+
+def test_received_since_reads_one_window_of_their_inbox(monkeypatch: pytest.MonkeyPatch) -> None:
+    # An email watch (monitoring.sources.mailbox) reads a page at a time.
+    client = FakeGoogle().client()
+    asked: list[tuple[str, int]] = []
+
+    async def ids(query: str, *, max_results: int = 100) -> list[tuple[str, str]]:
+        asked.append((query, max_results))
+        return [("m1", "t1"), ("gone", "t2")]
+
+    async def get(message_id: str) -> MailMessage:
+        if message_id == "gone":
+            raise gm.GmailNotFound("deleted")
+        return MailMessage(id=message_id, thread_id="t1", from_addr="a@b.example")
+
+    monkeypatch.setattr(client, "list_message_ids", ids)
+    monkeypatch.setattr(client, "get_message", get)
+    after = datetime.fromtimestamp(1_700_000_000, UTC)
+    found = asyncio.run(client.received_since(after, limit=500))
+    assert [m.id for m in found] == ["m1"]  # deleted since it was listed: left out
+    assert asked[-1] == ("in:inbox -in:chats -from:me after:1700000000", 50)
+    asyncio.run(client.received_since(after, before=datetime.fromtimestamp(1_700_003_600, UTC), limit=10))
+    assert asked[-1] == ("in:inbox -in:chats -from:me after:1700000000 before:1700003600", 10)

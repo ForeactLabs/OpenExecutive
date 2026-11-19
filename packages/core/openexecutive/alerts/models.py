@@ -41,7 +41,10 @@ def artifact_visible_to(
 # browser hand-over ("Waiting on you: sign in to ...", with the task from that
 # person's own chat). Only that person sees one, not even the principal, and
 # no surface shared by everyone (``visible_alert``).
-PERSONAL_SOURCES: frozenset[str] = frozenset({"browser_handover"})
+# An email watch's card (``monitoring.mailbox``) names a sender and a subject
+# from one person's own inbox: theirs alone.
+MAILBOX_SOURCE = "mailbox"
+PERSONAL_SOURCES: frozenset[str] = frozenset({"browser_handover", MAILBOX_SOURCE})
 
 
 def visible_alert(

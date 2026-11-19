@@ -138,7 +138,6 @@ _LABELS: dict[str, str] = {
     "read_my_email_attachment": f"{tool_labels.mail_labels(tool_labels.YOUR_MAIL, 'attachment')[1]}…",
     "save_my_email_attachment": "Saving a file from your email…",
     "remind_me": "Setting a reminder…",
-    "watch_for_email": "Watching for that email…",
     "propose_actions": "Leaving you a card to approve…",
     "find_in_app": "Looking that up in the app…",
     "do_in_app": "Making that change…",

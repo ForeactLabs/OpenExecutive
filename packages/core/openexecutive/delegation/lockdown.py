@@ -57,11 +57,14 @@ returned: their next message is them asking again, having read the reply.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any
 
 # outside_content imports this module only inside functions, so this stays safe.
 from openexecutive.orchestrator.outside_content import ASK_AGAIN_TONE
+
+logger = logging.getLogger(__name__)
 
 # What runs once the turn has read the owner's mail: everything but a door
 # to the open internet or to everyone. Each send here is fenced on its own.
@@ -124,9 +127,6 @@ MAIL_TOUCHED_ALLOWED_TOOLS: frozenset[str] = frozenset({
     "cancel_calendar_event",
     # A reminder to the speaker alone, as fixed text with no links.
     "remind_me",
-    # A watch on the speaker's own mailbox that tells them alone when an
-    # awaited email lands (sender name and subject, cleaned).
-    "watch_for_email",
     # Cards and drafts a person approves before anything happens.
     "propose_actions",
     # The inbox's work turn hands its result back to the reply card it
@@ -354,6 +354,31 @@ def speaker_named_contact(tool_input: Any) -> bool:
         return False
 
 
+def own_inbox_watch(tool_name: str, tool_input: Any) -> bool:
+    """Whether a watch-list call sets up or changes a watch on the speaker's
+    own inbox (``monitoring.mailbox``). Unlike the watch list's other kinds
+    it fetches no address: whose inbox is set in code, and its trigger is
+    addresses and words. So, like the old ``watch_for_email``, it runs after
+    their mail was read ("check Dana's email and tell me when she replies").
+    Never raises; False when unsure."""
+    try:
+        if not isinstance(tool_input, dict):
+            return False
+        from openexecutive.monitoring import mailbox
+        from openexecutive.monitoring.models import SOURCE_KIND_MAILBOX
+
+        if tool_name == "add_watchlist_entry":
+            return str(tool_input.get("signal_type") or "").strip() == SOURCE_KIND_MAILBOX
+        if tool_name == "tune_watchlist_entry":
+            from openexecutive.monitoring import store
+
+            item = store.get_watchlist_item_by_slug(str(tool_input.get("slug") or "").strip())
+            return item is not None and mailbox.is_mailbox(item)
+    except Exception:
+        logger.warning("lockdown: couldn't tell whether a watch is on an inbox", exc_info=True)
+    return False
+
+
 def mail_touched_withholds(tool_name: str, tool_input: Any) -> bool:
     """Whether a call to ``tool_name`` is refused once the turn has read the
     owner's mail. Anything unclassified is (fail closed)."""
@@ -363,7 +388,7 @@ def mail_touched_withholds(tool_name: str, tool_input: Any) -> bool:
         return not private_turn_allows_mcp_call(tool_input)
     if tool_name == "upsert_person":
         return not speaker_named_contact(tool_input)
-    if tool_name in MAIL_TOUCHED_ALLOWED_TOOLS:
+    if tool_name in MAIL_TOUCHED_ALLOWED_TOOLS or own_inbox_watch(tool_name, tool_input):
         return False
     from openexecutive.orchestrator.extensions import allowed_after_mail_read
 
