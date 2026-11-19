@@ -193,3 +193,15 @@ def test_a_card_approved_after_a_day_shows_from_when_it_went(
     ttl.resolved(card, "approved")
     block = ttl.done_lately_block(_web(roster.principal))
     assert "done:" in block and "Approved today" in block
+
+
+def test_closed_cards_never_crowd_out_what_went(monkeypatch: pytest.MonkeyPatch, roster: SimpleNamespace) -> None:
+    from openexecutive.memory import decision_ledger
+
+    _step(monkeypatch, roster.principal, subject="This morning's email", hours_ago=5)
+    for _ in range(ttl.DONE_LATELY_MAX * 5):
+        card = _card()
+        _step(monkeypatch, roster.principal, status="waiting", decision_id=card, subject="Replaced")
+        decision_ledger.close_externally(card, reason="replaced by a newer card")
+    block = ttl.done_lately_block(_web(roster.principal))
+    assert "This morning's email" in block and "Replaced" not in block

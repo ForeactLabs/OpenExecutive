@@ -2073,30 +2073,26 @@ def done_lately(
     whose card is still open however old, newest first: what a new turn of
     theirs is shown, so the same ask again is taken as that one
     (``done_lately_block``). A waiting row's time is when its card was made."""
+    from openexecutive.memory.decision_ledger import OPEN_STATUSES
+
     since = ((now or datetime.now(UTC)) - DONE_LATELY_WINDOW).isoformat()
+    open_marks = ",".join("?" * len(OPEN_STATUSES))
     conn = _connect(db_path)
     try:
+        # A waiting row counts only while its card is open: the decision
+        # says so, whichever way the card was closed (a row isn't moved on
+        # every path). Filtered here so the limit counts only what shows.
         rows = conn.execute(
-            f"SELECT * FROM {LOG_TABLE} WHERE asked_by = ? "  # noqa: S608
-            "AND (status = ? OR (status IN (?, ?) AND at >= ?)) ORDER BY at DESC, id DESC LIMIT ?",
-            (int(person_id), _LATELY_WAITING, *_LATELY_WENT, since, DONE_LATELY_MAX * 4),
+            f"SELECT l.* FROM {LOG_TABLE} l LEFT JOIN decision_instances d ON d.id = l.decision_id "  # noqa: S608
+            f"WHERE l.asked_by = ? AND ((l.status = ? AND (l.decision_id IS NULL OR d.status IN ({open_marks}))) "
+            "OR (l.status IN (?, ?) AND l.at >= ?)) ORDER BY l.at DESC, l.id DESC LIMIT ?",
+            (int(person_id), _LATELY_WAITING, *OPEN_STATUSES, *_LATELY_WENT, since, DONE_LATELY_MAX * 4),
         ).fetchall()
     finally:
         conn.close()
     steps = [Done(**dict(r)) for r in rows]
-    # A waiting row counts only while its card is open: the decision says so,
-    # whichever way the card was closed (a row isn't moved on every path).
-    from openexecutive.memory.decision_ledger import OPEN_STATUSES, get_decision_instances
-
-    held = [s.decision_id for s in steps if s.status == _LATELY_WAITING and s.decision_id]
-    cards = get_decision_instances([int(i) for i in held], db_path=db_path) if held else {}
-    open_cards = {i for i, card in cards.items() if card.status in OPEN_STATUSES}
-    return [
-        s for s in steps
-        # A connected-app read did nothing for anyone.
-        if ("__" not in s.tool or mcp_tool_acts(s.tool))
-        and (s.status != _LATELY_WAITING or s.decision_id is None or s.decision_id in open_cards)
-    ][:DONE_LATELY_MAX]
+    # A connected-app read did nothing for anyone.
+    return [s for s in steps if "__" not in s.tool or mcp_tool_acts(s.tool)][:DONE_LATELY_MAX]
 
 
 def done_lately_block(session: Any, *, now: datetime | None = None, db_path: Path | None = None) -> str:
