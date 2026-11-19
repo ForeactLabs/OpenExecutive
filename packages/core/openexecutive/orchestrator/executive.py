@@ -3149,7 +3149,10 @@ class Executive:
                 for tu in [*skill_tool_uses, *mcp_tool_uses, *script_tool_uses]
                 if tu["id"] in gate_reasons
             }
-            mail_why = levels.mail_reason() if mail_touched_uses else levels.OWN_MAIL
+            mail_why = (
+                levels.mail_reason(pinned_delegation, reading_now=reads_mail_now)
+                if mail_touched_uses else levels.OWN_MAIL
+            )
             for tu in mail_touched_uses:
                 noticed.setdefault(tu["id"], (tu, mail_why))
             for tu in outside_uses:
@@ -3315,7 +3318,7 @@ class Executive:
                     },
                     private=private_turn or bool(
                         pinned_delegation is not None and pinned_delegation.touched_mail
-                    ) or reason in (levels.OWN_MAIL, levels.MAIL_FLAGGED, levels.PRIVATE),
+                    ) or reason in (levels.OWN_MAIL, levels.MAIL_FLAGGED, levels.MAIL_UNCHECKED, levels.PRIVATE),
                 )
                 if not can_card:
                     results_by_id[tu["id"]] = levels.not_carriable_error(label, reason)
@@ -3757,7 +3760,7 @@ class Executive:
                     elif pinned_delegation is not None and mail_turn_withholds(
                         probe_name, probe_input, pinned=pinned_delegation
                     ):
-                        script_reason = levels.mail_reason()
+                        script_reason = levels.mail_reason(pinned_delegation)
                     if (
                         script_reason is not None
                         and levels.decide(script_reason, mode=turn_level) == levels.CARD

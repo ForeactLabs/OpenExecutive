@@ -1706,25 +1706,14 @@ routing:
     morning brief.
 
   outbound_privacy_invariant: |
-    For decisions touching `authority_scope` of `board`, `comp`, or
-    `legal`, OE must DM the scope-holder rather than posting to a
-    department channel or company broadcast — even when the matter
-    would otherwise qualify as department-scoped or company-wide.
-    The blast radius of a broadcast is the whole team; the privacy
-    expectation for these scopes is the named decision-maker.
-    Enforced PRIMARILY by persona instruction ("Choosing Who to Tell"),
-    with a deterministic code backstop on the broadcast tools:
-    `broadcast_tools._privacy_backstop_violation` refuses
-    `send_department_message` / `send_company_broadcast` whose body matches a
-    curated, word-boundary set of sensitive terms (layoffs, severance,
-    valuation, compensation, litigation, lawsuit, term sheet, cap table,
-    equity grant, board deck/meeting/vote), returning an error that tells the
-    model to DM the scope-holder instead. This mirrors the alert dispatcher's
-    `_violates_privacy_invariant` (which gates on topic_tags); the broadcast
-    backstop works on free text and is curated for precision (few false
-    positives) over recall — the persona is the primary control, the code is
-    defence-in-depth. Every refusal emits a `tool_invocation` audit row
-    carrying the matched term.
+    Privacy decides who sees what, and nothing else. What a message or an
+    alert is about (board, comp, legal, layoffs) never stops it: the
+    broadcast tools and the alert dispatcher have no topic word lists. The
+    persona's "Choosing Who to Tell" still guides who the model tells. An
+    alert only its person may see (`models.PRIVATE_ALERT_TAG`) never posts
+    to a channel others read (`dispatcher._private`). Whether a broadcast
+    waits is the one gate's call: a broadcast or department message is a
+    big send, one of the kinds Balanced holds (`take_the_lead`).
 
 knowledge:
   embedding_function: |
@@ -9646,13 +9635,12 @@ integrations:
     row carries it, and nothing in the app writes the column — a stored
     "UTC" is the default, never a choice.
 
-    Privacy invariant (board / comp / legal / valuation / layoffs /
-    severance stays DM-only) is encoded BOTH in the triage prompt
-    (primary enforcement) AND in `dispatcher._violates_privacy_invariant`
-    (defence-in-depth backstop). A model misroute that picks
-    `department_channel` or `company_broadcast` for a sensitive-tag
-    alert is refused at dispatch time with a logged error — the
-    alert still persists, but the broadcast doesn't happen.
+    What an alert is about never stops its broadcast (privacy hides, it
+    never stops work). Only an alert private to its person
+    (`models.PRIVATE_ALERT_TAG`) is kept off department and company
+    channels (`dispatcher._private`). Alert review routes a board / comp /
+    legal alert like any other: its department, the routed person and the
+    principal.
 
     Broadcast bodies are plain text (no `*foo*` markdown): Slack
     renders that as bold, Discord as italic, Telegram MarkdownV2

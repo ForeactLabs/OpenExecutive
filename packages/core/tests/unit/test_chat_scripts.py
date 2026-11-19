@@ -39,6 +39,8 @@ def _principals_own_turn(monkeypatch: pytest.MonkeyPatch) -> None:
     # every acting step a turn asks for; these tests are about scripts, so
     # Careful's hold on asked steps (take_the_lead._asked_hit) stays out.
     monkeypatch.setattr("openexecutive.orchestrator.take_the_lead._careful_turn", lambda: None)
+    # Nor the level's topics: the gate's own tests cover those.
+    monkeypatch.setattr("openexecutive.orchestrator.take_the_lead._turn_runs", lambda: True)
 
 
 class _TextBlock:

@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -35,70 +34,6 @@ logger = logging.getLogger(__name__)
 # The chat apps the broadcast tools post to, in the order a department's
 # notice tries them.
 INTEGRATIONS: tuple[str, ...] = ("slack", "discord", "telegram", "google_chat")
-
-
-# --- Privacy backstop (defence-in-depth for "Choosing Who to Tell") ----------
-# The Executive persona is the PRIMARY control over what may be broadcast. This
-# is a deterministic backstop on the free-text broadcast tools: it refuses a
-# department/company broadcast whose body mentions a board / compensation /
-# legal-class matter, which the privacy invariant says must be DM'd to the
-# scope-holder, never posted to a channel. Mirrors the alert dispatcher's
-# `_violates_privacy_invariant` (which gates on topic_tags); this works on free
-# text, so it is curated for PRECISION (few false positives blocking legitimate
-# broadcasts) over recall — and word-boundary matched so "board" doesn't trip on
-# "onboarding" or "comp" on "company" (the substring overmatch the dispatcher's
-# set explicitly warns about). High-frequency-but-legit words (revenue, legal,
-# comp) are deliberately excluded. Add new sensitive vocabulary here.
-_PRIVACY_SENSITIVE_TERMS: frozenset[str] = frozenset({
-    "layoff",
-    "rif",
-    "down round",
-    "severance",
-    "valuation",
-    "compensation",
-    "litigation",
-    "lawsuit",
-    "termsheet",
-    "term sheet",
-    "cap table",
-    "equity grant",
-    "board deck",
-    "board meeting",
-    "board vote",
-})
-
-# Each term is matched with an optional trailing plural "s" (so "lawsuit" also
-# catches "lawsuits", "board meeting" -> "board meetings"); the inner
-# non-capturing group keeps the `s?` applying to every alternative while the
-# outer group still captures the whole hit. Word-boundary anchored so "rif"
-# can't trip on "rifle" and "down round" can't trip on "markdown round".
-_SENSITIVE_RE = re.compile(
-    r"\b((?:" + "|".join(re.escape(t) for t in sorted(_PRIVACY_SENSITIVE_TERMS)) + r")s?)\b",
-    re.IGNORECASE,
-)
-
-
-def _privacy_backstop_violation(text: str) -> str | None:
-    """Return the matched sensitive term if a broadcast body looks like a
-    board / comp / legal matter that must be DM'd to the scope-holder rather
-    than broadcast, else None. Defence-in-depth backstop, not the primary gate.
-    """
-    match = _SENSITIVE_RE.search(text)
-    return match.group(1).lower() if match else None
-
-
-def _privacy_refusal(term: str) -> str:
-    """The JSON error a broadcast tool returns when the backstop fires —
-    phrased so the model routes to a per-person DM instead."""
-    return json.dumps({
-        "error": (
-            f"Refused for privacy: the message mentions '{term}', a "
-            "board / compensation / legal-class matter that must be sent "
-            "privately to the scope-holder via a DM, not broadcast to a "
-            "channel. Use a per-person DM (send_slack_dm / send_discord_dm / "
-            "send_telegram_message) to the right owner instead."
-        )
-    })
 
 
 SEND_DEPARTMENT_MESSAGE_TOOL: dict[str, Any] = {
@@ -336,13 +271,6 @@ async def handle_send_department_message(tool_input: dict[str, Any]) -> str:
     if integration not in INTEGRATIONS:
         return json.dumps({"error": f"unknown integration {integration!r}"})
 
-    sensitive = _privacy_backstop_violation(text)
-    if sensitive is not None:
-        _audit(tool="send_department_message", ok=False, integration=integration,
-               target=slug, text_len=len(text),
-               reason=f"privacy invariant: matched {sensitive!r}")
-        return _privacy_refusal(sensitive)
-
     dept = get_department(slug)
     if dept is None:
         _audit(tool="send_department_message", ok=False, integration=integration,
@@ -407,13 +335,6 @@ async def handle_send_company_broadcast(tool_input: dict[str, Any]) -> str:
     if integration not in INTEGRATIONS:
         return json.dumps({"error": f"unknown integration {integration!r}"})
 
-    sensitive = _privacy_backstop_violation(text)
-    if sensitive is not None:
-        _audit(tool="send_company_broadcast", ok=False, integration=integration,
-               target="<unset>", text_len=len(text),
-               reason=f"privacy invariant: matched {sensitive!r}")
-        return _privacy_refusal(sensitive)
-
     settings = get_settings()
     channel_id: str | None
     if integration == "google_chat":
@@ -459,27 +380,19 @@ async def post_department_notice(
     """Post a notice to a department's FIRST configured channel.
 
     A public, internal-caller entry point (e.g. onboarding kickoff) that applies
-    the SAME controls as ``send_department_message`` — the length cap, the
-    privacy backstop, and the broadcast audit trail — so internal broadcasts
-    can't bypass the guardrails that protect the team-visible channels. Unlike
+    the SAME controls as ``send_department_message`` — the length cap and the
+    broadcast audit trail. Unlike
     the chat tool it doesn't take an integration: it tries slack → discord →
     telegram and uses the first one configured.
 
-    Returns a status dict: ``sent`` (with integration/channel), ``refused``
-    (privacy backstop), ``skipped`` (no department / no channel), or ``error``
-    (bad text). Never raises.
+    Returns a status dict: ``sent`` (with integration/channel), ``skipped``
+    (no department / no channel), or ``error`` (bad text). Never raises.
     """
     from openexecutive.departments.store import get_department
 
     clean, err = _validate_text(text)
     if err is not None or clean is None:
         return {"status": "error", "error": err}
-
-    sensitive = _privacy_backstop_violation(clean)
-    if sensitive is not None:
-        _audit(tool=tool, ok=False, integration="auto", target=department_slug,
-               text_len=len(clean), reason=f"privacy invariant: matched {sensitive!r}")
-        return {"status": "refused", "term": sensitive}
 
     dept = get_department(department_slug)
     if dept is None:

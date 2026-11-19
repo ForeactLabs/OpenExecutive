@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from openexecutive.alerts import sse_bus
-from openexecutive.alerts.models import Alert, AlertChannel
+from openexecutive.alerts.models import PRIVATE_ALERT_TAG, Alert, AlertChannel
 from openexecutive.alerts.store import DB_PATH, update_delivery
 
 logger = logging.getLogger(__name__)
@@ -127,50 +127,11 @@ async def dispatch_email(alert: Alert) -> bool:
         return False
 
 
-# Tags that MUST NOT broadcast — even if the triage prompt would have
-# routed them to a department channel or company broadcast. Mirrors the
-# privacy invariant codified in the Executive persona's "Choosing Who
-# to Tell" section. Defence-in-depth: the prompt is the primary
-# enforcement, this is the backstop against a single model misroute
-# leaking comp / board / legal context to the entire team.
-#
-# Exact match (not substring) — a substring check overmatched the
-# documented tag vocabulary in round-1 review (e.g. "comp" matching
-# "competitor", "legal" matching "legalese"). The set lists every
-# spelling triage might emit; new sensitive vocabulary must be added
-# here explicitly.
-_PRIVACY_SENSITIVE_TAGS: frozenset[str] = frozenset({
-    # models.PRIVATE_ALERT_TAG: an alert only the principal may see. The
-    # pipeline already keeps such an alert off every broadcast channel; this
-    # is the backstop.
-    "private:principal",
-    "board",
-    "comp",
-    "compensation",
-    "compensation-refresh",
-    "comp-refresh",
-    "legal",
-    "litigation",
-    "layoffs",
-    "severance",
-    "valuation",
-    "term-sheet",
-    "termsheet",
-    "term_sheet",
-    "revenue",
-})
-
-
-def _violates_privacy_invariant(alert: Alert) -> bool:
-    """True when any of the alert's topic_tags is in the sensitive set.
-
-    Uses exact (case-insensitive) match on each tag rather than
-    substring — a substring check would block legitimate broadcasts on
-    "competitor" / "compliance" / "legalese" / etc.
-    """
-    if not alert.topic_tags:
-        return False
-    return any(tag.lower() in _PRIVACY_SENSITIVE_TAGS for tag in alert.topic_tags)
+def _private(alert: Alert) -> bool:
+    """Whether the alert is one only its person may see
+    (``models.PRIVATE_ALERT_TAG``). Privacy hides: such an alert never goes
+    to a channel other people read. What an alert is about never stops it."""
+    return any(tag.lower() == PRIVATE_ALERT_TAG for tag in alert.topic_tags or [])
 
 
 def _format_broadcast_body(alert: Alert) -> str:
@@ -205,14 +166,8 @@ async def dispatch_department_channel(
             alert.id, department_slug, integration,
         )
         return False
-    if _violates_privacy_invariant(alert):
-        # Triage prompt is supposed to prevent this; defence-in-depth
-        # backstop. Log loudly so a misroute is visible in the audit.
-        logger.error(
-            "privacy invariant breach: refusing department broadcast for "
-            "alert=%s tags=%s",
-            alert.id, alert.topic_tags,
-        )
+    if _private(alert):
+        logger.warning("dispatch_department_channel: alert=%s is private — not posted", alert.id)
         return False
     import json as _json
 
@@ -253,12 +208,8 @@ async def dispatch_company_broadcast(
             "dispatch_company_broadcast: missing integration (alert=%s)", alert.id,
         )
         return False
-    if _violates_privacy_invariant(alert):
-        logger.error(
-            "privacy invariant breach: refusing company broadcast for "
-            "alert=%s tags=%s",
-            alert.id, alert.topic_tags,
-        )
+    if _private(alert):
+        logger.warning("dispatch_company_broadcast: alert=%s is private — not posted", alert.id)
         return False
     import json as _json
 

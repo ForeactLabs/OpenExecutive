@@ -510,8 +510,9 @@ def check_one_gate_code(c: Change) -> Result:
     name = "one-gate-code"
     # Entries the change adds to the list, by what they name (a reworded note
     # is no new entry). The change that first writes the list adds them all.
-    # A hold moved, as it is, into a file the change renames or adds is the
-    # same entry under its new path.
+    # A hold moved, as it is, into a file the change touches (renamed, added
+    # or edited) is the same entry under its new path: the entry it left is
+    # gone from the list in the same change.
     grown: list[str] = []
     if one_gate.KNOWN not in c.added:
         left = Counter(k for k, _ in one_gate.parse_known("\n".join(c.removed_lines.get(one_gate.KNOWN, []))))
@@ -521,7 +522,7 @@ def check_one_gate_code(c: Change) -> Result:
             if left[key] > 0:
                 left[key] -= 1
                 unpathed[rest] -= 1
-            elif path in (c.renamed | c.added) and unpathed[rest] > 0:
+            elif path in (c.changed | c.renamed | c.added) and unpathed[rest] > 0:
                 unpathed[rest] -= 1
             else:
                 grown.append(key)

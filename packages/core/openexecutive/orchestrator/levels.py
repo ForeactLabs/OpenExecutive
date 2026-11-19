@@ -13,10 +13,13 @@ the install) only *detect*. This module decides, in one place
 it says:
 
 - **Hands-off**: the step runs. Nothing waits.
-- **Balanced** and **Careful**: the step comes to the owner as an Approve
-  card (``hold``). Careful detects more (any outside read), Balanced less
-  (only a read the check flagged): the outside-content check is the
-  level's.
+- **Careful**: every step noticed for any reason comes as an Approve card
+  for whoever asked (``hold``), and the gate holds everything else too.
+- **Balanced**: one meaning on every channel, for every person and feature.
+  A step waits when it touches one of the topics the gate reads (money,
+  contracts and legal, hiring and people decisions, deleting, cancelling or
+  sharing, someone new, big sends: ``take_the_lead``), or follows a read
+  that tried to give orders (``BALANCED_WAITS``). Everything else runs.
 - **Whose level**: the level belongs to whoever is asking. The owner's
   turns and a teammate's turns (a shared chat they wrote in included, and
   an AI app they signed in to, which is them) run at the company's level.
@@ -60,6 +63,10 @@ OWN_MAIL = "mail_touched"
 # The owner's own mail was read this turn and the content check flagged some
 # of what it read: Balanced holds then too, and the card says why.
 MAIL_FLAGGED = "mail_flagged"
+# The owner's own mail was read this turn and not all of it is checked yet
+# (too big to check, or read this round beside the step): on Balanced it
+# waits like a flagged read, since nothing has cleared what it said.
+MAIL_UNCHECKED = "mail_unchecked"
 PRIVATE = "private_turn"
 SHARED = "shared_chat"
 # A turn that may only read and advise (``schedule_tools.read_only_turn``):
@@ -76,9 +83,17 @@ SCRIPT = "apps_script"
 # (``browser.tools``), where it can send a message.
 SEND_SITE = "send_site"
 REASONS: frozenset[str] = frozenset({
-    OUTSIDE, OUTSIDE_READ, OWN_MAIL, MAIL_FLAGGED, PRIVATE, SHARED, READ_ONLY, NOT_OWNER, UNATTENDED, STRANGER,
+    OUTSIDE, OUTSIDE_READ, OWN_MAIL, MAIL_FLAGGED, MAIL_UNCHECKED, PRIVATE, SHARED, READ_ONLY, NOT_OWNER, UNATTENDED, STRANGER,
     NEW_PERSON, FILE_PLACE, URL_FETCH, SCRIPT, SEND_SITE,
 })
+
+# The reasons Balanced waits on, besides the topics the gate reads
+# (``take_the_lead.KINDS``): a read that tried to give orders (or mail no
+# check has cleared yet), and a step
+# that reaches someone new (one of the topics). Careful waits on every
+# reason. UNATTENDED stays until the last features that ask "is it
+# Hands-off?" for work nobody is watching ask the gate for the step instead.
+BALANCED_WAITS: frozenset[str] = frozenset({OUTSIDE, MAIL_FLAGGED, MAIL_UNCHECKED, NEW_PERSON, UNATTENDED})
 
 # What the card says it waited for, in the owner's words.
 _WHY: dict[str, str] = {
@@ -86,6 +101,7 @@ _WHY: dict[str, str] = {
     OUTSIDE_READ: "it read something from outside the company first",
     OWN_MAIL: "it read your own mail first",
     MAIL_FLAGGED: "something it read looked like it was trying to give it instructions",
+    MAIL_UNCHECKED: "it read your mail first and couldn't check all of what it said",
     PRIVATE: "it came from mail that's private to you",
     SHARED: "someone else wrote in this shared chat",
     READ_ONLY: "it was asked from a page in another app or a run queued for someone else",
@@ -195,19 +211,37 @@ def turn_level(session: Any = None) -> str:
     return outside_mode.for_turn(session)
 
 
-def mail_reason() -> str:
+def mail_reason(pinned: Any = None, *, reading_now: bool = False) -> str:
     """Why a step waits after the owner's own mail was read this turn:
     ``MAIL_FLAGGED`` when the content check flagged some of what it read,
-    else ``OWN_MAIL``. Never raises."""
+    ``MAIL_UNCHECKED`` while some of it couldn't be checked (too big) or
+    is read this round, beside the step (``reading_now``), else
+    ``OWN_MAIL``. ``pinned`` is the turn's ``TurnDelegation`` (the bound
+    session's when not given). Never raises."""
     try:
-        from openexecutive.orchestrator import outside_content
+        from openexecutive.orchestrator import outside_content, outside_mode
 
         state = outside_content.current()
         flags = getattr(state, "flags", None) or []
         if any(source == outside_content.MAIL for source, _, _ in flags):
             return MAIL_FLAGGED
+        if reading_now:
+            return MAIL_UNCHECKED
+        if pinned is None:
+            from openexecutive.delegation.settings import turn_delegation
+            from openexecutive.orchestrator.schedule_tools import current_session
+
+            pinned = turn_delegation(current_session.get())
+        # A read the check held (``mail_held``: too big to check, on
+        # Balanced) or a file it couldn't read whole (``unchecked_mail``).
+        if pinned is not None and (
+            getattr(pinned, "unchecked_mail", False) is True
+            or (getattr(pinned, "mail_held", False) is True and getattr(state, "mode", None) == outside_mode.OUTSIDERS)
+        ):
+            return MAIL_UNCHECKED
     except Exception:
-        logger.debug("levels: couldn't tell whether a mail read was flagged", exc_info=True)
+        logger.debug("levels: couldn't tell whether a mail read was checked", exc_info=True)
+        return MAIL_UNCHECKED
     return OWN_MAIL
 
 
@@ -238,6 +272,12 @@ def decide(reason: str, *, mode: str | None = None) -> str:
             return CARD
         current = mode if mode is not None else turn_level()
         if current == outside_mode.TRUST:
+            return RUN
+        if current == outside_mode.OUTSIDERS and reason not in BALANCED_WAITS:
+            # Balanced has one meaning everywhere: the topics wait (the gate
+            # in ``take_the_lead``), and so does a step after a read that
+            # tried to give orders or one that reaches someone new. Every
+            # other reason a feature noticed runs.
             return RUN
         return CARD
     except Exception:

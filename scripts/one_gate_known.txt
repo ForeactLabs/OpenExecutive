@@ -5,10 +5,8 @@
 # path | kind | what | what happens to it
 packages/core/openexecutive/alerts/approvals.py | named | def record_held_action | keep: card bookkeeping
 packages/core/openexecutive/alerts/approvals.py | named | def held_action_id | keep: card bookkeeping
-packages/core/openexecutive/alerts/dispatcher.py | words | _PRIVACY_SENSITIVE_TAGS | remove: fold into the gate
 packages/core/openexecutive/alerts/one_card.py | named | def held_topic | keep: card bookkeeping
 packages/core/openexecutive/alerts/replan.py | named | def plan_refusal | remove: fold into the gate
-packages/core/openexecutive/alerts/review.py | words | _SENSITIVE_TAGS | remove: fold into the gate
 packages/core/openexecutive/api/caller.py | named | def caller_gate | keep: sign-in
 packages/core/openexecutive/api/caller.py | named | def refuse | keep: sign-in
 packages/core/openexecutive/api/caller.py | named | def gate | keep: sign-in
@@ -157,9 +155,6 @@ packages/core/openexecutive/orchestrator/app_control.py | level | outside_mode.A
 packages/core/openexecutive/orchestrator/app_control.py | waiting | status waiting_for_approval | remove: fold into the gate
 packages/core/openexecutive/orchestrator/app_control.py | card | create_decision_instance | remove: fold into the gate
 packages/core/openexecutive/orchestrator/artifact_records.py | named | def runs_refused_for_nobody | remove: fold into the gate
-packages/core/openexecutive/orchestrator/broadcast_tools.py | words | _PRIVACY_SENSITIVE_TERMS | remove: fold into the gate
-packages/core/openexecutive/orchestrator/broadcast_tools.py | named | def _privacy_refusal | remove: fold into the gate
-packages/core/openexecutive/orchestrator/broadcast_tools.py | waiting | status refused | remove: fold into the gate
 packages/core/openexecutive/orchestrator/calendar_tools.py | named | def raw_booking_refusal | remove: fold into the gate
 packages/core/openexecutive/orchestrator/calendar_tools.py | named | def _meeting_gate | remove: fold into the gate
 packages/core/openexecutive/orchestrator/calendar_tools.py | card | create_decision_instance | remove: fold into the gate

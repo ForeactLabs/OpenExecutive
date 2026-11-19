@@ -40,6 +40,12 @@ def alerts_db(monkeypatch: pytest.MonkeyPatch, db: Path) -> Iterator[None]:
     from openexecutive.orchestrator import outside_mode
 
     monkeypatch.setattr(outside_mode, "get_mode", lambda **_k: outside_mode.OUTSIDERS)
+    # On the team, so reaching them is no one new (on Balanced that waits).
+    for name, address in (("Xavi Far", "x@far.example"), ("Zoe Far", "z@far.example")):
+        people_store.upsert_person(full_name=name, email=address)
+    people_registry.invalidate()
+    # Dana, a contact, wrote in: this turn may reach her, so she is no one new.
+    monkeypatch.setattr("openexecutive.orchestrator.people_tools.contacts_reachable_now", lambda: True)
     yield
 
 

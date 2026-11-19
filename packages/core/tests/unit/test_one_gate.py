@@ -202,5 +202,9 @@ def test_moving_a_listed_hold_into_a_renamed_file_is_the_same_entry() -> None:
         "removed_lines": {one_gate.KNOWN: [old]},
     }
     assert _check(**moved) == "PASS"
-    # Into a file that was already there, it is a new entry.
-    assert _check(**{**moved, "renamed": set()}) == "FAIL"
+    # Into a file that was already there and the change edits, too.
+    assert _check(**{**moved, "renamed": set()}) == "PASS"
+    # Into a file the change doesn't touch, it is a new entry.
+    assert _check(**{**moved, "renamed": set(), "changed": {one_gate.KNOWN}}) == "FAIL"
+    # Nor does a move make room for a second copy.
+    assert _check(**{**moved, "added_lines": {one_gate.KNOWN: [new, new]}}) == "FAIL"

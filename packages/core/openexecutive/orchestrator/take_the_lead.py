@@ -2691,26 +2691,43 @@ def _hit(name: str, tool_input: dict[str, Any], *, mcp: bool) -> tuple[Hit | Non
             return None, found
         if _level_runs():
             return None, None
-        # A Goes rule lets go what it covers (goes_kinds) where Balanced
-        # would hold it; the rest still waits, a delete or share always.
-        # Only who it actually reaches counts for a person or company rule,
-        # never an address written in the body.
-        targets = sorted({a.lower() for a in addresses})
-        goes = goes_rules(rules, spends, targets)
-        if goes:
-            released = goes_kinds(goes)
-            rest = Lead(scope=SCOPE_EXECUTIVE, ask_first={k: k not in released for k in KINDS})
-            held = check(name, tool_input, lead=rest, rules=[], mcp=mcp)
-            return (held, None) if held is not None else (None, goes[0])
-        # Balanced: the six kinds wait, everything else goes.
-        asks = Lead(scope=SCOPE_EXECUTIVE, ask_first=dict.fromkeys(KINDS, True))
-        hit = check(name, tool_input, lead=asks, rules=[], mcp=mcp)
-        if hit is not None:
-            return hit, None
-        return None, None
+        return _balanced(name, tool_input, rules, addresses=addresses, spends=spends, mcp=mcp)
     except Exception:
         logger.warning("take_the_lead: the gate failed — holding the action", exc_info=True)
         return Hit("rule", "its rules couldn't be read"), None
+
+
+def _balanced(
+    name: str, tool_input: dict[str, Any], rules: list[Rule], *, addresses: list[str], spends: str, mcp: bool,
+) -> tuple[Hit | None, Rule | None]:
+    """Balanced, asked or not: the topics (``KINDS``) wait unless a Goes
+    rule lets them go (``goes_kinds``), and everything else goes. Only who
+    a step actually reaches counts for a person or company rule, never an
+    address written in the body."""
+    targets = sorted({a.lower() for a in addresses})
+    goes = goes_rules(rules, spends, targets)
+    if goes:
+        released = goes_kinds(goes)
+        rest = Lead(scope=SCOPE_EXECUTIVE, ask_first={k: k not in released for k in KINDS})
+        held = check(name, tool_input, lead=rest, rules=[], mcp=mcp)
+        return (held, None) if held is not None else (None, goes[0])
+    asks = Lead(scope=SCOPE_EXECUTIVE, ask_first=dict.fromkeys(KINDS, True))
+    return check(name, tool_input, lead=asks, rules=[], mcp=mcp), None
+
+
+def _turn_runs() -> bool:
+    """Whether the turn in progress runs at Hands-off (its person's own
+    level where they have one). Never raises: an error is no."""
+    try:
+        from openexecutive.orchestrator import levels, outside_mode
+        from openexecutive.orchestrator.schedule_tools import current_session
+
+        session = current_session.get()
+        level = levels.turn_level(session) if session is not None else outside_mode.get_mode()
+        return bool(level == outside_mode.TRUST)
+    except Exception:
+        logger.warning("take_the_lead: couldn't read the turn's level — not Hands-off", exc_info=True)
+        return False
 
 
 def _level_runs() -> bool:
@@ -2718,9 +2735,9 @@ def _level_runs() -> bool:
     its own: Hands-off only (``orchestrator.levels``). Never raises: an
     error holds."""
     try:
-        from openexecutive.orchestrator import levels, outside_mode
+        from openexecutive.orchestrator import outside_mode
 
-        return levels.decide(levels.UNATTENDED, mode=outside_mode.get_mode()) == levels.RUN
+        return bool(outside_mode.get_mode() == outside_mode.TRUST)
     except Exception:
         logger.warning("take_the_lead: couldn't read the level — holding the action", exc_info=True)
         return False
@@ -2953,7 +2970,8 @@ def asked_checks_apply(session: Any) -> bool:
 def _asked_hit(name: str, tool_input: dict[str, Any], *, mcp: bool) -> Hit | None:
     """Why an asked-for step waits: a Waits rule, then Careful (it asks
     before anything goes, even what the person asked for), then In
-    training. The owner's own ask meets the same checks. Never raises: an
+    training, then on Balanced the topics (``_balanced``), as for work
+    nobody is watching. The owner's own ask meets the same checks. Never raises: an
     error holds."""
     try:
         lead = get(SCOPE_EXECUTIVE)
@@ -2975,7 +2993,11 @@ def _asked_hit(name: str, tool_input: dict[str, Any], *, mcp: bool) -> Hit | Non
             grant = allowance(name, tool_input, mcp=mcp)
             if (find_allowed(grant[0]) if grant is not None else None) is None:
                 return Hit(TRAINING, "it's in training and you haven't allowed this yet")
-        return None
+        if _turn_runs():
+            return None
+        # Balanced means one thing for a step someone asked for too.
+        hit, _ = _balanced(name, tool_input, rules, addresses=addresses, spends=spends, mcp=mcp)
+        return hit
     except Exception:
         logger.warning("take_the_lead: the rules check failed — holding the step", exc_info=True)
         return Hit("rule", "its rules couldn't be read")

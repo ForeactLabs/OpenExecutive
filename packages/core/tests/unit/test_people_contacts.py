@@ -395,7 +395,7 @@ def test_alert_review_never_puts_a_routed_contact_in_the_slice(roster: SimpleNam
     from openexecutive.alerts import review
 
     alert = SimpleNamespace(routed_to_person_id=roster.contact, topic_tags=[])
-    ids = {row["id"] for row in review._roster_slice(alert, sensitive=False)}
+    ids = {row["id"] for row in review._roster_slice(alert)}
     assert roster.contact not in ids
     assert roster.principal in ids
 

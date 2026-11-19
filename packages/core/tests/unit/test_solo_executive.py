@@ -76,6 +76,8 @@ def _careful_holds_no_asked_step(monkeypatch: pytest.MonkeyPatch) -> None:
     every acting step a turn asks for (take_the_lead._asked_hit); these
     tests are about other checks, so that hold stays out."""
     monkeypatch.setattr("openexecutive.orchestrator.take_the_lead._careful_turn", lambda: None)
+    # Nor the level's topics: the gate's own tests cover those.
+    monkeypatch.setattr("openexecutive.orchestrator.take_the_lead._turn_runs", lambda: True)
 
 
 @pytest.fixture(autouse=True)

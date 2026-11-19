@@ -38,6 +38,8 @@ def _careful_holds_no_asked_step(monkeypatch: pytest.MonkeyPatch) -> None:
     every acting step a turn asks for (take_the_lead._asked_hit); these
     tests are about other checks, so that hold stays out."""
     monkeypatch.setattr("openexecutive.orchestrator.take_the_lead._careful_turn", lambda: None)
+    # Nor the level's topics: the gate's own tests cover those.
+    monkeypatch.setattr("openexecutive.orchestrator.take_the_lead._turn_runs", lambda: True)
 
 
 @pytest.fixture(autouse=True)
@@ -379,6 +381,7 @@ def test_a_read_holds_the_writes_beside_it_but_runs_itself() -> None:
 
 
 def test_writes_alone_run() -> None:
+    _person(full_name="Ben Team", email="ben@co.example")  # on People: not someone new
     gateway = _Gateway()
     _run(
         [ToolUseBlock("tu1", "call_tool", SEND), ToolUseBlock("tu2", "call_tool", WRITE_DOC)],
@@ -402,6 +405,7 @@ def test_balanced_lets_a_write_beside_a_web_search_run(monkeypatch: pytest.Monke
     from openexecutive.orchestrator import outside_mode
 
     monkeypatch.setattr(outside_mode, "get_mode", lambda **_: outside_mode.OUTSIDERS)
+    _person(full_name="Ben Team", email="ben@co.example")  # on People: not someone new
     gateway = _Gateway()
     _run([_WebResult(), ToolUseBlock("tu1", "call_tool", SEND)], gateway=gateway)
     assert gateway.calls == [SEND]
@@ -824,6 +828,7 @@ def test_a_script_that_reads_a_company_file_can_edit_it() -> None:
 
 
 def test_a_search_of_the_company_drive_is_not_outside() -> None:
+    _person(full_name="Ben Team", email="ben@co.example")  # on People: not someone new
     gateway = _Gateway()
     search = {"name": "google_workspace__search_drive_files", "arguments": {"query": "withdrawal"}}
     _run(

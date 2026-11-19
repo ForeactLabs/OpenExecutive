@@ -58,11 +58,6 @@ EVENT_MERGED = "alert_review_merged"
 EVENT_SUGGESTED = "alert_review_suggested_workflow"
 EVENT_CHANGED = "alert_review_changed"
 
-# Tags / scopes that mark an alert as board / comp / legal: such an alert may
-# only be routed or escalated to a scope-holder or the principal.
-_SENSITIVE_TAGS = frozenset({"board", "comp", "compensation", "legal", "department:legal"})
-_SENSITIVE_SCOPES = ("legal_sign", "board_comms")
-
 # Moves that produce an outbound side effect (route, nudge, escalate, draft)
 # count against ALERT_REVIEW_MAX_MOVES_PER_SCAN via `_MoveContext.can_move`;
 # merges, closes, rewrites and annotations are silent bookkeeping, never capped.
@@ -196,60 +191,26 @@ def _department_slug(alert: Alert) -> str | None:
     return None
 
 
-def _is_sensitive(alert: Alert) -> bool:
-    tags = {t.lower() for t in (alert.topic_tags or [])}
-    if tags & _SENSITIVE_TAGS:
-        return True
+def _roster_slice(alert: Alert) -> list[dict[str, Any]]:
+    """People who could own this alert: department members, the person it is
+    routed to, and the principal."""
     try:
-        from openexecutive.orchestrator.broadcast_tools import _privacy_backstop_violation
-
-        return _privacy_backstop_violation(f"{alert.headline}\n{alert.body}") is not None
-    except Exception:
-        return False
-
-
-def _roster_slice(alert: Alert, sensitive: bool) -> list[dict[str, Any]]:
-    """People who could own this alert: department members (or scope-holders
-    for a sensitive matter), the person it is routed to, and the principal."""
-    try:
-        from openexecutive.people.store import find_approvers, get_person, list_people
+        from openexecutive.people.store import get_person, list_people
     except Exception:
         return []
     people: dict[int, Any] = {}
     try:
-        if sensitive:
-            from openexecutive.people.models import AuthorityScope
-
-            for scope in _SENSITIVE_SCOPES:
-                try:
-                    for p in find_approvers(AuthorityScope(scope)):
-                        if p.id is not None:
-                            people[p.id] = p
-                except Exception:
-                    continue
-        else:
-            slug = _department_slug(alert)
-            for p in list_people():
-                if p.id is None:
-                    continue
-                if p.is_principal or (slug and slug in (p.department_slugs or [])):
-                    people[p.id] = p
-        # The routed person joins the slice ONLY for non-sensitive alerts:
-        # for board / comp / legal matters the slice is scope-holders + the
-        # principal, whatever a producer put in routed_to_person_id.
-        if (
-            not sensitive
-            and alert.routed_to_person_id is not None
-            and alert.routed_to_person_id not in people
-        ):
+        slug = _department_slug(alert)
+        for p in list_people():
+            if p.id is None:
+                continue
+            if p.is_principal or (slug and slug in (p.department_slugs or [])):
+                people[p.id] = p
+        if alert.routed_to_person_id is not None and alert.routed_to_person_id not in people:
             routed = get_person(alert.routed_to_person_id)
             # Team only: a contact is never routed to, nudged or chased.
             if routed is not None and not routed.archived and routed.kind == "team":
                 people[alert.routed_to_person_id] = routed
-        if sensitive:
-            for p in list_people():
-                if p.id is not None and p.is_principal:
-                    people[p.id] = p
     except Exception:
         logger.debug("alert_review: roster slice failed", exc_info=True)
     return [
@@ -327,7 +288,6 @@ def gather_evidence(
 
     created = parse_aware(alert.created_at) or now
     age_hours = max(0.0, (now - created).total_seconds() / 3600)
-    sensitive = _is_sensitive(alert)
     slug = _department_slug(alert)
     evidence: dict[str, Any] = {
         "age_hours": round(age_hours, 1),
@@ -335,14 +295,13 @@ def gather_evidence(
         "last_seen_at": alert.last_seen_at,
         "prior_verdict": alert.review_verdict,
         "prior_note": alert.review_note,
-        "sensitive": sensitive,
         "department": slug,
         "authority_level": _authority_level(slug),
         "watch": None,
         "newer_signals": [],
         "related_alerts": [],
         "activity_since": [],
-        "roster": _roster_slice(alert, sensitive),
+        "roster": _roster_slice(alert),
         "workflows": _workflow_matches(alert),
         # Citable evidence ids (S1.. newer signals, R1.. related alerts,
         # A1.. activity). A closing verdict must cite one of these — free
@@ -465,8 +424,6 @@ def render_batch(
         parts.append(f"body: {_untrusted(a.body, 800)}")
         if ev.get("department"):
             parts.append(f"department: {ev['department']} (authority_level={ev.get('authority_level')})")
-        if ev.get("sensitive"):
-            parts.append("SENSITIVE: board / comp / legal — route only to a listed scope-holder or the principal.")
         watch = ev.get("watch")
         if watch:
             parts.append(
@@ -643,7 +600,6 @@ class _MoveContext:
     db_path: Path | None
     roster_ids: set[int]
     principal_id: int | None
-    sensitive: bool
     base_details: dict[str, Any]
     # The STANDING FACTS block the batch was reviewed with ("" when none):
     # a rewrite that applies one of the principal's corrections is grounded
@@ -721,14 +677,9 @@ def _close_or_annotate(ctx: _MoveContext) -> str:
 
 
 def _apply_changed(ctx: _MoveContext) -> None:
-    """Rewrite headline / body / severity in place; prior text goes to audit.
-
-    A sensitive (board / comp / legal) alert keeps its text: a rewrite could
-    launder the keywords the privacy backstop keys on, so only severity moves.
-    """
+    """Rewrite headline / body / severity in place; prior text goes to audit."""
     v, alert = ctx.verdict, ctx.alert
-    headline = None if ctx.sensitive else v.headline
-    body = None if ctx.sensitive else v.body
+    headline, body = v.headline, v.body
     # A rewrite nobody reads before it lands must not bring in a person or a
     # figure that neither the alert nor its evidence holds; the old text stays.
     unsupported = _ungrounded_rewrite(ctx, headline, body)
@@ -738,9 +689,6 @@ def _apply_changed(ctx: _MoveContext) -> None:
         if unsupported:
             _audit(EVENT_REVIEWED, f"Rewrite refused for '{alert.headline[:80]}': ungrounded",
                    {**ctx.base_details, "text_ungrounded": unsupported[:10]})
-            return
-        _audit(EVENT_REVIEWED, f"Text change refused for sensitive '{alert.headline[:80]}'",
-               {**ctx.base_details, "text_frozen": True})
         return
     alert_store.update_alert_content(
         ctx.alert_id, headline=headline, body=body, severity=v.severity, db_path=ctx.db_path,
@@ -751,7 +699,7 @@ def _apply_changed(ctx: _MoveContext) -> None:
         EVENT_CHANGED,
         f"Updated '{alert.headline[:80]}' — {ctx.note[:100]}",
         {**ctx.base_details, "prior_headline": alert.headline, "prior_body": alert.body[:2000],
-         "new_headline": headline, "new_severity": v.severity, "text_frozen": ctx.sensitive,
+         "new_headline": headline, "new_severity": v.severity,
          **({"text_ungrounded": unsupported[:10]} if unsupported else {})},
     )
 
@@ -830,10 +778,7 @@ async def _apply_route(ctx: _MoveContext) -> None:
         return
     slug = ctx.evidence.get("department")
     proposed = False
-    # A sensitive matter never takes the department proposal path: the gate's
-    # approver is a company-wide wildcard holder outside the vetted slice, and
-    # the proposal row would drop the tags that mark the matter sensitive.
-    if slug and not ctx.sensitive:
+    if slug:
         try:
             from openexecutive.departments.authority import gate_action, propose_via_alert
 
@@ -1052,7 +997,6 @@ async def apply_verdict(
         db_path=db_path,
         roster_ids={int(p["id"]) for p in roster},
         principal_id=next((int(p["id"]) for p in roster if p.get("is_principal")), None),
-        sensitive=bool(evidence.get("sensitive")),
         standing_facts=standing_facts,
         base_details={
             "alert_id": alert.id,

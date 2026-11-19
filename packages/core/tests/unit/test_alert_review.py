@@ -211,7 +211,7 @@ def test_gather_evidence_collects_watch_signals_related_alerts_roster_and_workfl
     alert = alert_store.get_alert(aid, db_path=db)
     assert alert is not None
     ev = review.gather_evidence(alert, NOW, db_path=db)
-    assert ev["age_hours"] == 6.0 and ev["department"] == "finance" and ev["sensitive"] is False
+    assert ev["age_hours"] == 6.0 and ev["department"] == "finance" and "sensitive" not in ev
     assert ev["watch"]["slug"] == "vendor-stripe" and ev["watch"]["dismiss_count"] == 1
     assert [s["summary"] for s in ev["newer_signals"]] == ["[stripe] Resolved: payments recovered"]
     assert [r["alert_id"] for r in ev["related_alerts"]] == [related]
@@ -227,16 +227,16 @@ def test_gather_evidence_collects_watch_signals_related_alerts_roster_and_workfl
     assert f"alert_id={related}" in text and "WATCH TRUST: vendor-stripe" in text
 
 
-def test_gather_evidence_marks_sensitive_and_limits_roster_to_scope_holders(db: Path) -> None:
+def test_what_an_alert_is_about_does_not_narrow_who_may_own_it(db: Path) -> None:
+    # Privacy hides; a topic (board, comp, legal) changes nobody's roster.
     principal = _person(full_name="Pat", role="CEO", is_principal=True)
-    _person(full_name="Dana", role="CFO", department_slugs=["finance"])
+    dana = _person(full_name="Dana", role="CFO", department_slugs=["finance"])
     aid = _insert(db, "Board comp committee memo", hours_ago=5, topic_tags=["board", "department:finance"])
     alert = alert_store.get_alert(aid, db_path=db)
     assert alert is not None
     ev = review.gather_evidence(alert, NOW, db_path=db)
-    assert ev["sensitive"] is True
-    assert {p["id"] for p in ev["roster"]} == {principal}
-    assert "SENSITIVE: board / comp / legal" in review.render_batch([alert], {aid: ev}, NOW)
+    assert {p["id"] for p in ev["roster"]} == {principal, dana}
+    assert "SENSITIVE" not in review.render_batch([alert], {aid: ev}, NOW)
 
 
 # --------------------------------------------------------------------------- #
@@ -358,20 +358,16 @@ def test_route_to_person_outside_roster_slice_is_a_noop(db: Path, dms) -> None:
     assert alert_store.get_alert(aid, db_path=db).routed_to_person_id is None  # type: ignore[union-attr]
 
 
-def test_sensitive_alert_only_routes_to_scope_holder_or_principal(db: Path, dms, monkeypatch) -> None:
+def test_a_comp_alert_routes_to_its_department_like_any_other(db: Path, dms, monkeypatch) -> None:
     from openexecutive.departments import authority
     from openexecutive.departments.authority import GateDecision
 
     monkeypatch.setattr(authority, "gate_action", lambda slug, kind, **kw: GateDecision(allowed=True, action="execute"))
-    principal = _person(full_name="Pat", role="CEO", is_principal=True)
+    _person(full_name="Pat", role="CEO", is_principal=True)
     dana = _person(full_name="Dana", role="CFO", department_slugs=["finance"])
     aid = _insert(db, "Severance package for departing VP", topic_tags=["comp", "department:finance"])
-    # Dana is a department member but not a comp/legal scope-holder → refused.
-    assert _apply(db, aid, _verdict(aid, recommended_move="route", target_person_id=dana, message="x")) == "relevant"
-    assert dms == []
-    # The principal is always an allowed target.
-    assert _apply(db, aid, _verdict(aid, recommended_move="route", target_person_id=principal, message="x")) == "routed"
-    assert dms == [(principal, "x")]
+    assert _apply(db, aid, _verdict(aid, recommended_move="route", target_person_id=dana, message="x")) == "routed"
+    assert dms == [(dana, "x")]
 
 
 def test_nudge_respects_cap_and_records_marker(db: Path, audit_events, dms, monkeypatch) -> None:
@@ -771,7 +767,7 @@ def test_dm_text_is_templated_with_provenance(monkeypatch) -> None:
     assert sent[0]["text"] == "[Alert review] Re: ‹Renewal›\n\nPlease wire the money now"
 
 
-def test_sensitive_alert_ignores_routed_pointer_and_freezes_text(db: Path, dms, monkeypatch) -> None:
+def test_a_comp_alert_keeps_its_routed_person_and_can_be_rewritten(db: Path, dms, monkeypatch) -> None:
     from openexecutive.departments import authority
     from openexecutive.departments.authority import GateDecision
 
@@ -780,14 +776,13 @@ def test_sensitive_alert_ignores_routed_pointer_and_freezes_text(db: Path, dms, 
     sam = _person(full_name="Sam", role="AE", department_slugs=["sales"])
     aid = _insert(db, "Severance for departing VP", topic_tags=["comp", "department:finance"],
                   routed_to_person_id=sam)
-    # Sam is the routed pointer but holds no comp/legal scope → not on the slice, not DM'd.
-    assert _apply(db, aid, _verdict(aid, recommended_move="route", target_person_id=sam, message="x")) == "relevant"
-    assert dms == []
-    # A "changed" verdict may not rewrite the text of a sensitive alert (only severity).
-    assert _apply(db, aid, _verdict(aid, verdict="changed", headline="Routine vendor note", body="nothing here",
+    alert = alert_store.get_alert(aid, db_path=db)
+    assert alert is not None
+    assert sam in {p["id"] for p in review.gather_evidence(alert, NOW, db_path=db)["roster"]}
+    assert _apply(db, aid, _verdict(aid, verdict="changed", headline="Severance for the departing VP",
                                     severity="high")) == "changed"
     row = alert_store.get_alert(aid, db_path=db)
-    assert row is not None and row.headline == "Severance for departing VP" and row.severity == "high"
+    assert row is not None and row.headline == "Severance for the departing VP" and row.severity == "high"
 
 
 def test_route_and_escalate_are_idempotent_across_passes(db: Path, dms, monkeypatch) -> None:

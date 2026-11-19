@@ -38,10 +38,21 @@ def test_hands_off_runs_every_noticed_step(reason: str) -> None:
     assert levels.decide(reason, mode=outside_mode.TRUST) == levels.RUN
 
 
-@pytest.mark.parametrize("mode", [outside_mode.ASK, outside_mode.OUTSIDERS])
 @pytest.mark.parametrize("reason", sorted(levels.REASONS))
-def test_below_hands_off_every_noticed_step_is_a_card(mode: str, reason: str) -> None:
-    assert levels.decide(reason, mode=mode) == levels.CARD
+def test_careful_puts_every_noticed_step_on_a_card(reason: str) -> None:
+    assert levels.decide(reason, mode=outside_mode.ASK) == levels.CARD
+
+
+@pytest.mark.parametrize("reason", sorted(levels.REASONS))
+def test_balanced_waits_only_on_its_own_reasons(reason: str) -> None:
+    """Balanced means one thing everywhere: the topics (the gate's) and a
+    read that tried to give orders or a step to someone new. Any other
+    reason a feature noticed runs."""
+    expected = (
+        levels.CARD if reason in levels.BALANCED_WAITS | {levels.STRANGER, levels.NOT_OWNER, levels.READ_ONLY}
+        else levels.RUN
+    )
+    assert levels.decide(reason, mode=outside_mode.OUTSIDERS) == expected
 
 
 @pytest.mark.parametrize("mode", sorted(outside_mode.MODES))

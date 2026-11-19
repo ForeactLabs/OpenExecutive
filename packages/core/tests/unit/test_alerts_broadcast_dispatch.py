@@ -319,12 +319,11 @@ async def test_resolve_channels_keeps_broadcast_channels(
 
 
 @pytest.mark.asyncio
-async def test_privacy_invariant_blocks_board_broadcast(
+async def test_a_board_alert_still_posts_to_its_department(
     alerts_db: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A 'board'-tagged alert MUST NOT broadcast, even when triage routed
-    it to a department channel. Defence-in-depth backstop on top of the
-    prompt-level rule."""
+    """What an alert is about never stops it (privacy hides, it never stops
+    work): a 'board'-tagged alert posts where triage routed it."""
     sent = {"n": 0}
 
     async def _stub_dept(_payload: dict[str, Any]) -> str:
@@ -348,17 +347,15 @@ async def test_privacy_invariant_blocks_board_broadcast(
         department_slug="finance",
         broadcast_integration="slack",
     )
-    assert "department_channel" in attempted
-    assert "department_channel" not in delivered
-    assert sent["n"] == 0  # broadcast handler was never called
+    assert "department_channel" in delivered
+    assert sent["n"] == 1  # what it is about never stops it
 
 
 @pytest.mark.asyncio
-async def test_privacy_invariant_blocks_comp_company_broadcast(
+async def test_a_comp_alert_still_posts_to_the_company_channel(
     alerts_db: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Mirror of the dept test for company_broadcast — a comp-tagged
-    alert can't reach the company channel either."""
+    """Mirror of the dept test for company_broadcast."""
     sent = {"n": 0}
 
     async def _stub_company(_payload: dict[str, Any]) -> str:
@@ -381,9 +378,43 @@ async def test_privacy_invariant_blocks_comp_company_broadcast(
         db_path=alerts_db,
         broadcast_integration="slack",
     )
-    assert "company_broadcast" in attempted
-    assert "company_broadcast" not in delivered
-    assert sent["n"] == 0
+    assert "company_broadcast" in delivered
+    assert sent["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_private_alert_never_posts_to_a_channel(
+    alerts_db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Privacy hides: an alert only its person may see stays off every
+    channel other people read."""
+    from openexecutive.alerts.models import PRIVATE_ALERT_TAG
+
+    sent = {"n": 0}
+
+    async def _stub(_payload: dict[str, Any]) -> str:
+        sent["n"] += 1
+        return '{"status": "sent"}'
+    import openexecutive.orchestrator.broadcast_tools as bt
+    monkeypatch.setattr(bt, "handle_send_department_message", _stub)
+    monkeypatch.setattr(bt, "handle_send_company_broadcast", _stub)
+
+    alert = _make_alert()
+    alert.topic_tags = [PRIVATE_ALERT_TAG]
+    alert.id = store.insert_alert(
+        source=alert.source, external_id="priv-3", severity=alert.severity,
+        headline=alert.headline, body=alert.body,
+        topic_tags=alert.topic_tags, dedup_key="priv-3",
+        db_path=alerts_db,
+    )
+    _attempted, delivered = await dispatcher.dispatch_all(
+        alert,
+        [AlertChannel.DEPARTMENT_CHANNEL, AlertChannel.COMPANY_BROADCAST],
+        db_path=alerts_db,
+        department_slug="finance",
+        broadcast_integration="slack",
+    )
+    assert delivered == [] and sent["n"] == 0
 
 
 @pytest.mark.asyncio

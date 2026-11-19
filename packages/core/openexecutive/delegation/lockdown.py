@@ -512,7 +512,7 @@ def outside_reach_refusal(label: str, tool_input: Any = None, tool_name: str = "
         return None
     from openexecutive.orchestrator import levels, outside_content
 
-    mail = reason in (levels.OWN_MAIL, levels.MAIL_FLAGGED)
+    mail = reason in (levels.OWN_MAIL, levels.MAIL_FLAGGED, levels.MAIL_UNCHECKED)
     error = mail_touched_withheld_error(label) if mail else outside_content.outside_withheld_error(label)
     return _card_or(error, name, tool_input, reason)
 
