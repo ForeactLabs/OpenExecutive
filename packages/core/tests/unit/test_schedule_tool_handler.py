@@ -80,7 +80,7 @@ def test_rejects_unparseable_run_at(session_with_telegram_ref: Session) -> None:
             "intent": "x",
         }
     )
-    assert "ISO8601" in payload["error"]
+    assert "company's time zone" in payload["error"]
 
 
 def test_rejects_unknown_channel(session_with_telegram_ref: Session) -> None:

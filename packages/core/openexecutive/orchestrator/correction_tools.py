@@ -326,7 +326,7 @@ async def handle_move_followup(tool_input: dict[str, Any]) -> str:
     except (KeyError, TypeError, ValueError):
         parsed = None
     if parsed is None:
-        return json.dumps({"error": "action_id (from list_followups) and run_at (ISO 8601) are required"})
+        return json.dumps({"error": "action_id (from list_followups) and run_at are required. run_at: " + COMPANY_TIME_HINT})
     run_at = parsed.astimezone(UTC)
     now = datetime.now(UTC)
     if run_at <= now:

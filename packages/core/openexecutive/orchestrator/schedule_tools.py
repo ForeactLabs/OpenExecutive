@@ -889,7 +889,7 @@ async def handle_schedule_followup(tool_input: dict[str, Any]) -> str:
 
     parsed = company_time(run_at_raw)
     if parsed is None:
-        return json.dumps({"error": f"run_at not parseable as ISO8601: {run_at_raw!r}"})
+        return json.dumps({"error": f"run_at {run_at_raw!r} can't be read. {COMPANY_TIME_HINT}"})
     parsed_utc = parsed.astimezone(UTC)
 
     now = datetime.now(UTC)
@@ -2608,7 +2608,7 @@ async def handle_suggest_workflow(tool_input: dict[str, Any]) -> str:
 
     parsed = company_time(run_at_raw)
     if parsed is None:
-        return json.dumps({"error": f"run_at not parseable as ISO8601: {run_at_raw!r}"})
+        return json.dumps({"error": f"run_at {run_at_raw!r} can't be read. {COMPANY_TIME_HINT}"})
     parsed_utc = parsed.astimezone(UTC)
 
     now = datetime.now(UTC)

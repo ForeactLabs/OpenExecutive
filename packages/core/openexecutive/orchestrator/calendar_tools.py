@@ -718,9 +718,9 @@ async def handle_create_calendar_event(tool_input: dict[str, Any]) -> str:
     start = _parse_iso(start_raw)
     end = _parse_iso(end_raw)
     if start is None:
-        return json.dumps({"error": f"start is not valid ISO 8601: {start_raw!r}"})
+        return json.dumps({"error": f"start {start_raw!r} can't be read. {COMPANY_TIME_HINT}"})
     if end is None:
-        return json.dumps({"error": f"end is not valid ISO 8601: {end_raw!r}"})
+        return json.dumps({"error": f"end {end_raw!r} can't be read. {COMPANY_TIME_HINT}"})
     if start <= now:
         return json.dumps({"error": "start must be in the future"})
     if end <= start:
