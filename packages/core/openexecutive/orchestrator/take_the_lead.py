@@ -1135,9 +1135,9 @@ def rule_text(rule: Rule) -> str:
     return f"anything with {rule.value}"
 
 
-# Steps that only book, file or note something for the team: they spend no
-# money, sign nothing and decide nothing about anyone, whatever their text
-# mentions (a calendar invite about a $2,150 lease). ``says``.
+# Steps that only book, file or note something: when they reach only the
+# team they spend no money, sign nothing and decide nothing about anyone,
+# whatever their text mentions (a team invite about a $2,150 lease). ``says``.
 _KEEPS_TOOLS = frozenset({"assign_open_loop", "cancel_calendar_event", "create_calendar_event", "create_instant_meeting"})
 _MCP_SENDS_RE = re.compile(r"(?:^|_)(?:send\w*|notify\w*|share\w*|e?mails?|gmail|messages?|reply|replies|forward|post|chat|dm|sms)(?=$|_)")
 # Calendar, meeting, task and note apps: only their steps can be a booking,
@@ -1169,24 +1169,27 @@ def says(tool: str, tool_input: dict[str, Any], *, mcp: bool = False) -> str:
     """What a step says to someone or pays: the only part of it that can
     spend money, agree to a contract or decide about a person. Money,
     contracts, people decisions and amount rules (Waits and Goes) read only
-    this. A message or email: the words it sends. A step that only books,
-    notes or files something (an invite, a meeting, a task, a reminder, a
-    note, a write into a file that reaches only the team): "", whatever its
-    text mentions, when it is a calendar, meeting, task or notes app's step
-    that names no money (a credit note or a billing event does). Any other
-    step, a payment or an app it can't place: all of it."""
+    this. A message or email: the words it sends. A booking, task, reminder
+    or note in a calendar, meeting, task or notes app, or a write into a
+    file, that reaches only the team: "", whatever its text mentions. One
+    that reaches anyone else sends them its words (an invite emails its
+    description), so it is read in full. A step whose name says it sends,
+    shares or bills (a credit note, a usage event), a payment, or an app it
+    can't place: all of it."""
     text = "\n".join(_strings(tool_input))
     if not mcp:
-        return "" if tool in _KEEPS_TOOLS else text
-    words = _tool_words(tool)
-    app = _tool_words(re.split(r"__|\.", tool or "")[0]) if "__" in (tool or "") or "." in (tool or "") else ""
-    if is_mail_send(tool) or _MCP_SENDS_RE.search(words) or _MCP_MONEY_WORD_RE.search(words):
-        return text
-    if _MCP_KEEPS_APP_RE.match(app) and _MCP_KEEPS_RE.search(words):
-        return ""
-    if _file_tool(tool) and _all_team(_reach_addresses(tool, tool_input)):
-        return ""
-    return text
+        if tool not in _KEEPS_TOOLS:
+            return text
+        reach = [*_EMAIL_RE.findall(text), *_rule_targets(tool, tool_input)[0]]
+    else:
+        words = _tool_words(tool)
+        app = _tool_words(re.split(r"__|\.", tool or "")[0]) if "__" in (tool or "") or "." in (tool or "") else ""
+        if is_mail_send(tool) or _MCP_SENDS_RE.search(words) or _MCP_MONEY_WORD_RE.search(words):
+            return text
+        if not ((_MCP_KEEPS_APP_RE.match(app) and _MCP_KEEPS_RE.search(words)) or _file_tool(tool)):
+            return text
+        reach = _reach_addresses(tool, tool_input)
+    return "" if _all_team(reach) else text
 
 
 def _mcp_deletes(tool: str, tool_input: dict[str, Any]) -> bool:

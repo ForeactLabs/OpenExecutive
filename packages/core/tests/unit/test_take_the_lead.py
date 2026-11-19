@@ -2269,7 +2269,7 @@ _LEASE = "Walk through the $2,150/month lease and sign the contract. Then hire a
 
 
 @pytest.mark.parametrize(("tool", "tool_input", "mcp"), [
-    ("create_calendar_event", {"title": "Lease review", "description": _LEASE, "attendee_emails": [DANA]}, False),
+    ("create_calendar_event", {"title": "Lease review", "description": _LEASE, "attendee_emails": [SAM]}, False),
     ("create_instant_meeting", {"title": _LEASE}, False),
     ("assign_open_loop", {"person_id": 1, "text": _LEASE}, False),
     ("google_workspace__manage_event", {"action": "create", "summary": "Lease", "description": _LEASE}, True),
@@ -2280,6 +2280,7 @@ _LEASE = "Walk through the $2,150/month lease and sign the contract. Then hire a
 def test_a_step_that_spends_nothing_meets_no_money_check_or_amount_rule(
     owner: Any, tool: str, tool_input: dict[str, Any], mcp: bool,
 ) -> None:
+    people_store.upsert_person(full_name="Sam Team", email=SAM)
     assert ttl.says(tool, tool_input, mcp=mcp) == ""
     ttl.add_rule(ttl.SCOPE_COMPANY, "amount", "500", created_by="t")
     rules = ttl.list_rules([ttl.SCOPE_COMPANY])
@@ -2309,6 +2310,25 @@ def test_the_same_words_sent_or_paid_still_wait(owner: Any) -> None:
         assert hit is not None and hit.kind == "rule", tool
     hit = ttl.check("message_person", {"person_id": 1, "text": _LEASE}, lead=_lead(), rules=[])
     assert hit is not None and hit.kind == ttl.MONEY
+
+
+def test_an_invite_to_someone_outside_the_team_is_read_in_full(owner: Any) -> None:
+    """An invite emails its description to every guest: one reaching a
+    contact says its words to them."""
+    client = people_store.upsert_person(full_name="Cleo Client", email="cleo@client.example", kind="contact")
+    ttl.add_rule(ttl.SCOPE_COMPANY, "amount", "500", created_by="t")
+    rules = ttl.list_rules([ttl.SCOPE_COMPANY])
+    off = _lead(**dict.fromkeys(ttl.KINDS, False))
+    for tool, tool_input, mcp in [
+        ("create_calendar_event", {"title": "Lease", "description": _LEASE, "attendee_person_ids": [client]}, False),
+        ("create_calendar_event", {"title": "Lease", "description": _LEASE,
+                                   "attendee_emails": ["cleo@client.example"]}, False),
+        ("google_workspace__manage_event", {"action": "create", "description": _LEASE,
+                                            "attendees": ["cleo@client.example"]}, True),
+    ]:
+        assert ttl.says(tool, tool_input, mcp=mcp), tool
+        hit = ttl.check(tool, tool_input, lead=off, rules=rules, mcp=mcp)
+        assert hit is not None and hit.kind == "rule", tool
 
 
 def test_a_words_or_person_rule_still_reads_an_invite(owner: Any) -> None:
