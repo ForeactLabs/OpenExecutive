@@ -1067,10 +1067,14 @@ def _only_looks(tool_uses: list[dict[str, Any]]) -> bool:
 
 def _is_working_note(text: str) -> bool:
     """Whether a round's text before its tool calls is a working note ("Now
-    the live data.", "Let me check the folder."): a line or two, no list or
-    table. Longer text is part of the answer and stays."""
+    the live data.", "Let me check the folder."): a line or two, no list,
+    table or figure. Longer text, or a figure ("Revenue was $1.2M."), is
+    part of the answer and stays."""
     note = text.strip()
-    return bool(note) and len(note) <= WORKING_NOTE_MAX_CHARS and "\n" not in note and "|" not in note
+    return (
+        bool(note) and len(note) <= WORKING_NOTE_MAX_CHARS
+        and "\n" not in note and "|" not in note and not any(c.isdigit() for c in note)
+    )
 
 
 def _without_notes(rounds: list[tuple[str, bool]]) -> str | None:

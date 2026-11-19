@@ -119,6 +119,15 @@ def test_an_answer_written_before_an_action_stays() -> None:
     assert reply == "Runway is 14 months at the current burn.\n\nSent to Dana."
 
 
+def test_a_short_answer_with_a_figure_before_a_lookup_stays() -> None:
+    reply = _reply([
+        FinalMsg([TextBlock("Revenue was $1.2M last quarter."), ToolUseBlock("tu1", "search_knowledge", {})],
+                 "tool_use"),
+        FinalMsg([TextBlock("Costs were $800k.")], "end_turn"),
+    ])
+    assert reply == "Revenue was $1.2M last quarter.\n\nCosts were $800k."
+
+
 def test_the_rest_of_a_cut_sentence_stays() -> None:
     # A round cut mid-answer carries on in the next; that short rest is
     # the end of the sentence, not a note.
