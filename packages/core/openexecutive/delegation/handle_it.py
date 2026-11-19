@@ -231,7 +231,7 @@ def content_hold(
     except Exception:
         logger.warning("delegation.handle_it: couldn't read the rules — holding", exc_info=True)
         return "rule"
-    if take_the_lead.rule_waits(rules, joined, going) is not None:
+    if take_the_lead.rule_waits(rules, joined, going, topics=take_the_lead.topics_in(joined)) is not None:
         return "rule"
     if hands_off(db_path=db_path):
         return None
@@ -244,13 +244,18 @@ def content_hold(
     kinds = {r.kind for r in goes}
     if kinds & {take_the_lead.RULE_PERSON, take_the_lead.RULE_DOMAIN}:
         return None
+    # A topic rule lets its topic go here as in every other check
+    # (take_the_lead.goes_kinds): a word goes when its topic does.
+    released = take_the_lead.goes_kinds([r for r in goes if r.kind == take_the_lead.RULE_TOPIC])
+    money_goes = take_the_lead.RULE_AMOUNT in kinds or take_the_lead.MONEY in released
     topics = {m.group(0).lower() for t in texts for m in _SENSITIVE_RE.finditer(t or "")}
     money = {t for t in topics if re.sub(r"\s+", " ", t) in MONEY_WORDS}
-    if take_the_lead.RULE_AMOUNT not in kinds and money:
+    covered = {t for t in topics if take_the_lead.topics_in(t) & released}
+    if not money_goes and money:
         return "sensitive"
-    if topics - money:
+    if topics - money - covered:
         return "sensitive"
-    if take_the_lead.RULE_AMOUNT not in kinds and any(_AMOUNT_RE.search(t or "") for t in texts):
+    if not money_goes and any(_AMOUNT_RE.search(t or "") for t in texts):
         return "amount"
     return None
 

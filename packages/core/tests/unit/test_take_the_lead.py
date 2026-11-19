@@ -120,7 +120,7 @@ def test_rules_belong_to_their_scope() -> None:
     ("message_person", {"person_id": 1, "text": "The quote came in at $4,000."}, "money"),
     ("message_person", {"person_id": 1, "text": "Please sign the NDA today."}, "contracts"),
     ("message_person", {"person_id": 1, "text": "We should hire a second engineer."}, "people_decisions"),
-    ("cancel_calendar_event", {"event_id": "e1"}, "delete_share"),
+    ("cancel_calendar_event", {"event_id": "e1"}, "delete"),
     ("send_company_broadcast", {"text": "Office closed Friday."}, "big_send"),
     ("create_calendar_event", {"title": "Sync", "attendee_emails": ["stranger@far.example"]}, "someone_new"),
     # A follow-up the scheduler fires to an address nobody on People has:
@@ -262,8 +262,19 @@ def test_only_a_file_apps_tool_writes_a_team_file(owner: Any, tool: str, tool_in
 def test_a_plain_message_to_someone_known_goes(owner: Any) -> None:
     assert ttl.check("message_person", {"person_id": 1, "text": "Are we still on for Thursday?"},
                      lead=_lead(), rules=[]) is None
+    from types import SimpleNamespace
+
+    from openexecutive.orchestrator.schedule_tools import current_session
+
     assert ttl.check("create_calendar_event", {"title": "Sync", "attendee_emails": [DANA]},
                      lead=_lead(), rules=[]) is None
+    # A contact is someone new only on a turn contacts don't exist for (the
+    # same list the connected-app checks read): words from outside.
+    token = current_session.set(SimpleNamespace(unattended=True, email_from="x@far.example"))
+    try:
+        assert ttl.new_people([DANA]) == [DANA]
+    finally:
+        current_session.reset(token)
 
 
 def test_more_than_five_people_is_a_big_send(owner: Any) -> None:
@@ -419,7 +430,8 @@ def test_the_same_waiting_action_is_one_card(owner: Any) -> None:
         ("people_decisions", "Send Jo the offer letter", ["hiring_signoff"]),
         ("big_send", "Quarterly update to all investors", ["board_comms"]),
         ("someone_new", "Draft for the board meeting", ["board_comms"]),
-        ("delete_share", "Share the board deck", []),
+        ("share", "Share the board deck", []),
+        ("delete", "Delete the board deck", []),
         ("big_send", "Office closed Friday", []),
     ],
 )
@@ -468,7 +480,8 @@ def test_credit_vendors_and_board_reach_their_holders(owner: Any, monkeypatch: p
     assert _approver(owner, "big_send", "Note to all investors") == board
     # Nobody holds Legal or the spend ranges: those come to the principal.
     assert _approver(owner, "contracts", "Sign the NDA") == owner.id
-    assert _approver(owner, "delete_share", "Share the board deck") == owner.id
+    assert _approver(owner, "share", "Share the board deck") == owner.id
+    assert _approver(owner, "delete", "Delete the board deck") == owner.id
 
 
 def test_an_action_reaching_a_contact_goes_to_the_principal(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -663,7 +676,7 @@ def test_connected_tools_fail_closed(name: str, acts: bool) -> None:
 
 def test_clearing_a_sheet_counts_as_deleting(owner: Any) -> None:
     hit = ttl.check("google_workspace__clear_sheet_values", {"spreadsheet_id": "abc"}, lead=_lead(), rules=[], mcp=True)
-    assert hit is not None and hit.kind == ttl.DELETE_SHARE
+    assert hit is not None and hit.kind == ttl.DELETE
 
 
 def test_connected_tool_arguments_must_be_an_object(owner: Any) -> None:
@@ -981,7 +994,7 @@ def test_a_teammate_cant_see_or_approve_someone_elses(client: TestClient, owner:
 
 def test_the_owner_turns_it_on_and_adds_rules(client: TestClient, owner: Any) -> None:
     body = client.get("/take-the-lead").json()
-    assert body["enabled"] is False and body["paused"] is False and len(body["ask_first"]) == 6
+    assert body["enabled"] is False and body["paused"] is False and len(body["ask_first"]) == 7
     assert all(a["hint"] for a in body["ask_first"])
     body = client.put("/take-the-lead", json={"enabled": True, "ask_first": {"someone_new": False}}).json()
     assert body["enabled"] is True
@@ -1589,9 +1602,9 @@ def test_the_owners_act_as_me_ones_share_the_list_and_nobody_elses(client: TestC
 
 def test_a_calendar_delete_by_action_counts_as_deleting(owner: Any) -> None:
     hit = ttl.check("google_workspace__manage_event", {"action": "delete", "event_id": "e1"}, lead=_lead(), rules=[], mcp=True)
-    assert hit is not None and hit.kind == ttl.DELETE_SHARE
+    assert hit is not None and hit.kind == ttl.DELETE
     hit = ttl.check("google_workspace__manage_event", {"action": "update", "event_id": "e1"}, lead=_lead(), rules=[], mcp=True)
-    assert hit is None or hit.kind != ttl.DELETE_SHARE
+    assert hit is None or hit.kind != ttl.DELETE
 
 
 def test_mail_sends_are_known_without_their_addresses() -> None:
@@ -1848,7 +1861,7 @@ def test_the_route_adds_a_goes_rule_for_a_provable_owner(
 def test_a_goes_rule_never_lets_a_delete_go(owner: Any, balanced: None) -> None:
     _go("amount", "500")
     hit, _ = ttl._hit("cancel_calendar_event", {"event_id": "e1", "title": "$100 standup"}, mcp=False)
-    assert hit is not None and hit.kind == "delete_share"
+    assert hit is not None and hit.kind == "delete"
 
 
 def test_a_goes_rule_lets_go_only_what_it_covers(owner: Any, balanced: None) -> None:
@@ -2387,3 +2400,146 @@ def test_the_gate_lets_an_invite_about_money_go_under_an_amount_rule(owner: Any,
     assert hit is None or hit.kind != "rule"
     hit = ttl._asked_hit("message_person", {"person_id": owner.id, "text": _LEASE}, mcp=False)
     assert hit is not None and hit.kind == "rule"
+
+
+# ── topic rules ───────────────────────────────────────────────────────────────
+
+
+_SHARE = ("google_workspace__share_drive_file", {"file_id": "f1", "share_with": "lee@far.example"})
+_DELETE = ("google_workspace__delete_drive_file", {"file_id": "f1"})
+
+
+def test_sharing_and_deleting_are_two_topics(owner: Any) -> None:
+    share = ttl.check(*_SHARE, lead=_lead(someone_new=False), rules=[], mcp=True)
+    delete = ttl.check(*_DELETE, lead=_lead(), rules=[], mcp=True)
+    assert share is not None and share.kind == ttl.SHARE
+    assert delete is not None and delete.kind == ttl.DELETE
+    assert ttl.SHARE not in ttl.topics_of(*_DELETE, mcp=True)
+    assert ttl.DELETE not in ttl.topics_of(*_SHARE, mcp=True)
+
+
+def test_a_topic_rule_names_a_real_topic() -> None:
+    assert ttl.clean_rule("topic", "share") == "share"
+    with pytest.raises(ttl.RuleError):
+        ttl.clean_rule("topic", "anything")
+    rule = _go("topic", "share")
+    assert ttl.rule_text(rule) == "anything about sharing"
+
+
+def test_a_topic_goes_rule_lets_sharing_go_and_deleting_still_waits(owner: Any, balanced: None) -> None:
+    hit, _ = ttl._hit(*_SHARE, mcp=True)
+    assert hit is not None
+    rule = _go("topic", "share")
+    _go("topic", "someone_new")
+    hit, why = ttl._hit(*_SHARE, mcp=True)
+    assert hit is None and isinstance(why, ttl.Rule) and why.kind == "topic"
+    hit, _ = ttl._hit(*_DELETE, mcp=True)
+    assert hit is not None and hit.kind == ttl.DELETE
+    assert ttl.delete_rule(rule.id, ttl.SCOPE_COMPANY)
+    hit, _ = ttl._hit(*_SHARE, mcp=True)
+    assert hit is not None and hit.kind == ttl.SHARE
+
+
+def test_a_topic_waits_rule_holds_on_any_level_and_wins(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.orchestrator import outside_mode
+
+    monkeypatch.setattr(outside_mode, "get_mode", lambda **_: outside_mode.TRUST)
+    assert ttl._asked_hit(*_SHARE, mcp=True) is None
+    _go("topic", "share")
+    ttl.add_rule(ttl.SCOPE_COMPANY, "topic", "share", created_by="t")
+    hit = ttl._asked_hit(*_SHARE, mcp=True)
+    assert hit is not None and hit.kind == "rule" and hit.reason == "your rule about sharing says to wait"
+    assert ttl._asked_hit(*_DELETE, mcp=True) is None
+
+
+def test_lets_go_needs_a_goes_rule_no_waits_rule_and_a_turn_goes_rules_count_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.orchestrator import mcp_gateway
+
+    applies = {"on": True}
+    monkeypatch.setattr(mcp_gateway, "_goes_rules_apply", lambda: applies["on"])
+    assert ttl.lets_go(ttl.SOMEONE_NEW) is False
+    _go("topic", "someone_new")
+    assert ttl.lets_go(ttl.SOMEONE_NEW) is True
+    assert ttl.lets_go(ttl.SHARE) is False
+    applies["on"] = False
+    assert ttl.lets_go(ttl.SOMEONE_NEW) is False
+    applies["on"] = True
+    ttl.add_rule(ttl.SCOPE_COMPANY, "topic", "someone_new", created_by="t")
+    assert ttl.lets_go(ttl.SOMEONE_NEW) is False
+
+
+def test_a_someone_new_rule_opens_the_egress_list_only_where_goes_rules_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.orchestrator import mcp_gateway
+
+    applies = {"on": True}
+    monkeypatch.setattr(mcp_gateway, "_goes_rules_apply", lambda: applies["on"])
+    _go("topic", "someone_new")
+    assert "lee@far.example" in mcp_gateway._roster_allow_set(goes=True)
+    assert "lee@far.example" not in mcp_gateway._roster_allow_set()
+    applies["on"] = False
+    assert "lee@far.example" not in mcp_gateway._roster_allow_set(goes=True)
+
+
+# ── what a held card offers for next time ─────────────────────────────────────
+
+
+def test_a_card_offers_only_rules_that_would_let_it_go(owner: Any, balanced: None) -> None:
+    step = ("message_person", {"person_id": owner.id, "text": "Pay the $450 invoice"})
+    offers = ttl.rule_offers(*step, ttl.MONEY, mcp=False)
+    assert {"kind": "topic", "value": "money"} in offers
+    assert {"kind": "amount", "value": "500"} in offers
+    # A contract under the limit: an amount rule alone wouldn't let it go.
+    signed = ("message_person", {"person_id": owner.id, "text": "Sign the $300 contract"})
+    assert not {"topic", "amount"} & {o["kind"] for o in ttl.rule_offers(*signed, ttl.MONEY, mcp=False)}
+    # A rule already there isn't offered again.
+    _go("amount", "500")
+    assert {"kind": "amount", "value": "500"} not in ttl.rule_offers(*step, ttl.MONEY, mcp=False)
+
+
+def test_a_card_offers_the_person_and_company_but_never_for_a_delete(owner: Any, balanced: None) -> None:
+    offers = ttl.rule_offers(*_SHARE, ttl.SHARE, mcp=True)
+    # Sharing and someone new: a sharing rule alone doesn't let it go, the
+    # person or their company covers both.
+    assert {"kind": "person", "value": "lee@far.example"} in offers
+    assert {"kind": "domain", "value": "far.example"} in offers
+    assert {"kind": "topic", "value": "share"} not in offers
+    assert ttl.rule_offers(*_DELETE, ttl.DELETE, mcp=True) == [{"kind": "topic", "value": "delete"}]
+    assert ttl.rule_offers(*_SHARE, "training", mcp=True) == []
+
+
+def test_someone_new_on_an_asked_step_offers_what_covers_everyone_new(
+    owner: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.orchestrator import mcp_gateway
+
+    applies = {"on": True}
+    monkeypatch.setattr(mcp_gateway, "_goes_rules_apply", lambda: applies["on"])
+    two = ("google_workspace__send_gmail_message", {"to": "a@far.example, b@gmail.com", "body": "hi"})
+    assert ttl.rule_offers(*two, ttl.SOMEONE_NEW, mcp=True, asked=True) == [{"kind": "topic", "value": "someone_new"}]
+    one = ("google_workspace__send_gmail_message", {"to": "a@far.example", "body": "hi"})
+    assert ttl.rule_offers(*one, ttl.SOMEONE_NEW, mcp=True, asked=True) == [
+        {"kind": "topic", "value": "someone_new"},
+        {"kind": "person", "value": "a@far.example"},
+        {"kind": "domain", "value": "far.example"},
+    ]
+    applies["on"] = False
+    assert ttl.rule_offers(*one, ttl.SOMEONE_NEW, mcp=True, asked=True) == []
+
+
+def test_just_above() -> None:
+    assert [ttl._just_above(x) for x in (450, 1200, 8000, 10, 99.5)] == ["500", "1500", "10000", "15", "100"]
+
+
+def test_a_person_goes_rule_covers_a_connected_apps_mail_to_them(owner: Any, balanced: None) -> None:
+    mail = ("google_workspace__send_gmail_message", {"to": "lee@far.example", "subject": "Hi", "body": "Thanks"})
+    assert ttl._hit(*mail, mcp=True)[0] is not None
+    _go("person", "lee@far.example")
+    hit, why = ttl._hit(*mail, mcp=True)
+    assert hit is None and isinstance(why, ttl.Rule)
+    # Someone else on it: the rule doesn't cover them.
+    both = (mail[0], {**mail[1], "cc": "kim@other.example"})
+    assert ttl._hit(*both, mcp=True)[0] is not None

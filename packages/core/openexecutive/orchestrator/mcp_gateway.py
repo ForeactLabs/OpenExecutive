@@ -889,9 +889,9 @@ def _check_attachment_urls(tool: str, arguments: dict[str, Any]) -> str | None:
 def _roster_allow_set(*, goes: bool = False) -> RosterAllow:
     """The set of lowercased addresses the Executive may reach outbound.
 
-    ``goes``: for a send or an invite, who a company Goes rule lets go
-    counts too (``_goes_rules_apply``). Never for a share: a share always
-    waits, whatever a Goes rule says (``take_the_lead._GOES_KINDS``).
+    ``goes``: who a company Goes rule lets go counts too
+    (``_goes_rules_apply``), and a Someone new topic rule lets anyone go
+    (``take_the_lead.goes_reach``).
 
     Derived from the People roster plus the Executive's own address — the single
     egress allow-list shared by the Gmail, Calendar, and Drive gates so they
@@ -925,8 +925,11 @@ def _roster_allow_set(*, goes: bool = False) -> RosterAllow:
         # Who a Goes rule lets go is not someone new (take_the_lead.goes_reach).
         from openexecutive.orchestrator import take_the_lead
 
-        addresses, any_at = take_the_lead.goes_reach()
+        addresses, any_at, anyone = take_the_lead.goes_reach()
         extra = [*extra, *sorted(addresses)]
+        if anyone:
+            # A Someone new rule: nobody is someone new on this step.
+            return RosterAllow(everyone, extra=extra, any_at=any_at, anyone=True)
     # Primary addresses and aliases exactly; for a teammate, also their
     # local part on the company's own domains (people.identity) — the same
     # rule inbound mail is matched by.
@@ -3218,7 +3221,7 @@ def _check_drive_share(tool: str, arguments: dict[str, Any]) -> str | None:
     that lets a grantee slip through an unrecognized field, and the Executive can
     re-issue the share without the incidental mention.
     """
-    allow = _roster_allow_set()
+    allow = _roster_allow_set(goes=True)
 
     # Typed-flag form first: a boolean/int "make public" flag carries no string
     # for the scan below to catch, so check sharing-scope keys against a

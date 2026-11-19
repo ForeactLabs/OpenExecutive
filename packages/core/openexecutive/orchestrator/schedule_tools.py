@@ -346,10 +346,11 @@ def _resolve_recipient_person_id(channel: str, channel_ref: str) -> int | None:
 
 def _off_roster_runs() -> bool:
     """Whether a direct message to someone not in People goes ahead: under
-    Hands-off, or for a step the owner approved (``orchestrator.levels``)."""
-    from openexecutive.orchestrator import levels
+    Hands-off, for a step the owner approved (``orchestrator.levels``), or
+    when a rule lets someone new go (``take_the_lead.lets_go``)."""
+    from openexecutive.orchestrator import levels, take_the_lead
 
-    return levels.relaxed()
+    return levels.relaxed() or take_the_lead.lets_go(take_the_lead.SOMEONE_NEW)
 
 
 def _off_roster_card(blocked: str, tool: str, tool_input: dict[str, Any]) -> str:

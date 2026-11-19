@@ -12564,10 +12564,11 @@ delegation:
     of kind TRAINING unless allowance()/find_allowed covers it; hold()
     stores allow {key, label}), Hands-off runs, Goes rules let go the KINDS
     they cover (goes_rules / goes_kinds: person and domain all but
-    DELETE_SHARE, amount MONEY; a words rule can only wait, add_rule
+    DELETE, amount MONEY, topic its topic; a words rule can only wait, add_rule
     refuses a Goes one) and the rest still waits (_gated records "Your rule: <rule_text>" as the log's why),
-    Balanced holds the six KINDS.
-    Rules (take_the_lead_rules: kind person / domain / words / amount,
+    Balanced holds the seven KINDS (2026-11-19: DELETE and SHARE are
+    separate topics, so sharing can go while deleting waits).
+    Rules (take_the_lead_rules: kind person / domain / words / amount / topic,
     effect wait (default, the column added 2026-11-09) or go; POST
     /take-the-lead/rules {kind, value, effect}, a Goes rule needs
     _provably_theirs like DELETE). Waits matches loosely (any recipient, a
@@ -12581,8 +12582,15 @@ delegation:
     (several: none; aliases don't count), or exactly @that domain (Waits
     also takes subdomains); an amount rule
     needs an amount in what it sends and every amount under the limit, and
-    fails closed on a percentage or a currency sign it can't parse. A delete or share
-    (DELETE_SHARE) always waits under a Goes rule. Goes only lifts the level's topic holds:
+    fails closed on a percentage or a currency sign it can't parse. A delete
+    always waits under a person or company Goes rule; only a Deleting or
+    cancelling topic rule lets it go. A topic rule (RULE_TOPIC, value one of
+    KINDS) matches topics_of (the same _topics check() reads); Waits wins.
+    One answer everywhere: new_people (the egress list) and lets_go (a
+    topic Goes rule, where mcp_gateway._goes_rules_apply) are what the
+    gate, the gateway checks and schedule_tools._off_roster_runs ask. Held cards carry offers
+    (rule_offers): Goes rules verified by re-running _balanced with them.
+    Goes only lifts the level's topic holds:
     levels.decide's always-card reasons (STRANGER, outside content giving
     orders, NOT_OWNER, SHARED) are decided before and never see it.
     In training stays the last check: nothing goes out on its own while it

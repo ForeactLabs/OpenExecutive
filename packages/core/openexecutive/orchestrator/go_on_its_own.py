@@ -61,7 +61,8 @@ _AS_ME_BECAUSE: dict[str, str] = {
     "money": "they were about money",
     "contracts": "they were about contracts",
     "people_decisions": "they were about hiring or people decisions",
-    "delete_share": "they deleted, cancelled or shared something",
+    "delete": "they deleted or cancelled something",
+    "share": "they shared something",
     "someone_new": "they went to someone outside People",
     "big_send": "they went to many people at once",
 }
