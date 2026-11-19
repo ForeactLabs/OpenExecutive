@@ -27,6 +27,7 @@ from collections.abc import Awaitable, Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from openexecutive.memory.workspace_settings import COMPANY_TIME_HINT, company_time
 from openexecutive.orchestrator.card_answers import ANSWER_CARD_TOOL, handle_answer_card
 from openexecutive.orchestrator.disclosure import with_chat_line
 
@@ -478,15 +479,16 @@ SCHEDULE_FOLLOWUP_TOOL: dict[str, Any] = {
         "else (channel_ref). One to someone else is sent when it runs, under the "
         "asker's Approvals like any send. Use "
         "ONLY when the user explicitly asks for a follow-up, reminder, check-in or "
-        "scheduled action, never to defer a normal reply. Convert relative times "
-        "(\"tomorrow 9am\") to ISO8601 UTC yourself, using the timezone in your system prompt."
+        "scheduled action, never to defer a normal reply. Give run_at in the company's "
+        "time zone, as the person said it (\"tomorrow 9am\" is 09:00 tomorrow), never "
+        "converted to UTC."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
             "run_at": {
                 "type": "string",
-                "description": "ISO8601 UTC timestamp for when to send the follow-up.",
+                "description": COMPANY_TIME_HINT,
             },
             "channel": {
                 "type": "string",
@@ -882,13 +884,9 @@ async def handle_schedule_followup(tool_input: dict[str, Any]) -> str:
     if channel not in {"email", "telegram", "slack_dm"}:
         return json.dumps({"error": f"unknown channel {channel!r}"})
 
-    # Parse run_at as ISO8601, accept trailing "Z" as UTC.
-    try:
-        parsed = datetime.fromisoformat(run_at_raw.replace("Z", "+00:00"))
-    except ValueError:
+    parsed = company_time(run_at_raw)
+    if parsed is None:
         return json.dumps({"error": f"run_at not parseable as ISO8601: {run_at_raw!r}"})
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
     parsed_utc = parsed.astimezone(UTC)
 
     now = datetime.now(UTC)
@@ -1476,7 +1474,7 @@ SUGGEST_WORKFLOW_TOOL: dict[str, Any] = {
             },
             "run_at": {
                 "type": "string",
-                "description": "ISO8601 UTC timestamp for when to send the nudge.",
+                "description": COMPANY_TIME_HINT,
             },
             "channel": {
                 "type": "string",
@@ -2605,12 +2603,9 @@ async def handle_suggest_workflow(tool_input: dict[str, Any]) -> str:
     if channel not in {"email", "telegram", "slack_dm"}:
         return json.dumps({"error": f"unknown channel {channel!r}"})
 
-    try:
-        parsed = datetime.fromisoformat(run_at_raw.replace("Z", "+00:00"))
-    except ValueError:
+    parsed = company_time(run_at_raw)
+    if parsed is None:
         return json.dumps({"error": f"run_at not parseable as ISO8601: {run_at_raw!r}"})
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
     parsed_utc = parsed.astimezone(UTC)
 
     now = datetime.now(UTC)

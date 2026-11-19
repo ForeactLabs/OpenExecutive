@@ -42,6 +42,8 @@ import threading
 from datetime import UTC, date, datetime, timedelta, tzinfo
 from pathlib import Path
 
+from openexecutive.memory import workspace_settings
+
 logger = logging.getLogger(__name__)
 
 # ISO weekday (Monday=0) for each 3-letter DOW token.
@@ -141,17 +143,6 @@ CADENCE_FORMATS_HINT = (
 )
 
 
-def company_zone() -> tzinfo:
-    """The company's time zone (Settings), else UTC. Never raises."""
-    try:
-        from openexecutive.memory.workspace_settings import get_user_timezone
-
-        return get_user_timezone()
-    except Exception:
-        logger.warning("cadence: couldn't read the company's time zone; using UTC", exc_info=True)
-        return UTC
-
-
 def is_valid_cadence_spec(spec: str) -> bool:
     """Return True if ``spec`` parses to a next occurrence.
 
@@ -198,7 +189,7 @@ def bootstrap_cadences(db_path: Path | None = None) -> int:
         return 0
 
     now = datetime.now(UTC)
-    zone = company_zone()
+    zone = workspace_settings.get_user_timezone()
     inserted = 0
 
     states = dept_store.list_departments(db_path=db_path)
@@ -341,7 +332,7 @@ def enqueue_next(
         return None
 
     base = (after or datetime.now(UTC)).astimezone(UTC)
-    run_at = _parse_cadence_spec(spec, base, company_zone())
+    run_at = _parse_cadence_spec(spec, base, workspace_settings.get_user_timezone())
     if run_at is None:
         logger.warning("cadence.enqueue_next: invalid spec %r for dept %r", spec, slug)
         return None
@@ -471,7 +462,7 @@ def retime_pending(db_path: Path | None = None) -> int:
         for s in dept_store.list_departments(db_path=db_path)
     }
     now = datetime.now(UTC)
-    zone = company_zone()
+    zone = workspace_settings.get_user_timezone()
     moved = 0
     with _get_conn(resolved) as conn:
         table = conn.execute(

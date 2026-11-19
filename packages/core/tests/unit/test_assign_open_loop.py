@@ -129,7 +129,7 @@ def test_refusals(team: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_due_date_resolves_to_local_five_pm_and_is_clamped(team: SimpleNamespace) -> None:
-    tz = open_loops._user_tz()
+    tz = open_loops.workspace_settings.get_user_timezone()
     today = datetime.now(tz).date()
     target = today + timedelta(days=3)
     result = _assign(team.sara, team.principal, due=target)

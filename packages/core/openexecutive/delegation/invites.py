@@ -59,6 +59,8 @@ from datetime import UTC, datetime, timedelta, tzinfo
 from email.utils import parseaddr
 from typing import Any
 
+from openexecutive.memory import workspace_settings
+
 logger = logging.getLogger(__name__)
 
 DECISION_CLASS = "delegation_invite"
@@ -139,19 +141,10 @@ def _moment(value: str) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
-def _tz() -> tzinfo:
-    try:
-        from openexecutive.memory.workspace_settings import get_user_timezone
-
-        return get_user_timezone()
-    except Exception:
-        return UTC
-
-
 def when_text(start: str, end: str, all_day: bool, tz: tzinfo | None = None) -> str:
     """When the meeting is, as the person reads it: "Wed 21 Oct, 14:30–15:00",
     or "Wed 21 Oct, all day"."""
-    zone = tz or _tz()
+    zone = tz or workspace_settings.get_user_timezone()
     if all_day:
         try:
             day = datetime.fromisoformat(start[:10])
@@ -385,7 +378,7 @@ async def clashes(mailbox: Any, event: Any, *, tz: tzinfo | None = None) -> list
     start, end = _moment(event.start), _moment(event.end)
     if start is None or end is None or end <= start:
         return []
-    zone = tz or _tz()
+    zone = tz or workspace_settings.get_user_timezone()
     try:
         found = await asyncio.wait_for(calendar.events_for(mailbox, start, end), timeout=_CALENDAR_TIMEOUT_S)
     except Exception as exc:
@@ -520,7 +513,7 @@ async def consider(
         if start is None or start <= now:
             skip("invite_past")
             return
-        tz = _tz()
+        tz = workspace_settings.get_user_timezone()
         clash = await clashes(client, event, tz=tz)
         try:
             granted = await client.calendar_write_granted()
@@ -846,7 +839,7 @@ def handled(person_id: int, *, since: str, limit: int = 50) -> list[Any]:
     from openexecutive.memory.decision_ledger import STATUS_EXECUTED, list_instances
 
     out: list[Any] = []
-    tz = _tz()
+    tz = workspace_settings.get_user_timezone()
     for card in list_instances(
         DECISION_CLASS, status=STATUS_EXECUTED, approver_person_id=person_id, resolved_since=since, limit=limit,
     ):

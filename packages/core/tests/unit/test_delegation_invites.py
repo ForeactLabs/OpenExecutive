@@ -38,7 +38,7 @@ def setup(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OE_LOCAL_LOGIN", "1")
     monkeypatch.delenv("OE_PUBLIC_DEPLOYMENT", raising=False)
     monkeypatch.delenv("CALLER_ASSERTION_PUBLIC_KEYS", raising=False)
-    monkeypatch.setattr(invites, "_tz", lambda: UTC)
+    monkeypatch.setattr("openexecutive.memory.workspace_settings.get_user_timezone", lambda: UTC)
     monkeypatch.setattr(invites, "_now", lambda: NOW)
 
 

@@ -1694,3 +1694,49 @@ def test_the_website_is_saved_with_the_session(
     route._interview_sessions.clear()
     stored = interview_store.load(sid)
     assert stored is not None and stored.website == "https://example.com/"
+
+
+def _zone_calls(monkeypatch: pytest.MonkeyPatch, stored: str | None) -> list[str | None]:
+    from openexecutive.memory import workspace_settings as ws
+
+    saved: list[str | None] = []
+    monkeypatch.setattr(ws, "get_workspace", lambda *a, **k: ws.WorkspaceSettings(timezone=stored))
+    monkeypatch.setattr(ws, "set_timezone", lambda tz: saved.append(tz))
+    monkeypatch.setattr("openexecutive.audit.log_event", lambda *a, **k: None)
+    return saved
+
+
+def test_commit_saves_the_devices_zone_as_the_companys(
+    client: TestClient, seeded: list[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Setup is where a company gets its clock: the device's zone goes with
+    the commit, so nothing the Executive schedules on the first day lands
+    in UTC."""
+    saved = _zone_calls(monkeypatch, None)
+    seeded.append(_draft())
+    sid = _start(client)
+    body = {**_commit_body(sid), "timezone": "America/New_York"}
+    assert client.post("/onboard/interview/commit", json=body).status_code == 200
+    assert saved == ["America/New_York"]
+
+
+def test_a_later_setup_never_moves_a_clock_already_set(
+    client: TestClient, seeded: list[Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    saved = _zone_calls(monkeypatch, "Europe/Berlin")
+    seeded.append(_draft())
+    sid = _start(client)
+    body = {**_commit_body(sid), "timezone": "America/New_York"}
+    assert client.post("/onboard/interview/commit", json=body).status_code == 200
+    assert saved == []
+
+
+def test_commit_with_an_unknown_zone_still_saves_and_leaves_the_zone(
+    client: TestClient, seeded: list[Any], monkeypatch: pytest.MonkeyPatch, profile_path: Path
+) -> None:
+    saved = _zone_calls(monkeypatch, None)
+    seeded.append(_draft())
+    sid = _start(client)
+    body = {**_commit_body(sid), "timezone": "Mars/Olympus"}
+    assert client.post("/onboard/interview/commit", json=body).status_code == 200
+    assert profile_path.exists() and saved == []

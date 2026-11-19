@@ -23,10 +23,10 @@ from __future__ import annotations
 import asyncio
 import inspect
 from collections.abc import Callable
-from datetime import UTC, datetime
 from functools import partial
 from typing import Any
 
+from openexecutive.memory import workspace_settings
 from openexecutive.orchestrator.app_control import (
     Action,
     Item,
@@ -354,12 +354,12 @@ async def _snooze_alert(request: Any, alert_id: str, value: str) -> str:
         raise Refused("That isn't an alert id.") from None
     if aid not in _trusted_alert_ids():
         raise Refused("I can only snooze a card you were shown here. Look it up with find_alerts first.")
-    try:
-        until = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        raise Refused("Give the time as an ISO date and time, e.g. 2026-10-20T09:00:00-04:00.") from None
+    until = workspace_settings.company_time(value)
+    if until is None:
+        raise Refused("Give the time as a date and time in the company's time zone, e.g. 2026-10-20T09:00.")
     alert = await _call(alerts.snooze_alert, aid, alerts.SnoozeBody(until=until), request)
-    when = until.astimezone(UTC).strftime("%b %-d, %H:%M UTC")
+    local = until.astimezone(workspace_settings.get_user_timezone())
+    when = f"{local:%b} {local.day}, {local:%H:%M} ({local.tzname()})"
     return f"Snoozed {_q(alert.headline)} until {when}"
 
 
@@ -1066,7 +1066,7 @@ _ACTIONS = (
     Action("sync_source", "source", "Sync a connected source now", _sync_source),
     # Alerts
     Action("snooze_alert", "alert", "Hide a card on Today until a time, when it comes back", _snooze_alert,
-           value="when it comes back, ISO 8601 with a zone, at most 30 days out"),
+           value="when it comes back, in the company's time zone (2026-10-20T09:00), at most 30 days out"),
     Action("clear_all_alerts", "alert_board", "Clear every card shown on Today", _clear_alerts, confirm=True,
            card="Clear every card on Today", prepare=_prepare_clear_all),
     # Watch suggestions

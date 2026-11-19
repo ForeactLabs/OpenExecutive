@@ -57,7 +57,7 @@ def test_open_loop_due_dates_use_the_workspace_zone() -> None:
     from openexecutive.attunement import open_loops
 
     _set_zone("Pacific/Auckland")
-    assert open_loops._user_tz() == ZoneInfo("Pacific/Auckland")
+    assert ws.get_user_timezone() == ZoneInfo("Pacific/Auckland")
     due = open_loops._resolve_due("2026-07-01", today=date(2026, 6, 30), default_days=2)
     local = due.astimezone(ZoneInfo("Pacific/Auckland"))
     assert (local.date(), local.hour) == (date(2026, 7, 1), 17)
@@ -176,12 +176,12 @@ def test_a_cadence_saved_in_utc_moves_to_the_companys_clock_once(tmp_path) -> No
 
     _set_zone("America/New_York")
     nov = datetime(2026, 11, 13, 12, tzinfo=UTC)
-    assert dynamic_cadence.from_utc("weekly@mon@14:00", dynamic_cadence._zone(), nov) == "weekly@mon@09:00"
-    assert dynamic_cadence.from_utc("weekly@tue@02:00", dynamic_cadence._zone(), nov) == "weekly@mon@21:00"
-    assert dynamic_cadence.from_utc("daily@13:30", dynamic_cadence._zone(), nov) == "daily@08:30"
-    assert dynamic_cadence.from_utc("quarterly@15-14:00", dynamic_cadence._zone(), nov) == "quarterly@15-09:00"
-    assert dynamic_cadence.from_utc("quarterly@01-02:00", dynamic_cadence._zone(), nov) == "quarterly@01-21:00"
-    assert dynamic_cadence.from_utc("whenever", dynamic_cadence._zone(), nov) == "whenever"
+    assert dynamic_cadence.from_utc("weekly@mon@14:00", ws.get_user_timezone(), nov) == "weekly@mon@09:00"
+    assert dynamic_cadence.from_utc("weekly@tue@02:00", ws.get_user_timezone(), nov) == "weekly@mon@21:00"
+    assert dynamic_cadence.from_utc("daily@13:30", ws.get_user_timezone(), nov) == "daily@08:30"
+    assert dynamic_cadence.from_utc("quarterly@15-14:00", ws.get_user_timezone(), nov) == "quarterly@15-09:00"
+    assert dynamic_cadence.from_utc("quarterly@01-02:00", ws.get_user_timezone(), nov) == "quarterly@01-21:00"
+    assert dynamic_cadence.from_utc("whenever", ws.get_user_timezone(), nov) == "whenever"
 
     db = tmp_path / "episodic.db"
     body = {

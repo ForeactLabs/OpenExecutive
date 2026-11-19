@@ -339,3 +339,18 @@ def test_side_effect_failures_never_roll_back_the_setting(monkeypatch: pytest.Mo
     assert ws.set_timezone("Europe/Athens").timezone == "Europe/Athens"
     assert ws.set_workspace_mode("solo").mode == "solo"
     assert ws.get_workspace() == ws.WorkspaceSettings(mode="solo", timezone="Europe/Athens")
+
+
+def test_company_time_reads_a_bare_time_on_the_companys_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    from zoneinfo import ZoneInfo
+
+    from openexecutive.memory import workspace_settings
+
+    zone = ZoneInfo("America/Chicago")
+    monkeypatch.setattr(workspace_settings, "get_user_timezone", lambda: zone)
+    assert workspace_settings.company_time("2026-11-20T12:00") == datetime(2026, 11, 20, 12, tzinfo=zone)
+    # An explicit zone is kept, "Z" included.
+    assert workspace_settings.company_time("2026-11-20T12:00Z") == datetime(2026, 11, 20, 12, tzinfo=UTC)
+    assert workspace_settings.company_time("2026-11-20T12:00-05:00").utcoffset().total_seconds() == -5 * 3600
+    assert workspace_settings.company_time("noon tomorrow") is None
+    assert workspace_settings.company_time(None) is None

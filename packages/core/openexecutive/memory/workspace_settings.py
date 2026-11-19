@@ -421,6 +421,31 @@ def get_user_timezone(db_path: Path | None = None) -> ZoneInfo:
     return zone if zone is not None else _configured_timezone()
 
 
+# How a tool asks the Executive for a time: in the company's zone, as the
+# person said it, read back by ``company_time``.
+COMPANY_TIME_HINT = (
+    "When, in the company's time zone, as the person said it: "
+    "2026-11-20T12:00 for noon. Never converted to UTC."
+)
+
+
+def company_time(raw: object) -> datetime | None:
+    """A date and time someone gave (the Executive in a tool call, a person
+    in a form), as an aware datetime, or None when it isn't one.
+
+    The one reader for such times. A time with no offset
+    ("2026-11-20T12:00") is the company's time, as the person said it, never
+    UTC; a "Z" or an offset is kept. Never raises.
+    """
+    try:
+        parsed = datetime.fromisoformat(str(raw).strip().replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=get_user_timezone())
+    return parsed
+
+
 def _valid_mode(value: object) -> WorkspaceMode | None:
     if value == "solo":
         return "solo"

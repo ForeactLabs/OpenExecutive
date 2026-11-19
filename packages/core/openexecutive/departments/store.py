@@ -139,7 +139,7 @@ _LOCAL_CADENCES = "cadences_in_company_time"
 def _cadences_to_company_time(conn: sqlite3.Connection) -> None:
     """Once per database: rewrite the check-in times saved while they were
     read in UTC as the same times in the company's time zone, which is how
-    they are read now (``cadence.company_zone``). The first process to mark
+    they are read now (``workspace_settings.get_user_timezone``). The first process to mark
     the database does it, in the same transaction. Best effort: a row it
     can't read stays as it is."""
     from openexecutive.workflows.dynamic_cadence import from_utc

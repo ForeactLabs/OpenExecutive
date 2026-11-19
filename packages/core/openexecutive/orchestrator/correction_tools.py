@@ -30,6 +30,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from openexecutive.memory.workspace_settings import COMPANY_TIME_HINT, company_time
 from openexecutive.orchestrator.speaker import speaker as _speaker
 
 logger = logging.getLogger(__name__)
@@ -88,14 +89,13 @@ MOVE_FOLLOWUP_TOOL: dict[str, Any] = {
     "name": "move_followup",
     "description": (
         "Move a pending follow-up or reminder to a new time when the person "
-        "asks. action_id from list_followups; run_at is ISO 8601 with a zone, "
-        "in the future."
+        "asks. action_id from list_followups; run_at is in the future."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
             "action_id": {"type": "integer"},
-            "run_at": {"type": "string", "description": "ISO 8601, e.g. 2026-10-20T09:00:00-04:00"},
+            "run_at": {"type": "string", "description": COMPANY_TIME_HINT},
         },
         "required": ["action_id", "run_at"],
     },
@@ -322,11 +322,11 @@ async def handle_move_followup(tool_input: dict[str, Any]) -> str:
         return _refused(_NOT_VERIFIED)
     try:
         action_id = int(tool_input["action_id"])
-        parsed = datetime.fromisoformat(str(tool_input["run_at"]).replace("Z", "+00:00"))
+        parsed = company_time(tool_input["run_at"])
     except (KeyError, TypeError, ValueError):
+        parsed = None
+    if parsed is None:
         return json.dumps({"error": "action_id (from list_followups) and run_at (ISO 8601) are required"})
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
     run_at = parsed.astimezone(UTC)
     now = datetime.now(UTC)
     if run_at <= now:

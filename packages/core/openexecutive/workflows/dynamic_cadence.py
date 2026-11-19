@@ -18,18 +18,10 @@ import logging
 from datetime import UTC, datetime, tzinfo
 from pathlib import Path
 
+from openexecutive.memory import workspace_settings
 from openexecutive.workflows.dynamic_models import DynamicWorkflowDef
 
 logger = logging.getLogger(__name__)
-
-
-def _zone() -> tzinfo:
-    try:
-        from openexecutive.memory.workspace_settings import get_user_timezone
-
-        return get_user_timezone()
-    except Exception:
-        return UTC
 
 
 _DOW_NAMES = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
@@ -81,7 +73,7 @@ def schedule_dynamic_workflow_cadence(
     base = (after or datetime.now(UTC)).astimezone(UTC)
     # A cadence's times are the company's own (Settings), summer time and
     # all: "weekly@mon@09:00" is 9 AM there every Monday.
-    run_at = _parse_cadence_spec(defn.cadence, base, _zone())
+    run_at = _parse_cadence_spec(defn.cadence, base, workspace_settings.get_user_timezone())
     if run_at is None:
         logger.warning(
             "dynamic_cadence: invalid spec %r for workflow %r", defn.cadence, defn.name

@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from openexecutive.memory import workspace_settings
 from openexecutive.utils import db
 
 logger = logging.getLogger(__name__)
@@ -114,15 +115,6 @@ def _connect(db_path: Path | None) -> sqlite3.Connection:
 
 def _now() -> datetime:
     return datetime.now(UTC)
-
-
-def _zone() -> ZoneInfo:
-    try:
-        from openexecutive.memory.workspace_settings import get_user_timezone
-
-        return get_user_timezone()
-    except Exception:
-        return ZoneInfo("UTC")
 
 
 def key_words(text: str) -> frozenset[str]:
@@ -227,7 +219,7 @@ def note_ask(
             return None
         pid = int(person.id)
         current = now or _now()
-        tz = zone or _zone()
+        tz = zone or workspace_settings.get_user_timezone()
         ask = " ".join(typed.split())[:ASK_MAX]
         session_id = str(getattr(session, "session_id", "") or "")
         conn = _connect(db_path)

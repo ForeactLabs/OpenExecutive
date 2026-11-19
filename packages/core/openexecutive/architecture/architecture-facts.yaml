@@ -4371,7 +4371,11 @@ departments:
     when nothing is stored, or None when the read fails or the value is not
     a mode — for callers that must not treat a failed read as team: the
     scheduler's weekly-review retire/chain check),
-    get_user_timezone() -> ZoneInfo, set_timezone(tz) (validated like
+    get_user_timezone() -> ZoneInfo (every module reads the company's zone
+    here, never through its own copy), company_time(raw) (the one reader of
+    a time the Executive or a person gives: no offset is company time, never
+    UTC; schedule_followup, suggest_workflow, move_followup, reminders and
+    calendar events all use it), set_timezone(tz) (validated like
     USER_TIMEZONE; re-times the principal's briefs in place via
     scheduler.runner.reschedule_principal_rhythm when the zone in effect
     moves), set_workspace_mode(mode) (solo cancels pending dept_cadence

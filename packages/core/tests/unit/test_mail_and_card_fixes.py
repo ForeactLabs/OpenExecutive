@@ -146,7 +146,7 @@ def test_a_meetings_card_says_when_and_with_whom(monkeypatch: pytest.MonkeyPatch
     from openexecutive.orchestrator import card_details
     from openexecutive.people import registry
 
-    monkeypatch.setattr(card_details, "_zone", lambda: ZoneInfo("America/New_York"))
+    monkeypatch.setattr("openexecutive.memory.workspace_settings.get_user_timezone", lambda: ZoneInfo("America/New_York"))
 
     class _Leo:
         full_name = "Leo Park"

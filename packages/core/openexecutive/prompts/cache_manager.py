@@ -93,8 +93,9 @@ def build_system_blocks(
     after the identity addendum: what is on, and the pinned Google tool names.
     All of it is fixed per process or install, so block 0 stays warm.
     """
-    # Inject the user's zone so the Executive can resolve relative times
-    # ("tomorrow 9am") to ISO8601 UTC when calling schedule_followup. Read
+    # Inject the user's zone so the Executive resolves relative times
+    # ("tomorrow 9am") on the company's clock; tools read a time with no
+    # offset as company time (workspace_settings.company_time). Read
     # fresh from the workspace settings (else USER_TIMEZONE, else UTC). It
     # only changes when the user sets a new zone, so block 0's 1h cache misses
     # once on that change and stays warm otherwise.
@@ -103,7 +104,7 @@ def build_system_blocks(
 
     settings = get_settings()
     tz = get_user_timezone().key
-    tz_addendum = f"\n\nThe user's local timezone is {tz} (IANA). When converting relative times to UTC for scheduling, use this zone."
+    tz_addendum = f"\n\nThe user's local timezone is {tz} (IANA). Give every time you pass to a tool in this zone, as the person said it; never convert it to UTC."
 
     # The Executive's own name and address. How to use its Google account
     # (never ask which address to send from) lives in the Connected Systems

@@ -1,5 +1,6 @@
 import { cardDetail, cardDetails, type CardDetail } from "@/lib/cardDetails";
 import type { AlertApproval } from "@/lib/approvals";
+import { deviceTimeZone } from "@/lib/timeZone";
 import type { AnswerSources } from "@/lib/answerSources";
 import type { DirectoryListing, DirectoryOption } from "@/lib/chatDirectory";
 import type { HistoryNote, HistoryState } from "@/lib/history";
@@ -708,6 +709,8 @@ export async function commitOnboardDraft(
       departments,
       goals,
       owner_email: ownerEmail.trim() || null,
+      // The company's clock: this browser's zone.
+      timezone: deviceTimeZone(),
     }),
   });
   if (!res.ok) throw await onboardError(res, "Could not save your profile");

@@ -181,3 +181,24 @@ def test_a_follow_up_goes_to_the_speakers_own_address_or_anyone_elses(
     finally:
         current_session.reset(token)
         people_registry.invalidate()
+
+
+def test_a_time_with_no_offset_is_the_companys_time(
+    session_with_telegram_ref: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """"Tomorrow at noon" in New York is noon there, not noon UTC."""
+    from zoneinfo import ZoneInfo
+
+    zone = ZoneInfo("America/New_York")
+    monkeypatch.setattr("openexecutive.memory.workspace_settings.get_user_timezone", lambda: zone)
+    noon = (datetime.now(zone) + timedelta(days=1)).replace(hour=12, minute=0, second=0, microsecond=0)
+    payload = _call(
+        {
+            "run_at": noon.replace(tzinfo=None).isoformat(),
+            "channel": "telegram",
+            "channel_ref": "42",
+            "intent": "Follow up on the board prep.",
+        }
+    )
+    assert payload["status"] == "scheduled"
+    assert datetime.fromisoformat(payload["run_at"]) == noon

@@ -1094,9 +1094,8 @@ def test_a_proposal_says_where_its_card_is() -> None:
 def _new_york(monkeypatch: pytest.MonkeyPatch) -> None:
     from zoneinfo import ZoneInfo
 
-    from openexecutive.orchestrator import calendar_tools
 
-    monkeypatch.setattr(calendar_tools, "_local_tz", lambda: ZoneInfo("America/New_York"))
+    monkeypatch.setattr("openexecutive.memory.workspace_settings.get_user_timezone", lambda: ZoneInfo("America/New_York"))
 
 
 def _weekday(days_out: int = 3, tz: Any = UTC) -> datetime:

@@ -900,6 +900,25 @@ async def commit_interview(body: OnboardCommitRequest, request: Request) -> Comp
     # profile is on disk. This process still answers a repeat save with 409.
     interview_store.delete(body.session_id)
 
+    # The company's clock, from the device setup ran on, when it has none
+    # yet: a later setup run never moves a clock someone set (Settings is
+    # where it changes). Best effort, and audited like a Settings change.
+    if body.timezone:
+        try:
+            from openexecutive.audit import log_event as audit_log
+            from openexecutive.memory import workspace_settings
+
+            if workspace_settings.get_workspace().timezone is None:
+                workspace_settings.set_timezone(body.timezone)
+                audit_log(
+                    "workspace_settings_changed",
+                    f"Workspace settings changed: time zone default → {body.timezone} (setup)",
+                    actor=api_caller.actor(request),
+                    details={"timezone": {"from": None, "to": body.timezone}},
+                )
+        except Exception:
+            logger.warning("onboarding commit: couldn't save the time zone", exc_info=True)
+
     # 5-6. Best-effort seeding. Departments are reconciled additively — see
     #      onboarding/commit.py for why this must not mirror the fixture loader.
     # The owner's seeded entry takes the drafted name first, so the upsert

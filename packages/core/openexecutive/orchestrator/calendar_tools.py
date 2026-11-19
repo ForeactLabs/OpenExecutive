@@ -19,8 +19,10 @@ import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from datetime import UTC, date, datetime, timedelta, tzinfo
+from datetime import UTC, date, datetime, timedelta
 from typing import TYPE_CHECKING, Any
+
+from openexecutive.memory import workspace_settings
 
 if TYPE_CHECKING:
     from openexecutive.departments.authority import GateDecision
@@ -281,27 +283,11 @@ def typed_booking_only(offered: bool, call_tool: Any) -> Any:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _local_tz() -> tzinfo:
-    """The company's time zone (Settings), UTC when it can't be read."""
-    try:
-        from openexecutive.memory.workspace_settings import get_user_timezone
-
-        return get_user_timezone()
-    except Exception:
-        return UTC
-
-
 def _parse_iso(raw: str) -> datetime | None:
-    """Parse an ISO 8601 string; return None on failure. A time with no
-    offset ("2026-11-05T14:00") is the company's local time, as the person
-    said it, never UTC."""
-    try:
-        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=_local_tz())
-        return dt.astimezone(UTC)
-    except (ValueError, AttributeError):
-        return None
+    """A time from the Executive in UTC (``company_time``: no offset is the
+    company's time), or None."""
+    dt = workspace_settings.company_time(raw)
+    return dt.astimezone(UTC) if dt is not None else None
 
 
 def is_business_day(day: date) -> bool:
@@ -319,7 +305,7 @@ def _check_business_hours(dt: datetime, start_hhmm: str, end_hhmm: str) -> bool:
     except (ValueError, AttributeError):
         return True  # misconfigured cap → don't block
     if dt.tzinfo is not None:
-        dt = dt.astimezone(_local_tz())
+        dt = dt.astimezone(workspace_settings.get_user_timezone())
     if not is_business_day(dt.date()):
         return False
     t_minutes = dt.hour * 60 + dt.minute

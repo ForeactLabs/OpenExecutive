@@ -459,8 +459,8 @@ def get_decision(instance_id: int, request: Request) -> DecisionInstance:
 
 def _check_booking_edits(payload: dict[str, Any], edits: dict[str, Any]) -> None:
     """An edited booking keeps the shape the tool would have accepted: an
-    edited title of 1-200 characters, and a start and end it can read (naive
-    times count as UTC, as in ``calendar_tools._parse_iso``), end after start.
+    edited title of 1-200 characters, and a start and end it can read (a time
+    with no offset is the company's, as in ``calendar_tools._parse_iso``), end after start.
     422 otherwise."""
     from openexecutive.orchestrator.calendar_tools import _parse_iso
 

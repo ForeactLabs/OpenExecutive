@@ -13,8 +13,10 @@ from __future__ import annotations
 import contextlib
 import json
 import re
-from datetime import UTC, datetime, tzinfo
+from datetime import datetime, tzinfo
 from typing import Any
+
+from openexecutive.memory import workspace_settings
 
 # A served payload keeps a field's value up to this long; longer (a file's
 # bytes) is left out of what the page downloads. Approve reads the stored row.
@@ -286,15 +288,6 @@ def file_name(file_id: str) -> str:
         return ""
 
 
-def _zone() -> tzinfo:
-    try:
-        from openexecutive.memory.workspace_settings import get_user_timezone
-
-        return get_user_timezone()
-    except Exception:
-        return UTC
-
-
 def _moment(value: Any, zone: tzinfo) -> datetime | None:
     if not isinstance(value, str) or "T" not in value:
         return None
@@ -313,7 +306,7 @@ def _clock(dt: datetime) -> str:
 def when(start: Any, end: Any = None, zone: tzinfo | None = None) -> str | None:
     """``Tue Nov 18, 11:00 to 11:30 AM`` in the company's time zone, or
     None when ``start`` isn't a date and time."""
-    zone = zone or _zone()
+    zone = zone or workspace_settings.get_user_timezone()
     first = _moment(start, zone)
     if first is None:
         return None

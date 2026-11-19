@@ -50,8 +50,8 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
 
+from openexecutive.memory import workspace_settings
 from openexecutive.utils import db
 
 logger = logging.getLogger(__name__)
@@ -521,7 +521,7 @@ def assign_open_loop(
         if assigner.id == owner.id
         else f"{assigner.full_name} asked {owner.full_name} for: {clean}"
     )
-    today = datetime.now(_user_tz()).date()
+    today = datetime.now(workspace_settings.get_user_timezone()).date()
     due = _resolve_due(due_date.isoformat() if due_date else None, today=today,
                        default_days=settings.attunement_loop_default_due_days)
     loop_id = open_loop(owner_person_id=owner.id, description=description, due_at=due,
@@ -705,7 +705,7 @@ def _due_date_of(loop: OpenLoop) -> str | None:
     if not loop.due_at:
         return None
     try:
-        return datetime.fromisoformat(loop.due_at).astimezone(_user_tz()).date().isoformat()
+        return datetime.fromisoformat(loop.due_at).astimezone(workspace_settings.get_user_timezone()).date().isoformat()
     except ValueError:
         return None
 
@@ -811,7 +811,7 @@ def update_task(
         sets.append("task_status = ?")
         params.append(status)
     if due_date is not None:
-        today = datetime.now(_user_tz()).date()
+        today = datetime.now(workspace_settings.get_user_timezone()).date()
         due = _resolve_due(due_date.isoformat(), today=today, default_days=0)
         sets.append("awaiting_response_since = ?")
         params.append(due.isoformat())
@@ -996,7 +996,7 @@ def principal_due_soon(
         logger.warning("open_loops: principal due-soon read failed", exc_info=True)
         return []
     now = now or datetime.now(UTC)
-    tz = _user_tz()
+    tz = workspace_settings.get_user_timezone()
     today = now.astimezone(tz).date()
     horizon = now + timedelta(days=max(within_days, 0))
     out: list[dict[str, Any]] = []
@@ -1033,15 +1033,6 @@ def _parse_iso(value: str | None) -> datetime | None:
     return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
-def _user_tz() -> ZoneInfo:
-    from openexecutive.memory.workspace_settings import get_user_timezone
-
-    try:
-        return get_user_timezone()
-    except Exception:
-        return ZoneInfo("UTC")
-
-
 def _stated_due_date(raw: Any) -> date | None:
     """The model's ``due_date`` when it is a real YYYY-MM-DD, else None — the
     difference between a STATED due date and one ``_resolve_due`` defaults."""
@@ -1056,7 +1047,7 @@ def _stated_due_date(raw: Any) -> date | None:
 def _resolve_due(raw: Any, *, today: date, default_days: int) -> datetime:
     """A stated YYYY-MM-DD (clamped to [today, today+60d]) at 17:00 in the
     user's timezone, else ``default_days`` from now."""
-    tz = _user_tz()
+    tz = workspace_settings.get_user_timezone()
     parsed = _stated_due_date(raw)
     if parsed is None:
         return datetime.now(UTC) + timedelta(days=max(default_days, 0))
@@ -1169,7 +1160,7 @@ async def run_open_loop_pass(
         return counts
 
     roster = [p for p in list_people() if p.id is not None]
-    today = datetime.now(_user_tz()).date()
+    today = datetime.now(workspace_settings.get_user_timezone()).date()
     turn = _render_turn(user_message, assistant_response, speaker=speaker, roster=roster,
                         closable=closable, today=today)
     solo = _is_solo(workspace_mode)
