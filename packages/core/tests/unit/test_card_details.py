@@ -439,3 +439,7 @@ def test_an_account_or_a_yes_no_a_step_sets_is_still_shown(monkeypatch) -> None:
     assert {"field": "Slack user id", "value": "U_OTHER"} in shown
     shown = card_details.plain("resolve_roster_request", {"decision": "link", "person_id": 4, "replace_channel_id": True})
     assert {"field": "Replace channel id", "value": "Yes"} in shown
+
+
+def test_a_person_given_by_something_other_than_a_number_shows_as_given() -> None:
+    assert card_details.plain("message_person", {"person_id": "dana@x.com"})[0] == {"field": "To", "value": "dana@x.com"}

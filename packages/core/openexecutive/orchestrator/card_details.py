@@ -496,7 +496,11 @@ def _own_ref(tool: str, norm: str, value: Any) -> tuple[str, str] | tuple[()] | 
         label = "To" if tool == "message_person" and norm == "person_id" else _PERSON_LABELS.get(norm, "Who")
         if tool == "assign_open_loop" and norm == "person_id":
             label = "Assigned to"
-        return (label, _names(value) or "Someone not on People")
+        names = _names(value)
+        if names:
+            return (label, names)
+        # A number People doesn't have; anything else is shown as it is.
+        return (label, "Someone not on People" if _record_number(value) else _text(value))
     if norm == "department_slug":
         return ("Department", _department(value)) if value else ()
     if norm in ("goal_id", "for_goal_id"):

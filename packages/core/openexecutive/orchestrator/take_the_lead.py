@@ -2701,7 +2701,7 @@ def where(tool: str, tool_input: dict[str, Any]) -> str:
                 return f"On {_CHANNEL_NAMES[channel]}"
         if person.kind != "team":
             return ""
-        first = (person.full_name or "").split(" ")[0] or "They"
+        first = ((person.full_name or "").split() or ["They"])[0]
         return f"{first} will see it in Open Executive"
     except Exception:
         return ""
