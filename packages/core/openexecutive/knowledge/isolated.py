@@ -124,6 +124,7 @@ def run_isolated(
     reraise: tuple[type[BaseException], ...] = (),
     slots: threading.Semaphore | None = None,
     max_wait: float | None = None,
+    file_limit: int | None = None,
 ) -> T:
     """Return ``func(*args)``, computed in a child process. Blocking — run it
     in a thread from async code.
@@ -132,7 +133,9 @@ def run_isolated(
     ``_MAX_CHILDREN`` one); OCR passes its own so a long OCR run never holds
     up the quick text-layer parses. ``max_wait`` caps the wait for a slot
     (default ``_MAX_SLOT_WAIT_S``); OCR, whose runs last minutes, waits
-    longer and sets ``timeout`` to cover the wait and the run."""
+    longer and sets ``timeout`` to cover the wait and the run. ``file_limit``
+    is the largest file the child may write (default: twice the answer
+    cap), for a call that hands its result back through a file."""
     if not enabled:
         return func(*args)
     gate = _child_slots if slots is None else slots
@@ -144,7 +147,7 @@ def run_isolated(
         remaining = timeout - (time.monotonic() - started)
         if remaining <= 0:
             raise ParserBusy(f"{func.__qualname__} found no free parser slot in time")
-        return _run_child(func, args, remaining, reraise)  # type: ignore[no-any-return]
+        return _run_child(func, args, remaining, reraise, file_limit)  # type: ignore[no-any-return]
     finally:
         gate.release()
 
@@ -154,9 +157,11 @@ def _run_child(
     args: tuple[Any, ...],
     timeout: float,
     reraise: tuple[type[BaseException], ...],
+    file_limit: int | None = None,
 ) -> Any:
     """The child's answer."""
-    request = pickle.dumps((func.__module__, func.__qualname__, args), pickle.HIGHEST_PROTOCOL)
+    limit = file_limit or 2 * _MAX_ANSWER_BYTES
+    request = pickle.dumps((func.__module__, func.__qualname__, args, limit), pickle.HIGHEST_PROTOCOL)
     name = func.__qualname__
     with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
         try:
@@ -217,17 +222,17 @@ def _main() -> int:
     sys.stdout = sys.stderr
     logging.disable(logging.CRITICAL)
     warnings.simplefilter("ignore")
+    module, qualname, args, limit = pickle.loads(sys.stdin.buffer.read())
     # Native code can still write to stderr, which is a file on disk: no file
-    # this process writes may pass twice the answer cap (SIGXFSZ ends it).
+    # this process writes may pass the limit the caller set, by default twice
+    # the answer cap (SIGXFSZ ends it).
     try:
         import resource
 
-        limit = 2 * _MAX_ANSWER_BYTES
         resource.setrlimit(resource.RLIMIT_FSIZE, (limit, limit))
     except (ImportError, ValueError, OSError):
         pass
 
-    module, qualname, args = pickle.loads(sys.stdin.buffer.read())
     func: Any = importlib.import_module(module)
     for part in qualname.split("."):
         func = getattr(func, part)

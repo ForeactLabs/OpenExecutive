@@ -212,6 +212,9 @@ async def page_range(data: bytes, start: int, end: int) -> tuple[int, bytes | No
     try:
         total = await asyncio.to_thread(
             run_isolated, _page_range, data, start, end, out, timeout=_TEXT_LAYER_TIMEOUT_S,
+            # The slice is written to ``out``: room for pages as large as the
+            # whole file, with the usual margin on top.
+            file_limit=2 * len(data) + 64 * 1024 * 1024,
         )
         part = await asyncio.to_thread(Path(out).read_bytes)
     finally:

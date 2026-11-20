@@ -403,9 +403,9 @@ async def test_a_page_range_is_read_in_a_child_process(monkeypatch) -> None:
     seen: list[str] = []
     real = isolated._run_child
 
-    def _spy(func, args, timeout, reraise):  # type: ignore[no-untyped-def]
+    def _spy(func, args, timeout, reraise, file_limit=None):  # type: ignore[no-untyped-def]
         seen.append(func.__qualname__)
-        return real(func, args, timeout, reraise)
+        return real(func, args, timeout, reraise, file_limit)
 
     monkeypatch.setattr(isolated, "_run_child", _spy)
     total, part = await pdf_reader.page_range(data, 1, 3)
@@ -415,10 +415,11 @@ async def test_a_page_range_is_read_in_a_child_process(monkeypatch) -> None:
     assert await pdf_reader.page_range(data, 5, 6) == (5, None)
 
 
-async def test_a_page_range_bigger_than_the_answer_cap_still_comes_back(monkeypatch) -> None:
-    """The slice comes back through a file, not the child's answer, so its
-    size is not held to the answer cap."""
-    from pypdf import PdfReader, PdfWriter
+def test_the_file_limit_reaches_the_child(tmp_path) -> None:
+    """A page range is written to a file under the limit its caller sets in
+    the child, not the answer cap: too small a limit stops the write, and
+    page_range sets one that fits the file."""
+    from pypdf import PdfWriter
 
     writer = PdfWriter()
     for _ in range(5):
@@ -426,8 +427,10 @@ async def test_a_page_range_bigger_than_the_answer_cap_still_comes_back(monkeypa
     buf = io.BytesIO()
     writer.write(buf)
     data = buf.getvalue()
-    monkeypatch.setattr(isolated, "_MAX_ANSWER_BYTES", 64)
-    total, part = await pdf_reader.page_range(data, 0, 4)
-    assert total == 5
-    assert part is not None and len(part) > 64
-    assert len(PdfReader(io.BytesIO(part)).pages) == 4
+    out = tmp_path / "part.pdf"
+    with pytest.raises(isolated.WorkerStopped):
+        isolated.run_isolated(pdf_reader._page_range, data, 0, 4, str(out), timeout=60, file_limit=64)
+    assert isolated.run_isolated(
+        pdf_reader._page_range, data, 0, 4, str(out), timeout=60, file_limit=len(data) * 2,
+    ) == 5
+    assert out.stat().st_size > 64
