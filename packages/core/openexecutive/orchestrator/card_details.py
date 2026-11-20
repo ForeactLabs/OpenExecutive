@@ -475,7 +475,7 @@ def plain(tool: str, tool_input: Any) -> list[dict[str, Any]]:
 def _own_ref(tool: str, norm: str, value: Any) -> tuple[str, str] | tuple[()] | None:
     """For one of our own tools' reference fields, the (label, name) the
     card shows: a person, a department or a goal by name. ``()`` when the
-    field is a number only the system reads (a task's, a chat app's): it
+    field is a record's number only the system reads (a task's, a card's): it
     shows only on a card that names nothing else. None for any other field."""
     from openexecutive.orchestrator import take_the_lead
 
@@ -502,9 +502,16 @@ def _own_ref(tool: str, norm: str, value: Any) -> tuple[str, str] | tuple[()] | 
     if norm in ("goal_id", "for_goal_id"):
         goal = _goal(value)
         return ("Goal", goal) if goal else ()
-    if norm.endswith("_id") or norm.endswith("_ids"):
+    if (norm.endswith("_id") or norm.endswith("_ids")) and _record_number(value):
         return ()
     return None
+
+
+def _record_number(value: Any) -> bool:
+    """Whether a value is one of our own records' numbers (a task's, a
+    card's): never a yes/no or an account a step sets, which show."""
+    values = value if isinstance(value, list) else [value]
+    return bool(values) and all(isinstance(v, int) and not isinstance(v, bool) for v in values)
 
 
 def _department(slug: Any) -> str:

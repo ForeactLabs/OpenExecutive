@@ -399,7 +399,7 @@ def test_our_own_tools_name_people_departments_and_goals_never_a_number(monkeypa
         {"field": "Goal", "value": "Close 10 deals"}, {"field": "Task", "value": "Call Acme"},
     ]
     # A number that names no one, or only the system reads, isn't shown.
-    assert card_details.plain("message_person", {"person_id": 99, "slack_user_id": "U1", "text": "Hi"}) == [
+    assert card_details.plain("message_person", {"person_id": 99, "loop_id": 12, "text": "Hi"}) == [
         {"field": "To", "value": "Someone not on People"}, {"field": "Message", "value": "Hi"},
     ]
     # Two people with the same kind of label are told apart.
@@ -431,3 +431,11 @@ def test_a_chat_app_message_names_who_it_goes_to(monkeypatch) -> None:
     assert card_details.plain("send_telegram_message", {"chat_id": "-100123", "text": "Hi"})[0] == {
         "field": "To", "value": "-100123",
     }
+
+
+def test_an_account_or_a_yes_no_a_step_sets_is_still_shown(monkeypatch) -> None:
+    monkeypatch.setattr(card_details, "_names", lambda value: "Dana Lee")
+    shown = card_details.plain("upsert_person", {"person_id": 4, "full_name": "Dana", "slack_user_id": "U_OTHER"})
+    assert {"field": "Slack user id", "value": "U_OTHER"} in shown
+    shown = card_details.plain("resolve_roster_request", {"decision": "link", "person_id": 4, "replace_channel_id": True})
+    assert {"field": "Replace channel id", "value": "Yes"} in shown
