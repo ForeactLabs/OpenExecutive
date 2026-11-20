@@ -8,6 +8,7 @@ until a slot is explicitly created.
 """
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -20,12 +21,12 @@ from openexecutive.api.intake_uploads import (
 )
 
 
-def _principal_writes(request: Request) -> None:
+def _principal_writes(request: Request) -> Iterator[None]:
     """Every write here replaces or wipes the whole company: the principal's
     (``chat.principal_writes``)."""
     from openexecutive.api.routes.chat import principal_writes
 
-    principal_writes(request)
+    yield from principal_writes(request)
 
 
 router = APIRouter(dependencies=[Depends(_principal_writes)])

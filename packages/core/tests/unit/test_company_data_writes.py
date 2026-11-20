@@ -146,3 +146,8 @@ def test_whoever_sets_up_an_unclaimed_install_can_switch_back(
 def test_an_incidental_write_on_an_unclaimed_install_keeps_no_owner(client: TestClient, people_db: Path) -> None:
     client.post("/fixtures/snapshot", headers=TEAMMATE)
     assert install_owner.get(people_db) is None
+
+
+def test_a_failed_write_keeps_no_owner(client: TestClient, people_db: Path) -> None:
+    assert client.post("/fixtures/no-such-company/load", headers=TEAMMATE).status_code >= 400
+    assert install_owner.get(people_db) is None

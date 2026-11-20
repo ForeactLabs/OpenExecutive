@@ -7,7 +7,7 @@ import logging
 import re
 import time
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Iterator
 from types import SimpleNamespace
 from typing import Any, Literal, NamedTuple
 
@@ -1068,45 +1068,56 @@ def _caller_is_principal_or_unclaimed(request: Request) -> bool:
 
 _READS = frozenset({"GET", "HEAD", "OPTIONS"})
 # The writes that replace the whole company: on an install with no principal
-# yet, whoever makes one is kept as its owner (``_keep_install_owner``).
+# yet, whoever makes one is kept as its owner (``_install_owner_to_keep``).
 _SETS_UP = ("/reset", "/load", "/activate")
 
 
-def principal_writes(request: Request) -> None:
+def principal_writes(request: Request) -> Iterator[None]:
     """Router dependency for routes whose writes replace or wipe the whole
     company (the company simulator, client slots): a reset, a load, a switch
     and the backup are the principal's, as the workspace settings and the
-    People list are (``_caller_is_principal_or_unclaimed``). Reads stay open."""
+    People list are (``_caller_is_principal_or_unclaimed``). Reads stay open.
+    The install's owner is kept once the write has gone through, never on
+    one that failed."""
     if request.method in _READS:
+        yield
         return
-    if _caller_is_principal_or_unclaimed(request):
-        _keep_install_owner(request)
-        return
-    raise HTTPException(status_code=403, detail="Only the principal can change the company's saved data")
+    if not _caller_is_principal_or_unclaimed(request):
+        raise HTTPException(status_code=403, detail="Only the principal can change the company's saved data")
+    owner = _install_owner_to_keep(request)
+    yield
+    if owner:
+        from openexecutive.people import install_owner
+
+        try:
+            install_owner.remember(owner)
+        except Exception:
+            logger.warning("couldn't keep the install's owner", exc_info=True)
 
 
-def _keep_install_owner(request: Request) -> None:
-    """Keep the principal's address as the install's owner when they, signed
-    in as themselves, change the company's saved data while their own company
-    is live (or the address of whoever sets up an install with no principal
-    yet): loading a simulator company or a client then can't lock them out
-    of switching back (``people.install_owner``). Never raises."""
+def _install_owner_to_keep(request: Request) -> str | None:
+    """The address to keep as the install's owner once this write goes
+    through: the principal's, signed in as themselves, while their own
+    company is live, or on a roster with no principal yet the address of
+    whoever replaces the company (a reset, a load, a switch), not an
+    incidental write. With it kept, loading a simulator company or a client
+    can't lock them out of switching back (``people.install_owner``).
+    Never raises."""
     from openexecutive.people import install_owner
     from openexecutive.people import store as people_store
 
     try:
         email = api_caller.caller(request).email
         principal = people_store.find_principal_person()
-        # The principal, or on a roster with none yet the person who replaces
-        # the company (a reset, a load, a switch), not an incidental write.
         if principal is None:
             mine = request.url.path.rstrip("/").endswith(_SETS_UP)
         else:
             mine = (principal.email or "").strip().lower() == email
         if email and mine and not install_owner.away_from_own_company():
-            install_owner.remember(email)
+            return email
     except Exception:
-        logger.warning("couldn't keep the install's owner", exc_info=True)
+        logger.warning("couldn't tell the install's owner", exc_info=True)
+    return None
 
 
 async def _run_chat_turn(
