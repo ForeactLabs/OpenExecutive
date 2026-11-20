@@ -786,6 +786,13 @@ async def reset_all_state(
     from openexecutive.memory.company_profile import CompanyProfile
 
     async with _FIXTURE_OP_LOCK:
+        # The principal stays: a reset empties the company, not its owner.
+        # With no principal left, the first signed-in person to ask would be
+        # let set themselves up as the owner (``chat._caller_is_principal_or_unclaimed``
+        # is for a brand-new install only). Read first, so a roster that
+        # can't be read stops the reset before anything is wiped.
+        owner = _principal_to_keep(keep, settings)
+
         # 1. Live profile → empty
         CompanyProfile().save_to_yaml(settings.company_profile_path)
 
@@ -862,11 +869,6 @@ async def reset_all_state(
         from openexecutive.memory.episodic import DB_PATH as EPISODIC_DB_PATH
         from openexecutive.people import store as people_store
 
-        # The principal stays: a reset empties the company, not its owner.
-        # With no principal left, the first signed-in person to ask would be
-        # let set themselves up as the owner (``chat._caller_is_principal_or_unclaimed``
-        # is for a brand-new install only).
-        owner = _principal_to_keep(keep, settings)
 
         cleared: dict[str, int] = {}
         for db_path in dict.fromkeys(
