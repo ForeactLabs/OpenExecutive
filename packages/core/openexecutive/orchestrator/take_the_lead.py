@@ -600,11 +600,17 @@ def _number(text: str) -> float | None:
 
 def amounts(text: str) -> list[float]:
     """Money amounts written in ``text`` ($500, 2k EUR, $2 million, …)."""
-    found: list[float] = []
+    return [number for number, _ in written_amounts(text)]
+
+
+def written_amounts(text: str) -> list[tuple[float, str]]:
+    """Each money amount in ``text`` with the words it was written in
+    ("€1,284.50", "2k EUR"), so a card quotes it as the text says it."""
+    found: list[tuple[float, str]] = []
     for m in _AMOUNT_VALUE_RE.finditer(text or ""):
         number = _number(f"{m.group(1) or m.group(3) or m.group(5)} {m.group(2) or m.group(4) or m.group(6) or ''}")
         if number is not None:
-            found.append(number)
+            found.append((number, " ".join(m.group(0).split())))
     return found
 
 
@@ -986,7 +992,7 @@ def _rule_hit(
     when not given; a topic rule, ``topics`` (``topics_of``)."""
     lowered = text.lower()
     found_topics = set(topics)
-    spends = amounts(text if money is None else money)
+    spends = written_amounts(text if money is None else money)
     for rule in rules:
         if rule.effect != EFFECT_WAIT:
             continue
@@ -1004,12 +1010,13 @@ def _rule_hit(
                 return Hit("rule", f'your rule about "{value}" says to wait', rule.id)
         elif rule.kind == RULE_AMOUNT:
             limit = _number(value) or 0
-            over = [a for a in spends if a >= limit]
+            over = [(number, said) for number, said in spends if number >= limit]
             if over:
+                # The amount as the text wrote it: a euro sum is never quoted as dollars.
+                said = max(over)[1]
                 return Hit(
                     "rule",
-                    f"it says {_money(str(max(over)))}, and your rule about amounts of {_money(value)} or more says"
-                    " to wait",
+                    f"it says {said}, and your rule about amounts of {_money(value)} or more says to wait",
                     rule.id,
                 )
         elif rule.kind == RULE_TOPIC:
