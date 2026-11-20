@@ -121,3 +121,10 @@ def test_after_a_reset_only_the_kept_owner_can_set_up_again(client: TestClient, 
     install_owner.remember("pat@example.com", people_db)
     assert client.post("/fixtures/reset", headers=TEAMMATE).status_code == 403
     assert client.post("/fixtures/reset", headers=OWNER).status_code == 200
+
+
+def test_a_caller_naming_no_one_still_runs_an_owned_install(client: TestClient, people_db: Path) -> None:
+    """With no sign-in (open mode, no caller header) the caller is the
+    principal, so an empty roster with an owner kept doesn't lock them out."""
+    install_owner.remember("pat@example.com", people_db)
+    assert client.post("/fixtures/reset").status_code == 200

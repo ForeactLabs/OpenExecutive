@@ -1052,7 +1052,7 @@ def _caller_is_principal_or_unclaimed(request: Request) -> bool:
             # is kept (``people.install_owner``), only they may set it up again.
             owner = install_owner.get()
             if owner is not None:
-                return who.email == owner
+                return who.defaults_to_principal or who.email == owner
             return who.kind != "service"
         if install_owner.away_from_own_company():
             # A simulator company or a client is live, with its own principal:
