@@ -369,3 +369,42 @@ def test_a_held_cards_top_says_who_it_waits_on_who_started_it_and_why_it_waits(m
         "started"] == "Someone asked"
     training = card_details.top({"kind": "training", "reason": "x"}, approver_id=1, viewer_id=1)
     assert training["waits"] == "It's a new kind of step for me, so it waits for an OK once."
+
+
+def test_our_own_tools_name_people_departments_and_goals_never_a_number(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from openexecutive.departments import store as dept_store
+    from openexecutive.people import registry
+
+    people = {4: "Annamarie Braden", 7: "Leo Park"}
+    monkeypatch.setattr(
+        registry, "get_person",
+        lambda pid, include_contacts=False: SimpleNamespace(full_name=people[pid], email="") if pid in people else None,
+    )
+    monkeypatch.setattr(
+        dept_store, "get_department",
+        lambda slug: SimpleNamespace(config=SimpleNamespace(title="Sales")) if slug == "sales" else None,
+    )
+    monkeypatch.setattr(dept_store, "get_goal", lambda gid: SimpleNamespace(key_result="Close 10 deals") if gid == 3 else None)
+
+    shown = card_details.plain("message_person", {"person_id": 4, "text": "Hi"})
+    assert shown == [{"field": "To", "value": "Annamarie Braden"}, {"field": "Message", "value": "Hi"}]
+
+    shown = card_details.plain("assign_open_loop", {
+        "assigned_to_person_id": 7, "loop_id": 12, "department_slug": "sales", "goal_id": 3, "task": "Call Acme",
+    })
+    assert shown == [
+        {"field": "Assigned to", "value": "Leo Park"}, {"field": "Department", "value": "Sales"},
+        {"field": "Goal", "value": "Close 10 deals"}, {"field": "Task", "value": "Call Acme"},
+    ]
+    # A number that names no one, or only the system reads, isn't shown.
+    assert card_details.plain("message_person", {"person_id": 99, "slack_user_id": "U1", "text": "Hi"}) == [
+        {"field": "Message", "value": "Hi"},
+    ]
+    assert not any("id" in d["field"].lower() for d in card_details.plain("x", {"goal_id": 0, "alert_id": 5}))
+
+
+def test_a_connected_apps_ids_are_still_shown() -> None:
+    # A connected app's step may act only on its own record: that stays.
+    assert card_details.plain("asana__update_task", {"task_id": "123"}) == [{"field": "Task id", "value": "123"}]

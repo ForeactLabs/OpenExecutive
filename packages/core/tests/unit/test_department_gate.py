@@ -180,9 +180,8 @@ def test_a_teammates_held_step_is_their_own_card(
     assert instance.originating_session_id == "s-1"
     payload = json.loads(instance.proposed_payload_json)
     assert payload["tool"] == "send_slack_dm" and payload["requested_by_person_id"] == team["sam"].id
-    assert payload["details"] == [
-        {"field": "User id", "value": "U_RIA"}, {"field": "Message", "value": _send()["text"]},
-    ]
+    # Who it goes to is in the title; a chat app's own id for them isn't shown.
+    assert payload["details"] == [{"field": "Message", "value": _send()["text"]}]
     [card] = alerts_store.list_alerts(limit=10)
     assert card.routed_to_person_id == team["sam"].id
     assert f"decision_instance:{instance.id}" in card.topic_tags

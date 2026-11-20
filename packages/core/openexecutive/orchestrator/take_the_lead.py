@@ -2666,8 +2666,8 @@ def _google_chat_space_named(tool: str, tool_input: dict[str, Any]) -> str:
 
 
 def where(tool: str, tool_input: dict[str, Any]) -> str:
-    """Where a held message would go, in a few words ("On Slack", "In Open
-    Executive, on their Needs you"); "" when it isn't a message or can't be
+    """Where a held message would go, in a few words ("On Slack", "Dana will
+    see it in Open Executive"); "" when it isn't a message or can't be
     told. Mirrors ``schedule_tools.message_person``'s choice: the first chat
     app set up here that the person has an id for, else an alert to them.
     Never raises."""
@@ -2701,7 +2701,8 @@ def where(tool: str, tool_input: dict[str, Any]) -> str:
                 return f"On {_CHANNEL_NAMES[channel]}"
         if person.kind != "team":
             return ""
-        return "In Open Executive, on their Needs you (no chat app set up for them)"
+        first = (person.full_name or "").split(" ")[0] or "They"
+        return f"{first} will see it in Open Executive"
     except Exception:
         return ""
 

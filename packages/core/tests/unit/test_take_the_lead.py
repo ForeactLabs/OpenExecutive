@@ -1650,8 +1650,9 @@ def test_a_training_card_says_who_where_and_the_whole_message(owner: Any, monkey
     assert result["status"] == "waiting_for_approval" and calls == []
     payload = json.loads(ledger.list_instances(ttl.DECISION_CLASS)[0].proposed_payload_json)
     assert payload["headline"] == "Message Sam Teammate"
-    # No chat app set up for Sam: it would land on their Needs you.
-    assert payload["where"].startswith("In Open Executive")
+    # No chat app set up for Sam: it would reach them in Open Executive,
+    # said in plain words (no note on how it was routed).
+    assert payload["where"] == "Sam will see it in Open Executive"
     assert payload["fields"][0]["value"] == text  # the whole message, not the first 120 characters
 
 
