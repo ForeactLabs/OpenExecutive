@@ -413,3 +413,21 @@ async def test_a_page_range_is_read_in_a_child_process(monkeypatch) -> None:
     assert part is not None and len(PdfReader(io.BytesIO(part)).pages) == 2
     assert seen == ["_page_range"]
     assert await pdf_reader.page_range(data, 5, 6) == (5, None)
+
+
+async def test_a_page_range_bigger_than_the_answer_cap_still_comes_back(monkeypatch) -> None:
+    """The slice comes back through a file, not the child's answer, so its
+    size is not held to the answer cap."""
+    from pypdf import PdfReader, PdfWriter
+
+    writer = PdfWriter()
+    for _ in range(5):
+        writer.add_blank_page(width=200, height=200)
+    buf = io.BytesIO()
+    writer.write(buf)
+    data = buf.getvalue()
+    monkeypatch.setattr(isolated, "_MAX_ANSWER_BYTES", 64)
+    total, part = await pdf_reader.page_range(data, 0, 4)
+    assert total == 5
+    assert part is not None and len(part) > 64
+    assert len(PdfReader(io.BytesIO(part)).pages) == 4
