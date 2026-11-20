@@ -2482,12 +2482,16 @@ async def _deliver_to_principal(text: str, *, label: str = "Update") -> Principa
 
 
 async def deliver_to_person(
-    person: Person, text: str, *, label: str = "Update", chat_only: bool = False,
+    person: Person, text: str, *, label: str = "Update", chat_only: bool = False, email_only: bool = False,
 ) -> PrincipalDelivery:
     """Send ``text`` to ``person`` alone, the way the briefs reach the
     principal: their own Slack or Discord DM, their Telegram chat, or email
     to their own address (``delivery_order``, which skips a Telegram group).
-    ``chat_only`` leaves email out: nothing goes when no chat app reaches them."""
+    ``chat_only`` leaves email out: nothing goes when no chat app reaches them.
+    ``email_only`` is the other half: their own address, never a chat app.
+    ``label`` is the email's subject."""
+    if email_only:
+        return await _send_on_plan(person, ["email"] if await ensure_email_ready() else [], text, label=label)
     if chat_only:
         plan = [c for c in delivery_order(person, email_ready=False) if c != "email"]
         if not plan:
