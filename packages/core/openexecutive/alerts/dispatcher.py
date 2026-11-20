@@ -56,7 +56,6 @@ async def dispatch_slack_dm(alert: Alert) -> bool:
     urgent things through; it still waits on Home. The channel keeps its old
     name, ``slack_dm``, in stored preferences."""
     from openexecutive.alerts.models import SEVERITY_RANK
-    from openexecutive.people.channel import is_within_availability
     from openexecutive.scheduler.runner import deliver_to_person
 
     if SEVERITY_RANK.get(str(alert.severity), 0) < SEVERITY_RANK[_CHAT_DM_MIN_SEVERITY]:
@@ -65,8 +64,7 @@ async def dispatch_slack_dm(alert: Alert) -> bool:
         person = _alert_person(alert)
         if person is None:
             return False
-        urgent = str(alert.severity) == "urgent"
-        if not is_within_availability(person, now=datetime.now(UTC), quiet_hours=True, urgent=urgent):
+        if not _awake_for(person, alert):
             logger.info("dispatch_slack_dm: alert=%s waits on Home (quiet hours)", alert.id)
             return False
         delivery = await deliver_to_person(person, _format_broadcast_body(alert), label="Alert", chat_only=True)
@@ -95,9 +93,20 @@ def _alert_person(alert: Alert) -> Any:
     return person
 
 
+def _awake_for(person: Any, alert: Alert) -> bool:
+    """Whether ``person`` may be reached about ``alert`` now: not in their
+    quiet hours, unless it is urgent and they let urgent things through.
+    Otherwise it waits on Home."""
+    from openexecutive.people.channel import is_within_availability
+
+    urgent = str(alert.severity) == "urgent"
+    return bool(is_within_availability(person, now=datetime.now(UTC), quiet_hours=True, urgent=urgent))
+
+
 async def dispatch_email(alert: Alert) -> bool:
-    """The alert to its person's own address (``_alert_person``), the way a
-    brief reaches them (``scheduler.runner.deliver_to_person``, email only),
+    """The alert to its person's own address (``_alert_person``), outside
+    their quiet hours like the chat DM (``_awake_for``), the way a brief
+    reaches them (``scheduler.runner.deliver_to_person``, email only),
     with the headline as the subject and a link to the card on Home."""
     from openexecutive.alerts.card_refs import card_url
     from openexecutive.scheduler.runner import deliver_to_person
@@ -105,6 +114,9 @@ async def dispatch_email(alert: Alert) -> bool:
     try:
         person = _alert_person(alert)
         if person is None or not person.email:
+            return False
+        if not _awake_for(person, alert):
+            logger.info("dispatch_email: alert=%s waits on Home (quiet hours)", alert.id)
             return False
         text = _format_broadcast_body(alert)
         link = card_url(alert.id) if alert.id is not None else ""

@@ -11,6 +11,7 @@ import pytest
 
 from openexecutive.alerts import card_refs, dispatcher
 from openexecutive.alerts.models import PRIVATE_ALERT_TAG, Alert
+from openexecutive.people import channel as people_channel
 from openexecutive.people import store as people_store
 from openexecutive.scheduler import runner
 from openexecutive.scheduler.runner import PrincipalDelivery
@@ -42,6 +43,7 @@ def sent(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     monkeypatch.setattr(people_store, "find_principal_person", lambda: OWNER)
     monkeypatch.setattr(people_store, "get_person", lambda pid: {1: OWNER, 2: BEN, 3: NO_MAIL}.get(pid))
     monkeypatch.setattr(card_refs, "card_url", lambda alert_id: f"https://app.example/?card={alert_id}")
+    monkeypatch.setattr(people_channel, "is_within_availability", lambda person, **kw: True)
     return calls
 
 
@@ -91,3 +93,22 @@ def test_an_exception_is_a_failed_delivery(monkeypatch: pytest.MonkeyPatch, sent
 
     monkeypatch.setattr(runner, "deliver_to_person", boom)
     assert asyncio.run(dispatcher.dispatch_email(_alert())) is False
+
+
+@pytest.mark.parametrize("lets_urgent_through", [True, False])
+def test_quiet_hours_hold_it_like_the_chat_dm(
+    monkeypatch: pytest.MonkeyPatch, sent: list[dict[str, Any]], lets_urgent_through: bool,
+) -> None:
+    """Ben is in his quiet hours: an urgent alert reaches him only when he lets
+    urgent things through; a high one waits on Home either way."""
+    asked: list[bool] = []
+
+    def availability(person: Any, *, now: Any, quiet_hours: bool, urgent: bool) -> bool:
+        asked.append(urgent)
+        return urgent and lets_urgent_through
+
+    monkeypatch.setattr(people_channel, "is_within_availability", availability)
+    assert asyncio.run(dispatcher.dispatch_email(_alert("urgent", routed=2))) is lets_urgent_through
+    assert asyncio.run(dispatcher.dispatch_email(_alert("high", routed=2))) is False
+    assert asked == [True, False]
+    assert [c["person"] for c in sent] == ([BEN] if lets_urgent_through else [])
