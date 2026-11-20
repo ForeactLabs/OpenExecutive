@@ -61,7 +61,9 @@ CLIENT_WORKSPACE_PREFIX = "openexec-client-"
 # global pause switch (scheduler/pause.py): activating a client must never
 # silently un-pause (or re-pause) the Executive. `eval_scenarios` are the
 # scenarios people wrote: the instance's, kept by a reset (RESET_KEEPS) too.
-_GLOBAL_TABLES = ("generated_fixtures", "executive_control", "eval_scenarios")
+# `install_owner` is who runs the install whichever company is live
+# (people/install_owner.py).
+_GLOBAL_TABLES = ("generated_fixtures", "executive_control", "eval_scenarios", "install_owner")
 
 # Engagement metadata lives in meta.json — deliberately OUTSIDE the swapped
 # client state, so the practice layer (cockpit, renewal awareness) can see
@@ -518,6 +520,7 @@ def _ensure_schemas() -> None:
     from openexecutive.memory.episodic import initialize_db as init_episodic
     from openexecutive.memory.workspace_settings import init_workspace_settings_db
     from openexecutive.monitoring.store import initialize_db as init_monitoring
+    from openexecutive.people.install_owner import initialize_db as initialize_install_owner_db
     from openexecutive.people.store import initialize_db as init_people
     from openexecutive.scheduler.pause import initialize_pause_db
 
@@ -554,6 +557,7 @@ def _ensure_schemas() -> None:
     # tables it can't find.
     initialize_pause_db(db_path)
     initialize_user_scenarios_db(db_path)
+    initialize_install_owner_db(db_path)
     ReviewStore.initialize_db(db_path)
     # Register shipped knowledge as trusted defaults too — without this a
     # freshly activated slot has an empty review_items table until the next

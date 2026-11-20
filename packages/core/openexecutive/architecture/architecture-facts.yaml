@@ -4416,7 +4416,12 @@ departments:
     /fixtures/unload responses; every /fixtures and /clients write is the
     principal's (chat.principal_writes, a router dependency), and the
     factory reset writes the principal's People row back so the company
-    always keeps its owner); the user snapshot
+    always keeps its owner; the install's owner, the principal who last
+    changed this data with their own company live, is kept in the
+    install_owner row (people/install_owner.py), which reset, load, unload
+    and a client switch all keep, so they can switch back from a loaded
+    company, and once kept they alone may set up a roster with no
+    principal); the user snapshot
     writes one (every field, so the role round-trips), and a load while the live state is the user's own (no fixture, no
     client active) takes the whole snapshot again, so an older backup is
     never reused — unload keeps `_user_backup`; an unload from a

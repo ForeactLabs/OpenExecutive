@@ -162,6 +162,7 @@ async def _read_handle(tool_input: dict[str, Any]) -> str:
 
 
 async def _read_path(resolved: Path, tool_input: dict[str, Any]) -> str:
+    from openexecutive.knowledge.isolated import ParserBusy
     from openexecutive.knowledge.loader import read_document_text
     from openexecutive.providers.registry import reading_limits_for
 
@@ -180,6 +181,8 @@ async def _read_path(resolved: Path, tool_input: dict[str, Any]) -> str:
             result = await read_document_text(resolved)
     except ValueError as exc:
         return _err(str(exc))
+    except ParserBusy:
+        return _err("the document reader is busy right now; try again in a minute")
     except Exception as exc:
         logger.warning("read_document: extraction failed (%s)", type(exc).__name__)
         return _err("could not read that file")

@@ -187,27 +187,36 @@ def _is_thin(text: str, pages: int) -> bool:
 
 # ── The deployment's model (a document block, through any provider) ──────────
 
-def _page_range(data: bytes, start: int, end: int) -> list[Any]:
-    """``[page count, base64 of pages [start, end) as a PDF]``; the slice is
-    ``""`` when ``start`` is past the last page. Runs in a child process
-    (``page_range``), so its answer is JSON."""
+def _page_range(data: bytes, start: int, end: int, out: str) -> int:
+    """The page count; pages [start, end) are written as a PDF to ``out``
+    (left empty when ``start`` is past the last page). Runs in a child
+    process (``page_range``): the slice goes through a file, since it can be
+    larger than the answer a child may send back."""
     from pypdf import PdfReader
 
     total = len(PdfReader(io.BytesIO(data)).pages)
-    if start >= total:
-        return [total, ""]
-    part = slice_pdf(data, start, min(end, total))
-    return [total, base64.b64encode(part).decode("ascii")]
+    if start < total:
+        Path(out).write_bytes(slice_pdf(data, start, min(end, total)))
+    return total
 
 
 async def page_range(data: bytes, start: int, end: int) -> tuple[int, bytes | None]:
     """``(page count, pages [start, end) as a PDF)``, read in a child process
     like every other parse of a file someone sent; None for the pages when
     ``start`` is past the last page."""
-    total, part = await asyncio.to_thread(
-        run_isolated, _page_range, data, start, end, timeout=_TEXT_LAYER_TIMEOUT_S,
-    )
-    return int(total), (base64.b64decode(part) if part else None)
+    import os
+    import tempfile
+
+    fd, out = tempfile.mkstemp(suffix=".pdf")
+    os.close(fd)
+    try:
+        total = await asyncio.to_thread(
+            run_isolated, _page_range, data, start, end, out, timeout=_TEXT_LAYER_TIMEOUT_S,
+        )
+        part = await asyncio.to_thread(Path(out).read_bytes)
+    finally:
+        Path(out).unlink(missing_ok=True)
+    return int(total), (part or None)
 
 
 def slice_pdf(data: bytes, start: int, end: int) -> bytes:

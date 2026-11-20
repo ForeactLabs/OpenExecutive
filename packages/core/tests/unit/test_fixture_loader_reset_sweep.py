@@ -113,6 +113,27 @@ def test_reset_with_no_principal_leaves_people_empty(db: Path, tmp_path: Path) -
     assert _rows(db, "people") == 0
 
 
+def test_reset_keeps_the_install_owner(db: Path, tmp_path: Path) -> None:
+    from openexecutive.people import install_owner
+
+    install_owner.remember("pat@example.com", db)
+    _reset(tmp_path)
+    assert install_owner.get(db) == "pat@example.com"
+
+
+def test_reset_drops_a_loaded_companys_principal(db: Path, tmp_path: Path) -> None:
+    from openexecutive.people import install_owner
+
+    owner_id = people_store.find_principal_person().id
+    people_store.upsert_person(
+        full_name="Fixture Boss", is_principal=True, email="boss@fixture.test", person_id=owner_id,
+    )
+    install_owner.remember("pat@example.com", db)
+    people_registry.invalidate()
+    _reset(tmp_path)
+    assert _rows(db, "people") == 0
+
+
 def test_reset_keeps_the_tables_the_caller_names(db: Path, tmp_path: Path) -> None:
     ws.restore_workspace_settings(ws.WorkspaceSettings(mode="solo", timezone="Asia/Seoul"))
     _reset(tmp_path, keep=frozenset({"people", "workspace_settings"}))

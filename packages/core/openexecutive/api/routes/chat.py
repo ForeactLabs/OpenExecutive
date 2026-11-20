@@ -1042,11 +1042,24 @@ def _caller_is_principal_or_unclaimed(request: Request) -> bool:
     names no one, so it can't set up an install it doesn't own. Fails closed:
     if the roster cannot be read, the answer is no.
     """
+    from openexecutive.people import install_owner
     from openexecutive.people import store as people_store
 
     try:
+        who = api_caller.caller(request)
         if people_store.find_principal_person() is None:
-            return api_caller.caller(request).kind != "service"
+            # Unclaimed only on an install nobody has owned yet: once an owner
+            # is kept (``people.install_owner``), only they may set it up again.
+            owner = install_owner.get()
+            if owner is not None:
+                return who.email == owner
+            return who.kind != "service"
+        if install_owner.away_from_own_company():
+            # A simulator company or a client is live, with its own principal:
+            # the install's owner still runs it and can switch back.
+            owner = install_owner.get()
+            if owner is not None and who.email == owner:
+                return True
         return people_store.is_principal_or_self(_resolve_caller_person_id(request), None)
     except Exception:
         logger.exception("principal check failed — refusing the principal-only change")
@@ -1061,9 +1074,32 @@ def principal_writes(request: Request) -> None:
     company (the company simulator, client slots): a reset, a load, a switch
     and the backup are the principal's, as the workspace settings and the
     People list are (``_caller_is_principal_or_unclaimed``). Reads stay open."""
-    if request.method in _READS or _caller_is_principal_or_unclaimed(request):
+    if request.method in _READS:
+        return
+    if _caller_is_principal_or_unclaimed(request):
+        _keep_install_owner(request)
         return
     raise HTTPException(status_code=403, detail="Only the principal can change the company's saved data")
+
+
+def _keep_install_owner(request: Request) -> None:
+    """Keep the principal's address as the install's owner when they, signed
+    in as themselves, change the company's saved data while their own company
+    is live: loading a simulator company or a client then can't lock them out
+    of switching back (``people.install_owner``). Never raises."""
+    from openexecutive.people import install_owner
+    from openexecutive.people import store as people_store
+
+    try:
+        email = api_caller.caller(request).email
+        principal = people_store.find_principal_person()
+        if (
+            email and principal is not None and (principal.email or "").strip().lower() == email
+            and not install_owner.away_from_own_company()
+        ):
+            install_owner.remember(email)
+    except Exception:
+        logger.warning("couldn't keep the install's owner", exc_info=True)
 
 
 async def _run_chat_turn(

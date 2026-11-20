@@ -12,6 +12,8 @@ from fastapi.testclient import TestClient
 
 from openexecutive.api.routes import clients as clients_route
 from openexecutive.api.routes import fixtures as fixtures_route
+from openexecutive.memory import episodic
+from openexecutive.people import install_owner
 from openexecutive.people import registry as people_registry
 from openexecutive.people import store as people_store
 
@@ -38,6 +40,8 @@ WRITES = [
 def people_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     path = tmp_path / "people.db"
     monkeypatch.setattr(people_store, "DB_PATH", path)
+    monkeypatch.setattr(episodic, "DB_PATH", path)
+    monkeypatch.setattr(install_owner, "away_from_own_company", lambda: False)
     people_store.initialize_db(path)
     people_registry.invalidate()
     yield path
@@ -93,3 +97,27 @@ def test_reads_stay_open_to_the_team(client: TestClient) -> None:
     _team()
     assert client.get("/fixtures/status", headers=TEAMMATE).status_code != 403
     assert client.get("/clients", headers=TEAMMATE).status_code != 403
+
+
+def test_the_principal_is_kept_as_the_install_owner(client: TestClient, people_db: Path) -> None:
+    _team()
+    client.post("/fixtures/reset", headers=OWNER)
+    assert install_owner.get(people_db) == "pat@example.com"
+
+
+def test_the_owner_can_switch_back_from_a_loaded_company(
+    client: TestClient, people_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    install_owner.remember("pat@example.com", people_db)
+    # A simulator company is live, with its own principal on the roster.
+    people_store.upsert_person(full_name="Fixture Boss", is_principal=True, email="boss@fixture.test")
+    people_registry.invalidate()
+    monkeypatch.setattr(install_owner, "away_from_own_company", lambda: True)
+    assert client.post("/fixtures/reset", headers=OWNER).status_code == 200
+    assert client.post("/fixtures/reset", headers=TEAMMATE).status_code == 403
+
+
+def test_after_a_reset_only_the_kept_owner_can_set_up_again(client: TestClient, people_db: Path) -> None:
+    install_owner.remember("pat@example.com", people_db)
+    assert client.post("/fixtures/reset", headers=TEAMMATE).status_code == 403
+    assert client.post("/fixtures/reset", headers=OWNER).status_code == 200

@@ -116,6 +116,7 @@ RESET_KEEPS: frozenset[str] = frozenset({
     "generated_fixtures",
     "executive_control",
     "eval_scenarios",
+    "install_owner",  # who runs the install, whichever company is live
 })
 
 # Walk up from this file to find the repo root (contains evals/, fixtures/, etc.)
@@ -1056,20 +1057,32 @@ _SHADOW_TABLE_PARTS = (
 
 def _principal_to_keep(keep: Collection[str]) -> Any:
     """The principal's People row to write back after the sweep, or None
-    when the caller keeps the people table anyway or there is no principal.
+    when the caller keeps the people table anyway, there is no principal, or
+    the principal is a loaded company's rather than the install owner's.
     Raises when the roster can't be read: a reset must not drop an owner it
     could not see."""
     if "people" in keep:
         return None
+    from openexecutive.people import install_owner
     from openexecutive.people import store as people_store
 
-    return people_store.find_principal_person()
+    principal = people_store.find_principal_person()
+    owner = install_owner.get()
+    if principal is not None and owner is not None and (principal.email or "").strip().lower() != owner:
+        # A simulator company's or a client's principal, not the install's
+        # owner: none is written back, and only the owner may set the
+        # company up again (``chat._caller_is_principal_or_unclaimed``).
+        return None
+    return principal
 
 
 def _restore_principal(owner: Any) -> None:
     """Write ``owner`` back as the principal: name, role, sign-in address,
     the other addresses they write from and the chat accounts the Executive
-    reaches them on. Nothing else of the old company comes back."""
+    reaches them on. Nothing else of the old company comes back: not their
+    departments, channel preference, reply time or authority. Should this
+    fail with the roster already empty, the install's kept owner
+    (``people.install_owner``) is still the only one who may set it up."""
     from openexecutive.people import store as people_store
 
     person_id = people_store.upsert_person(

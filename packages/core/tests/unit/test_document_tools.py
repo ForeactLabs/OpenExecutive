@@ -236,3 +236,18 @@ async def test_a_part_of_text_written_a_token_a_character_is_a_third_as_long(dir
     out = await handle_read_document({"path": str(downloads / "jp.txt")})
 
     assert len(out) <= 1000 and "call again with start=" in out
+
+
+async def test_a_busy_reader_says_to_try_again(dirs, monkeypatch) -> None:
+    from openexecutive.knowledge.isolated import ParserBusy
+
+    async def busy(_path):
+        raise ParserBusy("busy")
+
+    monkeypatch.setattr("openexecutive.knowledge.loader.read_document_text", busy)
+    downloads, _ = dirs
+    (downloads / "scan.pdf").write_bytes(b"%PDF")
+
+    out = await handle_read_document({"path": str(downloads / "scan.pdf")})
+
+    assert "busy" in _error(out)
