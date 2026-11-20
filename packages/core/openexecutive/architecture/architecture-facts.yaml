@@ -1034,7 +1034,13 @@ routing:
     The pipeline leads the body with "Raised by <name>." and drops
     `company_broadcast` after `resolve_channels` (person / department only),
     and prefixes the dedup key with who raised it so teammates' cards never
-    coalesce. A teammate's saved workflow raises as its creator
+    coalesce. The row keeps who raised it (`AlertEvent.raised_by_person_id`
+    -> `owner_person_id`), and `alerts.models.visible_alert` shows such a
+    card only to that person and the one it is routed to; unrouted, to the
+    people of its department tags, else the principal. Its one_card reader
+    key carries the raiser, so it joins only another card of theirs. Why: a
+    teammate's card showed on everyone's Home.
+    A teammate's saved workflow raises as its creator
     (`alert_tools.raised_for_workflow_owner`, bound in `action_step._dispatch`).
     HTTP matches: `/alerts/{id}/ack` (ack/dismissed) and `/alerts/bulk-ack`
     let a team member clear only alerts routed to them (403 otherwise, no age
