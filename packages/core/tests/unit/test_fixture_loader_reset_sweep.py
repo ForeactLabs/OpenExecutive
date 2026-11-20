@@ -122,16 +122,34 @@ def test_reset_keeps_the_install_owner(db: Path, tmp_path: Path) -> None:
 
 
 def test_reset_drops_a_loaded_companys_principal(db: Path, tmp_path: Path) -> None:
-    from openexecutive.people import install_owner
-
+    """With a simulator company live and no owner kept yet, its principal is
+    not written back as the install's own."""
     owner_id = people_store.find_principal_person().id
     people_store.upsert_person(
         full_name="Fixture Boss", is_principal=True, email="boss@fixture.test", person_id=owner_id,
     )
-    install_owner.remember("pat@example.com", db)
     people_registry.invalidate()
+    sentinel = fixture_loader._fixture_active_sentinel(_settings(tmp_path))
+    sentinel.parent.mkdir(parents=True, exist_ok=True)
+    sentinel.write_text("acme")
     _reset(tmp_path)
     assert _rows(db, "people") == 0
+
+
+def test_reset_keeps_the_principal_after_a_handover(db: Path, tmp_path: Path) -> None:
+    """The kept owner follows the principal on the owner's own company."""
+    from openexecutive.people import install_owner
+
+    install_owner.remember("pat@example.com", db)
+    owner_id = people_store.find_principal_person().id
+    people_store.upsert_person(
+        full_name="Alex New", is_principal=True, email="alex@example.com", person_id=owner_id,
+    )
+    people_registry.invalidate()
+    _reset(tmp_path)
+    people_registry.invalidate()
+    assert [p.email for p in people_store.list_people()] == ["alex@example.com"]
+    assert install_owner.get(db) == "alex@example.com"
 
 
 def test_reset_keeps_the_tables_the_caller_names(db: Path, tmp_path: Path) -> None:

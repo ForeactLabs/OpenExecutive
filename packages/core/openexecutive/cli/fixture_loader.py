@@ -866,7 +866,7 @@ async def reset_all_state(
         # With no principal left, the first signed-in person to ask would be
         # let set themselves up as the owner (``chat._caller_is_principal_or_unclaimed``
         # is for a brand-new install only).
-        owner = _principal_to_keep(keep)
+        owner = _principal_to_keep(keep, settings)
 
         cleared: dict[str, int] = {}
         for db_path in dict.fromkeys(
@@ -1055,24 +1055,26 @@ _SHADOW_TABLE_PARTS = (
 )
 
 
-def _principal_to_keep(keep: Collection[str]) -> Any:
+def _principal_to_keep(keep: Collection[str], settings: Any) -> Any:
     """The principal's People row to write back after the sweep, or None
     when the caller keeps the people table anyway, there is no principal, or
-    the principal is a loaded company's rather than the install owner's.
-    Raises when the roster can't be read: a reset must not drop an owner it
-    could not see."""
+    a simulator company or a client is live (its principal is that
+    company's, not the install owner's). With the owner's own company live,
+    its principal is kept as the install's owner too, so a handover on the
+    People page is what the reset keeps. Raises when the roster can't be
+    read: a reset must not drop an owner it could not see."""
     if "people" in keep:
         return None
     from openexecutive.people import install_owner
     from openexecutive.people import store as people_store
 
-    principal = people_store.find_principal_person()
-    owner = install_owner.get()
-    if principal is not None and owner is not None and (principal.email or "").strip().lower() != owner:
-        # A simulator company's or a client's principal, not the install's
-        # owner: none is written back, and only the owner may set the
-        # company up again (``chat._caller_is_principal_or_unclaimed``).
+    if install_owner.away_from_own_company(settings):
+        # Only the kept owner may set the company up again
+        # (``chat._caller_is_principal_or_unclaimed``).
         return None
+    principal = people_store.find_principal_person()
+    if principal is not None and principal.email:
+        install_owner.remember(principal.email)
     return principal
 
 
