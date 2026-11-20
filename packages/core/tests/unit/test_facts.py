@@ -891,4 +891,6 @@ def test_a_wait_rule_said_in_chat_goes_to_your_rules_not_memory() -> None:
     from openexecutive.orchestrator.fact_tools import REMEMBER_FACT_TOOL
 
     words = REMEMBER_FACT_TOOL["description"]
-    assert "do_in_app add_waits_rule" in words and "is not a fact" in words
+    assert "do_in_app add_waits_rule (open_tools group app" in words and "is not a fact" in words
+    # The review after a chat has no do_in_app: it raises it in the brief.
+    assert "raise it in the brief" in words
