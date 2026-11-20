@@ -121,7 +121,12 @@ def test_cards_say_who_an_email_goes_to_and_why_it_waited(owner: Any) -> None:
     assert ttl.summarize(SEND, two, mcp=True).startswith("Email 2 people")
     ttl.add_rule(ttl.SCOPE_COMPANY, "amount", "$250", created_by="t")
     hit = ttl._rule_hit(ttl.list_rules([ttl.SCOPE_COMPANY]), "Yes, bill $300.", [DANA])
-    assert hit is not None and hit.reason == "your rule about amounts of $250 or more says to wait"
-    assert f"It waited because {hit.reason}." == "It waited because your rule about amounts of $250 or more says to wait."
+    # It quotes the amount it saw, so the card shows what tripped the rule.
+    assert hit is not None and hit.reason == "it says $300, and your rule about amounts of $250 or more says to wait"
+    assert f"It waited because {hit.reason}." == (
+        "It waited because it says $300, and your rule about amounts of $250 or more says to wait."
+    )
+    hit = ttl._rule_hit(ttl.list_rules([ttl.SCOPE_COMPANY]), "We'll pay $1,284.50 by Dec 4, not $90.", [DANA])
+    assert hit is not None and hit.reason.startswith("it says $1,284.50, and")
     assert ttl._money("1500") == "$1,500" and ttl._money("12.5") == "$12.50"
     json.dumps(hit.reason)

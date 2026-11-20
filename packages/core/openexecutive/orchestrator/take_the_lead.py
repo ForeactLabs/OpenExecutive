@@ -1004,8 +1004,14 @@ def _rule_hit(
                 return Hit("rule", f'your rule about "{value}" says to wait', rule.id)
         elif rule.kind == RULE_AMOUNT:
             limit = _number(value) or 0
-            if any(a >= limit for a in spends):
-                return Hit("rule", f"your rule about amounts of {_money(value)} or more says to wait", rule.id)
+            over = [a for a in spends if a >= limit]
+            if over:
+                return Hit(
+                    "rule",
+                    f"it says {_money(str(max(over)))}, and your rule about amounts of {_money(value)} or more says"
+                    " to wait",
+                    rule.id,
+                )
         elif rule.kind == RULE_TOPIC:
             if value in found_topics:
                 return Hit("rule", f"your rule about {KIND_LABELS.get(value, value).lower()} says to wait", rule.id)
