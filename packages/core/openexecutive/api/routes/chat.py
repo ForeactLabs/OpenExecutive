@@ -1085,7 +1085,8 @@ def principal_writes(request: Request) -> None:
 def _keep_install_owner(request: Request) -> None:
     """Keep the principal's address as the install's owner when they, signed
     in as themselves, change the company's saved data while their own company
-    is live: loading a simulator company or a client then can't lock them out
+    is live (or the address of whoever sets up an install with no principal
+    yet): loading a simulator company or a client then can't lock them out
     of switching back (``people.install_owner``). Never raises."""
     from openexecutive.people import install_owner
     from openexecutive.people import store as people_store
@@ -1093,10 +1094,10 @@ def _keep_install_owner(request: Request) -> None:
     try:
         email = api_caller.caller(request).email
         principal = people_store.find_principal_person()
-        if (
-            email and principal is not None and (principal.email or "").strip().lower() == email
-            and not install_owner.away_from_own_company()
-        ):
+        # The principal, or on a roster with none yet the person setting it
+        # up (only an unclaimed install lets them through).
+        mine = principal is None or (principal.email or "").strip().lower() == email
+        if email and mine and not install_owner.away_from_own_company():
             install_owner.remember(email)
     except Exception:
         logger.warning("couldn't keep the install's owner", exc_info=True)

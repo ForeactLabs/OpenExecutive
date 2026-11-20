@@ -128,3 +128,16 @@ def test_a_caller_naming_no_one_still_runs_an_owned_install(client: TestClient, 
     principal, so an empty roster with an owner kept doesn't lock them out."""
     install_owner.remember("pat@example.com", people_db)
     assert client.post("/fixtures/reset").status_code == 200
+
+
+def test_whoever_sets_up_an_unclaimed_install_can_switch_back(
+    client: TestClient, people_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No principal yet: the person who changes the company's data is kept
+    as the owner, so a client's own principal can't lock them out later."""
+    client.post("/fixtures/reset", headers=OWNER)
+    assert install_owner.get(people_db) == "pat@example.com"
+    people_store.upsert_person(full_name="Client CEO", is_principal=True, email="ceo@acme.test")
+    people_registry.invalidate()
+    monkeypatch.setattr(install_owner, "away_from_own_company", lambda: True)
+    assert client.post("/fixtures/reset", headers=OWNER).status_code == 200
