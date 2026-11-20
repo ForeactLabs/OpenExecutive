@@ -1067,6 +1067,9 @@ def _caller_is_principal_or_unclaimed(request: Request) -> bool:
 
 
 _READS = frozenset({"GET", "HEAD", "OPTIONS"})
+# The writes that replace the whole company: on an install with no principal
+# yet, whoever makes one is kept as its owner (``_keep_install_owner``).
+_SETS_UP = ("/reset", "/load", "/activate")
 
 
 def principal_writes(request: Request) -> None:
@@ -1094,9 +1097,12 @@ def _keep_install_owner(request: Request) -> None:
     try:
         email = api_caller.caller(request).email
         principal = people_store.find_principal_person()
-        # The principal, or on a roster with none yet the person setting it
-        # up (only an unclaimed install lets them through).
-        mine = principal is None or (principal.email or "").strip().lower() == email
+        # The principal, or on a roster with none yet the person who replaces
+        # the company (a reset, a load, a switch), not an incidental write.
+        if principal is None:
+            mine = request.url.path.rstrip("/").endswith(_SETS_UP)
+        else:
+            mine = (principal.email or "").strip().lower() == email
         if email and mine and not install_owner.away_from_own_company():
             install_owner.remember(email)
     except Exception:

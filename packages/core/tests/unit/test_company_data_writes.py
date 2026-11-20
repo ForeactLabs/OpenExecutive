@@ -141,3 +141,8 @@ def test_whoever_sets_up_an_unclaimed_install_can_switch_back(
     people_registry.invalidate()
     monkeypatch.setattr(install_owner, "away_from_own_company", lambda: True)
     assert client.post("/fixtures/reset", headers=OWNER).status_code == 200
+
+
+def test_an_incidental_write_on_an_unclaimed_install_keeps_no_owner(client: TestClient, people_db: Path) -> None:
+    client.post("/fixtures/snapshot", headers=TEAMMATE)
+    assert install_owner.get(people_db) is None

@@ -22,7 +22,6 @@ import sqlite3
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +79,7 @@ def remember(email: str, db_path: Path | None = None) -> None:
         )
 
 
-def away_from_own_company(settings: Any = None) -> bool:
+def away_from_own_company() -> bool:
     """Whether the live company is not the owner's own: a simulator company
     or a client slot is loaded. Fails closed: an error reads as away, which
     only ever lets the kept owner in, never anyone else."""
@@ -89,7 +88,7 @@ def away_from_own_company(settings: Any = None) -> bool:
         from openexecutive.clients.slots import get_active_client
         from openexecutive.config import get_settings
 
-        settings = settings or get_settings()
+        settings = get_settings()
         return _fixture_active_sentinel(settings).exists() or get_active_client(settings) is not None
     except Exception:
         logger.warning("install_owner: couldn't tell which company is live", exc_info=True)

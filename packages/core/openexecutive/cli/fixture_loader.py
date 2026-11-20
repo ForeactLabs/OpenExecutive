@@ -1070,10 +1070,14 @@ def _principal_to_keep(keep: Collection[str], settings: Any) -> Any:
     read: a reset must not drop an owner it could not see."""
     if "people" in keep:
         return None
+    from openexecutive.clients.slots import get_active_client
     from openexecutive.people import install_owner
     from openexecutive.people import store as people_store
 
-    if install_owner.away_from_own_company(settings):
+    # Read directly, not through ``install_owner.away_from_own_company``,
+    # which reads an error as away: here that would drop the owner, so an
+    # error aborts the reset instead.
+    if _fixture_active_sentinel(settings).exists() or get_active_client(settings) is not None:
         # Only the kept owner may set the company up again
         # (``chat._caller_is_principal_or_unclaimed``).
         return None
