@@ -359,3 +359,15 @@ def test_a_team_members_card_shows_only_to_them_and_whom_it_is_for(monkeypatch, 
         # A department nobody is in leaves the card to the principal.
         ops = unrouted.model_copy(update={"topic_tags": ["department:ops"]})
         assert sees(1, principal=True, alert=ops) and sees(7, alert=ops) and not sees(2, alert=ops)
+
+
+def test_a_teammates_same_ask_for_two_people_is_two_cards(monkeypatch: pytest.MonkeyPatch, db: Path) -> None:
+    """Each card shows only to its raiser and whom it is for: the same ask
+    for someone else never folds into the first person's card."""
+    with patch("openexecutive.orchestrator.alert_tools._routable_person", return_value=True):
+        first = _raise({**_POSING, "assigned_to_person_id": 1}, _teammate(7))
+        second = _raise({**_POSING, "external_id": "msg-124", "assigned_to_person_id": 2}, _teammate(7))
+    _, first_id = _run_pipeline(monkeypatch, db, first)
+    _, second_id = _run_pipeline(monkeypatch, db, second)
+    assert first_id is not None and second_id is not None and first_id != second_id
+    assert alert_store.get_alert(second_id, db_path=db).routed_to_person_id == 2  # type: ignore[union-attr]
