@@ -12,6 +12,7 @@ from openexecutive.alerts import dispatcher, preferences, store
 from openexecutive.alerts.models import (
     PERSONAL_SOURCES,
     PRIVATE_ALERT_TAG,
+    TEAM_RAISED_SOURCE,
     AlertChannel,
     AlertEvent,
     AlertSeverity,
@@ -459,6 +460,9 @@ def _insert(
         topic_tags=[t for t in topic_tags if not t.startswith("collection:")],
         dedup_key=dedup_key,
         routed_to_person_id=routed_to,
+        # A card a team member raised is theirs and its reader's
+        # (``models.visible_alert``): who raised it is kept beside whom it is for.
+        owner_person_id=event.raised_by_person_id if event.source == TEAM_RAISED_SOURCE else None,
         needs=event.needs,
         question=event.question,
         choices=event.choices,

@@ -490,6 +490,23 @@ def test_an_unconnected_inbox_says_how_to_connect(db: Path, monkeypatch: pytest.
     assert ms.get_watchlist_item_by_slug("email-sign-ups", db_path=db) is None
 
 
+def test_no_mailbox_this_turn_says_how_to_connect_not_that_a_tool_was_missing(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.orchestrator import delegation_tools
+
+    _speaker(monkeypatch, OWNER)
+    monkeypatch.setattr(delegation_tools, "_writer", lambda tool: json.dumps({"error": f"{tool} is not available"}))
+    out = _add(trigger={"from": ["jamie@acme.example"]})
+    # Its own reason (it isn't "not connected"), with words for the reply.
+    assert "status" not in out and out["note"] == wt.NOT_HERE_NOTE
+    assert "shows up on Today" in out["note"] and "try again in another chat" in out["note"]
+    _speaker(monkeypatch, OWNER, status="not_configured")
+    out = _add(trigger={"from": ["jamie@acme.example"]})
+    assert out["status"] == "not_configured" and out["note"] == wt.NO_MAILBOX_NOTE
+    assert ms.list_watchlist(db_path=db, every_watch=True) == []
+
+
 def test_someone_else_cant_see_or_change_an_email_watch(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _email_watch(db)
     _speaker(monkeypatch, OTHER)

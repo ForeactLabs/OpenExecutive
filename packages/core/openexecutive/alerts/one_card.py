@@ -25,8 +25,9 @@ How two cards on one topic become one:
 * Two Approve cards stay two (each is its own yes), except a newer mail send
   to the same people on the same thread, which replaces the one waiting:
   the older decision closes and its card goes.
-* Two other cards: the newer joins the older, and a question it asks
-  becomes the card's question when the older one asked none.
+* Two other cards: the newer joins the older. A newer one that asks
+  something is the matter as it stands now: its title, plan and question
+  lead, the older text above its own ("Then: ...").
 * The card that stays takes the graver severity of the two, and a card that
   joined is never sent on its own (``dispatcher.dispatch_all``).
 
@@ -336,6 +337,19 @@ def _reader(routed_to: Any, tags: list[str]) -> str:
     return f"{who}{':private' if PRIVATE_ALERT_TAG in tags else ''}"
 
 
+def _card_reader(row: Any, tags: list[str]) -> str:
+    """The reader key of card ``row``. A card a team member raised is read
+    by them as well as whom it is for (``models.visible_alert``), so it
+    joins only another of theirs: never a card the rest of the team sees,
+    nor one another teammate raised."""
+    from openexecutive.alerts.models import TEAM_RAISED_SOURCE
+
+    reader = _reader(row.routed_to_person_id, tags)
+    if row.source == TEAM_RAISED_SOURCE:
+        return f"{reader}:raised:{row.owner_person_id}"
+    return reader
+
+
 def reader_for(person_id: int | None, *, private: bool) -> str:
     """The reader key of a card for ``person_id`` (None: the team)."""
     from openexecutive.alerts.models import PRIVATE_ALERT_TAG
@@ -417,12 +431,20 @@ def _join(conn: sqlite3.Connection, card: _Card, into: _Card) -> None:
         "last_seen_at = ?, status = CASE WHEN status = 'read' THEN 'unread' ELSE status END WHERE id = ?",
         (body, severity, _now(), into.id),
     )
-    if not into.approve and card.needs in ("answer", "choice") and str(survivor["needs"] or "") not in ("answer", "choice"):
-        # The card that stays asks what the joining one asked.
-        ask = conn.execute("SELECT needs, question, choices FROM alerts WHERE id = ?", (card.id,)).fetchone()
+    if not into.approve and card.needs in ("answer", "choice"):
+        # The joining card is newer and asks something: the matter as it
+        # stands now. Its title, plan and question lead, and what came
+        # before stays above "Then:" (a contact's new times sat under their
+        # old ones, and the card asked about the old ones).
+        newer = conn.execute(
+            "SELECT headline, suggested_action, needs, question, choices FROM alerts WHERE id = ?", (card.id,),
+        ).fetchone()
         conn.execute(
-            "UPDATE alerts SET needs = ?, question = ?, choices = ? WHERE id = ?",
-            (ask["needs"], ask["question"], ask["choices"], into.id),
+            "UPDATE alerts SET headline = COALESCE(NULLIF(?, ''), headline), "
+            "suggested_action = COALESCE(NULLIF(?, ''), suggested_action), needs = ?, question = ?, choices = ? "
+            "WHERE id = ?",
+            (newer["headline"], newer["suggested_action"], newer["needs"], newer["question"], newer["choices"],
+             into.id),
         )
     _close(conn, card.id, into.id)
 
@@ -529,7 +551,7 @@ def _place(alert_id: int, db_path: Path | None) -> int:
             "INSERT OR REPLACE INTO card_topics (alert_id, reader, person, turn, thread, step, decision_id, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                alert_id, _reader(row.routed_to_person_id, tags), person_key(session),
+                alert_id, _card_reader(row, tags), person_key(session),
                 "" if given.get("own_words") else _turn_id(),
                 _conversation(conn, str(given.get("thread") or "") or _turn_thread(session)),
                 str(given.get("step") or ""),

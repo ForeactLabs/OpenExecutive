@@ -317,3 +317,41 @@ def test_one_team_members_alert_never_folds_into_anothers(monkeypatch, db: Path)
     _, first = _run_pipeline(monkeypatch, db, event("Dana", "x1"))
     _, second = _run_pipeline(monkeypatch, db, event("Sam", "x2"))
     assert first is not None and second is not None and first != second
+
+
+def test_a_team_members_card_shows_only_to_them_and_whom_it_is_for(monkeypatch, db: Path) -> None:
+    """A teammate's card for the owner showed on every Home. It carries one
+    person's ask: the one who raised it and whom it is for read it, nobody
+    else on the team."""
+    from types import SimpleNamespace
+
+    from openexecutive.alerts.models import visible_alert
+    from openexecutive.people.models import Person
+
+    with patch("openexecutive.orchestrator.alert_tools._routable_person", return_value=True):
+        raised = _raise({**_POSING, "assigned_to_person_id": 1}, _teammate(7))
+    assert raised.raised_by_person_id == 7
+    _, alert_id = _run_pipeline(monkeypatch, db, raised)
+    card = alert_store.get_alert(alert_id, db_path=db)  # type: ignore[arg-type]
+    assert card is not None and card.owner_person_id == 7 and card.routed_to_person_id == 1
+
+    def sees(person_id: int, *, principal: bool = False, alert: Any = card) -> bool:
+        return visible_alert(alert, SimpleNamespace(person_id=person_id, is_principal=principal))
+
+    assert sees(7) and sees(1, principal=True)
+    assert not sees(2) and not visible_alert(card, None)
+    # Unrouted: the principal owns it; a department card, its people.
+    unrouted = card.model_copy(update={"routed_to_person_id": None})
+    assert sees(1, principal=True, alert=unrouted) and sees(7, alert=unrouted) and not sees(2, alert=unrouted)
+    # The principal's own brief, built with no viewer for its reader.
+    principal = Person(id=1, full_name="Skyler", kind="team", is_principal=True)
+    with patch("openexecutive.people.registry.get_principal", return_value=principal):
+        assert visible_alert(unrouted, None, chat_reader=1)
+        assert not visible_alert(unrouted, None, chat_reader=2)
+    finance = unrouted.model_copy(update={"topic_tags": ["department:finance"]})
+    people = {
+        2: Person(id=2, full_name="Kendall", kind="team", department_slugs=["finance"]),
+        3: Person(id=3, full_name="Riley", kind="team"),
+    }
+    with patch("openexecutive.people.registry.get_person", side_effect=lambda pid, **_: people.get(pid)):
+        assert sees(2, alert=finance) and sees(7, alert=finance) and not sees(3, alert=finance)

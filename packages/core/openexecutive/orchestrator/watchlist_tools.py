@@ -558,11 +558,15 @@ async def _own_mailbox(
     or the JSON string to return. Whose inbox is never an argument: it is
     the speaker's, through Act as me (``delegation_tools._writer``)."""
     from openexecutive.delegation.gmail import STATUS_MESSAGES, gmail_status
-    from openexecutive.orchestrator.delegation_tools import NOT_CONNECTED_NOTE, _writer
+    from openexecutive.orchestrator.delegation_tools import _writer
 
     writer = _writer(tool)
     if isinstance(writer, str):
-        return writer
+        # Their mailbox can't be opened in this conversation (Act as me off,
+        # a shared channel, an unattended turn): its own reason, with words
+        # for the reply that never blame "a tool" or ask them to try again
+        # in a new chat.
+        return json.dumps({**json.loads(writer), "note": NOT_HERE_NOTE})
     cleaned = mailbox.clean_trigger(trigger)
     if not cleaned:
         return _err(tool, "say who the email is from (trigger.from) or words its subject has (trigger.keywords)")
@@ -570,8 +574,28 @@ async def _own_mailbox(
     # turn, so setting a watch never counts as having read their mail.
     status = await gmail_status(writer.email, gmail=writer.mailbox)
     if status != "connected":
-        return json.dumps({"error": STATUS_MESSAGES[status], "status": status, "note": NOT_CONNECTED_NOTE})
+        return _no_mailbox(STATUS_MESSAGES[status], status)
     return mailbox.owner_config(config, int(writer.person.id)), cleaned
+
+
+NO_MAILBOX_NOTE = (
+    "No watch was set: an email watch reads their own inbox, and it can't be read. Tell them so in a line,"
+    " with how to connect it (the error says how). Say that an email that comes to you, the Executive,"
+    " still shows up on Today for whoever it is for. Don't say a tool was unavailable or ask them to try"
+    " again in another chat."
+)
+
+
+NOT_HERE_NOTE = (
+    "No watch was set: an email watch reads their own inbox, and it can't be opened in this conversation"
+    " (Act as me may be off for them, or the conversation isn't private to them). Tell them so in a line."
+    " Say that an email that comes to you, the Executive, still shows up on Today for whoever it is for."
+    " Don't say a tool was unavailable or ask them to try again in another chat."
+)
+
+
+def _no_mailbox(error: str, status: str) -> str:
+    return json.dumps({"error": error, "status": status, "note": NO_MAILBOX_NOTE})
 
 
 def _scan_soon() -> None:

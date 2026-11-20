@@ -394,9 +394,8 @@ async def handle_create_alert(tool_input: dict[str, Any], *, as_written: bool = 
         logger.info("create_alert: question for the person in the chat; asked in the reply")
         return json.dumps({"status": "ask_in_reply", "message": ASK_IN_REPLY})
     try:
-        source, external_id, from_address, raised_by = _origin_for(
-            _team_member_raising(current_session.get()), tool_input,
-        )
+        raiser = _team_member_raising(current_session.get())
+        source, external_id, from_address, raised_by = _origin_for(raiser, tool_input)
         event = AlertEvent.model_validate({
             "source": source,
             "external_id": external_id,
@@ -404,6 +403,7 @@ async def handle_create_alert(tool_input: dict[str, Any], *, as_written: bool = 
             "body": tool_input["body"],
             "from": from_address,
             "raised_by": raised_by,
+            "raised_by_person_id": raiser.id if raiser is not None and raised_by else None,
             "user": raised_by or None,
             "from_executive": True,
         })

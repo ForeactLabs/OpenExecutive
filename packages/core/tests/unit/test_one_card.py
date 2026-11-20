@@ -435,3 +435,44 @@ def test_a_newer_reply_takes_each_follow_up_once_and_stays_within_the_cap(mail_t
     assert len(body) <= _FOLLOW_UP_MAX
     follow_ups = body.split("\n\nThen: ")[1:]
     assert follow_ups and len(follow_ups) == len(set(follow_ups))
+
+
+def test_a_newer_card_on_the_same_matter_says_where_it_stands_now(mail_turn: Session) -> None:
+    """A contact's new request joined their old card, whose title and
+    choices stayed the old times. The newer card's title, plan and question
+    lead; the old words stay above its own."""
+    with set_turn(session_id="s", turn_id="turn-1"):
+        first = _note(
+            "Sam asks to move Nov 24 to Dec 2 or 3", body="Sam offers Dec 2 or Dec 3.",
+            suggested_action="Confirm Dec 2", needs="choice", question="Dec 2 or Dec 3?", choices=["Dec 2", "Dec 3"],
+        )
+    with set_turn(session_id="s", turn_id="turn-2"):
+        newer = _note(
+            "Sam now offers Dec 1 or Dec 2", body="Sam can't make Nov 24 and offers Dec 1 or Dec 2.",
+            suggested_action="Reply proposing Dec 1", needs="choice", question="Dec 1 or Dec 2?",
+            choices=["Dec 1", "Dec 2"],
+        )
+    assert _get(newer).superseded_by_alert_id == first
+    kept = _get(first)
+    assert kept.headline == "Sam now offers Dec 1 or Dec 2" and kept.suggested_action == "Reply proposing Dec 1"
+    assert kept.question == "Dec 1 or Dec 2?" and kept.choices == ["Dec 1", "Dec 2"]
+    assert kept.body.startswith("Sam offers Dec 2 or Dec 3.") and "Then: " in kept.body
+    # A card that only tells adds its words and leaves the rest.
+    with set_turn(session_id="s", turn_id="turn-3"):
+        _note("Sam is still waiting")
+    assert _get(first).question == "Dec 1 or Dec 2?" and _get(first).headline == "Sam now offers Dec 1 or Dec 2"
+
+
+def test_a_team_members_card_joins_only_another_of_theirs() -> None:
+    """A teammate's card is read by them and whom it is for: joining a card
+    everyone reads would show their ask to the whole team, and joining another teammate's would hide it from them."""
+    from openexecutive.alerts.models import TEAM_RAISED_SOURCE
+
+    with set_turn(session_id="s", turn_id="turn-1"):
+        team = _note("Owner's own card")
+        theirs = _note("Dana asks for the FedEx deadline", source=TEAM_RAISED_SOURCE, owner_person_id=7)
+        sams = _note("Sam asks for the UPS deadline", source=TEAM_RAISED_SOURCE, owner_person_id=8)
+        again = _note("Dana asks again", source=TEAM_RAISED_SOURCE, owner_person_id=7)
+    assert _get(theirs).status == "unread" and _get(theirs).superseded_by_alert_id is None
+    assert _get(sams).status == "unread" and _get(team).status == "unread"
+    assert _get(again).superseded_by_alert_id == theirs

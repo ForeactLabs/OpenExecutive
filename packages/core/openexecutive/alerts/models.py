@@ -76,6 +76,8 @@ def visible_alert(
     if source in PERSONAL_SOURCES:
         routed = getattr(alert, "routed_to_person_id", None)
         return viewer is not None and routed is not None and getattr(viewer, "person_id", None) == routed
+    if source == TEAM_RAISED_SOURCE:
+        return _team_card_reader(alert, reader, viewer)
     if source != ARTIFACT_SOURCE:
         return True
     if viewer is None:
@@ -85,6 +87,32 @@ def visible_alert(
         getattr(viewer, "person_id", None),
         is_principal=bool(getattr(viewer, "is_principal", False)),
     )
+
+
+def _team_card_reader(alert: object, reader: int | None, viewer: object | None) -> bool:
+    """Whether ``reader`` reads a card a team member raised from their own
+    chat (``TEAM_RAISED_SOURCE``): the one who raised it, and whom it is
+    for: the person it is routed to, else the people of its department, else
+    the principal, who owns an unrouted card. Nobody else on the team: it
+    carries one person's ask. ``viewer`` None is a build for ``reader``
+    alone (the principal's own brief) or, with no reader, for everyone."""
+    if reader is None:
+        return False
+    routed = getattr(alert, "routed_to_person_id", None)
+    if reader in (getattr(alert, "owner_person_id", None), routed):
+        return True
+    if routed is not None:
+        return False
+    from openexecutive.people import registry as people_registry
+
+    slugs = {t.split(":", 1)[1] for t in getattr(alert, "topic_tags", None) or [] if t.startswith("department:")}
+    if slugs:
+        person = people_registry.get_person(reader)
+        return person is not None and bool(slugs & set(person.department_slugs or []))
+    if viewer is not None:
+        return bool(getattr(viewer, "is_principal", False))
+    principal = people_registry.get_principal()
+    return principal is not None and principal.id == reader
 
 
 class AlertSeverity(StrEnum):
@@ -168,6 +196,10 @@ class AlertEvent(BaseModel):
     # turn asked, and never goes out as a company-wide broadcast — a person
     # or department only (alerts/pipeline.py).
     raised_by: str = ""
+    # Who that team member is (their People id), with ``raised_by``: their
+    # card is theirs and its reader's, not the whole team's
+    # (``visible_alert``).
+    raised_by_person_id: int | None = None
     # Set only by the create_alert tool: the Executive itself chose to raise
     # this card. When review makes no decision on it (the call failed, or its
     # answer was cut off), the card is kept as raised instead of dropped
