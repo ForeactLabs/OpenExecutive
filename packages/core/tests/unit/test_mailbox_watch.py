@@ -500,6 +500,7 @@ def test_no_mailbox_this_turn_says_how_to_connect_not_that_a_tool_was_missing(
     out = _add(trigger={"from": ["jamie@acme.example"]})
     # Its own reason (it isn't "not connected"), with words for the reply.
     assert "status" not in out and out["note"] == wt.NOT_HERE_NOTE
+    assert "not available" not in out["error"] and "retry" not in out["error"]
     assert "shows up on Today" in out["note"] and "try again in another chat" in out["note"]
     _speaker(monkeypatch, OWNER, status="not_configured")
     out = _add(trigger={"from": ["jamie@acme.example"]})

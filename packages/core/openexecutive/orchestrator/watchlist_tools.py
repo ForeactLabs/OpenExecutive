@@ -563,10 +563,11 @@ async def _own_mailbox(
     writer = _writer(tool)
     if isinstance(writer, str):
         # Their mailbox can't be opened in this conversation (Act as me off,
-        # a shared channel, an unattended turn): its own reason, with words
-        # for the reply that never blame "a tool" or ask them to try again
-        # in a new chat.
-        return json.dumps({**json.loads(writer), "note": NOT_HERE_NOTE})
+        # a shared channel, an unattended turn, no one to say whose it is):
+        # a plain reason of its own, not the writer's "not available, do not
+        # retry", with words for the reply that never blame "a tool" or ask
+        # them to try again in a new chat.
+        return json.dumps({"error": "No watch was set: their inbox can't be opened here.", "note": NOT_HERE_NOTE})
     cleaned = mailbox.clean_trigger(trigger)
     if not cleaned:
         return _err(tool, "say who the email is from (trigger.from) or words its subject has (trigger.keywords)")
