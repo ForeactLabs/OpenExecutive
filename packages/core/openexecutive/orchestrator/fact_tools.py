@@ -88,7 +88,7 @@ REMEMBER_FACT_TOOL: dict[str, Any] = {
         "'always ask me before paying Dana') is not a fact: add it to Your rules "
         "with do_in_app add_waits_rule (open_tools group app; id \"new\") so it holds "
         "every step, and say so. With no do_in_app to call (the review after a chat), "
-        "raise it in the brief so they can add it. A decision "
+        "raise it in the brief if raise_in_brief is offered. A decision "
         "the speaker states they made ('we're going with the Q1 hire', 'we "
         "won't renew Acme') is kept the same way with decision: true, so the "
         "weekly review can ask later how it turned out. A decision made in the "
