@@ -402,7 +402,9 @@ def test_our_own_tools_name_people_departments_and_goals_never_a_number(monkeypa
     assert card_details.plain("message_person", {"person_id": 99, "slack_user_id": "U1", "text": "Hi"}) == [
         {"field": "Message", "value": "Hi"},
     ]
-    assert not any("id" in d["field"].lower() for d in card_details.plain("x", {"goal_id": 0, "alert_id": 5}))
+    assert card_details.plain("x", {"alert_id": 5, "status": "done"}) == [{"field": "Status", "value": "done"}]
+    # A call that names only a number still says what it acts on.
+    assert card_details.plain("cancel_followup", {"action_id": 5}) == [{"field": "Action id", "value": "5"}]
 
 
 def test_a_connected_apps_ids_are_still_shown() -> None:

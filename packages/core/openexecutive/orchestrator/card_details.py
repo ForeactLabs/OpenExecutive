@@ -415,6 +415,9 @@ def plain(tool: str, tool_input: Any) -> list[dict[str, Any]]:
                 if named:
                     out.append({"field": named[0], "value": named[1]})
                     seen.add(named[0])
+                elif value not in (None, "", 0, [], {}):
+                    # Shown only when the call names nothing else.
+                    refs.append({"field": label(key), "value": _text(value)})
                 continue
         if norm in _REFS and value not in (None, "", [], {}):
             refs.append({"field": label(key), "value": _text(value)})
@@ -471,8 +474,8 @@ def plain(tool: str, tool_input: Any) -> list[dict[str, Any]]:
 def _own_ref(tool: str, norm: str, value: Any) -> tuple[str, str] | tuple[()] | None:
     """For one of our own tools' reference fields, the (label, name) the
     card shows: a person, a department or a goal by name. ``()`` when the
-    field is a number only the system reads (a task's, a chat app's), so it
-    isn't shown. None for any other field."""
+    field is a number only the system reads (a task's, a chat app's): it
+    shows only on a card that names nothing else. None for any other field."""
     if norm.endswith("person_ids"):
         names = _names(value) if value not in (None, "", [], {}) else None
         return ("With", names) if names else ()
