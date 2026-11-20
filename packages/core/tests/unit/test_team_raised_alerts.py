@@ -353,5 +353,9 @@ def test_a_team_members_card_shows_only_to_them_and_whom_it_is_for(monkeypatch, 
         2: Person(id=2, full_name="Kendall", kind="team", department_slugs=["finance"]),
         3: Person(id=3, full_name="Riley", kind="team"),
     }
-    with patch("openexecutive.people.registry.get_person", side_effect=lambda pid, **_: people.get(pid)):
+    with patch("openexecutive.people.registry.list_people", return_value=list(people.values())):
         assert sees(2, alert=finance) and sees(7, alert=finance) and not sees(3, alert=finance)
+        assert not sees(1, principal=True, alert=finance)
+        # A department nobody is in leaves the card to the principal.
+        ops = unrouted.model_copy(update={"topic_tags": ["department:ops"]})
+        assert sees(1, principal=True, alert=ops) and sees(7, alert=ops) and not sees(2, alert=ops)

@@ -445,10 +445,17 @@ def _join(conn: sqlite3.Connection, card: _Card, into: _Card) -> None:
         (body, severity, _now(), into.id),
     )
     # Two cards from one turn are often two asks, not a newer version of
-    # one: there the card that stays keeps its own question.
+    # one: there the card that stays keeps its own title and plan, and takes
+    # the question only when it asks none itself.
     same_turn = bool(card.turn) and card.turn == into.turn
-    asks = str(survivor["needs"] or "") in ("answer", "choice")
-    if not into.approve and card.needs in ("answer", "choice") and not (same_turn and asks):
+    if not into.approve and card.needs in ("answer", "choice") and same_turn:
+        if str(survivor["needs"] or "") not in ("answer", "choice"):
+            ask = conn.execute("SELECT needs, question, choices FROM alerts WHERE id = ?", (card.id,)).fetchone()
+            conn.execute(
+                "UPDATE alerts SET needs = ?, question = ?, choices = ? WHERE id = ?",
+                (ask["needs"], ask["question"], ask["choices"], into.id),
+            )
+    elif not into.approve and card.needs in ("answer", "choice"):
         # The joining card is newer and asks something: the matter as it
         # stands now. Its title, plan and question lead, and what came
         # before stays above "Then:" (a contact's new times sat under their

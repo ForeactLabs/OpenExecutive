@@ -92,8 +92,8 @@ def visible_alert(
 def _team_card_reader(alert: object, reader: int | None, viewer: object | None) -> bool:
     """Whether ``reader`` reads a card a team member raised from their own
     chat (``TEAM_RAISED_SOURCE``): the one who raised it, and whom it is
-    for: the person it is routed to, else the people of its department, else
-    the principal, who owns an unrouted card. Nobody else on the team: it
+    for: the person it is routed to, else the people of its department (when
+    anyone is in it), else the principal, who owns an unrouted card. Nobody else on the team: it
     carries one person's ask. ``viewer`` None is a build for ``reader``
     alone (the principal's own brief) or, with no reader, for everyone."""
     if reader is None:
@@ -106,9 +106,12 @@ def _team_card_reader(alert: object, reader: int | None, viewer: object | None) 
     from openexecutive.people import registry as people_registry
 
     slugs = {t.split(":", 1)[1] for t in getattr(alert, "topic_tags", None) or [] if t.startswith("department:")}
-    if slugs:
-        person = people_registry.get_person(reader)
-        return person is not None and bool(slugs & set(person.department_slugs or []))
+    # Its department's people, when it has any: a department nobody is in
+    # (new, or a slug the model got wrong) leaves the card to the principal,
+    # so the ask still reaches someone.
+    members = {p.id for p in people_registry.list_people() if slugs & set(p.department_slugs or [])} if slugs else set()
+    if members:
+        return reader in members
     if viewer is not None:
         return bool(getattr(viewer, "is_principal", False))
     principal = people_registry.get_principal()

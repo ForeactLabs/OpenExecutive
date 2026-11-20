@@ -542,3 +542,14 @@ def test_create_alert_asks_with_the_key_a_teammates_card_is_written_with() -> No
     assert _reader_of(event) == stored
     sams = AlertEvent(source=TEAM_RAISED_SOURCE, external_id="x", raised_by_person_id=8, channel="department:finance")
     assert _reader_of(sams) != stored
+
+
+def test_a_question_from_the_same_turn_keeps_the_reports_title() -> None:
+    """A report and a question in one turn: the card keeps the report's
+    title and plan, and asks the question."""
+    with set_turn(session_id="s", turn_id="turn-1"):
+        report = _note("Q3 revenue down 12%", suggested_action="Review the forecast")
+        _note("Approve the hiring freeze?", needs="choice", question="Freeze?", choices=["Yes", "No"])
+    kept = _get(report)
+    assert kept.headline == "Q3 revenue down 12%" and kept.suggested_action == "Review the forecast"
+    assert kept.question == "Freeze?" and kept.choices == ["Yes", "No"]
