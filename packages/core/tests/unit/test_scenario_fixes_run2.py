@@ -129,6 +129,8 @@ def test_cards_say_who_an_email_goes_to_and_why_it_waited(owner: Any) -> None:
     hit = ttl._rule_hit(ttl.list_rules([ttl.SCOPE_COMPANY]), "We'll pay $1,284.50 by Dec 4, not $90.", [DANA])
     assert hit is not None and hit.reason.startswith("it says $1,284.50, and")
     # Quoted as written: another currency is never turned into dollars.
+    hit = ttl._rule_hit(ttl.list_rules([ttl.SCOPE_COMPANY]), "Yes, bill $300, thanks.", [DANA])
+    assert hit is not None and hit.reason.startswith("it says $300, and")
     hit = ttl._rule_hit(ttl.list_rules([ttl.SCOPE_COMPANY]), "Pay €900.", [DANA])
     assert hit is not None and hit.reason.startswith("it says €900, and")
     hit = ttl._rule_hit(ttl.list_rules([ttl.SCOPE_COMPANY]), "Invoice for 2k EUR", [DANA])

@@ -610,7 +610,8 @@ def written_amounts(text: str) -> list[tuple[float, str]]:
     for m in _AMOUNT_VALUE_RE.finditer(text or ""):
         number = _number(f"{m.group(1) or m.group(3) or m.group(5)} {m.group(2) or m.group(4) or m.group(6) or ''}")
         if number is not None:
-            found.append((number, " ".join(m.group(0).split())))
+            # A comma after the amount is the sentence's, not the amount's.
+            found.append((number, " ".join(m.group(0).split()).rstrip(",")))
     return found
 
 
