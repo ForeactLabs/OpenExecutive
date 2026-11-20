@@ -878,7 +878,12 @@ async def reset_all_state(
         # a later step fails) serves the rows just deleted.
         forget_company_caches()
         if owner is not None:
-            _restore_principal(owner)
+            try:
+                _restore_principal(owner)
+            except Exception:
+                # The rest of the reset still runs; the roster is left with
+                # no principal (see ``_restore_principal``).
+                logger.exception("reset: couldn't write the principal back")
             forget_company_caches()
 
         # 3c. Knowledge review state (same DB as the episodic rows above). A
