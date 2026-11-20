@@ -85,7 +85,7 @@ REMEMBER_FACT_TOOL: dict[str, Any] = {
         "(industry, headcount, ARR, burn, runway, priorities, ...) use "
         "update_company_profile instead (open_tools group memory). A standing rule "
         "for what must wait ('check with me before you email anyone at acme.com', "
-        "'always ask me before paying Dana') is not a fact: add it to Your rules "
+        "'always ask me before anything over $5,000') is not a fact: add it to Your rules "
         "with do_in_app add_waits_rule (open_tools group app; id \"new\") so it holds "
         "every step, and say so. With no do_in_app to call (the review after a chat), "
         "raise it in the brief if raise_in_brief is offered. A decision "
