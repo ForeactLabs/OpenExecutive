@@ -108,7 +108,7 @@ async def dispatch_email(alert: Alert) -> bool:
     their quiet hours like the chat DM (``_awake_for``), the way a brief
     reaches them (``scheduler.runner.deliver_to_person``, email only),
     with the headline as the subject and a link to the card on Home."""
-    from openexecutive.alerts.card_refs import card_url
+    from openexecutive.alerts.card_refs import card_url, keep_app_links
     from openexecutive.scheduler.runner import deliver_to_person
 
     try:
@@ -118,7 +118,9 @@ async def dispatch_email(alert: Alert) -> bool:
         if not _awake_for(person, alert):
             logger.info("dispatch_email: alert=%s waits on Home (quiet hours)", alert.id)
             return False
-        text = _format_broadcast_body(alert)
+        # The headline and body quote outside mail and pages: like a brief,
+        # only links into the app stay clickable.
+        text = keep_app_links(_format_broadcast_body(alert))
         link = card_url(alert.id) if alert.id is not None else ""
         if link:
             text += f"\n\n[Open it on Home]({link})"

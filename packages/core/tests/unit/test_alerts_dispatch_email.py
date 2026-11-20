@@ -43,6 +43,7 @@ def sent(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     monkeypatch.setattr(people_store, "find_principal_person", lambda: OWNER)
     monkeypatch.setattr(people_store, "get_person", lambda pid: {1: OWNER, 2: BEN, 3: NO_MAIL}.get(pid))
     monkeypatch.setattr(card_refs, "card_url", lambda alert_id: f"https://app.example/?card={alert_id}")
+    monkeypatch.setattr(card_refs, "_base", lambda: "https://app.example")
     monkeypatch.setattr(people_channel, "is_within_availability", lambda person, **kw: True)
     return calls
 
@@ -112,3 +113,11 @@ def test_quiet_hours_hold_it_like_the_chat_dm(
     assert asyncio.run(dispatcher.dispatch_email(_alert("high", routed=2))) is False
     assert asked == [True, False]
     assert [c["person"] for c in sent] == ([BEN] if lets_urgent_through else [])
+
+
+def test_a_link_from_outside_is_not_clickable(sent: list[dict[str, Any]]) -> None:
+    alert = _alert().model_copy(update={"body": "See [the updated invoice](https://evil.example/login)."})
+    asyncio.run(dispatcher.dispatch_email(alert))
+    text = sent[0]["text"]
+    assert "evil.example" not in text and "the updated invoice" in text
+    assert text.endswith("[Open it on Home](https://app.example/?card=7)")
