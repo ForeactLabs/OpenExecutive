@@ -18,11 +18,16 @@ Everything else, in order:
   same person or thing, ``allow``), and from then on it runs on its own,
   except on Careful;
 - Hands-off runs everything else;
-- a Goes rule (``rule_goes``) lets it go where Balanced would hold it,
-  except a delete or share;
-- Balanced holds the six ``KINDS`` (money, contracts, people decisions,
-  deleting or sharing, someone new, big sends; ``check``) and runs the
-  rest.
+- a Goes rule (``rule_goes``) lets it go where Balanced would hold it:
+  a person or company rule everything but a delete or a share, an amount rule the
+  money, a topic rule its topic (``lets_go``);
+- Balanced holds the seven ``KINDS`` (money, contracts, people decisions,
+  deleting or cancelling, sharing, someone new, big sends; ``check``) and
+  runs the rest.
+
+Who counts as someone new is one answer everywhere (``new_people``, the
+egress allow-list ``mcp_gateway._roster_allow_set``), and so is whether a
+rule lets a topic go (``lets_go``).
 
 A held call waits as a ``take_the_lead_action`` decision with an Approve
 card on Today, and in the owner's chat app
@@ -87,10 +92,11 @@ TABLES: tuple[str, ...] = (LEAD_TABLE, RULES_TABLE, LOG_TABLE, ALLOWED_TABLE, JO
 MONEY = "money"
 CONTRACTS = "contracts"
 PEOPLE_DECISIONS = "people_decisions"
-DELETE_SHARE = "delete_share"
+DELETE = "delete"
+SHARE = "share"
 SOMEONE_NEW = "someone_new"
 BIG_SEND = "big_send"
-KINDS: tuple[str, ...] = (MONEY, CONTRACTS, PEOPLE_DECISIONS, DELETE_SHARE, SOMEONE_NEW, BIG_SEND)
+KINDS: tuple[str, ...] = (MONEY, CONTRACTS, PEOPLE_DECISIONS, DELETE, SHARE, SOMEONE_NEW, BIG_SEND)
 # More people than this on one action is a big send.
 BIG_SEND_RECIPIENTS = 5
 # The kind of a hold in training: nothing else held it, it just isn't allowed yet.
@@ -114,7 +120,8 @@ KIND_LABELS: dict[str, str] = {
     MONEY: "Money",
     CONTRACTS: "Contracts and legal",
     PEOPLE_DECISIONS: "Hiring and people decisions",
-    DELETE_SHARE: "Deleting, cancelling or sharing",
+    DELETE: "Deleting or cancelling",
+    SHARE: "Sharing",
     SOMEONE_NEW: "Someone new",
     BIG_SEND: "Big sends",
 }
@@ -132,7 +139,8 @@ KIND_HINTS: dict[str, str] = {
         "Hiring, firing, pay, promotions and performance reviews."
         " Words inside a team file it writes don't count."
     ),
-    DELETE_SHARE: "Deleting or cancelling something, or sharing a file or access.",
+    DELETE: "Deleting or cancelling something: a file, an email, a meeting.",
+    SHARE: "Sharing a file, a calendar or access with someone.",
     SOMEONE_NEW: "Messages to anyone who isn't on your team or in your contacts.",
     BIG_SEND: f"Company-wide or department-wide messages, or anything going to more than {BIG_SEND_RECIPIENTS} people.",
 }
@@ -141,10 +149,13 @@ RULE_PERSON = "person"
 RULE_DOMAIN = "domain"
 RULE_WORDS = "words"
 RULE_AMOUNT = "amount"
-RULE_KINDS: tuple[str, ...] = (RULE_PERSON, RULE_DOMAIN, RULE_WORDS, RULE_AMOUNT)
+# A topic: one of ``KINDS`` ("anything about sharing"). Waits holds that
+# topic on every level; Goes lets it go where Balanced would ask.
+RULE_TOPIC = "topic"
+RULE_KINDS: tuple[str, ...] = (RULE_PERSON, RULE_DOMAIN, RULE_WORDS, RULE_AMOUNT, RULE_TOPIC)
 # What a Goes rule can be about. Words only wait: what an email says can be
 # echoed into what it sends, so words never let anything go.
-GOES_RULE_KINDS: tuple[str, ...] = (RULE_PERSON, RULE_DOMAIN, RULE_AMOUNT)
+GOES_RULE_KINDS: tuple[str, ...] = (RULE_PERSON, RULE_DOMAIN, RULE_AMOUNT, RULE_TOPIC)
 RULE_VALUE_MAX = 200
 # What a rule does: "wait" always holds the action for the owner, on every
 # level; "go" lets it go on its own where the level would hold it. A Waits
@@ -188,10 +199,27 @@ _MCP_READ_VERBS = frozenset({"get", "list", "search", "read", "fetch", "query", 
 _MCP_FIRST_WORD_RE = re.compile(r"[a-z]+|[A-Z][a-z]*")
 # "…_batch" at the end of a read tool's name: it fetches several at once.
 _MCP_BATCH_READ_RE = re.compile(r"[_-]?batch$", re.IGNORECASE)
-_MCP_DELETE_RE = re.compile(r"(delete|remove|trash|cancel|share|permission|clear|archive)", re.IGNORECASE)
+_MCP_REMOVE_RE = re.compile(r"(delete|remove|trash|cancel|clear|archive)", re.IGNORECASE)
+_MCP_SHARE_RE = re.compile(r"(share|permission)", re.IGNORECASE)
 
+# "Sign" is signing something, not an account: signing up (sign-ups,
+# signup), a sign-in, sign-on or sign-out page, signing in to, into or on to
+# an app, or signing out. A bare "sign in" or "sign on" ("sign in the box",
+# "sign on the dotted line") is still signing.
 _CONTRACTS_RE = re.compile(
-    r"\b(contracts?|agreements?|sign|signed|signature|nda|terms|legal|lawyers?|liabilit\w*|lawsuit)\b",
+    r"\b(contracts?|agreements?|"
+    r"sign(?:ed)?(?![-\s]?ups?\b|-?(?:ins?|outs?|ons?)\b|\s+(?:in|on)\s+to\b|\s+into\b|\s+out\b)|"
+    r"signature|nda|terms|legal|lawyers?|"
+    r"liabilit\w*|lawsuit)\b",
+    re.IGNORECASE,
+)
+# Handing over a way in is sharing, whatever carries it: a password, a key,
+# a login.
+_CREDENTIALS_RE = re.compile(
+    r"\b(passwords?|passcodes?|passphrases?|pins?\s+(?:code|number)|api[\s_-]?keys?|access\s+tokens?|"
+    r"auth(?:entication)?\s+tokens?|secret\s+keys?|private\s+keys?|credentials|"
+    r"log-?in\s+(?:details|info|credentials)|sign-?in\s+(?:details|info|credentials)|"
+    r"social\s+security\s+numbers?|ssn)\b",
     re.IGNORECASE,
 )
 _PEOPLE_RE = re.compile(
@@ -462,7 +490,7 @@ class RuleError(ValueError):
 def clean_rule(kind: str, value: str) -> str:
     """``value`` normalised for ``kind``, or RuleError."""
     if kind not in RULE_KINDS:
-        raise RuleError("Pick a person, a domain, words or an amount.")
+        raise RuleError("Pick a person, a domain, words, an amount or a topic.")
     text = " ".join(str(value or "").split())
     if not text:
         raise RuleError("The rule is empty.")
@@ -480,6 +508,10 @@ def clean_rule(kind: str, value: str) -> str:
         text = format(number, "f").rstrip("0").rstrip(".")
     elif kind == RULE_PERSON:
         text = text.lower() if "@" in text else text
+    elif kind == RULE_TOPIC:
+        text = text.lower()
+        if text not in KINDS:
+            raise RuleError("Pick one of the topics.")
     return text
 
 
@@ -587,14 +619,41 @@ def _strings(value: Any) -> Iterator[str]:
             yield from _strings(v)
 
 
-def _known(address: str) -> bool:
-    """On the roster or a contact. Fails closed: unreadable is new."""
-    from openexecutive.people.store import find_person_by_address
+def _executive(address: str) -> bool:
+    """Whether ``address`` is the Executive itself: the account its Google
+    (or Microsoft) tools act as (a Google step names that account in
+    ``user_google_email``). A step never reaches it. Never raises."""
+    from openexecutive.config import get_settings
 
     try:
-        return find_person_by_address(address, include_contacts=True) is not None
+        return address.strip().lower() == get_settings().exec_email_address.strip().lower()
     except Exception:
         return False
+
+
+def new_people(addresses: Iterable[str]) -> list[str]:
+    """Who of ``addresses`` is someone new: not on the egress allow-list
+    (``mcp_gateway._roster_allow_set``: People, the contacts this turn may
+    reach, the Executive itself). The one answer to "is this person new",
+    for every check. With no turn in progress it is work the Executive does
+    for the team on its own (a meeting's follow-ups), where contacts exist,
+    as on an unattended run (``people_tools.contacts_reachable_now``). A
+    Goes rule doesn't count here (``lets_go``). Fails closed: an unreadable
+    list makes everyone new."""
+    wanted = [a for a in addresses if a]
+    if not wanted:
+        return []
+    try:
+        from openexecutive.orchestrator.mcp_gateway import _roster_allow_set
+        from openexecutive.orchestrator.people_tools import grant_contact_egress
+        from openexecutive.orchestrator.schedule_tools import current_session
+
+        with grant_contact_egress() if current_session.get() is None else contextlib.nullcontext():
+            allow = _roster_allow_set()
+    except Exception:
+        logger.warning("take_the_lead: couldn't read who is known — everyone is new", exc_info=True)
+        return wanted
+    return [a for a in wanted if a not in allow and not _executive(a)]
 
 
 def _names_of(addresses: list[str]) -> list[str]:
@@ -621,10 +680,13 @@ def _team_only(tool: str, tool_input: dict[str, Any]) -> bool:
 
 
 def _all_team(addresses: list[str]) -> bool:
-    """Whether every address is a teammate's. Fails closed."""
+    """Whether every address is a teammate's or the Executive's own. Fails
+    closed."""
     from openexecutive.people.store import find_person_by_address
 
     for address in {a.lower() for a in addresses}:
+        if _executive(address):
+            continue
         try:
             person = find_person_by_address(address, include_contacts=True)
         except Exception:
@@ -915,11 +977,15 @@ def words_match(value: str, lowered: str) -> bool:
     )
 
 
-def _rule_hit(rules: list[Rule], text: str, recipients: list[str], *, money: str | None = None) -> Hit | None:
+def _rule_hit(
+    rules: list[Rule], text: str, recipients: list[str], *, money: str | None = None,
+    topics: Iterable[str] = (),
+) -> Hit | None:
     """The first Waits rule that ``text`` / ``recipients`` match. An amount
     rule reads ``money`` (what the step says or pays, ``says``), ``text``
-    when not given."""
+    when not given; a topic rule, ``topics`` (``topics_of``)."""
     lowered = text.lower()
+    found_topics = set(topics)
     spends = amounts(text if money is None else money)
     for rule in rules:
         if rule.effect != EFFECT_WAIT:
@@ -940,13 +1006,16 @@ def _rule_hit(rules: list[Rule], text: str, recipients: list[str], *, money: str
             limit = _number(value) or 0
             if any(a >= limit for a in spends):
                 return Hit("rule", f"your rule about amounts of {_money(value)} or more says to wait", rule.id)
+        elif rule.kind == RULE_TOPIC:
+            if value in found_topics:
+                return Hit("rule", f"your rule about {KIND_LABELS.get(value, value).lower()} says to wait", rule.id)
     return None
 
 
-def rule_waits(rules: list[Rule], text: str, recipients: list[str]) -> Hit | None:
+def rule_waits(rules: list[Rule], text: str, recipients: list[str], *, topics: Iterable[str] = ()) -> Hit | None:
     """Public name for the Waits-rule check, for what goes out as a person
     (``delegation.handle_it``)."""
-    return _rule_hit(rules, text, recipients)
+    return _rule_hit(rules, text, recipients, topics=topics)
 
 
 def rule_goes(
@@ -964,8 +1033,9 @@ def goes_rules(
     lets something go: a person or domain must be every recipient (and
     there must be one), and an amount rule needs an amount in
     ``words_text`` (what it would send; ``text`` when not given) and every
-    amount in ``text`` under its limit. Words rules only wait. What each
-    one lets go is ``goes_kinds``."""
+    amount in ``text`` under its limit. A topic rule always counts: it lets
+    its topic go whatever the step is. Words rules only wait. What each one
+    lets go is ``goes_kinds``."""
     own = text if words_text is None else words_text
     found = amounts(text)
     mine = amounts(own)
@@ -985,35 +1055,157 @@ def goes_rules(
             limit = _number(value) or 0
             if mine and all(a < limit for a in [*found, *mine]) and _all_parsed(text, found) and _all_parsed(own, mine):
                 out.append(rule)
+        elif rule.kind == RULE_TOPIC:
+            out.append(rule)
     return out
 
 
-def goes_reach() -> tuple[frozenset[str], frozenset[str]]:
+def goes_reach() -> tuple[frozenset[str], frozenset[str], bool]:
     """Who the company's Goes rules let mail reach on Balanced, as
-    ``(addresses, domains)``: a person rule by address, and a company rule.
-    A person rule by name names someone in People already. The egress
-    checks count them as known (``mcp_gateway._roster_allow_set``), so
-    someone a rule lets go is not someone new. Never raises: an error is
-    nobody."""
+    ``(addresses, domains, anyone)``: a person rule by address, a company
+    rule, and whether a Someone new topic rule lets anyone go
+    (``lets_go``). A person rule by name names someone in People already.
+    The egress checks count them as known
+    (``mcp_gateway._roster_allow_set``), so someone a rule lets go is not
+    someone new. Never raises: an error is nobody."""
     try:
-        rules = [r for r in list_rules([SCOPE_COMPANY]) if r.effect == EFFECT_GO]
+        rules = list_rules([SCOPE_COMPANY])
     except Exception:
         logger.warning("take_the_lead: couldn't read the Goes rules", exc_info=True)
-        return frozenset(), frozenset()
+        return frozenset(), frozenset(), False
     from openexecutive.people.identity import FREEMAIL_DOMAINS
 
-    addresses = frozenset(r.value.lower() for r in rules if r.kind == RULE_PERSON and "@" in r.value)
+    goes = [r for r in rules if r.effect == EFFECT_GO]
+    addresses = frozenset(r.value.lower() for r in goes if r.kind == RULE_PERSON and "@" in r.value)
     # A free-mail domain proves nothing: anyone can have an address on it.
-    domains = frozenset(r.value.lower() for r in rules if r.kind == RULE_DOMAIN) - FREEMAIL_DOMAINS
-    return addresses, domains
+    domains = frozenset(r.value.lower() for r in goes if r.kind == RULE_DOMAIN) - FREEMAIL_DOMAINS
+    return addresses, domains, _topic_goes(rules, SOMEONE_NEW)
+
+
+def _topic_goes(rules: list[Rule], kind: str) -> bool:
+    """Whether ``rules`` let ``kind`` go: a Goes topic rule for it and no
+    Waits topic rule for it (wait wins)."""
+    on = {(r.effect, r.value) for r in rules if r.kind == RULE_TOPIC}
+    return (EFFECT_GO, kind) in on and (EFFECT_WAIT, kind) not in on
+
+
+def lets_go(kind: str) -> bool:
+    """Whether a rule lets ``kind`` go on its own where Balanced would ask,
+    on the step in progress: a Goes topic rule for it, no Waits topic rule
+    for it, and Goes rules count on this turn (``mcp_gateway._goes_rules_apply``:
+    Balanced, someone on People asking in their own words). The one answer
+    every check asks, so a rule works the same in every path. Never raises:
+    an error is no."""
+    try:
+        from openexecutive.orchestrator.mcp_gateway import _goes_rules_apply
+
+        return _topic_goes(list_rules([SCOPE_COMPANY]), kind) and _goes_rules_apply()
+    except Exception:
+        logger.warning("take_the_lead: couldn't read the topic rules", exc_info=True)
+        return False
+
+
+def _just_above(amount: float) -> str:
+    """A round limit just above ``amount`` (450 is 500, 1,200 is 1,500,
+    8,000 is 10,000), for an amount rule a card offers."""
+    scale = 1.0
+    while scale * 10 <= amount:
+        scale *= 10
+    for step in (1, 1.5, 2, 2.5, 3, 5, 7.5, 10):
+        if step * scale > amount:
+            return format(step * scale, "f").rstrip("0").rstrip(".")
+    return format(scale * 10, "f").rstrip("0").rstrip(".")
+
+
+def rule_offers(
+    tool: str, tool_input: dict[str, Any], kind: str, *, mcp: bool, reaches: Iterable[str] = (),
+    asked: bool = False,
+) -> list[dict[str, str]]:
+    """The Goes rules a held card may offer ("Next time, let this go on its
+    own"), as ``{"kind", "value"}``: its topic; for a step that reaches one
+    person or one company, that person or company (never for a delete); for
+    money, an amount just above this one. Each is offered only if, added,
+    it would let this exact step go: the gate's own Balanced check
+    (``_balanced``) is run again with it, or for someone new on a step
+    someone asked for (``asked``: the connected-app check held it), every
+    new person must be covered. A rule already there is not offered. Never
+    raises: an error offers none."""
+    if kind not in KINDS:
+        return []
+    try:
+        from openexecutive.orchestrator.mcp_gateway import _goes_rules_apply, goes_rules_clear
+        from openexecutive.people.identity import FREEMAIL_DOMAINS
+
+        if asked and not _goes_rules_apply():
+            # Goes rules don't count on this turn (Careful, or words from
+            # outside): no rule would let it go.
+            return []
+        if asked and mcp and not goes_rules_clear(tool, tool_input):
+            # The connected-app check that held it reads only People (a
+            # share): no rule would let it go.
+            return []
+
+        rules = list_rules([SCOPE_COMPANY])
+        targets, _ = _rule_targets(tool, tool_input)
+        addresses = _reached(tool, tool_input, [*targets, *reaches], mcp=mcp)
+        recipients = [a for a in addresses if "@" in a]
+        new = sorted({a.lower() for a in new_people(addresses)})
+        spends = says(tool, tool_input, mcp=mcp)
+        if new and not _goes_rules_apply():
+            # A step to someone new also meets the egress list (a connected
+            # app's) or the off-roster check (a direct message), which count
+            # Goes rules only where they apply on this turn (``lets_go``):
+            # no rule would let it go here.
+            return []
+        # A recipient it can't read: no person or company rule covers them,
+        # and a connected app's check holds it whatever the rules say (a
+        # direct message's off-roster check still takes a Someone new rule).
+        unreadable = any(not _EMAIL_RE.fullmatch(a) for a in addresses)
+        if asked and mcp and unreadable:
+            return []
+        candidates = [(RULE_TOPIC, kind)]
+        reached = new or recipients
+        if kind not in (DELETE, SHARE) and reached and not unreadable:
+            if len(reached) == 1:
+                candidates.append((RULE_PERSON, reached[0]))
+            domains = {a.rsplit("@", 1)[1] for a in reached if "@" in a}
+            if len(domains) == 1 and all("@" in a for a in reached):
+                domain = next(iter(domains))
+                if domain not in FREEMAIL_DOMAINS:
+                    candidates.append((RULE_DOMAIN, domain))
+        if kind == MONEY and (found := amounts(spends)):
+            candidates.append((RULE_AMOUNT, _just_above(max(found))))
+        out: list[dict[str, str]] = []
+        for rule_kind, raw in candidates:
+            value = clean_rule(rule_kind, raw)
+            if any(r.kind == rule_kind and r.value == value and r.effect == EFFECT_GO for r in rules):
+                continue
+            trial = Rule(id=0, scope=SCOPE_COMPANY, kind=rule_kind, value=value, created_at="", effect=EFFECT_GO)
+            if asked:
+                goes = kind == SOMEONE_NEW and bool(new) and (
+                    _topic_goes([*rules, trial], SOMEONE_NEW) if rule_kind == RULE_TOPIC
+                    else set(new) <= {value} if rule_kind == RULE_PERSON
+                    else rule_kind == RULE_DOMAIN and all(a.endswith("@" + value) for a in new)
+                )
+            else:
+                goes = _balanced(
+                    tool, tool_input, [*rules, trial], addresses=addresses, spends=spends, mcp=mcp,
+                )[0] is None
+            if goes:
+                out.append({"kind": rule_kind, "value": value})
+        return out
+    except Exception:
+        logger.warning("take_the_lead: couldn't work out which rules a card may offer", exc_info=True)
+        return []
 
 
 # What a Goes rule lets go where Balanced would ask: a person or company
-# rule, anything only to them; an amount rule, the money. A delete or share
-# always waits.
+# rule, anything only to them but a delete or a share (only a Sharing
+# topic rule lets a share go); an amount rule, the money; a
+# topic rule, its topic.
 _GOES_KINDS: dict[str, frozenset[str]] = {
-    RULE_PERSON: frozenset(KINDS) - {DELETE_SHARE},
-    RULE_DOMAIN: frozenset(KINDS) - {DELETE_SHARE},
+    RULE_PERSON: frozenset(KINDS) - {DELETE, SHARE},
+    RULE_DOMAIN: frozenset(KINDS) - {DELETE, SHARE},
     RULE_AMOUNT: frozenset({MONEY}),
 }
 
@@ -1022,7 +1214,7 @@ def goes_kinds(rules: list[Rule]) -> frozenset[str]:
     """The kinds ``rules`` (Goes rules that matched) let go together."""
     out: frozenset[str] = frozenset()
     for rule in rules:
-        out |= _GOES_KINDS.get(rule.kind, frozenset())
+        out |= frozenset({rule.value}) if rule.kind == RULE_TOPIC else _GOES_KINDS.get(rule.kind, frozenset())
     return out
 
 
@@ -1139,6 +1331,8 @@ def rule_text(rule: Rule) -> str:
         return f"amounts under ${rule.value}" if rule.effect == EFFECT_GO else f"amounts of ${rule.value} or more"
     if rule.kind == RULE_WORDS:
         return f'anything with "{rule.value}"'
+    if rule.kind == RULE_TOPIC:
+        return f"anything about {KIND_LABELS.get(rule.value, rule.value).lower()}"
     return f"anything with {rule.value}"
 
 
@@ -1199,14 +1393,96 @@ def says(tool: str, tool_input: dict[str, Any], *, mcp: bool = False) -> str:
     return "" if _all_team(reach) else text
 
 
-def _mcp_deletes(tool: str, tool_input: dict[str, Any]) -> bool:
-    """Whether a connected tool deletes, cancels or shares: by its name, or
-    by its ``action`` (Google's ``manage_event`` deletes with
-    ``action="delete"``)."""
-    if _MCP_DELETE_RE.search(tool):
+def _mcp_says(pattern: re.Pattern[str], tool: str, tool_input: dict[str, Any]) -> bool:
+    """Whether a connected tool's name, or its ``action`` (Google's
+    ``manage_event`` deletes with ``action="delete"``), matches ``pattern``."""
+    if pattern.search(tool):
         return True
     action = tool_input.get("action") if isinstance(tool_input, dict) else None
-    return isinstance(action, str) and bool(_MCP_DELETE_RE.search(action))
+    return isinstance(action, str) and bool(pattern.search(action))
+
+
+def _mcp_removes(tool: str, tool_input: dict[str, Any]) -> bool:
+    """Whether a connected tool deletes or cancels something."""
+    return _mcp_says(_MCP_REMOVE_RE, tool, tool_input)
+
+
+def _mcp_shares(tool: str, tool_input: dict[str, Any]) -> bool:
+    """Whether a connected tool shares something or changes who has access."""
+    return _mcp_says(_MCP_SHARE_RE, tool, tool_input)
+
+
+def _mcp_deletes(tool: str, tool_input: dict[str, Any]) -> bool:
+    """Whether a connected tool deletes, cancels or shares."""
+    return _mcp_removes(tool, tool_input) or _mcp_shares(tool, tool_input)
+
+
+def _someone_new(addresses: list[str]) -> str:
+    """Why a step to someone new waits, naming who: "it goes to someone new
+    (dana@co.example)". Only real addresses are named; one the step names by
+    an id the People list doesn't have is counted in "and N more"."""
+    shown = [a for a in addresses if _EMAIL_RE.fullmatch(a)]
+    if not shown:
+        return "it goes to someone new"
+    more = len(addresses) - len(shown[:3])
+    return f"it goes to someone new ({', '.join(shown[:3])}{f' and {more} more' if more > 0 else ''})"
+
+
+def _topics(
+    tool: str, tool_input: dict[str, Any], *, recipients: list[str], about: str, mcp: bool,
+    new_people_of: Callable[[list[str]], list[str]] | None = None,
+) -> list[tuple[str, str]]:
+    """Every topic (``KINDS``) a step is about, in order, with the reason a
+    card shows: the one place a step's topics are decided."""
+    removes = tool in _DELETE_TOOLS or (mcp and _mcp_removes(tool, tool_input))
+    shares = (mcp and _mcp_shares(tool, tool_input)) or bool(_CREDENTIALS_RE.search(about))
+    found: list[tuple[str, str]] = []
+    if removes:
+        found.append((DELETE, "it deletes or cancels something"))
+    if shares:
+        found.append((SHARE, "it shares something"))
+    if tool in _BROADCAST_TOOLS or len(recipients) > BIG_SEND_RECIPIENTS:
+        found.append((BIG_SEND, "it goes to a lot of people"))
+    if mentions_money(about):
+        found.append((MONEY, "it's about money"))
+    if _CONTRACTS_RE.search(about):
+        found.append((CONTRACTS, "it's about a contract or legal matter"))
+    if _PEOPLE_RE.search(about):
+        found.append((PEOPLE_DECISIONS, "it's about hiring or a people decision"))
+    new = (new_people_of or new_people)(recipients)
+    if new:
+        found.append((SOMEONE_NEW, _someone_new(new)))
+    return found
+
+
+def topics_in(text: str, recipients: Iterable[str] = (), *, on_error: frozenset[str] = frozenset(KINDS)) -> set[str]:
+    """The topics (``KINDS``) of something sent as a person
+    (``delegation.handle_it``): what ``text`` says, plus who it goes to
+    (someone new, a lot of people), read by ``_topics`` as for any step.
+    Never raises: an error is ``on_error`` (every topic, for a Waits rule;
+    a caller asking what a Goes rule releases passes none)."""
+    try:
+        going = sorted({r.strip().lower() for r in recipients if r and r.strip()})
+        return {k for k, _ in _topics("", {}, recipients=going, about=text, mcp=False)}
+    except Exception:
+        logger.warning("take_the_lead: couldn't read a message's topics", exc_info=True)
+        return set(on_error)
+
+
+def topics_of(tool: str, tool_input: dict[str, Any], *, mcp: bool = False, reaches: Iterable[str] = ()) -> set[str]:
+    """The topics (``KINDS``) a step is about, for topic rules: who it
+    reaches includes everyone a booking invites (``_rule_targets``). Never
+    raises: an error is every topic."""
+    try:
+        invited, _ = _rule_targets(tool, tool_input)
+        recipients = sorted({
+            a.lower() for a in [*_reach_addresses(tool, tool_input), *invited, *reaches] if not _executive(a)
+        })
+        about = says(tool, tool_input, mcp=mcp)
+        return {k for k, _ in _topics(tool, tool_input, recipients=recipients, about=about, mcp=mcp)}
+    except Exception:
+        logger.warning("take_the_lead: couldn't read a step's topics — every topic", exc_info=True)
+        return set(KINDS)
 
 
 def check(
@@ -1229,25 +1505,23 @@ def check(
     named = sorted({
         a.lower() for a in [*_EMAIL_RE.findall(text), *addresses, *(extra_recipients or [])]
     })
+    # The Executive's own account (a Google step's ``user_google_email``)
+    # is no one the step reaches: not someone new, not one of a lot.
     recipients = sorted({
-        a.lower() for a in [*_reach_addresses(tool, tool_input), *(extra_recipients or [])]
+        a.lower() for a in [*_reach_addresses(tool, tool_input), *(extra_recipients or [])] if not _executive(a)
     })
     about = says(tool, tool_input, mcp=mcp)
-    hit = _rule_hit(rules, text, named, money=about)
+    # Someone new is looked up only when it would hold.
+    topics = _topics(
+        tool, tool_input, recipients=recipients, about=about, mcp=mcp,
+        new_people_of=None if lead.asks_first(SOMEONE_NEW) or any(r.kind == RULE_TOPIC for r in rules)
+        else (lambda _: []),
+    )
+    hit = _rule_hit(rules, text, named, money=about, topics=[k for k, _ in topics])
     if hit is not None:
         return hit
-    deletes = tool in _DELETE_TOOLS or (mcp and _mcp_deletes(tool, tool_input))
-    checks: list[tuple[str, bool, str]] = [
-        (DELETE_SHARE, deletes, "it deletes, cancels or shares something"),
-        (BIG_SEND, tool in _BROADCAST_TOOLS or len(recipients) > BIG_SEND_RECIPIENTS,
-         "it goes to a lot of people"),
-        (MONEY, mentions_money(about), "it's about money"),
-        (CONTRACTS, bool(_CONTRACTS_RE.search(about)), "it's about a contract or legal matter"),
-        (PEOPLE_DECISIONS, bool(_PEOPLE_RE.search(about)), "it's about hiring or a people decision"),
-        (SOMEONE_NEW, any(not _known(r) for r in recipients), "it goes to someone new"),
-    ]
-    for kind, matched, reason in checks:
-        if matched and lead.asks_first(kind):
+    for kind, reason in topics:
+        if lead.asks_first(kind):
             return Hit(kind, reason)
     return None
 
@@ -2239,7 +2513,7 @@ def approval_ranges(kind: str, text: str) -> list[AuthorityScope]:
         return [AuthorityScope.LEGAL_SIGN]
     if kind == PEOPLE_DECISIONS:
         return [AuthorityScope.HIRING_SIGNOFF]
-    if kind != DELETE_SHARE and _BOARD_RE.search(text):
+    if kind not in (DELETE, SHARE) and _BOARD_RE.search(text):
         return [AuthorityScope.BOARD_COMMS]
     return []
 
@@ -2536,6 +2810,9 @@ def hold(
         "details": card_details(tool, tool_input, mcp=mcp),
         "fields": editable_fields(tool, tool_input, mcp=mcp),
         **({"allow": {"key": grant[0], "label": grant[1]}} if grant is not None else {}),
+        # Goes rules that would let this exact step go next time
+        # (``rule_offers``), for the card's "Next time" box.
+        **({"offers": offers} if (offers := rule_offers(tool, tool_input, hit.kind, mcp=mcp)) else {}),
         **({"requested_by_person_id": asker.id, "requested_by": asker.full_name} if asker is not None else {}),
         # Who asked, the owner included, for the card's "You asked" /
         # "Olivia asked" (``card_details.top``); a step no one asked for has
@@ -2678,7 +2955,10 @@ def _hit(name: str, tool_input: dict[str, Any], *, mcp: bool) -> tuple[Hit | Non
         # their address too.
         text = "\n".join([text, *_names_of(recipients)])
         spends = says(name, tool_input, mcp=mcp)
-        rule = _rule_hit(rules, text, recipients, money=spends)
+        topics = topics_of(name, tool_input, mcp=mcp) if any(
+            r.kind == RULE_TOPIC and r.effect == EFFECT_WAIT for r in rules
+        ) else set()
+        rule = _rule_hit(rules, text, recipients, money=spends, topics=topics)
         if rule is not None:
             return rule, None
         if _careful():
@@ -2691,23 +2971,10 @@ def _hit(name: str, tool_input: dict[str, Any], *, mcp: bool) -> tuple[Hit | Non
             return None, found
         if _level_runs():
             return None, None
-        # A Goes rule lets go what it covers (goes_kinds) where Balanced
-        # would hold it; the rest still waits, a delete or share always.
-        # Only who it actually reaches counts for a person or company rule,
-        # never an address written in the body.
-        targets = sorted({a.lower() for a in addresses})
-        goes = goes_rules(rules, spends, targets)
-        if goes:
-            released = goes_kinds(goes)
-            rest = Lead(scope=SCOPE_EXECUTIVE, ask_first={k: k not in released for k in KINDS})
-            held = check(name, tool_input, lead=rest, rules=[], mcp=mcp)
-            return (held, None) if held is not None else (None, goes[0])
-        # Balanced: the six kinds wait, everything else goes.
-        asks = Lead(scope=SCOPE_EXECUTIVE, ask_first=dict.fromkeys(KINDS, True))
-        hit = check(name, tool_input, lead=asks, rules=[], mcp=mcp)
-        if hit is not None:
-            return hit, None
-        return None, None
+        # Balanced: the topics wait unless a Goes rule lets them go.
+        return _balanced(
+            name, tool_input, rules, addresses=_reached(name, tool_input, addresses, mcp=mcp), spends=spends, mcp=mcp,
+        )
     except Exception:
         logger.warning("take_the_lead: the gate failed — holding the action", exc_info=True)
         return Hit("rule", "its rules couldn't be read"), None
@@ -2965,7 +3232,10 @@ def _asked_hit(name: str, tool_input: dict[str, Any], *, mcp: bool) -> Hit | Non
         # their address too.
         text = "\n".join([text, *_names_of(recipients)])
         spends = says(name, tool_input, mcp=mcp)
-        rule = _rule_hit(rules, text, recipients, money=spends)
+        topics = topics_of(name, tool_input, mcp=mcp) if any(
+            r.kind == RULE_TOPIC and r.effect == EFFECT_WAIT for r in rules
+        ) else set()
+        rule = _rule_hit(rules, text, recipients, money=spends, topics=topics)
         if rule is not None:
             return rule
         careful = _careful_turn()
@@ -3972,3 +4242,74 @@ def watch(now: datetime | None = None) -> str | None:
         return None
     _WATCHED.pending = []
     return reason
+
+
+def _reached(name: str, tool_input: dict[str, Any], addresses: Iterable[str], *, mcp: bool) -> list[str]:
+    """Who a step reaches for a Goes rule: ``addresses`` (Your rules'
+    targets) and, for a connected app's mail or share, everyone its
+    recipient or sharing fields name, less the Executive itself. An address
+    only in what it says (a body, a channel post) reaches no one."""
+    from openexecutive.orchestrator.mcp_gateway import _norm_key
+
+    found = [*addresses]
+    if mcp and _MAIL_TOOL_RE.search(name):
+        named = _mail_addresses(tool_input, _norm_key)
+        # Recipients that can't be read: someone it can't name, so no
+        # person or company rule covers it.
+        found.extend(sorted(named) if named is not None else ["unknown-recipient:?"])
+    elif mcp and _file_tool(name) and not _mcp_removes(name, tool_input):
+        found.extend(_EMAIL_RE.findall("\n".join(_strings(list(_reach_args(tool_input))))))
+    return sorted({a.lower() for a in found if a and not _executive(a)})
+
+
+def _released(
+    rules: list[Rule], text: str, addresses: Iterable[str], *, words_text: str | None = None,
+) -> tuple[set[str], list[Rule]]:
+    """The topics the company's Goes rules let go on Balanced, and the rules
+    that matched. A person or company rule covers a topic only when it
+    covers everyone reached; one that covers just the new people among
+    them lets only Someone new go (someone it knows needs no rule to be
+    reached, but a contract to them is still a contract)."""
+    everyone = sorted({a.lower() for a in addresses})
+    goes = goes_rules(rules, text, everyone, words_text=words_text)
+    released = set(goes_kinds(goes))
+    new = sorted({a.lower() for a in new_people(everyone)})
+    if new and new != everyone:
+        reach = [r for r in goes_rules(rules, text, new, words_text=words_text) if r.kind in (RULE_PERSON, RULE_DOMAIN)]
+        if reach:
+            released.add(SOMEONE_NEW)
+            goes = [*goes, *reach]
+    return released, goes
+
+
+def held_topic(rules: list[Rule], text: str, recipients: Iterable[str], *, words_text: str | None = None) -> str | None:
+    """Balanced for what goes out as a person (``delegation.handle_it``):
+    the first topic (``KINDS``) its words are about that waits, or None.
+    The same topics and Goes rules as any other step (``_balanced``); who
+    it may go to is the sender's own check (``handle_it``), so
+    ``recipients`` only decide which person or company rules match. Never
+    raises: an error is every topic."""
+    try:
+        going = sorted({r.strip().lower() for r in recipients if r and r.strip()})
+        released, _ = _released(rules, text, going, words_text=words_text)
+        held = topics_in(text) - released
+    except Exception:
+        logger.warning("take_the_lead: couldn't read what a message's rules let go", exc_info=True)
+        return KINDS[0]
+    return next((k for k in KINDS if k in held), None)
+
+
+def _balanced(
+    name: str, tool_input: dict[str, Any], rules: list[Rule], *, addresses: list[str], spends: str, mcp: bool,
+) -> tuple[Hit | None, Rule | None]:
+    """Unattended work on Balanced: the seven topics wait unless a Goes rule
+    lets them go (``_released``), everything else goes."""
+    released, goes = _released(rules, spends, addresses)
+    lead = Lead(scope=SCOPE_EXECUTIVE, ask_first={k: k not in released for k in KINDS})
+    held = check(name, tool_input, lead=lead, rules=[], mcp=mcp)
+    if held is not None or not goes:
+        return held, None
+    # What let it go: the first rule that released a topic the step has
+    # (a topic rule matches every step, so one about something else isn't it).
+    topics = topics_of(name, tool_input, mcp=mcp, reaches=addresses)
+    return None, next((r for r in goes if goes_kinds([r]) & topics), None)

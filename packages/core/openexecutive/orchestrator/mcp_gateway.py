@@ -825,20 +825,29 @@ def _nested_fetch_key(value: Any, depth: int = 0) -> str | None:
     return None
 
 
-def _check_mailed_text(tool: str, arguments: dict[str, Any]) -> str | None:
-    """Return None unless the call carries text Google would mail to someone
-    the roster never checked (`_MAILED_TEXT_KEYS`); else a JSON error."""
+def _mailed_text_key(arguments: dict[str, Any]) -> str | None:
+    """The argument Google would mail to someone the roster never checked
+    (`_MAILED_TEXT_KEYS`), or None. No audit, no log."""
     for key, value in arguments.items():
         if isinstance(key, str) and _norm_key(key) in _MAILED_TEXT_KEYS and value not in (None, ""):
-            return _refuse(
-                tool, key, "<unchecked-recipient>",
-                reason=(
-                    f"{key!r} is mailed by Google to a person the People roster "
-                    "never checked (an event's organizer, whoever sends an "
-                    "invitation) — refusing. Leave it out."
-                ),
-            )
+            return key
     return None
+
+
+def _check_mailed_text(tool: str, arguments: dict[str, Any]) -> str | None:
+    """Return None unless the call carries text Google would mail to someone
+    the roster never checked (`_mailed_text_key`); else a JSON error."""
+    key = _mailed_text_key(arguments)
+    if key is None:
+        return None
+    return _refuse(
+        tool, key, "<unchecked-recipient>",
+        reason=(
+            f"{key!r} is mailed by Google to a person the People roster "
+            "never checked (an event's organizer, whoever sends an "
+            "invitation) — refusing. Leave it out."
+        ),
+    )
 
 
 def _attachment_fetches_url(attachments: Any) -> bool:
@@ -890,8 +899,9 @@ def _roster_allow_set(*, goes: bool = False) -> RosterAllow:
     """The set of lowercased addresses the Executive may reach outbound.
 
     ``goes``: for a send or an invite, who a company Goes rule lets go
-    counts too (``_goes_rules_apply``). Never for a share: a share always
-    waits, whatever a Goes rule says (``take_the_lead._GOES_KINDS``).
+    counts too (``_goes_rules_apply``), and a Someone new topic rule lets
+    anyone go (``take_the_lead.goes_reach``). Never for a share: a person
+    or company rule never lets a share go (``take_the_lead._GOES_KINDS``).
 
     Derived from the People roster plus the Executive's own address — the single
     egress allow-list shared by the Gmail, Calendar, and Drive gates so they
@@ -925,8 +935,11 @@ def _roster_allow_set(*, goes: bool = False) -> RosterAllow:
         # Who a Goes rule lets go is not someone new (take_the_lead.goes_reach).
         from openexecutive.orchestrator import take_the_lead
 
-        addresses, any_at = take_the_lead.goes_reach()
+        addresses, any_at, anyone = take_the_lead.goes_reach()
         extra = [*extra, *sorted(addresses)]
+        if anyone:
+            # A Someone new rule: nobody is someone new on this step.
+            return RosterAllow(everyone, extra=extra, any_at=any_at, anyone=True)
     # Primary addresses and aliases exactly; for a teammate, also their
     # local part on the company's own domains (people.identity) — the same
     # rule inbound mail is matched by.
@@ -950,6 +963,24 @@ def _goes_rules_apply() -> bool:
         return levels.turn_level(session) == outside_mode.OUTSIDERS
     except Exception:
         logger.warning("mcp_gateway: couldn't tell whether the Goes rules count", exc_info=True)
+        return False
+
+
+def goes_rules_clear(tool: str, arguments: dict[str, Any]) -> bool:
+    """Whether a Goes rule could clear this call's someone-new hold: the
+    checks that read the egress list with Goes (mail, invites, Outlook
+    replies and events). Never a share (``_check_drive_share``,
+    ``_check_calendar_share``, an Outlook share), which reads only People,
+    nor a call ``_check_mailed_text`` holds, which no rule changes. What a
+    held card may offer asks this (``take_the_lead.rule_offers``). Never
+    raises: an error is no."""
+    try:
+        normalized = _normalize_tool_name(tool)
+        if tool == _CALENDAR_SHARE_TOOL or _is_drive_share_tool(tool) or normalized in _M365_DRIVE_SHARE_TOOLS:
+            return False
+        return _mailed_text_key(arguments) is None
+    except Exception:
+        logger.warning("mcp_gateway: couldn't tell whether a Goes rule could clear a call", exc_info=True)
         return False
 
 

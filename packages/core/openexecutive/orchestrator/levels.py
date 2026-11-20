@@ -459,6 +459,16 @@ def hold(
     return hold_many(tool, [tool_input], mcp=mcp, reason=reason, session=session)
 
 
+def _rule_offers(tool: str, tool_input: dict[str, Any], reason: str, *, mcp: bool) -> list[dict[str, str]]:
+    """Goes rules the card may offer: only for someone new, the one reason
+    here a Goes rule can let go (``take_the_lead.rule_offers``)."""
+    if reason != NEW_PERSON:
+        return []
+    from openexecutive.orchestrator import take_the_lead
+
+    return take_the_lead.rule_offers(tool, tool_input, take_the_lead.SOMEONE_NEW, mcp=mcp, asked=True)
+
+
 def hold_many(
     tool: str,
     tool_inputs: list[dict[str, Any]],
@@ -506,6 +516,7 @@ def hold_many(
             session_id=getattr(session, "session_id", None),
             held=True,
             more=steps[1:],
+            offers=_rule_offers(tool, steps[0], reason, mcp=mcp) if len(steps) == 1 else None,
         )
     except Exception:
         logger.exception("levels: couldn't put %s on a card", tool)

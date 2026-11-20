@@ -850,7 +850,7 @@ async def _after(person: Any, card_id: int, *, gmail: Any) -> None:
             str(payload.get("subject") or ""), str(payload.get("they_wrote") or ""),
             *newer_words(payload),
             str(payload.get("draft_subject") or ""), str(payload.get("draft_body") or ""),
-            link_texts=(str(payload.get("draft_body") or ""),),
+            sent_texts=(str(payload.get("draft_body") or ""),),
             recipients=tuple(a for a in payload.get("draft_to") or [] if isinstance(a, str)),
         )
         if held:

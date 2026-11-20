@@ -23,6 +23,7 @@ import {
 } from "@/lib/api";
 
 import HeldCardTop from "./HeldCardTop";
+import { parseOffers, useNextTimeRule } from "./NextTimeRule";
 import StepTalk from "./StepTalk";
 
 // The tag a training card carries (orchestrator.take_the_lead.TRAINING_TAG).
@@ -45,6 +46,7 @@ export default function LeadTrainingCard({
   const [learn, setLearn] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const nextTime = useNextTimeRule(parseOffers(card?.offers), onResolved, editing || Object.keys(card?.said ?? {}).length > 0);
 
   useEffect(() => {
     if (decisionId == null) return;
@@ -66,8 +68,8 @@ export default function LeadTrainingCard({
     setBusy(true);
     setError(null);
     try {
-      await action();
-      onResolved();
+      await nextTime.withRule(action);
+      nextTime.resolved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong. Try again.");
       setBusy(false);
@@ -227,6 +229,7 @@ export default function LeadTrainingCard({
         </div>
       ) : (
         <>
+          {nextTime.box}
           <StepTalk
             decisionId={decisionId}
             disabled={busy || card === null}
@@ -234,7 +237,7 @@ export default function LeadTrainingCard({
             turns={proposal.view?.turns ?? []}
             canSay={Boolean(proposal.view?.tell_me) && Boolean(card?.mayChange) && fields.length > 0}
             options={[
-              { label: "Do it", run: () => approveLeadCard(decisionId, edits(false)) },
+              { label: "Do it", run: () => nextTime.withRule(() => approveLeadCard(decisionId, edits(false))) },
               ...(allowLabel
                 ? [{
                     label: "Do it, and do this on its own next time",
@@ -251,9 +254,10 @@ export default function LeadTrainingCard({
                 })
                 .catch(() => setError("Couldn't load the details of this card."));
             }}
-            onResolved={onResolved}
+            onResolved={nextTime.resolved}
             onSkip={() => rejectDecision(decisionId)}
           />
+          {nextTime.done}
           <GoOnItsOwnOffer leadKey={card?.allow?.key ?? null} />
         </>
       )}

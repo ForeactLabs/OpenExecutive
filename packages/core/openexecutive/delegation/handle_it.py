@@ -35,10 +35,9 @@ with the reason recorded.
 - below Hands-off, the reply goes to anyone the email didn't already go to;
 - one of the owner's Waits rules (Delegate → Approvals → Your rules,
   ``take_the_lead.rule_waits``) matches, on every level;
-- below Hands-off, the email or the reply touches money, contracts,
-  credentials and the like (``SENSITIVE``), or the reply carries a link or
-  an amount (``content_hold``), unless a Goes rule
-  (``take_the_lead.rule_goes``) covers it. A link still waits;
+- on Balanced, the email or the reply is about one of the topics (money,
+  a contract, hiring, someone new, a lot of people; ``content_hold``),
+  unless a Goes rule lets it go, as for any other step;
 - the draft carries a flag other than ``ALLOWED_FLAGS`` (they asked whether
   it's an AI, recipients were trimmed, the draft names the Executive
   (``names_the_executive``), ...). The Executive merely being on the email
@@ -74,7 +73,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -106,51 +104,6 @@ THREAD_WINDOW = timedelta(days=1)
 # Draft flags a reply may carry and still be sent on its own.
 ALLOWED_FLAGS = frozenset({"others_on_thread", "executive_on_thread"})
 
-# Below Hands-off, replies about these topics, or with a link or an amount,
-# wait on a card (``content_hold``); Hands-off sends them. Matched as whole
-# words in the email, its subject and the reply. A false match costs a tap.
-SENSITIVE = (
-    "access token", "acquisition", "agreement", "api key", "attorney", "bank", "board", "bonus",
-    "budget", "compensation", "compliance", "confidential", "contract", "contracts", "counsel",
-    "court", "credentials", "diagnosis", "discount", "equity", "fire", "fired", "firing", "gdpr",
-    "health", "hire", "hiring", "investor", "investors", "invoice", "invoices", "journalist",
-    "lawsuit", "lawyer", "layoff", "layoffs", "legal", "login", "medical", "merger", "nda",
-    "offer letter", "paid", "passcode", "password", "passwords", "pay", "payment", "payments",
-    "payroll", "press", "price", "prices", "pricing", "quote", "refund", "reporter", "resign",
-    "resignation", "salary", "secret", "secrets", "settlement", "social security", "ssn",
-    "subpoena", "term sheet", "terminate", "termination", "token", "tokens", "wire",
-)
-# The money words: an amount Goes rule covers them, a words one doesn't.
-MONEY_WORDS = frozenset({
-    "bank", "budget", "discount", "invoice", "invoices", "paid", "pay", "payment", "payments", "payroll",
-    "price", "prices", "pricing", "quote", "refund", "wire",
-})
-# Never sent on its own below Hands-off, whatever a Goes rule says.
-CREDENTIALS = (
-    "access token", "api key", "credentials", "login", "passcode", "password", "passwords", "secret",
-    "secrets", "social security", "ssn", "token", "tokens",
-)
-_CREDENTIALS_RE = re.compile(
-    r"\b(?:" + "|".join(re.escape(w).replace(r"\ ", r"\s+") for w in CREDENTIALS) + r")\b", re.IGNORECASE,
-)
-_SENSITIVE_RE = re.compile(
-    r"\b(?:" + "|".join(re.escape(w).replace(r"\ ", r"\s+") for w in SENSITIVE) + r")\b", re.IGNORECASE,
-)
-# A scheme, www., a bare host with a path ("bit.ly/x9Z"), or a bare host on
-# a common top-level domain.
-_LINK_RE = re.compile(
-    r"(?:https?://|www\.|\b[\w-]+(?:\.[\w-]+)+/\S*"
-    r"|\b[\w-]+(?:\.[\w-]+)*\.(?:com|net|org|io|co|ly|ai|app|dev|me|info|biz|us|uk|link|xyz|gl|to|site|online)\b)",
-    re.IGNORECASE,
-)
-# An email address (a signature's, say) is not a link: its domain alone would
-# read as a bare host, so addresses are taken out before looking for links.
-_EMAIL_RE = re.compile(r"(?:mailto:)?[\w.+-]+@[\w-]+(?:\.[\w-]+)+", re.IGNORECASE)
-_AMOUNT_RE = re.compile(
-    r"[$€£¥₹]\s*\d|\d\s*%|\b\d[\d,.]*\s*(?:usd|eur|gbp|dollars?|euros?|pounds?|percent)\b",
-    re.IGNORECASE,
-)
-
 # What each refusal tells the person on the card.
 REASONS: dict[str, str] = {
     "level": "Approvals is on Careful, so what it would send as you waits for you.",
@@ -180,9 +133,7 @@ REASONS: dict[str, str] = {
     "work_stranger": "I did what they asked, and they aren't in your People, so it waits for you to look.",
     # Meeting invites (delegation.invites).
     "stranger": "Below Hands-off it acts on its own only for people you know.",
-    "sensitive": "Below Hands-off, mail about money, contracts, passwords and the like waits for you.",
-    "link": "Below Hands-off, a reply with a link waits for you.",
-    "amount": "Below Hands-off, a reply with an amount waits for you.",
+    "sensitive": "On Balanced, mail about money, a contract or hiring, or that hands over a password or key, waits for you.",
     "rule": "One of your rules says this waits for you.",
     "clash": "It clashes with something already on your calendar.",
     "calendar_unread": "It couldn't check your calendar for clashes, so it asked instead.",
@@ -211,16 +162,16 @@ def hands_off(*, db_path: Path | None = None) -> bool:
 
 
 def content_hold(
-    *texts: str, link_texts: tuple[str, ...] = (), recipients: tuple[str, ...] = (), db_path: Path | None = None,
+    *texts: str, sent_texts: tuple[str, ...] = (), recipients: tuple[str, ...] = (), db_path: Path | None = None,
 ) -> str | None:
     """Why what it would send on its own must wait, or None: a Waits rule
-    (``rule``) on every level; then, below Hands-off, money, contracts,
-    credentials and the like (``sensitive``), a link (``link``) or an amount
-    (``amount``), unless a Goes rule covers it: a person or company rule
-    covers all of them, an amount rule the money (a link or credentials
-    always wait). ``texts`` are read for rules, topics and amounts,
-    ``link_texts`` (what it would send) for links and Goes amounts,
-    ``recipients`` for person and domain rules. Unreadable rules hold, on
+    (``rule``) on every level; then, on Balanced, one of the topics
+    (``sensitive``) unless a Goes rule lets it go
+    (``take_the_lead.held_topic``), as for any other step. ``texts`` are
+    read for rules and topics, ``sent_texts`` (what it would send) for
+    Goes amounts, ``recipients`` for Waits rules (Someone new and Big sends
+    among them) and for which person and company Goes rules match. Who it
+    may go to is the sender's own check. Unreadable rules hold, on
     Hands-off too."""
     from openexecutive.orchestrator import take_the_lead
 
@@ -231,27 +182,13 @@ def content_hold(
     except Exception:
         logger.warning("delegation.handle_it: couldn't read the rules — holding", exc_info=True)
         return "rule"
-    if take_the_lead.rule_waits(rules, joined, going) is not None:
+    if take_the_lead.rule_waits(rules, joined, going, topics=take_the_lead.topics_in(joined, going)) is not None:
         return "rule"
     if hands_off(db_path=db_path):
         return None
-    if any(_LINK_RE.search(_EMAIL_RE.sub(" ", t or "")) for t in link_texts):
-        return "link"
-    if any(_CREDENTIALS_RE.search(t or "") for t in texts):
+    own = "\n".join(t or "" for t in sent_texts)
+    if take_the_lead.held_topic(rules, joined, going, words_text=own) is not None:
         return "sensitive"
-    own = "\n".join(t or "" for t in link_texts)
-    goes = take_the_lead.goes_rules(rules, joined, going, words_text=own)
-    kinds = {r.kind for r in goes}
-    if kinds & {take_the_lead.RULE_PERSON, take_the_lead.RULE_DOMAIN}:
-        return None
-    topics = {m.group(0).lower() for t in texts for m in _SENSITIVE_RE.finditer(t or "")}
-    money = {t for t in topics if re.sub(r"\s+", " ", t) in MONEY_WORDS}
-    if take_the_lead.RULE_AMOUNT not in kinds and money:
-        return "sensitive"
-    if topics - money:
-        return "sensitive"
-    if take_the_lead.RULE_AMOUNT not in kinds and any(_AMOUNT_RE.search(t or "") for t in texts):
-        return "amount"
     return None
 
 
@@ -465,7 +402,7 @@ def _refusal(
         return "flagged"
     held = content_hold(
         getattr(message, "subject", "") or "", getattr(message, "text", "") or "", reply.subject or "",
-        reply.body or "", link_texts=(reply.body or "",), recipients=(*reply.to, *reply.cc), db_path=db_path,
+        reply.body or "", sent_texts=(reply.body or "",), recipients=(*reply.to, *reply.cc), db_path=db_path,
     )
     if held:
         return held
@@ -540,7 +477,7 @@ def _follow_up_refusal(
         return "flagged"
     held = content_hold(
         getattr(sent, "subject", "") or "", reply.subject or "", reply.body or "",
-        link_texts=(reply.body or "",), recipients=(*reply.to, *reply.cc), db_path=db_path,
+        sent_texts=(reply.body or "",), recipients=(*reply.to, *reply.cc), db_path=db_path,
     )
     if held:
         return held

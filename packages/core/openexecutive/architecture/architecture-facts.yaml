@@ -12307,17 +12307,19 @@ delegation:
     auto-send per thread per day, delegation_handled: the loop guard, a
     card too), in_a_row (last own message in the thread was an auto-send).
     No daily cap and no length limit. Below Hands-off also stranger (not team, contact or past
-    correspondent), sensitive (SENSITIVE topics in the email, its subject or
-    the reply), link and amount (handle_it.content_hold, also on follow-ups
-    and, topic only, invite titles); Hands-off sends them. The owner's
-    rules (take_the_lead_rules, company scope) apply here too, inside
-    content_hold: a Waits rule (take_the_lead.rule_waits, against the texts
-    and the reply's recipients) holds as reason "rule" on every level; below
-    Hands-off Goes rules (take_the_lead.goes_rules, amounts read in the
-    reply too, link_texts) release by kind: person/domain all topic holds,
-    amount the money words and amounts; never link or credentials
-    (CREDENTIALS). Words rules only wait (GOES_RULE_KINDS). Unreadable
-    rules hold, on Hands-off too. The per-mode limits are gone.
+    correspondent), and sensitive: on Balanced, a topic the words of the
+    email, its subject or the reply are about (who it goes to is the
+    recipients check above)
+    (handle_it.content_hold -> take_the_lead.held_topic, also on follow-ups
+    and, topic only, invite titles); Hands-off sends them. No word list,
+    link or password check of its own: the same topics and Goes rules as
+    any other step (take_the_lead._released, shared with _balanced). The
+    owner's rules (take_the_lead_rules, company scope) apply here too,
+    inside content_hold: a Waits rule (take_the_lead.rule_waits, against
+    the texts and the reply's recipients) holds as reason "rule" on every
+    level; on Balanced Goes rules release by kind (goes_kinds, amounts read
+    in the reply too, sent_texts). Words rules only wait. Unreadable rules
+    hold, on Hands-off too. The per-mode limits are gone.
     Only when it passes, a last look (delegation.injection_check.held_back:
     one tool-less classifier-model call reading the sender's new words as
     plain text in an <email> block, up to 20,000 chars) asks whether they
@@ -12564,10 +12566,11 @@ delegation:
     of kind TRAINING unless allowance()/find_allowed covers it; hold()
     stores allow {key, label}), Hands-off runs, Goes rules let go the KINDS
     they cover (goes_rules / goes_kinds: person and domain all but
-    DELETE_SHARE, amount MONEY; a words rule can only wait, add_rule
+    DELETE, amount MONEY, topic its topic; a words rule can only wait, add_rule
     refuses a Goes one) and the rest still waits (_gated records "Your rule: <rule_text>" as the log's why),
-    Balanced holds the six KINDS.
-    Rules (take_the_lead_rules: kind person / domain / words / amount,
+    Balanced holds the seven KINDS (2026-11-19: DELETE and SHARE are
+    separate topics, so sharing can go while deleting waits).
+    Rules (take_the_lead_rules: kind person / domain / words / amount / topic,
     effect wait (default, the column added 2026-11-09) or go; POST
     /take-the-lead/rules {kind, value, effect}, a Goes rule needs
     _provably_theirs like DELETE). Waits matches loosely (any recipient, a
@@ -12581,8 +12584,23 @@ delegation:
     (several: none; aliases don't count), or exactly @that domain (Waits
     also takes subdomains); an amount rule
     needs an amount in what it sends and every amount under the limit, and
-    fails closed on a percentage or a currency sign it can't parse. A delete or share
-    (DELETE_SHARE) always waits under a Goes rule. Goes only lifts the level's topic holds:
+    fails closed on a percentage or a currency sign it can't parse. A delete
+    or a share always waits under a person or company Goes rule; only a
+    Deleting or cancelling, or a Sharing, topic rule lets it go (the drive
+    share check reads the plain roster, never Goes). A person or company
+    rule covers someone new only when everyone the step reaches is covered;
+    with a known contact on it too, it releases Someone new alone. A topic rule (RULE_TOPIC, value one of
+    KINDS) matches topics_of (the same _topics check() reads); Waits wins.
+    One answer everywhere: new_people (the egress list) and lets_go (a
+    topic Goes rule, where mcp_gateway._goes_rules_apply) are what the
+    gate, the gateway checks and schedule_tools._off_roster_runs ask;
+    what goes out as a person (handle_it.content_hold) reads its topics
+    with topics_in(text, recipients), the same _topics, so a Someone new
+    Waits rule holds a reply on Hands-off too. Held cards carry offers
+    (rule_offers): Goes rules verified by re-running _balanced with them;
+    on a connected-app hold, only where mcp_gateway.goes_rules_clear says
+    the check that held it reads Goes (never a share).
+    Goes only lifts the level's topic holds:
     levels.decide's always-card reasons (STRANGER, outside content giving
     orders, NOT_OWNER, SHARED) are decided before and never see it.
     In training stays the last check: nothing goes out on its own while it

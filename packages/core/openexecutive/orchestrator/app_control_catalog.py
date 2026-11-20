@@ -867,18 +867,21 @@ def _level_needs_tap(item_id: str, value: str) -> bool:
         return True
 
 
-_RULE_KINDS = {"person": "person", "domain": "domain", "words": "words", "amount": "amount"}
+_RULE_KINDS = {"person": "person", "domain": "domain", "words": "words", "amount": "amount", "topic": "topic"}
 
 
 def _rule_parts(value: str) -> tuple[str, str]:
     """``person: Dana``, ``domain: acme.com``, ``words: invoice``,
-    ``amount: 500`` → (kind, what), as the rule stores it."""
+    ``amount: 500``, ``topic: share`` → (kind, what), as the rule stores it."""
     from openexecutive.orchestrator import take_the_lead
 
     kind, sep, what = value.partition(":")
     kind = kind.strip().lower()
     if not sep or kind not in _RULE_KINDS or not what.strip():
-        raise Refused("Give the rule as person: <name or email>, domain: <example.com>, words: <words> or amount: <number>.")
+        raise Refused(
+            "Give the rule as person: <name or email>, domain: <example.com>, words: <words>, amount: <number> "
+            "or topic: <money, contracts, people_decisions, delete, share, someone_new or big_send>."
+        )
     try:
         return _RULE_KINDS[kind], take_the_lead.clean_rule(_RULE_KINDS[kind], what)
     except take_the_lead.RuleError as exc:
@@ -1123,11 +1126,17 @@ _ACTIONS = (
     Action("add_waits_rule", "new_rule",
            "Add a rule in Your rules that always waits for the person (use id \"new\")",
            partial(_add_rule, effect="wait"), prepare=_prepare_rule,
-           value="person: <name or email>, domain: <example.com>, words: <words> or amount: <number>"),
+           value=(
+               "person: <name or email>, domain: <example.com>, words: <words>, amount: <number> "
+               "or topic: <money, contracts, people_decisions, delete, share, someone_new or big_send>"
+           )),
     Action("add_goes_rule", "new_rule",
            "Add a rule in Your rules that lets something go on its own (use id \"new\"; not for words)",
            partial(_add_rule, effect="go"), confirm=True, prepare=_prepare_goes_rule,
-           value="person: <name or email>, domain: <example.com> or amount: <number>",
+           value=(
+               "person: <name or email>, domain: <example.com>, amount: <number> "
+               "or topic: <money, contracts, people_decisions, delete, share, someone_new or big_send>"
+           ),
            card="Add a rule that goes on its own: {value}"),
     Action("remove_rule", "rule", "Remove a rule from Your rules", _remove_rule, confirm=_removing_needs_tap,
            card="Remove the rule {title}"),

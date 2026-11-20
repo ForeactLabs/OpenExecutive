@@ -104,13 +104,16 @@ def hold(
     db_path: Path | None = None,
     held: bool = False,
     more: list[dict[str, Any]] | None = None,
+    offers: list[dict[str, str]] | None = None,
 ) -> int:
     """Make a held action a decision for its approver, with a card on Today.
     The same action still waiting is that card, not a new one. ``held``: the
     owner's level put it on a card (``orchestrator.levels``), so Approve may
     carry out any step the Executive runs, not only a send. ``more``: further
     calls of the same tool held with it; the one card lists them all and its
-    Approve carries out each in order (``take_the_lead.carry_out``)."""
+    Approve carries out each in order (``take_the_lead.carry_out``).
+    ``offers``: Goes rules that would let it go next time
+    (``take_the_lead.rule_offers``), for the card's "Next time" box."""
     from openexecutive.alerts.models import PRIVATE_ALERT_TAG, AlertSeverity
     from openexecutive.alerts.store import insert_alert
     from openexecutive.audit import log_event
@@ -174,6 +177,7 @@ def hold(
         "details": card_details.plain_steps(tool, steps),
         **({"held": True} if held else {}),
         **({"steps": steps} if more else {}),
+        **({"offers": offers} if offers and not more else {}),
     }
     decision_id = create_decision_instance(
         decision_class=DECISION_CLASS,

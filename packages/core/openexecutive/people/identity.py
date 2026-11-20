@@ -180,7 +180,10 @@ class RosterAllow:
         extra: Iterable[str] = (),
         domains: frozenset[str] | None = None,
         any_at: Iterable[str] = (),
+        anyone: bool = False,
     ) -> None:
+        # A Someone new rule (take_the_lead.lets_go): every address is allowed.
+        self.anyone = anyone
         self.domains = company_domains() if domains is None else domains
         self.exact: set[str] = {normalize_address(a) for a in extra if a}
         # Domains every address on is allowed (a Goes rule for a company).
@@ -197,6 +200,8 @@ class RosterAllow:
     def __contains__(self, addr: object) -> bool:
         if not isinstance(addr, str):
             return False
+        if self.anyone:
+            return True
         norm = normalize_address(addr)
         if norm in self.exact:
             return True

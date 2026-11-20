@@ -20,6 +20,7 @@ import {
 } from "@/lib/api";
 
 import HeldCardTop from "./HeldCardTop";
+import { parseOffers, useNextTimeRule } from "./NextTimeRule";
 import StepTalk from "./StepTalk";
 
 // The tag such a card carries (department_gate.DECISION_CLASS).
@@ -40,6 +41,7 @@ export default function HeldActionCard({
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const nextTime = useNextTimeRule(parseOffers(held?.offers), onResolved, editing || Object.keys(held?.said ?? {}).length > 0);
 
   useEffect(() => {
     if (decisionId == null) return;
@@ -58,8 +60,8 @@ export default function HeldActionCard({
     setBusy(true);
     setError(null);
     try {
-      await action();
-      onResolved();
+      await nextTime.withRule(action);
+      nextTime.resolved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong. Try again.");
       setBusy(false);
@@ -123,6 +125,7 @@ export default function HeldActionCard({
           )}
         </div>
       )}
+      {nextTime.box}
       <StepTalk
         decisionId={decisionId}
         disabled={busy || held == null}
@@ -132,14 +135,18 @@ export default function HeldActionCard({
         options={[{
           label: "Do it",
           // What was said on the card goes as the edit.
-          run: () => (Object.keys(said).length > 0 ? approveLeadCard(decisionId, { input: said }) : approveDecision(decisionId)),
+          run: () =>
+            nextTime.withRule(() =>
+              Object.keys(said).length > 0 ? approveLeadCard(decisionId, { input: said }) : approveDecision(decisionId),
+            ),
         }]}
         onSaid={() => {
           void getHeldAction(decisionId).then(setHeld).catch(() => setError("Couldn't load what it would do."));
         }}
-        onResolved={onResolved}
+        onResolved={nextTime.resolved}
         onSkip={() => rejectDecision(decisionId)}
       />
+      {nextTime.done}
       </>
       )}
       {error && <p className="mt-2 text-sm text-red-500">{error}</p>}

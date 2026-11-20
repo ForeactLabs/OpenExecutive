@@ -23,6 +23,8 @@ import {
 // approves it as this button does and the Executive carries on with what
 // you asked (decisions.approve_in_chat).
 
+import { parseOffers, useNextTimeRule } from "@/components/briefing/NextTimeRule";
+
 // What the chat shows you said when you tapped Approve on a card there.
 export const APPROVED_MESSAGE = "Approved";
 
@@ -31,6 +33,7 @@ interface HeldPayload {
   reason: string;
   details: CardDetail[];
   fields: LeadCardField[];
+  offers: unknown;
 }
 
 function readPayload(instance: DecisionInstance): HeldPayload | null {
@@ -43,6 +46,7 @@ function readPayload(instance: DecisionInstance): HeldPayload | null {
       reason: typeof raw.reason === "string" ? raw.reason : "",
       details: cardDetails(details),
       fields: heldFields(raw.fields),
+      offers: raw.offers,
     };
   } catch {
     return null;
@@ -67,6 +71,9 @@ export default function ChatHeldActionCard({
   const [busy, setBusy] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const shownPayload = instance ? readPayload(instance) : null;
+  // The card stays in the chat once done, so nothing to drop.
+  const nextTime = useNextTimeRule(parseOffers(shownPayload?.offers), () => {}, editing);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -87,25 +94,36 @@ export default function ChatHeldActionCard({
     if (!onApprove || approveDisabled) return;
     setHanded(true);
     setEditing(false);
+    let now: DecisionInstance | null = null;
     try {
-      await onApprove(instance.id, input);
+      await nextTime.withRule(
+        async () => {
+          try {
+            await onApprove(instance.id, input);
+          } finally {
+            try {
+              now = await getDecision(instance.id);
+              setInstance(now);
+            } catch {
+              /* gone or not this person's: what the reply says stands */
+            }
+          }
+        },
+        () => now !== null && DONE.has(now.status),
+      );
     } finally {
-      try {
-        setInstance(await getDecision(instance.id));
-      } catch {
-        /* gone or not this person's: what the reply says stands */
-      }
       setHanded(false);
     }
   };
   const waiting = instance.status === "proposed";
   if (!done && !waiting) return null;
 
-  const act = async (label: string, call: () => Promise<DecisionInstance>) => {
+  const act = async (label: string, call: () => Promise<DecisionInstance>, approving = true) => {
     setBusy(label);
     setError(null);
     try {
-      setInstance(await call());
+      if (approving) await nextTime.withRule(async () => setInstance(await call()));
+      else setInstance(await call());
     } catch (err) {
       setError(err instanceof Error ? err.message : "That didn't go through.");
     } finally {
@@ -151,6 +169,7 @@ export default function ChatHeldActionCard({
           ))}
         </dl>
       )}
+      {!done && nextTime.box}
       {done ? (
         <p className="mt-3 text-sm font-semibold text-emerald-700 dark:text-emerald-300">{DONE.has(instance.status) ? "✓ Done." : "✓ Approved."}</p>
       ) : (
@@ -176,7 +195,7 @@ export default function ChatHeldActionCard({
           <Button
             variant="ghost"
             className="ml-auto"
-            onClick={() => void act("Declining…", () => rejectDecision(instance.id))}
+            onClick={() => void act("Declining…", () => rejectDecision(instance.id), false)}
             disabled={busy !== null}
           >
             Not now
@@ -185,6 +204,7 @@ export default function ChatHeldActionCard({
       )}
       </>
       )}
+      {nextTime.done}
       {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
     </article>
   );

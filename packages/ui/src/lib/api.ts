@@ -7245,7 +7245,7 @@ export async function updateClientMeta(
 
 // ── Take the lead (Delegate → Take the lead) ────────────────
 
-export type LeadRuleKind = "person" | "domain" | "words" | "amount";
+export type LeadRuleKind = "person" | "domain" | "words" | "amount" | "topic";
 // "wait": always waits for your yes; "go": goes on its own where the level
 // would hold it (never past Careful or In training).
 export type LeadRuleEffect = "wait" | "go";
@@ -7510,6 +7510,9 @@ export interface LeadCardPayload {
   said: Record<string, string>;
   // Whether this reader may change it (Edit, Or tell me).
   mayChange: boolean;
+  // Goes rules that would let this exact step go next time (the card's
+  // "Next time" box, take_the_lead.rule_offers); raw, read by parseOffers.
+  offers: unknown;
 }
 
 function saidInput(payload: { said_input?: unknown }): Record<string, string> {
@@ -7563,6 +7566,7 @@ export async function getLeadCard(id: number, signal?: AbortSignal): Promise<Lea
     allow: payload.allow && typeof payload.allow.key === "string" ? payload.allow : undefined,
     said: saidInput(payload),
     mayChange: payload.may_change !== false,
+    offers: payload.offers,
   };
 }
 
@@ -7584,6 +7588,8 @@ export interface HeldActionPayload {
   said: Record<string, string>;
   // Whether this reader may change it (Edit, Or tell me).
   mayChange: boolean;
+  // Goes rules that would let it go next time (parseOffers).
+  offers: unknown;
 }
 
 export async function getHeldAction(id: number, signal?: AbortSignal): Promise<HeldActionPayload> {
@@ -7604,6 +7610,7 @@ export async function getHeldAction(id: number, signal?: AbortSignal): Promise<H
     ),
     said: saidInput(payload),
     mayChange: payload.may_change !== false,
+    offers: payload.offers,
   };
 }
 
