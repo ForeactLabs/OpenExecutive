@@ -400,7 +400,11 @@ def test_our_own_tools_name_people_departments_and_goals_never_a_number(monkeypa
     ]
     # A number that names no one, or only the system reads, isn't shown.
     assert card_details.plain("message_person", {"person_id": 99, "slack_user_id": "U1", "text": "Hi"}) == [
-        {"field": "Message", "value": "Hi"},
+        {"field": "To", "value": "Someone not on People"}, {"field": "Message", "value": "Hi"},
+    ]
+    # Two people with the same kind of label are told apart.
+    assert [d["field"] for d in card_details.plain("x", {"target_person_id": 4, "cadence_person_id": 7})] == [
+        "Who", "Who (cadence person id)",
     ]
     assert card_details.plain("x", {"alert_id": 5, "status": "done"}) == [{"field": "Status", "value": "done"}]
     # A call that names only a number still says what it acts on.
@@ -410,3 +414,20 @@ def test_our_own_tools_name_people_departments_and_goals_never_a_number(monkeypa
 def test_a_connected_apps_ids_are_still_shown() -> None:
     # A connected app's step may act only on its own record: that stays.
     assert card_details.plain("asana__update_task", {"task_id": "123"}) == [{"field": "Task id", "value": "123"}]
+
+
+def test_a_chat_app_message_names_who_it_goes_to(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from openexecutive.people import store
+
+    monkeypatch.setattr(
+        store, "find_person_by_slack_id",
+        lambda sid, include_contacts=False: SimpleNamespace(full_name="Ria Lopez", email="") if sid == "U_RIA" else None,
+    )
+    monkeypatch.setattr(store, "find_person_by_telegram_chat_id", lambda cid, include_contacts=False: None)
+    assert card_details.plain("send_slack_dm", {"user_id": "U_RIA", "text": "Hi"})[0] == {"field": "To", "value": "Ria Lopez"}
+    # Not on People: the chat's id is all there is to say who it reaches.
+    assert card_details.plain("send_telegram_message", {"chat_id": "-100123", "text": "Hi"})[0] == {
+        "field": "To", "value": "-100123",
+    }

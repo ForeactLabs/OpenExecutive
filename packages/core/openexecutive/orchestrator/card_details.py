@@ -413,8 +413,9 @@ def plain(tool: str, tool_input: Any) -> list[dict[str, Any]]:
             named = _own_ref(tool, norm, value)
             if named is not None:
                 if named:
-                    out.append({"field": named[0], "value": named[1]})
-                    seen.add(named[0])
+                    field = named[0] if named[0] not in seen else f"{named[0]} ({key.replace('_', ' ')})"
+                    out.append({"field": field, "value": named[1]})
+                    seen.add(field)
                 elif value not in (None, "", 0, [], {}):
                     # Shown only when the call names nothing else.
                     refs.append({"field": label(key), "value": _text(value)})
@@ -476,15 +477,26 @@ def _own_ref(tool: str, norm: str, value: Any) -> tuple[str, str] | tuple[()] | 
     card shows: a person, a department or a goal by name. ``()`` when the
     field is a number only the system reads (a task's, a chat app's): it
     shows only on a card that names nothing else. None for any other field."""
+    from openexecutive.orchestrator import take_the_lead
+
+    target = take_the_lead._TARGET_KEYS.get(tool)
+    if target is not None and target[1] != "person" and norm == target[0]:
+        # A chat app's own id for who it goes to: their name when they're
+        # on People, else the id, the only way to tell who it reaches.
+        if value in (None, ""):
+            return ()
+        person = take_the_lead._target_person(tool, {target[0]: value})
+        return ("To", (person.full_name or person.email or str(value)) if person is not None else str(value))
     if norm.endswith("person_ids"):
         names = _names(value) if value not in (None, "", [], {}) else None
         return ("With", names) if names else ()
     if norm.endswith("person_id"):
-        names = _names(value) if value not in (None, "", 0) else None
-        if not names:
+        if value in (None, "", 0):
             return ()
         label = "To" if tool == "message_person" and norm == "person_id" else _PERSON_LABELS.get(norm, "Who")
-        return (label, names)
+        if tool == "assign_open_loop" and norm == "person_id":
+            label = "Assigned to"
+        return (label, _names(value) or "Someone not on People")
     if norm == "department_slug":
         return ("Department", _department(value)) if value else ()
     if norm in ("goal_id", "for_goal_id"):
