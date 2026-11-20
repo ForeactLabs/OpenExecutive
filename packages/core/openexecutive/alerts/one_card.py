@@ -328,33 +328,36 @@ def _decision_of(tags: list[str]) -> int | None:
     return None
 
 
-def _reader(routed_to: Any, tags: list[str]) -> str:
-    """Who reads the card: one person, or the team; and whether it is the
-    principal's alone. Cards for different readers never join."""
+def _reader(routed_to: Any, tags: list[str], *, raised_by: Any = None, team_raised: bool = False) -> str:
+    """Who reads the card: one person, or the team; whether it is the
+    principal's alone; and, for a card a team member raised, who raised it,
+    as they read it too (``models.visible_alert``), so it joins only another
+    of theirs: never a card the rest of the team sees, nor one another
+    teammate raised. Cards for different readers never join."""
     from openexecutive.alerts.models import PRIVATE_ALERT_TAG
 
     who = str(routed_to) if isinstance(routed_to, int) and not isinstance(routed_to, bool) else "team"
-    return f"{who}{':private' if PRIVATE_ALERT_TAG in tags else ''}"
+    reader = f"{who}{':private' if PRIVATE_ALERT_TAG in tags else ''}"
+    return f"{reader}:raised:{raised_by}" if team_raised else reader
 
 
 def _card_reader(row: Any, tags: list[str]) -> str:
-    """The reader key of card ``row``. A card a team member raised is read
-    by them as well as whom it is for (``models.visible_alert``), so it
-    joins only another of theirs: never a card the rest of the team sees,
-    nor one another teammate raised."""
+    """The reader key of card ``row``."""
     from openexecutive.alerts.models import TEAM_RAISED_SOURCE
 
-    reader = _reader(row.routed_to_person_id, tags)
-    if row.source == TEAM_RAISED_SOURCE:
-        return f"{reader}:raised:{row.owner_person_id}"
-    return reader
+    return _reader(
+        row.routed_to_person_id, tags, raised_by=row.owner_person_id, team_raised=row.source == TEAM_RAISED_SOURCE,
+    )
 
 
-def reader_for(person_id: int | None, *, private: bool) -> str:
-    """The reader key of a card for ``person_id`` (None: the team)."""
+def reader_for(person_id: int | None, *, private: bool, raised_by: int | None = None, team_raised: bool = False) -> str:
+    """The reader key of a card for ``person_id`` (None: the team), the
+    same as the card's own once it is written (``_card_reader``)."""
     from openexecutive.alerts.models import PRIVATE_ALERT_TAG
 
-    return _reader(person_id, [PRIVATE_ALERT_TAG] if private else [])
+    return _reader(
+        person_id, [PRIVATE_ALERT_TAG] if private else [], raised_by=raised_by, team_raised=team_raised,
+    )
 
 
 # --------------------------------------------------------------------------- #

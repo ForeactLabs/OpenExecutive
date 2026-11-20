@@ -476,3 +476,22 @@ def test_a_team_members_card_joins_only_another_of_theirs() -> None:
     assert _get(theirs).status == "unread" and _get(theirs).superseded_by_alert_id is None
     assert _get(sams).status == "unread" and _get(team).status == "unread"
     assert _get(again).superseded_by_alert_id == theirs
+
+
+def test_a_team_member_is_asked_about_their_own_open_card() -> None:
+    """The key create_alert asks with (``reader_for``) is the card's own, so
+    a teammate's next card on the matter is asked whether it joins theirs."""
+    from openexecutive.alerts.models import TEAM_RAISED_SOURCE
+
+    token = current_session.set(Session(caller_person_id=7))
+    try:
+        with set_turn(session_id="s", turn_id="turn-1"):
+            theirs = _note("Dana asks for the FedEx deadline", source=TEAM_RAISED_SOURCE, owner_person_id=7)
+        dana = one_card.reader_for(OWNER, private=False, raised_by=7, team_raised=True)
+        sam = one_card.reader_for(OWNER, private=False, raised_by=8, team_raised=True)
+        assert [cid for cid, _, _ in one_card.open_cards_from("person:7", turn="turn-2", reader=dana)] == [theirs]
+        assert one_card.open_cards_from("person:7", turn="turn-2", reader=sam) == []
+        owners = one_card.reader_for(OWNER, private=False)
+        assert one_card.open_cards_from("person:7", turn="turn-2", reader=owners) == []
+    finally:
+        current_session.reset(token)

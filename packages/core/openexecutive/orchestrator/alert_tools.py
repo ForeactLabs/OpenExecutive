@@ -284,7 +284,8 @@ def _matter_choice(event: Any, joins: Any) -> str | None:
 
 def _reader_of(event: Any) -> str:
     """Who the card will be for, as the pipeline routes it: a private card
-    goes to the principal (``alerts.pipeline._make_private``)."""
+    goes to the principal (``alerts.pipeline._make_private``), and a card a
+    team member raised is theirs too."""
     from openexecutive.alerts import one_card
 
     routed = event.routed_to_person_id
@@ -293,7 +294,12 @@ def _reader_of(event: Any) -> str:
 
         principal = get_principal()
         routed = principal.id if principal is not None else None
-    return one_card.reader_for(routed, private=bool(event.private))
+    from openexecutive.alerts.models import TEAM_RAISED_SOURCE
+
+    return one_card.reader_for(
+        routed, private=bool(event.private), raised_by=event.raised_by_person_id,
+        team_raised=event.source == TEAM_RAISED_SOURCE,
+    )
 
 
 # What create_alert answers when the question is for the person in the chat.
