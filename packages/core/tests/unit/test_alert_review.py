@@ -1163,3 +1163,17 @@ def test_an_escalation_with_no_chat_app_says_no_message_went(db: Path, audit_eve
     assert row is not None and row.severity == "high" and row.due_at is not None
     [esc] = [e for e in audit_events if e[0] == review.EVENT_ESCALATED]
     assert esc[2]["dm_ok"] is False and "no message sent" in esc[1]
+
+
+def test_a_teammates_own_card_is_never_reviewed_nor_evidence(db: Path) -> None:
+    # A teammate's card is their one ask, shown only to them and whom it is
+    # for: the review never routes, nudges or quotes it onto another card.
+    from openexecutive.alerts.models import TEAM_RAISED_SOURCE
+
+    old = _insert(db, "Pilot pricing", hours_ago=30, topic_tags=["pilot"])
+    theirs = _insert(db, "Dana asks about pilot pricing", hours_ago=30, source=TEAM_RAISED_SOURCE, topic_tags=["pilot"])
+    assert [a.id for a in review.select_candidates(NOW, _settings(), db_path=db)] == [old]
+    related = review.gather_evidence(alert_store.get_alert(old, db_path=db), NOW, db_path=db)  # type: ignore[arg-type]
+    assert theirs not in {r.get("alert_id") for r in related.get("related_alerts") or []}
+    assert _apply(db, theirs, AlertVerdict(alert_id=theirs, verdict="stale"), evidence={}) == ""
+    assert alert_store.get_alert(theirs, db_path=db).routed_to_person_id is None  # type: ignore[union-attr]
