@@ -2397,12 +2397,11 @@ knowledge:
     reconcile) keep the empty result. drive_sync counts ParserBusy as failed
     for this tick and fetches the file again on the next, instead of
     recording it unreadable (which would drop its chunks until it changed).
-    Spawn failure (review): only FileNotFoundError / PermissionError (no
-    usable interpreter) falls back to parsing in-process, logged once, and
-    that parse runs outside the slot gate (it cannot be timed out, so a hung
-    one must not hold a slot). Any other OSError (ENOMEM, EAGAIN) is
-    WorkerStopped: memory pressure is exactly when an in-process parse would
-    hurt most.
+    Spawn failure: any OSError starting the child (no usable interpreter,
+    ENOMEM, EAGAIN) is WorkerStopped, and the slot is given back. A file
+    someone sent is never parsed in the API process. A page range of a PDF
+    (read_document's pages) is counted and sliced in the child too
+    (pdf_reader.page_range).
     POST /documents, GET /documents/{filename} and intake uploads turn any
     other IsolatedError from a Word/Excel parse into a 422 ("Could not read
     <name>: ..."), not a 500. Only IsolatedError.kind (the exception's type)
@@ -4414,7 +4413,10 @@ departments:
     with a warning naming only the field when invalid; _apply_workspace
     returns the mode and zone only — model_dump(exclude=ROLE_FIELDS) — since
     it becomes the `workspace` key of the POST /fixtures/{name}/load and
-    /fixtures/unload responses, which do not check the caller); the user snapshot
+    /fixtures/unload responses; every /fixtures and /clients write is the
+    principal's (chat.principal_writes, a router dependency), and the
+    factory reset writes the principal's People row back so the company
+    always keeps its owner); the user snapshot
     writes one (every field, so the role round-trips), and a load while the live state is the user's own (no fixture, no
     client active) takes the whole snapshot again, so an older backup is
     never reused — unload keeps `_user_backup`; an unload from a

@@ -81,9 +81,36 @@ def test_reset_empties_every_table_but_the_bookkeeping(db: Path, tmp_path: Path)
     assert not attached.exists()
     assert _rows(db, "brand_new_feature") == 0
     assert result["cleared"]["brand_new_feature"] == 1
-    assert _rows(db, "people") == 0
+    # Only the principal is written back; everyone else is gone.
+    assert _rows(db, "people") == 1
     assert _rows(db, "departments") == 0
     assert _rows(db, "app_migrations") >= 1
+
+
+def test_reset_keeps_the_principal_and_their_addresses(db: Path, tmp_path: Path) -> None:
+    owner_id = people_store.find_principal_person().id
+    people_store.upsert_person(
+        full_name="Pat Owner", role="CEO", is_principal=True, email="pat@example.com", person_id=owner_id,
+    )
+    people_store.add_person_email(owner_id, "pat.home@example.com")
+    people_store.upsert_person(full_name="Sam Teammate", email="sam@example.com")
+    _reset(tmp_path)
+    people_registry.invalidate()
+    people = people_store.list_people()
+    assert [p.full_name for p in people] == ["Pat Owner"]
+    owner = people[0]
+    assert owner.is_principal is True
+    assert owner.email == "pat@example.com"
+    assert owner.role == "CEO"
+    assert owner.email_aliases == ["pat.home@example.com"]
+
+
+def test_reset_with_no_principal_leaves_people_empty(db: Path, tmp_path: Path) -> None:
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute("DELETE FROM people")
+    people_registry.invalidate()
+    _reset(tmp_path)
+    assert _rows(db, "people") == 0
 
 
 def test_reset_keeps_the_tables_the_caller_names(db: Path, tmp_path: Path) -> None:

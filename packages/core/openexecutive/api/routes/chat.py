@@ -1053,6 +1053,19 @@ def _caller_is_principal_or_unclaimed(request: Request) -> bool:
         return False
 
 
+_READS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def principal_writes(request: Request) -> None:
+    """Router dependency for routes whose writes replace or wipe the whole
+    company (the company simulator, client slots): a reset, a load, a switch
+    and the backup are the principal's, as the workspace settings and the
+    People list are (``_caller_is_principal_or_unclaimed``). Reads stay open."""
+    if request.method in _READS or _caller_is_principal_or_unclaimed(request):
+        return
+    raise HTTPException(status_code=403, detail="Only the principal can change the company's saved data")
+
+
 async def _run_chat_turn(
     *,
     message: str,

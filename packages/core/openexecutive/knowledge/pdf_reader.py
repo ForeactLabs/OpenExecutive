@@ -187,6 +187,29 @@ def _is_thin(text: str, pages: int) -> bool:
 
 # ── The deployment's model (a document block, through any provider) ──────────
 
+def _page_range(data: bytes, start: int, end: int) -> list[Any]:
+    """``[page count, base64 of pages [start, end) as a PDF]``; the slice is
+    ``""`` when ``start`` is past the last page. Runs in a child process
+    (``page_range``), so its answer is JSON."""
+    from pypdf import PdfReader
+
+    total = len(PdfReader(io.BytesIO(data)).pages)
+    if start >= total:
+        return [total, ""]
+    part = slice_pdf(data, start, min(end, total))
+    return [total, base64.b64encode(part).decode("ascii")]
+
+
+async def page_range(data: bytes, start: int, end: int) -> tuple[int, bytes | None]:
+    """``(page count, pages [start, end) as a PDF)``, read in a child process
+    like every other parse of a file someone sent; None for the pages when
+    ``start`` is past the last page."""
+    total, part = await asyncio.to_thread(
+        run_isolated, _page_range, data, start, end, timeout=_TEXT_LAYER_TIMEOUT_S,
+    )
+    return int(total), (base64.b64decode(part) if part else None)
+
+
 def slice_pdf(data: bytes, start: int, end: int) -> bytes:
     """Pages [start, end) of ``data`` as a standalone PDF."""
     from pypdf import PdfReader, PdfWriter

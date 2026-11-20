@@ -16,7 +16,7 @@ dependencies = [
     "click>=8.1.0",
     "rich>=13.7.0",
     "pyyaml>=6.0.1",
-    "pypdf>=4.2.0",
+    "pypdf>=7.0.0",
     # Scanned / image-only PDFs have no text layer for pypdf to return.
     # knowledge/pdf_reader.py renders their pages (pypdfium2) and OCRs them
     # (RapidOCR on ONNX, models bundled in the wheel) on any provider, offline.
