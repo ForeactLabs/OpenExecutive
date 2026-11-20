@@ -443,3 +443,9 @@ def test_an_account_or_a_yes_no_a_step_sets_is_still_shown(monkeypatch) -> None:
 
 def test_a_person_given_by_something_other_than_a_number_shows_as_given() -> None:
     assert card_details.plain("message_person", {"person_id": "dana@x.com"})[0] == {"field": "To", "value": "dana@x.com"}
+
+
+def test_a_list_of_people_with_one_not_on_people_still_shows_everyone(monkeypatch) -> None:
+    monkeypatch.setattr(card_details, "_names", lambda value: "Annamarie Braden" if value == 4 else None)
+    shown = card_details.plain("create_calendar_event", {"title": "Sync", "attendee_person_ids": [4, 99]})
+    assert {"field": "With", "value": "Annamarie Braden, someone not on People"} in shown

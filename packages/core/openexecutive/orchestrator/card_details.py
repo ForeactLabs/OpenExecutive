@@ -488,8 +488,13 @@ def _own_ref(tool: str, norm: str, value: Any) -> tuple[str, str] | tuple[()] | 
         person = take_the_lead._target_person(tool, {target[0]: value})
         return ("To", (person.full_name or person.email or str(value)) if person is not None else str(value))
     if norm.endswith("person_ids"):
-        names = _names(value) if value not in (None, "", [], {}) else None
-        return ("With", names) if names else ()
+        ids = value if isinstance(value, list) else [value]
+        if not [i for i in ids if i not in (None, "")]:
+            return ()
+        # Each by name; one People doesn't have still counts, so the card
+        # shows everyone Approve reaches.
+        each = [_names(i) or ("someone not on People" if _record_number(i) else _text(i)) for i in ids]
+        return ("With", ", ".join(each))
     if norm.endswith("person_id"):
         if value in (None, "", 0):
             return ()
