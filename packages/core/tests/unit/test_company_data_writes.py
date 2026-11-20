@@ -3,6 +3,8 @@ company, so their writes are the principal's, as the workspace settings and
 the People list are. Reads stay open to the team."""
 from __future__ import annotations
 
+import shutil
+import sqlite3
 from pathlib import Path
 from typing import Any
 
@@ -151,3 +153,22 @@ def test_an_incidental_write_on_an_unclaimed_install_keeps_no_owner(client: Test
 def test_a_failed_write_keeps_no_owner(client: TestClient, people_db: Path) -> None:
     assert client.post("/fixtures/no-such-company/load", headers=TEAMMATE).status_code >= 400
     assert install_owner.get(people_db) is None
+
+
+def test_with_no_owner_kept_the_saved_copys_principal_can_switch_back(
+    client: TestClient, people_db: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A company loaded before an owner was ever kept: the principal of the
+    saved copy of the owner's own company can still switch back."""
+    _team()
+    copy = tmp_path / "backup" / "state.db"
+    copy.parent.mkdir()
+    shutil.copy(people_db, copy)
+    monkeypatch.setattr("openexecutive.cli.fixture_loader._user_backup_dir", lambda _s: copy.parent)
+    with sqlite3.connect(str(people_db)) as conn:
+        conn.execute("DELETE FROM people")
+    people_store.upsert_person(full_name="Fixture Boss", is_principal=True, email="boss@fixture.test")
+    people_registry.invalidate()
+    monkeypatch.setattr(install_owner, "away_from_own_company", lambda: True)
+    assert client.post("/fixtures/reset", headers=TEAMMATE).status_code == 403
+    assert client.post("/fixtures/reset", headers=OWNER).status_code == 200

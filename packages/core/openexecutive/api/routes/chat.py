@@ -1057,7 +1057,7 @@ def _caller_is_principal_or_unclaimed(request: Request) -> bool:
         if install_owner.away_from_own_company():
             # A simulator company or a client is live, with its own principal:
             # the install's owner still runs it and can switch back.
-            owner = install_owner.get()
+            owner = install_owner.get() or install_owner.from_own_company_copy()
             if owner is not None and who.email == owner:
                 return True
         return people_store.is_principal_or_self(_resolve_caller_person_id(request), None)

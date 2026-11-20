@@ -93,3 +93,26 @@ def away_from_own_company() -> bool:
     except Exception:
         logger.warning("install_owner: couldn't tell which company is live", exc_info=True)
         return True
+
+
+def from_own_company_copy() -> str | None:
+    """The principal's address in the copy of the owner's own company saved
+    before a simulator company or a client was loaded (``_user_backup/
+    state.db``), lowercased, or None. Used only while away with no owner
+    kept: an install that had a company loaded before the owner was first
+    kept still knows who to let switch back."""
+    try:
+        from openexecutive.cli.fixture_loader import _user_backup_dir
+        from openexecutive.config import get_settings
+
+        copy = _user_backup_dir(get_settings()) / "state.db"
+        if not copy.exists():
+            return None
+        with closing(sqlite3.connect(f"file:{copy}?mode=ro", uri=True)) as conn:
+            row = conn.execute(
+                "SELECT email FROM people WHERE is_principal = 1 AND email IS NOT NULL AND email != ''"
+            ).fetchone()
+        return str(row[0]).strip().lower() if row else None
+    except Exception:
+        logger.warning("install_owner: couldn't read the saved copy of the company", exc_info=True)
+        return None
