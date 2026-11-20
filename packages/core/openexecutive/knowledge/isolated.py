@@ -225,7 +225,7 @@ def _main() -> int:
     module, qualname, args, limit = pickle.loads(sys.stdin.buffer.read())
     # Native code can still write to stderr, which is a file on disk: no file
     # this process writes may pass the limit the caller set, by default twice
-    # the answer cap (SIGXFSZ ends it).
+    # the answer cap (a write past it fails with "File too large").
     try:
         import resource
 

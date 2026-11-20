@@ -415,22 +415,34 @@ async def test_a_page_range_is_read_in_a_child_process(monkeypatch) -> None:
     assert await pdf_reader.page_range(data, 5, 6) == (5, None)
 
 
-def test_the_file_limit_reaches_the_child(tmp_path) -> None:
-    """A page range is written to a file under the limit its caller sets in
-    the child, not the answer cap: too small a limit stops the write, and
-    page_range sets one that fits the file."""
+def _blank_pages(pages: int = 5) -> bytes:
     from pypdf import PdfWriter
 
     writer = PdfWriter()
-    for _ in range(5):
+    for _ in range(pages):
         writer.add_blank_page(width=200, height=200)
     buf = io.BytesIO()
     writer.write(buf)
-    data = buf.getvalue()
+    return buf.getvalue()
+
+
+def test_the_file_limit_reaches_the_child(tmp_path) -> None:
+    """The child writes the slice under the limit its caller sets: one
+    that fits the error reply but not the slice stops the write."""
+    data = _blank_pages(200)
     out = tmp_path / "part.pdf"
-    with pytest.raises(isolated.WorkerStopped):
-        isolated.run_isolated(pdf_reader._page_range, data, 0, 4, str(out), timeout=60, file_limit=64)
-    assert isolated.run_isolated(
-        pdf_reader._page_range, data, 0, 4, str(out), timeout=60, file_limit=len(data) * 2,
-    ) == 5
-    assert out.stat().st_size > 64
+    with pytest.raises(isolated.IsolatedError, match="File too large"):
+        isolated.run_isolated(pdf_reader._page_range, data, 0, 150, str(out), timeout=60, file_limit=2048)
+
+
+async def test_a_page_range_sets_a_limit_that_fits_the_file(monkeypatch) -> None:
+    """With the default limit far below the slice, page_range still reads
+    it: it sets its own limit from the file's size."""
+    from pypdf import PdfReader
+
+    data = _blank_pages()
+    monkeypatch.setattr(isolated, "_MAX_ANSWER_BYTES", 256)
+    total, part = await pdf_reader.page_range(data, 0, 4)
+    assert total == 5
+    assert part is not None and len(part) > 512
+    assert len(PdfReader(io.BytesIO(part)).pages) == 4
