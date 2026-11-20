@@ -298,7 +298,7 @@ def _reader_of(event: Any) -> str:
 
     return one_card.reader_for(
         routed, private=bool(event.private), raised_by=event.raised_by_person_id,
-        team_raised=event.source == TEAM_RAISED_SOURCE,
+        team_raised=event.source == TEAM_RAISED_SOURCE, department=event.department or event.channel,
     )
 
 

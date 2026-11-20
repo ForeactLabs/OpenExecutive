@@ -143,12 +143,19 @@ def _off_limits(alert: Alert) -> bool:
     evidence for another and as a merge target: a source its own code keeps
     (``TTL_EXEMPT_SOURCES``), or a card that is one person's alone, the
     principal's (``is_private_alert``) or its own person's
-    (``PERSONAL_SOURCES``, an email watch's sender and subject). The review
-    routes, nudges and writes audit rows for the team, so it never touches
-    those: their person handles them."""
-    from openexecutive.alerts.models import PERSONAL_SOURCES, is_private_alert
+    (``PERSONAL_SOURCES``, an email watch's sender and subject), or the ask
+    a teammate raised from their own chat (``TEAM_RAISED_SOURCE``, shown
+    only to them and whom it is for). The review routes, nudges and writes
+    audit rows for the team, so it never touches those: their person
+    handles them."""
+    from openexecutive.alerts.models import PERSONAL_SOURCES, TEAM_RAISED_SOURCE, is_private_alert
 
-    return alert.source in TTL_EXEMPT_SOURCES or alert.source in PERSONAL_SOURCES or is_private_alert(alert)
+    return (
+        alert.source in TTL_EXEMPT_SOURCES
+        or alert.source in PERSONAL_SOURCES
+        or alert.source == TEAM_RAISED_SOURCE
+        or is_private_alert(alert)
+    )
 
 
 # --------------------------------------------------------------------------- #

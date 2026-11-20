@@ -333,12 +333,18 @@ def _reader(routed_to: Any, tags: list[str], *, raised_by: Any = None, team_rais
     principal's alone; and, for a card a team member raised, who raised it,
     as they read it too (``models.visible_alert``), so it joins only another
     of theirs: never a card the rest of the team sees, nor one another
-    teammate raised. Cards for different readers never join."""
+    teammate raised. Unrouted, its departments are whom it is for
+    (``models._team_card_reader``), so they are part of the key too. Cards
+    for different readers never join."""
     from openexecutive.alerts.models import PRIVATE_ALERT_TAG
 
-    who = str(routed_to) if isinstance(routed_to, int) and not isinstance(routed_to, bool) else "team"
-    reader = f"{who}{':private' if PRIVATE_ALERT_TAG in tags else ''}"
-    return f"{reader}:raised:{raised_by}" if team_raised else reader
+    routed = isinstance(routed_to, int) and not isinstance(routed_to, bool)
+    reader = f"{routed_to if routed else 'team'}{':private' if PRIVATE_ALERT_TAG in tags else ''}"
+    if not team_raised:
+        return reader
+    reader = f"{reader}:raised:{raised_by}"
+    departments = sorted({t.split(":", 1)[1] for t in tags if t.startswith("department:")})
+    return f"{reader}:departments:{','.join(departments)}" if departments and not routed else reader
 
 
 def _card_reader(row: Any, tags: list[str]) -> str:
@@ -350,14 +356,18 @@ def _card_reader(row: Any, tags: list[str]) -> str:
     )
 
 
-def reader_for(person_id: int | None, *, private: bool, raised_by: int | None = None, team_raised: bool = False) -> str:
+def reader_for(
+    person_id: int | None, *, private: bool, raised_by: int | None = None, team_raised: bool = False,
+    department: str | None = None,
+) -> str:
     """The reader key of a card for ``person_id`` (None: the team), the
-    same as the card's own once it is written (``_card_reader``)."""
+    same as the card's own once it is written (``_card_reader``):
+    ``department`` is the routing hint the pipeline turns into its tag."""
     from openexecutive.alerts.models import PRIVATE_ALERT_TAG
+    from openexecutive.alerts.pipeline import _with_department_tag
 
-    return _reader(
-        person_id, [PRIVATE_ALERT_TAG] if private else [], raised_by=raised_by, team_raised=team_raised,
-    )
+    tags = _with_department_tag([PRIVATE_ALERT_TAG] if private else [], department)
+    return _reader(person_id, tags, raised_by=raised_by, team_raised=team_raised)
 
 
 # --------------------------------------------------------------------------- #
@@ -434,7 +444,11 @@ def _join(conn: sqlite3.Connection, card: _Card, into: _Card) -> None:
         "last_seen_at = ?, status = CASE WHEN status = 'read' THEN 'unread' ELSE status END WHERE id = ?",
         (body, severity, _now(), into.id),
     )
-    if not into.approve and card.needs in ("answer", "choice"):
+    # Two cards from one turn are often two asks, not a newer version of
+    # one: there the card that stays keeps its own question.
+    same_turn = bool(card.turn) and card.turn == into.turn
+    asks = str(survivor["needs"] or "") in ("answer", "choice")
+    if not into.approve and card.needs in ("answer", "choice") and not (same_turn and asks):
         # The joining card is newer and asks something: the matter as it
         # stands now. Its title, plan and question lead, and what came
         # before stays above "Then:" (a contact's new times sat under their

@@ -48,13 +48,13 @@ def mail_turn() -> Iterator[Session]:
 
 def _note(
     headline: str, *, reader: int | None = OWNER, private: bool = False, source: str = "email",
-    raised: bool = True, joins: int | None = None, severity: str = "medium", **kw: Any,
+    raised: bool = True, joins: int | None = None, severity: str = "medium", tags: tuple[str, ...] = (), **kw: Any,
 ) -> int:
     with one_card.about(raised=raised, joins=joins):
         alert_id = alerts_store.insert_alert(
             source=source, external_id=f"{headline}-{id(kw)}", severity=severity, headline=headline,
             body=kw.pop("body", headline), routed_to_person_id=reader,
-            topic_tags=[PRIVATE_ALERT_TAG] if private else [], **kw,
+            topic_tags=[*([PRIVATE_ALERT_TAG] if private else []), *tags], **kw,
         )
     assert alert_id is not None
     return alert_id
@@ -495,3 +495,50 @@ def test_a_team_member_is_asked_about_their_own_open_card() -> None:
         assert one_card.open_cards_from("person:7", turn="turn-2", reader=owners) == []
     finally:
         current_session.reset(token)
+
+
+def test_a_team_members_cards_for_two_departments_stay_apart() -> None:
+    """Unrouted, a teammate's card is for its department's people: joined
+    into another department's card, its ask would reach neither."""
+    from openexecutive.alerts.models import TEAM_RAISED_SOURCE
+
+    with set_turn(session_id="s", turn_id="turn-1"):
+        finance = _note("Dana asks finance", reader=None, source=TEAM_RAISED_SOURCE, owner_person_id=7,
+                        tags=("department:finance",))
+        sales = _note("Dana asks sales", reader=None, source=TEAM_RAISED_SOURCE, owner_person_id=7,
+                      tags=("department:sales",))
+        again = _note("Dana asks finance again", reader=None, source=TEAM_RAISED_SOURCE, owner_person_id=7,
+                      tags=("department:finance",))
+    assert _get(sales).superseded_by_alert_id is None and _get(sales).status == "unread"
+    assert _get(again).superseded_by_alert_id == finance
+
+
+def test_two_questions_from_one_turn_keep_the_first_ones_question() -> None:
+    """Two asks in one turn are two questions, not a newer version of one:
+    the card that stays keeps its own question and choices."""
+    with set_turn(session_id="s", turn_id="turn-1"):
+        budget = _note("Approve the Q1 budget?", needs="choice", question="Approve it?", choices=["Yes", "No"])
+        vendor = _note("Which vendor?", needs="choice", question="A or B?", choices=["A", "B"])
+    kept = _get(budget)
+    assert _get(vendor).superseded_by_alert_id == budget
+    assert kept.headline == "Approve the Q1 budget?" and kept.question == "Approve it?"
+    assert kept.choices == ["Yes", "No"] and "Which vendor?" in kept.body
+
+
+def test_create_alert_asks_with_the_key_a_teammates_card_is_written_with() -> None:
+    """The key ``create_alert`` looks for open cards with (``_reader_of``)
+    is the one the card it raises is stored under, department and all."""
+    import sqlite3
+
+    from openexecutive.alerts.models import TEAM_RAISED_SOURCE, AlertEvent
+    from openexecutive.orchestrator.alert_tools import _reader_of
+
+    with set_turn(session_id="s", turn_id="turn-1"):
+        card = _note("Dana asks finance", reader=None, source=TEAM_RAISED_SOURCE, owner_person_id=7,
+                     tags=("department:finance",))
+    with sqlite3.connect(str(episodic.DB_PATH)) as conn:
+        stored = conn.execute("SELECT reader FROM card_topics WHERE alert_id = ?", (card,)).fetchone()[0]
+    event = AlertEvent(source=TEAM_RAISED_SOURCE, external_id="x", raised_by_person_id=7, channel="department:finance")
+    assert _reader_of(event) == stored
+    sams = AlertEvent(source=TEAM_RAISED_SOURCE, external_id="x", raised_by_person_id=8, channel="department:finance")
+    assert _reader_of(sams) != stored
