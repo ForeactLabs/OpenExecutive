@@ -2834,7 +2834,7 @@ def hold(
         # later still finds the file it attaches. Only when the card is
         # theirs: whoever approves someone else's work never opens that
         # person's documents with the tap.
-        **({"documents_of": seen} if (seen := _documents_of()) is not None and seen == approver else {}),
+        **documents_for(approver),
         # Who asked, the owner included, for the card's "You asked" /
         # "Olivia asked" (``card_details.top``); a step no one asked for has
         # none and reads "I started this".
@@ -3415,10 +3415,10 @@ async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bo
 
     card_handler = extensions.card_handler(tool) if payload.get("held") is True and not payload.get("mcp") else None
     own_ok = own_card and card_handler is not None
-    # The step reads the documents of the person it was for (the viewer on
-    # the turn that held it, else who asked), never nobody's: an approved
-    # email attaching their own document must find it.
-    whose = payload.get("documents_of", payload.get("requested_by_person_id"))
+    # The step reads the documents of the person whose own card it is (the
+    # viewer on the turn that held it, ``documents_for``), else nobody's: an
+    # approved email attaching their own document must find it.
+    whose = payload.get("documents_of")
     token = current_session.set(Session(
         unattended=True, documents_viewer=viewer_for_person(whose if isinstance(whose, int) else None),
     ))
@@ -3497,15 +3497,18 @@ async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bo
     return _as_text(result)
 
 
-def _documents_of() -> int | None:
-    """The person whose documents this turn reads (``current_viewer``), or
-    None for nobody's. Never raises."""
+def documents_for(approver: int | None) -> dict[str, Any]:
+    """What a held step's card records about whose documents it may read
+    when approved (``carry_out``): this turn's viewer, only when the card
+    goes on that same person's list. Whoever approves someone else's work
+    never opens that person's documents with the tap. Never raises."""
     try:
         from openexecutive.orchestrator.artifact_records import current_viewer
 
-        return current_viewer().person_id
+        seen = current_viewer().person_id
     except Exception:
-        return None
+        return {}
+    return {"documents_of": seen} if seen is not None and seen == approver else {}
 
 
 def _as_text(result: Any) -> str:

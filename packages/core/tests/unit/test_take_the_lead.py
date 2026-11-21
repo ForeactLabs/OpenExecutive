@@ -1362,6 +1362,9 @@ def test_a_held_step_runs_with_the_documents_of_its_turn(owner: Any, monkeypatch
     assert "documents_of" not in theirs
     asyncio.run(ttl.carry_out(theirs, by_principal=True))
     assert seen[-1] == artifact_records.NOBODY
+    # Nor does naming Sam as the asker on a card someone else approves.
+    asyncio.run(ttl.carry_out({**theirs, "requested_by_person_id": sam}, by_principal=True))
+    assert seen[-1] == artifact_records.NOBODY
 
 
 def test_edit_then_do_it_like_this(client: TestClient, owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:

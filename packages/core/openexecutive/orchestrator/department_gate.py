@@ -169,6 +169,7 @@ def hold(
     payload = {
         "tool": tool, "input": tool_input, "mcp": mcp, "summary": summary,
         "requested_by_person_id": person.id, "requested_by": who,
+        **take_the_lead.documents_for(verdict.approver_person_id),
         "department": verdict.department, "level": verdict.level, "reason": verdict.reason,
         # A card for several calls can't be edited field by field.
         "fields": [] if more else take_the_lead.editable_fields(tool, tool_input, mcp=mcp),
