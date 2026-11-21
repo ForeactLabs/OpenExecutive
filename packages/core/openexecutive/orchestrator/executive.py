@@ -2866,13 +2866,23 @@ class Executive:
                     # after the next gets the break as usual.
                     run_on = bool(full_text)
                     continue
-            if final_msg.stop_reason == "pause_turn" and response_content and pauses < MAX_PAUSES:
+            if (
+                final_msg.stop_reason == "pause_turn" and response_content and pauses < MAX_PAUSES
+                and not repeating and not handing_over
+            ):
                 # A long web search paused the round (the API's pause_turn):
-                # sent back as it is, it carries on where it stopped. Not a
-                # step of its own; at most MAX_PAUSES in a turn.
+                # sent back as it is, it carries on where it stopped. It
+                # counts as a step; at most MAX_PAUSES in a turn. Past the
+                # turn's searches, it is told to write up instead.
                 pauses += 1
                 logger.info("round %d paused by a long web search; carrying on (%d)", iteration, pauses)
                 current_messages.append({"role": "assistant", "content": response_content})
+                if web_search_tool is not None and web_searches.spent(searches_used):
+                    current_messages.append(
+                        {"role": "user", "content": [{"type": "text", "text": web_searches.SEARCHES_OVER_NOTE}]},
+                    )
+                    repeating = True
+                    write_up_empty = web_searches.SEARCHES_EMPTY_REPLY
                 run_on = bool(full_text)
                 continue
             if final_msg.stop_reason != "tool_use" and not cut_off:

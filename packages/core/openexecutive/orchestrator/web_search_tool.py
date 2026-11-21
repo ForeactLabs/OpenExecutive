@@ -81,8 +81,10 @@ def turn_search_tool() -> dict[str, Any] | None:
 
 # Added to a round's results once the turn has run its searches. Its other
 # steps still run; a search after it makes the next round the write-up
-# (SEARCHES_OVER_NOTE), so a turn runs at most about three budgets' worth
-# even when it ignores this.
+# (SEARCHES_OVER_NOTE), as does a round a long search paused past it. The
+# tool itself can't shrink without missing the cache, so the write-up round
+# could still search: a turn that ignores every note runs at most about four
+# budgets; one that heeds them stops at the budget.
 SEARCHES_SPENT_NOTE = (
     "This turn has used its web searches. Don't search again: finish the answer from what the searches"
     " found and what the company knows, and say plainly what is still unconfirmed."
