@@ -2599,8 +2599,9 @@ class Executive:
         # (_without_notes).
         rounds: list[tuple[str, bool]] = []
         # Web searches this turn has run: one budget for the whole turn
-        # (web_search_tool.turn_search_tool).
+        # (web_search_tool.turn_search_tool), said once when it is spent.
         searches_used = 0
+        spent_said = False
         # Set by a round cut off mid-text: the next round's text carries it
         # on, so that round alone gets no paragraph break before its text.
         run_on = False
@@ -2691,7 +2692,7 @@ class Executive:
                 *client_tools[:-1],
                 {**client_tools[-1], "cache_control": {"type": "ephemeral", "ttl": "1h"}},
             ]
-            web_search_tool = web_searches.turn_search_tool(searches_used)
+            web_search_tool = web_searches.turn_search_tool()
             if web_search_tool is not None:
                 tools_with_cache.append(web_search_tool)
             stream_model = model or self._settings.default_model
@@ -4128,6 +4129,9 @@ class Executive:
                 tool_results.append({"type": "text", "text": STEPS_NOTE})
                 repeating = True
                 write_up_empty = STEPS_EMPTY_REPLY
+            if not spent_said and web_search_tool is not None and web_searches.spent(searches_used):
+                tool_results.append({"type": "text", "text": web_searches.SEARCHES_SPENT_NOTE})
+                spent_said = True
             if sees:
                 # Only the newest screenshots ride along: older ones would be
                 # sent again every round.

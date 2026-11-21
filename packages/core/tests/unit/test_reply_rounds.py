@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
+from openexecutive.orchestrator import web_search_tool
 from openexecutive.orchestrator.executive import Executive, _round_separator
 from openexecutive.orchestrator.schedule_tools import set_session
 from openexecutive.orchestrator.session import Session
@@ -210,11 +211,12 @@ def test_an_answer_before_a_web_search_in_the_same_round_stays() -> None:
 
 
 def test_the_turn_shares_one_search_budget_across_its_rounds(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Six facts to look up: the first round's searches count against the
-    # turn's budget, the next round gets what is left, and the turn ends on
-    # its reply with no extra "search again" round.
+    # Six facts to look up: the rounds share the turn's budget, the tools
+    # stay the same every round (the cached prompt starts with them), the
+    # round that spends it is told to finish, and the turn ends on its reply
+    # with no extra "search again" round.
     monkeypatch.setenv("ENABLE_WEB_SEARCH", "true")
-    monkeypatch.setenv("WEB_SEARCH_TURN_BUDGET", "5")
+    monkeypatch.setenv("WEB_SEARCH_TURN_BUDGET", "3")
     provider = StreamingProvider([
         FinalMsg([*_search("s1", "usps"), *_search("s2", "ups"), *_search("s3", "fedex"),
                   ToolUseBlock("tu1", "no_such_tool", {})], "tool_use"),
@@ -242,7 +244,10 @@ def test_the_turn_shares_one_search_budget_across_its_rounds(monkeypatch: pytest
     uses = [
         next(t["max_uses"] for t in call["tools"] if t.get("name") == "web_search") for call in provider.calls
     ]
-    assert uses == [5, 2]
+    assert uses == [3, 3]
+    assert provider.calls[0]["tools"] == provider.calls[1]["tools"]
+    told = [b for b in provider.calls[1]["messages"][-1]["content"] if b.get("type") == "text"]
+    assert [b["text"] for b in told] == [web_search_tool.SEARCHES_SPENT_NOTE]
     assert "".join(text).endswith("All three dates and the rate.")
 
 

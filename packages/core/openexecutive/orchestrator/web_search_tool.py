@@ -67,14 +67,27 @@ def searches_run(blocks: list[dict[str, Any]]) -> int:
     )
 
 
-def turn_search_tool(used: int) -> dict[str, Any] | None:
-    """The web_search tool for the next round of a chat turn that has run
-    ``used`` searches: one budget for the whole turn
-    (``WEB_SEARCH_TURN_BUDGET``), so a round may use all that is left of it
-    and an ask with many facts is looked up to the end, not cut off after a
-    round's first few searches. None when it is spent (or search is off)."""
-    left = get_settings().web_search_turn_budget - used
-    return build_web_search_tool(max_uses=left) if left > 0 else None
+def turn_search_tool() -> dict[str, Any] | None:
+    """The web_search tool for every round of a chat turn: one budget for
+    the whole turn (``WEB_SEARCH_TURN_BUDGET``), so an ask with many facts is
+    looked up to the end, not cut off after a round's first few searches.
+    The same tool every round, since the tools lead the cached prompt and a
+    changed ``max_uses`` would miss the cache on every later round; once the
+    turn has spent its budget the round's results say so instead
+    (``SEARCHES_SPENT_NOTE``). None when search is off."""
+    return build_web_search_tool(max_uses=get_settings().web_search_turn_budget)
+
+
+# Added to a round's results once the turn has run its searches.
+SEARCHES_SPENT_NOTE = (
+    "This turn has used its web searches. Don't search again: finish the answer from what the searches"
+    " found and what the company knows, and say plainly what is still unconfirmed."
+)
+
+
+def spent(used: int) -> bool:
+    """Whether a turn that has run ``used`` searches has spent its budget."""
+    return used >= get_settings().web_search_turn_budget
 
 
 def searched(blocks: list[dict[str, Any]]) -> list[tuple[str, str]]:

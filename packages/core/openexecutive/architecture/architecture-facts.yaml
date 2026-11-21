@@ -952,10 +952,13 @@ routing:
     assistant turn on the next iteration so continuity is preserved. The
     tool is appended after the sorted client-tool list so it never
     receives the cache_control marker. A chat turn has one search budget,
-    `WEB_SEARCH_TURN_BUDGET` (default 12), shared by all its steps: each
-    step's tool gets `max_uses` = what is left, and none is offered once it
-    is spent (web_search_tool.turn_search_tool), so an ask with many facts
-    is searched to the end. A standing web-search watch's poll is capped at
+    `WEB_SEARCH_TURN_BUDGET` (default 12), shared by all its steps. The
+    tool is the same every step (`max_uses` = the budget,
+    web_search_tool.turn_search_tool), since the tools lead the cached
+    prefix and a changing `max_uses` missed the cache on every later round;
+    once the turn has run that many searches the round's results carry
+    SEARCHES_SPENT_NOTE (finish from what was found). So an ask with many
+    facts is searched to the end. A standing web-search watch's poll is capped at
     `WEB_SEARCH_MAX_USES` per call, and the research fan-out at
     `RESEARCH_WEB_SEARCH_MAX_USES` per specialist — every search is billed,
     so these bound search spend.

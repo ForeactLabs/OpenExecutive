@@ -350,7 +350,7 @@ def test_a_web_search_is_a_look_for_the_after_reply_checks() -> None:
 def test_a_chat_turn_has_one_search_budget(monkeypatch) -> None:
     """A research ask with many facts is searched to the end: the turn's
     rounds share WEB_SEARCH_TURN_BUDGET, each round may use all that is
-    left, and none is offered once it is spent."""
+    left, and the round that spends it is told to finish."""
     from openexecutive.orchestrator import web_search_tool
 
     _reset_settings_cache()
@@ -358,10 +358,9 @@ def test_a_chat_turn_has_one_search_budget(monkeypatch) -> None:
     monkeypatch.setenv("WEB_SEARCH_TURN_BUDGET", "12")
     monkeypatch.setenv("WEB_SEARCH_MAX_USES", "2")
     try:
-        first = web_search_tool.turn_search_tool(0)
-        assert first is not None and first["max_uses"] == 12
-        later = web_search_tool.turn_search_tool(9)
-        assert later is not None and later["max_uses"] == 3
-        assert web_search_tool.turn_search_tool(12) is None
+        # The same tool every round (the tools lead the cached prompt).
+        assert web_search_tool.turn_search_tool() == web_search_tool.turn_search_tool()
+        assert web_search_tool.turn_search_tool()["max_uses"] == 12
+        assert not web_search_tool.spent(11) and web_search_tool.spent(12)
     finally:
         _reset_settings_cache()
