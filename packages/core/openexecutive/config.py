@@ -981,8 +981,9 @@ class Settings(BaseSettings):
     # for research (e.g. "skim Ford IR", "check Lucid news"). Set
     # ENABLE_WEB_SEARCH=false to opt out and avoid per-search charges.
     enable_web_search: bool = Field(True, alias="ENABLE_WEB_SEARCH")
-    # Cap on web searches per model request outside a chat turn (a standing
-    # web-search watch's poll). Each search is billed. Raise via
+    # Cap on web searches per model request outside a chat turn: a standing
+    # web-search watch's poll, a workflow's chat tools and its action steps
+    # (build_web_search_tool's default). Each search is billed. Raise via
     # WEB_SEARCH_MAX_USES for deeper digs.
     web_search_max_uses: int = Field(2, alias="WEB_SEARCH_MAX_USES")
     # Web searches one chat turn may run, across all its steps: an ask with

@@ -74,14 +74,25 @@ def turn_search_tool() -> dict[str, Any] | None:
     The same tool every round, since the tools lead the cached prompt and a
     changed ``max_uses`` would miss the cache on every later round; once the
     turn has spent its budget the round's results say so instead
-    (``SEARCHES_SPENT_NOTE``). None when search is off."""
+    (``SEARCHES_SPENT_NOTE``), and a search after that ends the turn on its
+    write-up (``SEARCHES_OVER_NOTE``). None when search is off."""
     return build_web_search_tool(max_uses=get_settings().web_search_turn_budget)
 
 
-# Added to a round's results once the turn has run its searches.
+# Added to a round's results once the turn has run its searches. Its other
+# steps still run; a search after it makes the next round the write-up
+# (SEARCHES_OVER_NOTE), so a turn runs at most about three budgets' worth
+# even when it ignores this.
 SEARCHES_SPENT_NOTE = (
     "This turn has used its web searches. Don't search again: finish the answer from what the searches"
     " found and what the company knows, and say plainly what is still unconfirmed."
+)
+SEARCHES_OVER_NOTE = (
+    "This turn has run past its web searches. Write the answer now from what you have, with no more"
+    " searches or other steps, and say plainly what is still unconfirmed."
+)
+SEARCHES_EMPTY_REPLY = (
+    "I've used all the web searches I get for one message. Ask me to carry on and I'll look up the rest."
 )
 
 

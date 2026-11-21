@@ -251,6 +251,42 @@ def test_the_turn_shares_one_search_budget_across_its_rounds(monkeypatch: pytest
     assert "".join(text).endswith("All three dates and the rate.")
 
 
+def test_a_turn_that_searches_past_its_budget_writes_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Told once that the searches are spent, it searched again: the next
+    # round is the write-up, and a tool it asks for there never runs.
+    monkeypatch.setenv("ENABLE_WEB_SEARCH", "true")
+    monkeypatch.setenv("WEB_SEARCH_TURN_BUDGET", "2")
+    provider = StreamingProvider([
+        FinalMsg([*_search("s1", "a"), *_search("s2", "b"), ToolUseBlock("tu1", "no_such_tool", {})], "tool_use"),
+        FinalMsg([*_search("s3", "c"), ToolUseBlock("tu2", "no_such_tool", {})], "tool_use"),
+        FinalMsg([ToolUseBlock("tu3", "no_such_tool", {})], "tool_use"),
+        FinalMsg([TextBlock("never asked for")], "end_turn"),
+    ])
+    text: list[str] = []
+
+    async def go() -> None:
+        with (
+            patch("openexecutive.orchestrator.executive.get_provider", return_value=provider),
+            patch("openexecutive.orchestrator.executive.audit_log", lambda *_a, **_k: None),
+            set_session(Session()),
+        ):
+            async for item in Executive()._stream_agent_loop(
+                system_blocks=[], messages=[{"role": "user", "content": "x"}],
+                model="claude-test", workspace_mode="team", principal_role_tag="", turn_id="t-1",
+            ):
+                if isinstance(item, str) and item != Executive._THINKING:
+                    text.append(item)
+
+    asyncio.run(go())
+    assert len(provider.calls) == 3
+    notes = [
+        b["text"] for m in provider.calls[-1]["messages"] if m["role"] == "user" and isinstance(m["content"], list)
+        for b in m["content"] if b.get("type") == "text"
+    ]
+    assert notes[1:] == [web_search_tool.SEARCHES_SPENT_NOTE, web_search_tool.SEARCHES_OVER_NOTE]
+    assert "".join(text).endswith(web_search_tool.SEARCHES_EMPTY_REPLY)
+
+
 def test_one_round_is_untouched_and_a_silent_round_adds_nothing() -> None:
     assert _reply([FinalMsg([TextBlock("ITEM-1 has 12.")], "end_turn")]) == "ITEM-1 has 12."
     # A round that only calls a tool writes nothing, so no break before the answer.

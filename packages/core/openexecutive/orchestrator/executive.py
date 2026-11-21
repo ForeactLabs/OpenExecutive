@@ -2599,9 +2599,10 @@ class Executive:
         # (_without_notes).
         rounds: list[tuple[str, bool]] = []
         # Web searches this turn has run: one budget for the whole turn
-        # (web_search_tool.turn_search_tool), said once when it is spent.
+        # (web_search_tool.turn_search_tool); spent_at is the count when the
+        # turn was told it had spent it.
         searches_used = 0
-        spent_said = False
+        spent_at: int | None = None
         # Set by a round cut off mid-text: the next round's text carries it
         # on, so that round alone gets no paragraph break before its text.
         run_on = False
@@ -4129,9 +4130,19 @@ class Executive:
                 tool_results.append({"type": "text", "text": STEPS_NOTE})
                 repeating = True
                 write_up_empty = STEPS_EMPTY_REPLY
-            if not spent_said and web_search_tool is not None and web_searches.spent(searches_used):
-                tool_results.append({"type": "text", "text": web_searches.SEARCHES_SPENT_NOTE})
-                spent_said = True
+            if web_search_tool is not None and web_searches.spent(searches_used) and not repeating:
+                if spent_at is None:
+                    # Spent: told once, and its other steps still run.
+                    tool_results.append({"type": "text", "text": web_searches.SEARCHES_SPENT_NOTE})
+                    spent_at = searches_used
+                elif searches_used > spent_at and not handing_over:
+                    # Searched again after being told: the next round writes
+                    # up with no more calls, so a turn's searches stay bounded
+                    # (the tool can't shrink without missing the cache).
+                    logger.info("round %d: searched past the turn's budget; writing up", iteration)
+                    tool_results.append({"type": "text", "text": web_searches.SEARCHES_OVER_NOTE})
+                    repeating = True
+                    write_up_empty = web_searches.SEARCHES_EMPTY_REPLY
             if sees:
                 # Only the newest screenshots ride along: older ones would be
                 # sent again every round.

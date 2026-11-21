@@ -350,7 +350,8 @@ def test_a_web_search_is_a_look_for_the_after_reply_checks() -> None:
 def test_a_chat_turn_has_one_search_budget(monkeypatch) -> None:
     """A research ask with many facts is searched to the end: the turn's
     rounds share WEB_SEARCH_TURN_BUDGET, each round may use all that is
-    left, and the round that spends it is told to finish."""
+    left, the round that spends it is told to finish, and a search after
+    that makes the next round the write-up."""
     from openexecutive.orchestrator import web_search_tool
 
     _reset_settings_cache()

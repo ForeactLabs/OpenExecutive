@@ -957,8 +957,10 @@ routing:
     web_search_tool.turn_search_tool), since the tools lead the cached
     prefix and a changing `max_uses` missed the cache on every later round;
     once the turn has run that many searches the round's results carry
-    SEARCHES_SPENT_NOTE (finish from what was found). So an ask with many
-    facts is searched to the end. A standing web-search watch's poll is capped at
+    SEARCHES_SPENT_NOTE (finish from what was found), and a search after
+    that makes the next round the write-up (SEARCHES_OVER_NOTE, no more
+    calls), so a turn runs at most about three budgets even if it ignores
+    the note. So an ask with many facts is searched to the end. A standing web-search watch's poll is capped at
     `WEB_SEARCH_MAX_USES` per call, and the research fan-out at
     `RESEARCH_WEB_SEARCH_MAX_USES` per specialist — every search is billed,
     so these bound search spend.
