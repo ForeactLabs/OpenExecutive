@@ -1327,8 +1327,10 @@ def test_the_tick_is_kept_when_the_step_fails(client: TestClient, owner: Any, mo
 
 
 def test_a_held_step_runs_with_the_documents_of_its_turn(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The card records whose documents its turn read, and the approved step
-    reads the same person's, so an email attaching their document finds it."""
+    """The card records whose documents its turn read when the card is
+    theirs, and the approved step reads the same person's, so an email
+    attaching their document finds it. Someone else's card never carries
+    them: the step then reads nobody's."""
     from openexecutive.orchestrator import artifact_records
     from openexecutive.orchestrator.executive import _ALL_SKILL_HANDLERS
 
@@ -1340,19 +1342,26 @@ def test_a_held_step_runs_with_the_documents_of_its_turn(owner: Any, monkeypatch
         return json.dumps({"status": "sent"})
 
     monkeypatch.setitem(_ALL_SKILL_HANDLERS, "message_person", handler)
-    with artifact_records.pinned_viewer(artifact_records.viewer_for_person(sam)):
-        decision_id = ttl.hold("message_person", {"person_id": sam, "text": "Thursday?"},
-                               ttl.Hit("level", "it waits"), source="reflection", mcp=False)
-    instance = ledger.get_decision_instance(decision_id)
-    assert instance is not None
-    payload = json.loads(instance.proposed_payload_json)
-    assert payload["documents_of"] == sam
-    asyncio.run(ttl.carry_out(payload, by_principal=True))
-    assert seen[0].person_id == sam
-    # A step held with no one's documents still reads nobody's.
-    seen.clear()
-    asyncio.run(ttl.carry_out({k: v for k, v in payload.items() if k != "documents_of"}, by_principal=True))
-    assert seen[0] == artifact_records.NOBODY
+
+    def held_as(viewer: Any, text: str) -> dict[str, Any]:
+        with artifact_records.pinned_viewer(viewer):
+            decision_id = ttl.hold("message_person", {"person_id": sam, "text": text},
+                                   ttl.Hit("level", "it waits"), source="reflection", mcp=False)
+        instance = ledger.get_decision_instance(decision_id)
+        assert instance is not None
+        return dict(json.loads(instance.proposed_payload_json))
+
+    principal = artifact_records.principal_viewer()
+    mine = held_as(principal, "Thursday?")
+    assert mine["documents_of"] == principal.person_id
+    asyncio.run(ttl.carry_out(mine, by_principal=True))
+    assert seen[-1] == principal
+    # Sam's work whose card lands on the owner's list: the tap doesn't open
+    # Sam's documents.
+    theirs = held_as(artifact_records.viewer_for_person(sam), "Friday?")
+    assert "documents_of" not in theirs
+    asyncio.run(ttl.carry_out(theirs, by_principal=True))
+    assert seen[-1] == artifact_records.NOBODY
 
 
 def test_edit_then_do_it_like_this(client: TestClient, owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:

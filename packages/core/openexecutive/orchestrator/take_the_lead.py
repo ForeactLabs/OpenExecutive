@@ -2831,8 +2831,10 @@ def hold(
         **({"requested_by_person_id": asker.id, "requested_by": asker.full_name} if asker is not None else {}),
         # Whose documents the step reads when it runs (``carry_out``): the
         # same person's as on the turn that held it, so an email approved
-        # later still finds the file it attaches.
-        **({"documents_of": seen} if (seen := _documents_of()) is not None else {}),
+        # later still finds the file it attaches. Only when the card is
+        # theirs: whoever approves someone else's work never opens that
+        # person's documents with the tap.
+        **({"documents_of": seen} if (seen := _documents_of()) is not None and seen == approver else {}),
         # Who asked, the owner included, for the card's "You asked" /
         # "Olivia asked" (``card_details.top``); a step no one asked for has
         # none and reads "I started this".

@@ -763,7 +763,7 @@ def _keep_allowed(
             str(grant.get("key")), str(grant.get("label") or ""), example=changed or None,
             created_by=f"person:{resolver}" if resolver is not None else "principal", decision_id=decision_id,
         )
-    except take_the_lead.RuleError:
+    except Exception:
         # Only the learning failed (the list filled up since the check
         # before the step). Say so in the log rather than fail the card.
         logger.warning("decisions/approve: the next-time tick on card %d couldn't be saved", decision_id)
