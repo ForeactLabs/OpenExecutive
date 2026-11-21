@@ -1326,6 +1326,42 @@ def test_the_tick_is_kept_when_the_step_fails(client: TestClient, owner: Any, mo
     assert learned["label"] == "Message Sam Teammate"
 
 
+def test_the_tick_is_kept_when_the_step_raises(client: TestClient, owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """However the one call ended, a crash included, the tick stays."""
+    async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bool = False) -> str:
+        raise RuntimeError("the connection dropped")
+
+    monkeypatch.setattr(ttl, "carry_out", carry_out)
+    decision_id, _ = _training_card(owner)
+    response = client.post(f"/decisions/{decision_id}/approve", json={"edits": {"allow": True}})
+    assert response.status_code == 502, response.text
+    [learned] = client.get("/take-the-lead").json()["learned"]
+    assert learned["label"] == "Message Sam Teammate"
+
+
+def test_a_department_card_carries_documents_only_for_its_own_approver(owner: Any) -> None:
+    """A department head's own request held on their own list carries their
+    documents; one held for someone else's approval carries none."""
+    from openexecutive.orchestrator import artifact_records, department_gate
+
+    sam = _teammate()
+    person = people_store.get_person(sam)
+    assert person is not None
+
+    def held(approver: int | None, text: str) -> dict[str, Any]:
+        verdict = department_gate.Verdict(run=False, department="sales", level="propose",
+                                          approver_person_id=approver, reason="it waits")
+        with artifact_records.pinned_viewer(artifact_records.viewer_for_person(sam)):
+            decision_id = department_gate.hold(person, "message_person", {"person_id": sam, "text": text},
+                                               verdict, mcp=False)
+        instance = ledger.get_decision_instance(decision_id)
+        assert instance is not None
+        return dict(json.loads(instance.proposed_payload_json))
+
+    assert held(sam, "Thursday?")["documents_of"] == sam
+    assert "documents_of" not in held(artifact_records.principal_viewer().person_id, "Friday?")
+
+
 def test_a_held_step_runs_with_the_documents_of_its_turn(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """The card records whose documents its turn read when the card is
     theirs, and the approved step reads the same person's, so an email
