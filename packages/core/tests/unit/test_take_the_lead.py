@@ -1354,8 +1354,14 @@ def test_a_held_step_runs_with_the_documents_of_its_turn(owner: Any, monkeypatch
     principal = artifact_records.principal_viewer()
     mine = held_as(principal, "Thursday?")
     assert mine["documents_of"] == principal.person_id
-    asyncio.run(ttl.carry_out(mine, by_principal=True))
+    asyncio.run(ttl.carry_out({**mine, "tapped_by": principal.person_id}, by_principal=True))
     assert seen[-1] == principal
+    # Their documents open only for their own tap: anyone else approving a
+    # card that carries them reads nobody's.
+    asyncio.run(ttl.carry_out({**mine, "documents_of": sam, "tapped_by": principal.person_id}, by_principal=True))
+    assert seen[-1] == artifact_records.NOBODY
+    asyncio.run(ttl.carry_out(mine, by_principal=True))
+    assert seen[-1] == artifact_records.NOBODY
     # Sam's work whose card lands on the owner's list: the tap doesn't open
     # Sam's documents.
     theirs = held_as(artifact_records.viewer_for_person(sam), "Friday?")

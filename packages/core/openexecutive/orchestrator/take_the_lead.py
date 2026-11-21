@@ -3416,9 +3416,13 @@ async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bo
     card_handler = extensions.card_handler(tool) if payload.get("held") is True and not payload.get("mcp") else None
     own_ok = own_card and card_handler is not None
     # The step reads the documents of the person whose own card it is (the
-    # viewer on the turn that held it, ``documents_for``), else nobody's: an
-    # approved email attaching their own document must find it.
+    # viewer on the turn that held it, ``documents_for``), and only when that
+    # person is the one who tapped (``tapped_by``, set by the approve route,
+    # never stored): anyone else approving it reads nobody's. An approved
+    # email attaching their own document must find it.
     whose = payload.get("documents_of")
+    if whose is None or whose != payload.get("tapped_by"):
+        whose = None
     token = current_session.set(Session(
         unattended=True, documents_viewer=viewer_for_person(whose if isinstance(whose, int) else None),
     ))

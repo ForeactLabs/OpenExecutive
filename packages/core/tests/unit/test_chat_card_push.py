@@ -190,7 +190,7 @@ def test_a_take_the_lead_card_is_done_as_it_stands(owner: int, monkeypatch: pyte
         "What I'll do\nMessage: hi"
     )
     assert asyncio.run(channel_cards.resolve(card, get_person(owner), approve=True)) == "Approved."
-    assert done == [(payload, True)]
+    assert done == [({**payload, "tapped_by": owner}, True)]
     assert get_decision_instance(card).status == decision_ledger.STATUS_APPROVED_UNCHANGED
 
 

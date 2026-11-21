@@ -720,7 +720,8 @@ async def _run_lead(
         raise HTTPException(status_code=409, detail="Someone else resolved this decision first.")
     try:
         result = await take_the_lead.carry_out(
-            payload, by_principal=by_principal, own_card=_own_card(instance, resolver, by_principal=by_principal),
+            {**payload, "tapped_by": resolver}, by_principal=by_principal,
+            own_card=_own_card(instance, resolver, by_principal=by_principal),
         )
     except Exception as exc:
         logger.exception("decisions/approve: As me action %d failed", instance.id)
@@ -985,7 +986,8 @@ async def _run_department_action(
         raise HTTPException(status_code=409, detail="Someone else resolved this decision first.")
     try:
         result = await take_the_lead.carry_out(
-            payload, by_principal=by_principal, own_card=_own_card(instance, resolver, by_principal=by_principal),
+            {**payload, "tapped_by": resolver}, by_principal=by_principal,
+            own_card=_own_card(instance, resolver, by_principal=by_principal),
         )
     except Exception as exc:
         logger.exception("decisions/approve: department action %d failed", instance.id)
