@@ -981,15 +981,15 @@ class Settings(BaseSettings):
     # for research (e.g. "skim Ford IR", "check Lucid news"). Set
     # ENABLE_WEB_SEARCH=false to opt out and avoid per-search charges.
     enable_web_search: bool = Field(True, alias="ENABLE_WEB_SEARCH")
-    # Cap on web searches per model request (one step of a specialist or
-    # Executive turn; each step gets a fresh count, and a chat turn whose
-    # last step hit the cap gets one more step to search again). Each
-    # search is billed, so the fan-out cost scales with this (7 specialists
-    # x N searches). Most
-    # findings come from the first one or two searches; default 2 keeps the
-    # bulk of the value at a fraction of the search spend. Raise via
+    # Cap on web searches per model request outside a chat turn: a standing
+    # web-search watch's poll, a workflow's chat tools and its action steps
+    # (build_web_search_tool's default). Each search is billed. Raise via
     # WEB_SEARCH_MAX_USES for deeper digs.
     web_search_max_uses: int = Field(2, alias="WEB_SEARCH_MAX_USES")
+    # Web searches one chat turn may run, across all its steps: an ask with
+    # several facts to look up is searched to the end, not cut off after a
+    # step's first few (orchestrator/web_search_tool.turn_search_tool).
+    web_search_turn_budget: int = Field(12, alias="WEB_SEARCH_TURN_BUDGET")
     # Searches per specialist in the executive_research fan-out. Separate
     # from the chat knob above because every specialist in the fan-out
     # (seven by default) gets this many, and every search adds results that
@@ -1032,6 +1032,8 @@ class Settings(BaseSettings):
             raise ValueError("WEB_SEARCH_MAX_USES must be >= 1")
         if self.research_web_search_max_uses < 1:
             raise ValueError("RESEARCH_WEB_SEARCH_MAX_USES must be >= 1")
+        if self.web_search_turn_budget < 1:
+            raise ValueError("WEB_SEARCH_TURN_BUDGET must be >= 1")
         return self
 
     # Base URL of the UI, used when the Executive composes deep links

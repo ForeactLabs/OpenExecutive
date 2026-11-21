@@ -341,12 +341,27 @@ def test_a_web_search_is_a_look_for_the_after_reply_checks() -> None:
         ("web_search midwest diesel", "1 results: EIA diesel"),
         ("web_search I-80 tolls", "error: max_uses_exceeded"),
     ]
-    assert web_search_tool.search_failed(blocks)
-    assert not web_search_tool.search_failed(blocks[:2])
-    bad_query = {"type": "web_search_tool_result", "tool_use_id": "s3",
-                 "content": {"type": "web_search_tool_result_error", "error_code": "query_too_long"}}
-    assert not web_search_tool.search_failed([bad_query])
-    busy = {"type": "web_search_tool_result", "tool_use_id": "s4",
-            "content": {"type": "web_search_tool_result_error", "error_code": "too_many_requests"}}
-    assert not web_search_tool.search_failed([busy])
+    # The one the limit stopped never ran, so it isn't counted.
+    assert web_search_tool.searches_run(blocks) == 1
+    assert web_search_tool.searches_run(blocks[:2]) == 1
     assert "web_search midwest diesel" in claim_check.render_calls(calls)
+
+
+def test_a_chat_turn_has_one_search_budget(monkeypatch) -> None:
+    """A research ask with many facts is searched to the end: the turn's
+    rounds share WEB_SEARCH_TURN_BUDGET, each round may use all that is
+    left, the round that spends it is told to finish, and a search after
+    that makes the next round the write-up."""
+    from openexecutive.orchestrator import web_search_tool
+
+    _reset_settings_cache()
+    monkeypatch.setenv("ENABLE_WEB_SEARCH", "true")
+    monkeypatch.setenv("WEB_SEARCH_TURN_BUDGET", "12")
+    monkeypatch.setenv("WEB_SEARCH_MAX_USES", "2")
+    try:
+        # The same tool every round (the tools lead the cached prompt).
+        assert web_search_tool.turn_search_tool() == web_search_tool.turn_search_tool()
+        assert web_search_tool.turn_search_tool()["max_uses"] == 12
+        assert not web_search_tool.spent(11) and web_search_tool.spent(12)
+    finally:
+        _reset_settings_cache()
