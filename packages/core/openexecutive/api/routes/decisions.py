@@ -766,7 +766,7 @@ def _keep_allowed(
     except take_the_lead.RuleError:
         # Only the learning failed (the list filled up since the check
         # before the step). Say so in the log rather than fail the card.
-        logger.warning("decisions/approve: As me action %d done but not allowed", decision_id)
+        logger.warning("decisions/approve: the next-time tick on card %d couldn't be saved", decision_id)
         return
     _audit_allowed(str(grant.get("label") or ""), decision_id, bool(changed))
 
