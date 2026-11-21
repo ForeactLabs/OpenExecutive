@@ -989,6 +989,9 @@ STEPS_EMPTY_REPLY = (
     "I've used all the steps I get for one message. Ask me to carry on and "
     "I'll pick up the rest."
 )
+# A long web search can pause a round (``pause_turn``); at most this many
+# are carried on in one turn.
+MAX_PAUSES = 5
 FULL_EMPTY_REPLY = (
     "I've read all I can hold for this one question. Ask me to carry on and "
     "I'll pick up the rest."
@@ -2603,6 +2606,8 @@ class Executive:
         # turn was told it had spent it.
         searches_used = 0
         spent_at: int | None = None
+        # Rounds a long web search paused (pause_turn), carried on.
+        pauses = 0
         # Set by a round cut off mid-text: the next round's text carries it
         # on, so that round alone gets no paragraph break before its text.
         run_on = False
@@ -2861,6 +2866,15 @@ class Executive:
                     # after the next gets the break as usual.
                     run_on = bool(full_text)
                     continue
+            if final_msg.stop_reason == "pause_turn" and response_content and pauses < MAX_PAUSES:
+                # A long web search paused the round (the API's pause_turn):
+                # sent back as it is, it carries on where it stopped. Not a
+                # step of its own; at most MAX_PAUSES in a turn.
+                pauses += 1
+                logger.info("round %d paused by a long web search; carrying on (%d)", iteration, pauses)
+                current_messages.append({"role": "assistant", "content": response_content})
+                run_on = bool(full_text)
+                continue
             if final_msg.stop_reason != "tool_use" and not cut_off:
                 # A reply with no tool call still gets the queued files and
                 # synced excerpts checked, so what they tried is flagged to
