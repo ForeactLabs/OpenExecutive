@@ -209,14 +209,16 @@ def test_an_answer_before_a_web_search_in_the_same_round_stays() -> None:
     assert reply == "Acme renewed. Beta churned in March."
 
 
-def test_a_search_that_did_not_run_gets_one_more_round() -> None:
-    # "I ran out of searches" left two of three questions open: the limit is
-    # per step, so the next step searches again and writes the whole reply.
+def test_the_turn_shares_one_search_budget_across_its_rounds(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Six facts to look up: the first round's searches count against the
+    # turn's budget, the next round gets what is left, and the turn ends on
+    # its reply with no extra "search again" round.
+    monkeypatch.setenv("ENABLE_WEB_SEARCH", "true")
+    monkeypatch.setenv("WEB_SEARCH_TURN_BUDGET", "5")
     provider = StreamingProvider([
-        FinalMsg([*_search("s1", "diesel"), *_search("s2", "tolls", "max_uses_exceeded"),
-                  TextBlock("Diesel is down. I ran out of searches for tolls.")], "end_turn"),
-        FinalMsg([*_search("s3", "tolls", "max_uses_exceeded"), TextBlock("Diesel is down. Tolls unknown.")],
-                 "end_turn"),
+        FinalMsg([*_search("s1", "usps"), *_search("s2", "ups"), *_search("s3", "fedex"),
+                  ToolUseBlock("tu1", "no_such_tool", {})], "tool_use"),
+        FinalMsg([*_search("s4", "rates"), TextBlock("All three dates and the rate.")], "end_turn"),
     ])
     text: list[str] = []
 
@@ -236,11 +238,12 @@ def test_a_search_that_did_not_run_gets_one_more_round() -> None:
                     text.clear()
 
     asyncio.run(go())
-    # Once a turn: the second failure ends the turn on its reply.
     assert len(provider.calls) == 2
-    assert "".join(text) == "Diesel is down. Tolls unknown."
-    nudge = provider.calls[1]["messages"][-1]["content"][0]["text"]
-    assert "search again" in nudge
+    uses = [
+        next(t["max_uses"] for t in call["tools"] if t.get("name") == "web_search") for call in provider.calls
+    ]
+    assert uses == [5, 2]
+    assert "".join(text).endswith("All three dates and the rate.")
 
 
 def test_one_round_is_untouched_and_a_silent_round_adds_nothing() -> None:

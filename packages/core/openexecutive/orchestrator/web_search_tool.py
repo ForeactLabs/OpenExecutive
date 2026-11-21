@@ -44,17 +44,6 @@ def build_web_search_tool(*, max_uses: int | None = None) -> dict[str, Any] | No
     return tool
 
 
-# The turn's next round may search again: the limit is per step.
-SEARCH_AGAIN_NOTE = (
-    "[Check before you finish] A web search this step didn't run: the search "
-    "limit for one step was reached. You can search again now: the "
-    "limit starts over each step. Search for what is still unanswered. Then "
-    "write your whole reply again, start to finish, keeping what you already "
-    "found: it replaces the one above, which the person will never see. No "
-    "note about searches or a correction."
-)
-
-
 def _result_error(block: dict[str, Any]) -> str | None:
     """The error code of a ``web_search_tool_result`` block, or None when it
     holds results."""
@@ -64,18 +53,28 @@ def _result_error(block: dict[str, Any]) -> str | None:
     return None
 
 
-# The errors a search in the next step gets past: the per-step limit,
-# which starts over. A bad query (query_too_long) or an outage or rate
-# limit (unavailable, too_many_requests) would fail the same way at once.
-RETRYABLE_ERRORS = frozenset({"max_uses_exceeded"})
-
-
-def search_failed(blocks: list[dict[str, Any]]) -> bool:
-    """Whether a web search in this round's blocks was stopped by the
-    per-step limit, which the next step gets past."""
-    return any(
-        b.get("type") == "web_search_tool_result" and _result_error(b) in RETRYABLE_ERRORS for b in blocks
+def searches_run(blocks: list[dict[str, Any]]) -> int:
+    """How many web searches in this round's blocks ran: every search but
+    one the limit stopped (``max_uses_exceeded``), which never ran."""
+    stopped = {
+        str(b.get("tool_use_id")) for b in blocks
+        if b.get("type") == "web_search_tool_result" and _result_error(b) == "max_uses_exceeded"
+    }
+    return sum(
+        1 for b in blocks
+        if b.get("type") == "server_tool_use" and b.get("name") == WEB_SEARCH_TOOL_NAME
+        and str(b.get("id")) not in stopped
     )
+
+
+def turn_search_tool(used: int) -> dict[str, Any] | None:
+    """The web_search tool for the next round of a chat turn that has run
+    ``used`` searches: one budget for the whole turn
+    (``WEB_SEARCH_TURN_BUDGET``), so a round may use all that is left of it
+    and an ask with many facts is looked up to the end, not cut off after a
+    round's first few searches. None when it is spent (or search is off)."""
+    left = get_settings().web_search_turn_budget - used
+    return build_web_search_tool(max_uses=left) if left > 0 else None
 
 
 def searched(blocks: list[dict[str, Any]]) -> list[tuple[str, str]]:

@@ -951,12 +951,14 @@ routing:
     the same generation. The Executive echoes those blocks in the
     assistant turn on the next iteration so continuity is preserved. The
     tool is appended after the sorted client-tool list so it never
-    receives the cache_control marker. Each model request (one step of a
-    turn) is capped at `WEB_SEARCH_MAX_USES` searches (default 2), and a
-    chat turn whose last step hit the cap gets one more step to search
-    again (one_clean_answer) — every search is billed, so this bounds
-    per-step search spend and, multiplied across the
-    7-specialist research fan-out, is a primary cost control.
+    receives the cache_control marker. A chat turn has one search budget,
+    `WEB_SEARCH_TURN_BUDGET` (default 12), shared by all its steps: each
+    step's tool gets `max_uses` = what is left, and none is offered once it
+    is spent (web_search_tool.turn_search_tool), so an ask with many facts
+    is searched to the end. A standing web-search watch's poll is capped at
+    `WEB_SEARCH_MAX_USES` per call, and the research fan-out at
+    `RESEARCH_WEB_SEARCH_MAX_USES` per specialist — every search is billed,
+    so these bound search spend.
 
     When the selected model is non-Claude (routed via OpenRouter), the
     feature gate strips this server tool from the request before it
@@ -5614,12 +5616,11 @@ chat:
     or table: "Now the live data.") leaves it once a later round writes
     the answer, sent as a rewrite with the clean text; a note with
     nothing after it stays. Each web search is a look for the after-reply
-    checks (web_search_tool.searched). A round whose web search hit the
-    per-step WEB_SEARCH_MAX_USES limit gets one more round,
-    once a turn, to search again and write the whole reply again
-    (SEARCH_AGAIN_NOTE, search_again audit row). Why: simulated-week research
-    replies (11-18) kept working notes, were rewritten as "didn't look"
-    after searching, and stopped at "I ran out of searches".
+    checks (web_search_tool.searched). Searches share one budget for the
+    turn (WEB_SEARCH_TURN_BUDGET), so no round runs out after its first
+    few. Why: simulated-week research replies (11-18) kept working notes,
+    were rewritten as "didn't look" after searching, and (11-21) stopped
+    half done with 2 searches a step.
   claim_check: |
     Do what it says (orchestrator/claim_check.py). At the end of the
     agent loop, a reply that uses a word able to claim a change (done,
