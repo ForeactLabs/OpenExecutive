@@ -727,6 +727,7 @@ async def _run_lead(
         finish_execution(instance.id, STATUS_FAILED, final_payload={**payload, "error": type(exc).__name__})
         take_the_lead.resolved(instance.id, "failed")
         _clear_decision_alert(instance.id, "dismissed")
+        _keep_allowed(grant, instance.id, resolver, changed)
         raise HTTPException(status_code=502, detail="Something went wrong, so it may not have gone through. Check before trying again.") from None
     failed = take_the_lead.result_failed(result)
     finish_execution(
@@ -738,23 +739,36 @@ async def _run_lead(
     _clear_decision_alert(instance.id, "dismissed" if failed else "ack")
     if failed:
         logger.warning("decisions/approve: step %d failed: %s", instance.id, result[:300])
+        _keep_allowed(grant, instance.id, resolver, changed)
         raise HTTPException(
             status_code=502,
             detail=f"It couldn't do that. {take_the_lead.failure_words(str(payload.get('tool') or ''), result)}",
         )
-    if grant is not None:
-        try:
-            take_the_lead.allow(
-                str(grant.get("key")), str(grant.get("label") or ""), example=changed or None,
-                created_by=f"person:{resolver}" if resolver is not None else "principal", decision_id=instance.id,
-            )
-        except take_the_lead.RuleError:
-            # It's done; only the learning failed (the list filled up since
-            # the check above). Say so in the log rather than fail a sent card.
-            logger.warning("decisions/approve: As me action %d done but not allowed", instance.id)
-            return _refresh(instance.id)
-        _audit_allowed(str(grant.get("label") or ""), instance.id, bool(changed))
+    _keep_allowed(grant, instance.id, resolver, changed)
     return _refresh(instance.id)
+
+
+def _keep_allowed(
+    grant: dict[str, Any] | None, decision_id: int, resolver: int | None, changed: dict[str, str] | None,
+) -> None:
+    """Save an "on its own next time" tick. Kept whether or not the step
+    went through: the tick is about the kind of step, and a step that failed
+    (an app turned it down) shouldn't make the person teach it again."""
+    if grant is None:
+        return
+    from openexecutive.orchestrator import take_the_lead
+
+    try:
+        take_the_lead.allow(
+            str(grant.get("key")), str(grant.get("label") or ""), example=changed or None,
+            created_by=f"person:{resolver}" if resolver is not None else "principal", decision_id=decision_id,
+        )
+    except take_the_lead.RuleError:
+        # Only the learning failed (the list filled up since the check
+        # before the step). Say so in the log rather than fail the card.
+        logger.warning("decisions/approve: As me action %d done but not allowed", decision_id)
+        return
+    _audit_allowed(str(grant.get("label") or ""), decision_id, bool(changed))
 
 
 def _provably_principal(request: Request) -> bool:

@@ -2829,6 +2829,10 @@ def hold(
         # (``rule_offers``), for the card's "Next time" box.
         **({"offers": offers} if (offers := rule_offers(tool, tool_input, hit.kind, mcp=mcp)) else {}),
         **({"requested_by_person_id": asker.id, "requested_by": asker.full_name} if asker is not None else {}),
+        # Whose documents the step reads when it runs (``carry_out``): the
+        # same person's as on the turn that held it, so an email approved
+        # later still finds the file it attaches.
+        **({"documents_of": seen} if (seen := _documents_of()) is not None else {}),
         # Who asked, the owner included, for the card's "You asked" /
         # "Olivia asked" (``card_details.top``); a step no one asked for has
         # none and reads "I started this".
@@ -3405,10 +3409,17 @@ async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bo
     tool = str(payload.get("tool") or "")
     tool_input = payload.get("input") if isinstance(payload.get("input"), dict) else {}
     from openexecutive.orchestrator import extensions, levels
+    from openexecutive.orchestrator.artifact_records import viewer_for_person
 
     card_handler = extensions.card_handler(tool) if payload.get("held") is True and not payload.get("mcp") else None
     own_ok = own_card and card_handler is not None
-    token = current_session.set(Session(unattended=True))
+    # The step reads the documents of the person it was for (the viewer on
+    # the turn that held it, else who asked), never nobody's: an approved
+    # email attaching their own document must find it.
+    whose = payload.get("documents_of", payload.get("requested_by_person_id"))
+    token = current_session.set(Session(
+        unattended=True, documents_viewer=viewer_for_person(whose if isinstance(whose, int) else None),
+    ))
     try:
         with (
             grant_contact_egress() if by_principal else nullcontext(),
@@ -3482,6 +3493,17 @@ async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bo
     finally:
         current_session.reset(token)
     return _as_text(result)
+
+
+def _documents_of() -> int | None:
+    """The person whose documents this turn reads (``current_viewer``), or
+    None for nobody's. Never raises."""
+    try:
+        from openexecutive.orchestrator.artifact_records import current_viewer
+
+        return current_viewer().person_id
+    except Exception:
+        return None
 
 
 def _as_text(result: Any) -> str:
