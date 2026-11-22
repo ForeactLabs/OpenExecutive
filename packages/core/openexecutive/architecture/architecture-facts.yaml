@@ -1164,6 +1164,24 @@ routing:
     done). Routed / nudged summaries name the roster person
     (`_MoveContext.person_label`, `target_person_name` in details); merged
     details carry `superseded_by_headline`.
+    The review is the one tidy-up job over everything waiting on a person.
+    Every close goes through `lifecycle.settle` (the TTL sweep too): it
+    stamps `tidied_at` / `tidied_reason` (the verdict's note, "Done.",
+    "No longer needed.", "Same as “<card>”, which is still open." on a
+    merge, "No change in N days." on expiry) and lapses a waiting step's
+    decision instance to `auto_no_response` (`decision_ledger.lapse`; like
+    Skip, nothing runs and no rule is learned). Waiting steps expire on the
+    action TTL; only `artifact` and `roster_request` never expire. Cards
+    kept by their own code (`REVIEW_EXEMPT_SOURCES`: meetings,
+    browser_handover, artifact, roster_request) are never touched. A
+    one-person card (private:principal, PERSONAL_SOURCES, the team-raised
+    ask, a waiting step) is read with `list_live_alerts(whole_board=True)`
+    but only settled or merged with the same reader's cards (`_may_see`),
+    never routed, nudged, escalated or drafted on, and never evidence for
+    a card someone else reads. A waiting step never merges. `GET
+    /alerts/tidied` lists a reader's last 7 days with reasons; `reopen`
+    is the Undo (`decision_ledger.unlapse`, 409 if the step was answered
+    since).
   artifact_tools: |
     Three tools (openexecutive.orchestrator.artifact_tools), registered via
     `DRAFT_ARTIFACT_TOOLS` / `DRAFT_ARTIFACT_TOOL_HANDLERS` in

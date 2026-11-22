@@ -1052,6 +1052,11 @@ class TodayResponse(BaseModel):
     # Home's bottom line (``_to_act_on``): only the counts that need the
     # reader to act, each a link; none means everything else is on track.
     to_act_on: list[ActOnCount] = Field(default_factory=list)
+    # What the tidy-up settled on the reader's Needs you
+    # (``alerts.lifecycle.settle``): in the last day, and in the week Tidied
+    # up lists (``GET /alerts/tidied``). Home shows one row while any is.
+    tidied_today: int = 0
+    tidied_week: int = 0
     # What waits on the reader on other pages (``_waiting_elsewhere``):
     # Needs you shows one row each and the day isn't quiet while any wait.
     waiting_elsewhere: list[WaitingElsewhereItem] = Field(default_factory=list)
@@ -3079,6 +3084,7 @@ async def get_today(request: Request, background_tasks: BackgroundTasks) -> Toda
     response.done_for_you = _done_for_you(request, caller, datetime.now(UTC))
     response.watching = _watching(request, caller)
     response.to_act_on = await asyncio.to_thread(_to_act_on, response, caller)
+    response.tidied_today, response.tidied_week = _tidied_counts(caller, principal)
     return response
 
 
@@ -3588,6 +3594,25 @@ def _waiting_elsewhere() -> list[WaitingElsewhereItem]:
 
 def _counted(n: int, one: str, many: str) -> str:
     return f"{n} {one if n == 1 else many}"
+
+
+def _tidied_counts(caller: int | None, principal: bool) -> tuple[int, int]:
+    """How many cards the tidy-up settled on the reader's Needs you in the
+    last day and in the last week. Never raises."""
+    from openexecutive.api.routes.alerts import TIDIED_DAYS, tidied_for
+    from openexecutive.orchestrator.artifact_records import viewer_for_person
+
+    now = datetime.now(UTC)
+    try:
+        rows = tidied_for(
+            caller, is_principal=principal, viewer=viewer_for_person(caller),
+            since=(now - timedelta(days=TIDIED_DAYS)).isoformat(),
+        )
+    except Exception:
+        logger.warning("today: counting tidied cards failed", exc_info=True)
+        return 0, 0
+    day = (now - timedelta(days=1)).isoformat()
+    return sum(1 for a in rows if (a.tidied_at or "") >= day), len(rows)
 
 
 def _to_act_on(response: TodayResponse, caller: int | None) -> list[ActOnCount]:

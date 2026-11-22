@@ -307,6 +307,43 @@ def mark_resolved(
         return result.rowcount == 1
 
 
+def instance_id_of(alert: Any) -> int | None:
+    """The waiting step a Needs you card stands for (``put_on_needs_you``),
+    from its ``decision_instance:<id>`` tag; None on any other card."""
+    for tag in getattr(alert, "topic_tags", None) or []:
+        if str(tag).startswith(DECISION_INSTANCE_TAG_PREFIX):
+            try:
+                return int(str(tag)[len(DECISION_INSTANCE_TAG_PREFIX):])
+            except ValueError:
+                continue
+    return None
+
+
+def lapse(instance_id: int, db_path: Path | None = None) -> bool:
+    """The tidy-up settled a waiting step nobody answered
+    (``alerts.lifecycle.settle``): it never happened, like Skip, but nobody
+    said no, so nothing is learned from it. Compare-and-set on proposed."""
+    return mark_resolved(instance_id, STATUS_AUTO_NO_RESPONSE, db_path=db_path)
+
+
+def unlapse(instance_id: int, db_path: Path | None = None) -> bool:
+    """Undo of :func:`lapse`: the step waits again. False when it was not
+    lapsed (someone answered it, or it ran) or the same step was asked for
+    again since (a later row of its class with the same payload), so one
+    ask never waits twice."""
+    with _get_conn(db_path or _db_path()) as conn:
+        result = conn.execute(
+            "UPDATE decision_instances SET status = ?, resolved_at = NULL, resolver_person_id = NULL "
+            "WHERE id = ? AND status = ? AND NOT EXISTS ("
+            " SELECT 1 FROM decision_instances later"
+            " WHERE later.id > decision_instances.id"
+            " AND later.decision_class = decision_instances.decision_class"
+            " AND later.proposed_payload_json = decision_instances.proposed_payload_json)",
+            (STATUS_PROPOSED, instance_id, STATUS_AUTO_NO_RESPONSE),
+        )
+        return result.rowcount == 1
+
+
 def claim_for_execution(
     instance_id: int,
     *,

@@ -98,6 +98,11 @@ def initialize_db(db_path: Path | None = None) -> None:
             # the reply"). Written with ``suggested_action`` and cleared when
             # that changes without one, so it never names an older step.
             ("action_label", "TEXT NOT NULL DEFAULT ''"),
+            # Tidy-up (alerts.lifecycle.settle): when the Executive settled
+            # this card on its own, and why, in plain words. The reader's
+            # Tidied up list reads these; Undo (``reopen_alert``) clears them.
+            ("tidied_at", "TEXT"),
+            ("tidied_reason", "TEXT NOT NULL DEFAULT ''"),
         ):
             if col not in existing:
                 try:
@@ -796,10 +801,43 @@ def reopen_alert(
             "UPDATE alerts SET status = 'unread', review_verdict = '', "
             "review_note = '', recommended_move = '', why_now = '', due_at = NULL, "
             "last_reviewed_at = NULL, superseded_by_alert_id = NULL, "
-            "snoozed_until = NULL, suggested_workflow = '', last_seen_at = ? WHERE id = ?",
+            "snoozed_until = NULL, suggested_workflow = '', tidied_at = NULL, "
+            "tidied_reason = '', last_seen_at = ? WHERE id = ?",
             (_now(), alert_id),
         )
         return True
+
+
+def stamp_tidied(
+    alert_ids: list[int], reason: str, *, at: str | None = None, db_path: Path | None = None
+) -> None:
+    """Mark cards the tidy-up settled (``alerts.lifecycle.settle``): when and
+    why, for the reader's Tidied up list."""
+    if not alert_ids or not _resolve_db_path(db_path).exists():
+        return
+    stamp = at or _now()
+    with _get_conn(db_path) as conn:
+        for start in range(0, len(alert_ids), 500):
+            chunk = alert_ids[start : start + 500]
+            conn.execute(
+                f"UPDATE alerts SET tidied_at = ?, tidied_reason = ? "  # noqa: S608 - placeholders only
+                f"WHERE id IN ({','.join('?' * len(chunk))})",
+                (stamp, reason[:300], *chunk),
+            )
+
+
+def list_tidied(since: str, *, limit: int = 200, db_path: Path | None = None) -> list[Alert]:
+    """Cards the tidy-up settled since ``since`` (ISO) and nobody has put
+    back, newest first."""
+    if not _resolve_db_path(db_path).exists():
+        return []
+    with _get_conn(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM alerts WHERE tidied_at IS NOT NULL AND tidied_at >= ? "
+            "AND status != 'unread' ORDER BY tidied_at DESC, id DESC LIMIT ?",
+            (since, limit),
+        ).fetchall()
+    return [_row_to_alert(r) for r in rows]
 
 
 def get_alert_by_external(
