@@ -207,12 +207,14 @@ def _visible_owner(requested: int | None) -> tuple[bool, int | None]:
 
 
 def _caller() -> int | None:
-    """This turn's resolved caller, the reader of every task lookup here."""
+    """The reader of every task lookup here: the person whose own
+    conversation this is (``fact_tools.own_chat_person``), so their private
+    tasks show there and never in a channel others read. None (the team's
+    tasks only) anywhere else, as private decisions are read back."""
+    from openexecutive.orchestrator.fact_tools import own_chat_person
     from openexecutive.orchestrator.schedule_tools import current_session
 
-    session = current_session.get()
-    caller = getattr(session, "caller_person_id", None) if session is not None else None
-    return int(caller) if caller is not None else None
+    return own_chat_person(current_session.get())
 
 
 OTHERS_NOT_SHOWN = (

@@ -457,6 +457,10 @@ async def test_list_tool_keeps_a_private_task_to_its_two_people(team: SimpleName
                          due_at=datetime.now(UTC), private_to_person_id=team.sara)
     assert _owners(await _list_as(team.sara, web=True)) == {team.sara}
     assert _owners(await _list_as(team.ben, web=True)) == {team.ben}
+    # In a channel others read, neither Sara's nor Ben's list shows it.
+    for who in (team.sara, team.ben):
+        assert _owners(await _list_as(who, session_id="slack:channel:C1:U_X")) == set()
+    assert _owners(await _list_as(team.ben, session_id="slack:dm:U_BEN")) == {team.ben}
     owner = await _list_as(team.principal, web=True)
     assert owner["open_loops"] == [] and "never confirm or deny" in owner["private"]
     token = current_session.set(Session(session_id="w", caller_person_id=team.principal,
