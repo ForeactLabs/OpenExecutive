@@ -78,9 +78,11 @@ def test_judge_is_told_a_message_backs_only_a_real_send() -> None:
 
 def test_nudge_sends_what_was_asked_and_offers_the_rest() -> None:
     text = claim_check.nudge("I just messaged her")
-    assert "If the person asked for it, make it now" in text
+    assert "if the person asked for it, make it now" in text
     assert "offer it instead" in text
     assert "say plainly you couldn't" in text
+    # A send already on a card is not made a second time.
+    assert "don't make it again: say it's waiting for their OK" in text
 
 
 def test_judge_is_told_a_call_backs_only_what_it_made() -> None:

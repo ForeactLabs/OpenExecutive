@@ -298,9 +298,10 @@ def nudge(claim: str) -> str:
     never sent, and the web and phone chats swap it out (``rewrite``)."""
     return (
         "[Check before you finish] Your reply says “" + claim + "”, but no "
-        "tool call in this reply made that change. If the person asked for it, "
-        "make it now with the right tool, or say plainly you couldn't; if they "
-        "didn't, offer it instead "
+        "tool call in this reply backs that. If a call already put it up for "
+        "approval, don't make it again: say it's waiting for their OK. "
+        "Otherwise, if the person asked for it, make it now with the right "
+        "tool, or say plainly you couldn't; if they didn't, offer it instead "
         "(\"want me to message her?\"). Then write your whole reply again, start to finish, "
         "saying only what is true: it replaces the one above, which the person "
         "will never see. No note about a correction."
