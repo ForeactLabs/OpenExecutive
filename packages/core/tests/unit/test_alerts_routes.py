@@ -432,3 +432,42 @@ def test_a_step_tag_on_any_other_card_is_just_text(db: Path) -> None:
     assert lifecycle.settle(alert, "dismissed", "No longer needed.", db_path=db)
     step = decision_ledger.get_decision_instance(iid, db_path=db)
     assert step is not None and step.status == decision_ledger.STATUS_PROPOSED
+
+
+def test_a_lapsed_department_step_is_audited_as_the_executives(
+    client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openexecutive import audit
+    from openexecutive.memory import decision_ledger
+
+    rows: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(audit, "log_event", lambda event_type, summary, **kw: rows.append((event_type, kw.get("actor"))))
+    iid = decision_ledger.create_decision_instance(
+        decision_class="department_action", department="sales", originating_session_id=None,
+        proposed_payload={"tool": "send", "summary": "Email the quote", "department": "sales"},
+        idempotency_key=None, gate_mode="propose", approver_person_id=None, confidence=None, db_path=db,
+    )
+    card = _insert(
+        db, "Email the quote", source="decision_scheduling",
+        external_id=decision_ledger.decision_alert_external_id(iid),
+        topic_tags=[decision_ledger.decision_instance_tag(iid)],
+    )
+    alert = alert_store.get_alert(card, db_path=db)
+    assert alert is not None and lifecycle.settle(alert, "expired", "No change in 14 days.", db_path=db)
+    assert ("department_action_lapsed", "executive") in rows
+    _as(monkeypatch, 1, principal=True)
+    assert client.post(f"/alerts/{card}/reopen").status_code == 200
+    assert ("department_action_waiting", "user") in rows
+
+
+def test_the_one_who_raised_an_ask_sees_it_tidied_wherever_it_was_routed(
+    client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openexecutive.alerts.models import TEAM_RAISED_SOURCE
+
+    ask = _insert(db, "Sam asks Dana about pricing", source=TEAM_RAISED_SOURCE, owner_person_id=7, routed_to_person_id=9)
+    alert = alert_store.get_alert(ask, db_path=db)
+    assert alert is not None and lifecycle.settle(alert, "dismissed", "Pricing is set.", db_path=db)
+    for person in (7, 9):
+        _as(monkeypatch, person, principal=False)
+        assert [i["alert_id"] for i in client.get("/alerts/tidied").json()["items"]] == [ask]

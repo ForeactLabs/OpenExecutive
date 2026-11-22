@@ -1046,7 +1046,7 @@ async def _run_department_action(
 
 def _audit_department_action(
     log_event: Any, event_type: str, instance: DecisionInstance, payload: dict[str, Any],
-    resolver: int | None,
+    resolver: int | None, *, actor: str | None = None,
 ) -> None:
     verb = {
         "department_action_done": "Approved and done",
@@ -1059,7 +1059,7 @@ def _audit_department_action(
         log_event(
             event_type,
             f"{verb}: {payload.get('summary') or payload.get('tool')}"[:240],
-            actor=f"person:{resolver}" if resolver is not None else "user",
+            actor=actor or (f"person:{resolver}" if resolver is not None else "user"),
             details={
                 "decision_id": instance.id,
                 "tool": payload.get("tool"),
@@ -1088,7 +1088,7 @@ def _department_action_lapsed(instance: DecisionInstance, lapsed: bool) -> None:
 
     _audit_department_action(
         log_event, "department_action_lapsed" if lapsed else "department_action_waiting", instance,
-        _parse_payload(instance), None,
+        _parse_payload(instance), None, actor="executive" if lapsed else "user",
     )
 
 

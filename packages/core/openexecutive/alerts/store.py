@@ -838,7 +838,8 @@ def list_tidied(
     """Cards the tidy-up settled since ``since`` (ISO) and nobody has put
     back, newest first: those routed to ``reader``, the unrouted ones when
     ``unrouted`` (the principal's), and the unrouted ones of
-    ``unrouted_source`` (a teammate's own ask, which its readers decide).
+    ``unrouted_source`` (a teammate's own ask, which its readers decide),
+    and any of ``unrouted_source`` that ``reader`` raised.
     Filtered before the limit, so one busy week for the team never crowds
     out someone's own."""
     if not _resolve_db_path(db_path).exists():
@@ -847,9 +848,10 @@ def list_tidied(
         rows = conn.execute(
             "SELECT * FROM alerts WHERE tidied_at IS NOT NULL AND tidied_at >= ? "
             "AND status != 'unread' AND ((? IS NOT NULL AND routed_to_person_id = ?) "
-            "OR (routed_to_person_id IS NULL AND (? OR source = ?))) "
+            "OR (routed_to_person_id IS NULL AND (? OR source = ?)) "
+            "OR (? IS NOT NULL AND source = ? AND owner_person_id = ?)) "
             "ORDER BY tidied_at DESC, id DESC LIMIT ?",
-            (since, reader, reader, 1 if unrouted else 0, unrouted_source, limit),
+            (since, reader, reader, 1 if unrouted else 0, unrouted_source, reader, unrouted_source, reader, limit),
         ).fetchall()
     return [_row_to_alert(r) for r in rows]
 

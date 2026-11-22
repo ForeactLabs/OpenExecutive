@@ -793,7 +793,9 @@ def tidied_for(caller: int | None, *, is_principal: bool, viewer: object, since:
     out: list[Alert] = []
     rows = store.list_tidied(since, reader=caller, unrouted=is_principal, unrouted_source=TEAM_RAISED_SOURCE)
     for a in rows:
-        if a.routed_to_person_id is not None:
+        if a.source == TEAM_RAISED_SOURCE and caller is not None and a.owner_person_id == caller:
+            mine = True  # they raised it, wherever it was routed
+        elif a.routed_to_person_id is not None:
             mine = a.routed_to_person_id == caller
         else:
             mine = a.source == TEAM_RAISED_SOURCE or is_principal
@@ -842,6 +844,7 @@ def reopen_alert(alert_id: int, request: Request) -> Alert:
     ):
         raise HTTPException(status_code=409, detail="That step was answered or asked for again since.")
     if not store.reopen_alert(alert_id, exclude_sources=_NOT_REOPENED):
+        # Only a step this request put back is lapsed again.
         if instance_id is not None and decision_ledger.lapse(instance_id):
             lifecycle.step_lapsed(instance_id, lapsed=True)
         raise HTTPException(

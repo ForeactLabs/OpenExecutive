@@ -229,9 +229,18 @@ def _batches(candidates: list[Alert], size: int) -> list[list[Alert]]:
     """The pass's batches: one person's cards share a prompt only with
     cards the same people read, so nothing one card says can echo another
     reader's card."""
+    from openexecutive.alerts import own_chat
+
+    readers = own_chat.readers(candidates)
     groups: dict[tuple[Any, ...], list[Alert]] = {}
     for a in candidates:
-        groups.setdefault(_reader_key(a), []).append(a)
+        key = _reader_key(a)
+        if a.source in TTL_EXEMPT_SOURCES:
+            # Waiting steps read by the very same people share a prompt
+            # (never evidence: ``_reader_key`` keeps each to itself).
+            tags = frozenset(t for t in a.topic_tags or [] if t.startswith("private:"))
+            key = ("steps", a.routed_to_person_id, readers.get(a.id or 0), tags)
+        groups.setdefault(key, []).append(a)
     step = max(1, size)
     return [g[i : i + step] for g in groups.values() for i in range(0, len(g), step)]
 
