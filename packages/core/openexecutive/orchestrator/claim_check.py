@@ -47,7 +47,7 @@ CLAIM_RE = re.compile(
     # Saying a message went to someone ("I just messaged her", "emailed
     # Pat", "let Kendall know") and anything the reply says it "just" or
     # "already" did.
-    r"messaged|emailed|e-mailed|texted|pinged|dm['’]?(?:e)?d|told|let \w+ know|"
+    r"messaged|emailed|e-mailed|texted|pinged|dm['’]?(?:e)?d|told|let (?!me\b|us\b)\w+ know|"
     r"reached out|wrote (?:to|back)|replied|forwarded|notified|invited|shared|"
     r"posted|followed up|nudged|(?:i|we) (?:just|already|also|went ahead and) \w+)\b",
     re.IGNORECASE,

@@ -50,6 +50,7 @@ def _verdict(payload: dict[str, Any]):
 def test_word_check_skips_replies_that_claim_nothing() -> None:
     assert not claim_check.may_claim("Revenue was up 4% on last quarter.")
     assert not claim_check.may_claim("   ")
+    assert not claim_check.may_claim("Let me know if you want the numbers.")
     assert claim_check.may_claim("Done.")
     assert claim_check.may_claim("I'll treat the draft as closed.")
     assert claim_check.may_claim("Removed it from the brief")
