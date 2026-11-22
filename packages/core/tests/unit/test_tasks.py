@@ -315,6 +315,10 @@ def test_waiting_counts_skip_private_tasks(team: SimpleNamespace) -> None:
     open_loops.open_loop(owner_person_id=team.ben, description="Pat Principal asked Ben Ortiz for: the deck", due_at=due)
     open_loops.open_loop(owner_person_id=team.ben, description="Sara Kim asked Ben Ortiz for: the boxes",
                          due_at=due, private_to_person_id=team.sara)
+    # Everyone who opens Today sees the same counts: the principal's own
+    # private task is not counted either.
+    open_loops.open_loop(owner_person_id=team.ben, description="Pat Principal asked Ben Ortiz for: the Q3 deck",
+                         due_at=due, private_to_person_id=team.principal)
     assert episodic.list_awaiting_replies_by_person()[team.ben][0] == 1
 
 

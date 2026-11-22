@@ -2135,7 +2135,9 @@ def list_awaiting_replies_by_person(
             # same cut-off).
             "  AND NOT (kind = 'open_loop' AND awaiting_response_since > ?) "
             # A task from someone's own chat is theirs and its assignee's
-            # (attunement.open_loops.visible_to): it counts for no one else.
+            # (attunement.open_loops.visible_to). These counts are the same for
+            # everyone who opens Today, so only the team's tasks count, the
+            # principal's own private ones included.
             "  AND NOT (kind = 'open_loop' AND private_to_person_id IS NOT NULL) "
             "GROUP BY assigned_to_person_id",
             (datetime.now(UTC).isoformat(),),
