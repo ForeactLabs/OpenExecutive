@@ -314,6 +314,16 @@ def visible_to(loop: OpenLoop, reader: Reader) -> bool:
     return reader is not None and reader in (loop.private_to_person_id, loop.owner_person_id)
 
 
+def principal_reader(db_path: Path | None = None) -> int | None:
+    """The principal as a reader: what they see, for a read written for
+    them (the reflection block, Take the lead's watch). None (the team's
+    only) when there is no principal."""
+    from openexecutive.people.store import find_principal_person
+
+    principal = find_principal_person(db_path)
+    return int(principal.id) if principal is not None and principal.id is not None else None
+
+
 def _reader_clause(reader: Reader) -> tuple[str, list[Any]]:
     """``visible_to`` as SQL over scheduled_actions."""
     if isinstance(reader, Everyone):
@@ -1017,10 +1027,11 @@ def consume_call_budget(limit: int, *, db_path: Path | None = None) -> bool:
 
 def render_for_reflection(limit: int = 10, *, db_path: Path | None = None) -> list[str]:
     """One line per open loop, soonest-due first, for the reflection prompt:
-    the team's only, since what it writes is the team's."""
+    what the principal sees (``principal_reader``), since it is written for
+    them."""
     now = datetime.now(UTC)
     lines: list[str] = []
-    for loop in list_open_loops(limit=limit, reader=None, db_path=db_path):
+    for loop in list_open_loops(limit=limit, reader=principal_reader(db_path), db_path=db_path):
         due = _parse_iso(loop.due_at)
         state = "OVERDUE" if due is not None and due <= now else "due"
         lines.append(

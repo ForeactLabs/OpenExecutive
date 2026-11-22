@@ -233,6 +233,22 @@ def test_a_task_from_someones_own_chat_is_theirs_and_its_assignees(
     assert route.get_task_route(private, request=None).task_id == private  # type: ignore[arg-type]
 
 
+def test_the_principals_own_reads_keep_their_private_tasks(team: SimpleNamespace) -> None:
+    """The reflection block and Take the lead's overdue watch are written for
+    the principal: their own private tasks show there, a teammate's don't."""
+    from openexecutive.orchestrator.take_the_lead import _overdue_tasks
+
+    due = datetime.now(UTC) - timedelta(hours=1)
+    open_loops.open_loop(owner_person_id=team.ben, description="Pat Principal asked Ben Ortiz for: the Q3 deck",
+                         due_at=due, private_to_person_id=team.principal)
+    open_loops.open_loop(owner_person_id=team.ben, description="Sara Kim asked Ben Ortiz for: the Ortiz boxes",
+                         due_at=due, private_to_person_id=team.sara)
+    lines = "\n".join(open_loops.render_for_reflection())
+    assert "the Q3 deck" in lines and "Ortiz boxes" not in lines
+    overdue = _overdue_tasks(due - timedelta(hours=1), datetime.now(UTC))
+    assert any("the Q3 deck" in d for d in overdue) and not any("Ortiz boxes" in d for d in overdue)
+
+
 def test_the_executive_is_told_others_private_things_stay_private() -> None:
     from openexecutive.prompts.executive_persona import EXECUTIVE_PERSONA_PROMPT
 

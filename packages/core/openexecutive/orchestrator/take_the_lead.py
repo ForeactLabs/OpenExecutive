@@ -4198,11 +4198,12 @@ def _failed_runs(since: datetime) -> list[str]:
 
 
 def _overdue_tasks(since: datetime, now: datetime) -> list[str]:
-    from openexecutive.attunement.open_loops import list_open_loops
+    from openexecutive.attunement.open_loops import list_open_loops, principal_reader
 
     found = []
-    # The team's tasks only: one person's private task is nobody else's look.
-    for loop in list_open_loops(limit=200, reader=None):
+    # What the owner sees: the look is theirs, and a teammate's private task
+    # is not.
+    for loop in list_open_loops(limit=200, reader=principal_reader()):
         try:
             due = datetime.fromisoformat(loop.due_at.replace("Z", "+00:00"))
         except ValueError:
