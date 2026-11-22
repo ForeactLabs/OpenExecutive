@@ -824,18 +824,19 @@ def reopen_alert(alert_id: int, request: Request) -> Alert:
     """Undo for a close / dismiss / expiry: back to ``unread``, verdict cleared.
     A waiting step the tidy-up let lapse waits again with its card; one
     someone answered stays answered."""
+    from openexecutive.alerts import lifecycle
     from openexecutive.memory import decision_ledger
 
     existing = _visible_alert(alert_id, request)
     prior = existing.status
     instance_id = decision_ledger.instance_id_of(existing)
     if existing.source == decision_ledger.DECISION_ALERT_SOURCE and (
-        instance_id is None or not decision_ledger.unlapse(instance_id)
+        instance_id is None or not lifecycle.unlapse_step(instance_id)
     ):
         raise HTTPException(status_code=409, detail="That step was answered or asked for again since.")
     if not store.reopen_alert(alert_id, exclude_sources=_NOT_REOPENED):
-        if instance_id is not None:
-            decision_ledger.lapse(instance_id)
+        if instance_id is not None and decision_ledger.lapse(instance_id):
+            lifecycle.step_lapsed(instance_id, lapsed=True)
         raise HTTPException(
             status_code=409,
             detail="Only resolved, expired or dismissed alerts can be reopened",

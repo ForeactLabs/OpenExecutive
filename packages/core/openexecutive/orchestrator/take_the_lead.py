@@ -3519,6 +3519,13 @@ def _as_text(result: Any) -> str:
     return result if isinstance(result, str) else json.dumps(result, default=str)
 
 
+def mark_lapsed(decision_id: int, *, lapsed: bool, db_path: Path | None = None) -> None:
+    """A held step the tidy-up let lapse reads as lapsed in the log (not
+    waiting); its Undo makes it waiting again. Its text stays, since Undo
+    brings the same step back. Best effort."""
+    _set_log_status(decision_id, "lapsed" if lapsed else _LATELY_WAITING, db_path=db_path)
+
+
 def resolved(
     decision_id: int, status: str, *, payload: dict[str, Any] | None = None, result: str = "",
     db_path: Path | None = None,

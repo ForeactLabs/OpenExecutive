@@ -210,19 +210,42 @@ def list_live_alerts(
     return live[:limit]
 
 
-def _lapse_step(alert: Alert, db_path: Path | None) -> bool:
+def _lapse_step(alert: Alert, db_path: Path | None) -> tuple[bool, int | None]:
     """A waiting step's card closes only with its step: lapse the step first.
-    True when the card may close (no step behind it, the step lapsed now, or
-    it was already answered elsewhere and only its card was left)."""
+    (whether the card may close, the step lapsed now or None): it may close
+    with no step behind it, with the step lapsed now, or when the step was
+    already answered elsewhere and only its card was left."""
     from openexecutive.memory import decision_ledger
 
     instance_id = decision_ledger.instance_id_of(alert)
     if instance_id is None:
-        return alert.source != _DECISION_SOURCE
+        return alert.source != _DECISION_SOURCE, None
     if decision_ledger.lapse(instance_id, db_path=db_path):
-        return True
+        return True, instance_id
     found = decision_ledger.get_decision_instance(instance_id, db_path=db_path)
-    return found is None or found.status not in decision_ledger.OPEN_STATUSES
+    return found is None or found.status not in decision_ledger.OPEN_STATUSES, None
+
+
+def step_lapsed(instance_id: int, *, lapsed: bool, db_path: Path | None = None) -> None:
+    """Tell a waiting step's own class it lapsed (or, on Undo, waits again),
+    the way Skip runs its close-out (``decisions.after_lapse``). Best effort."""
+    try:
+        from openexecutive.api.routes.decisions import run_after_lapse
+
+        run_after_lapse(instance_id, lapsed=lapsed, db_path=db_path)
+    except Exception:
+        logger.warning("lifecycle: a lapsed step's close-out failed for %s", instance_id, exc_info=True)
+
+
+def unlapse_step(instance_id: int, *, db_path: Path | None = None) -> bool:
+    """Undo of a lapse: the step waits again, its class told so. False when
+    it was answered or asked for again since (``decision_ledger.unlapse``)."""
+    from openexecutive.memory import decision_ledger
+
+    if not decision_ledger.unlapse(instance_id, db_path=db_path):
+        return False
+    step_lapsed(instance_id, lapsed=False, db_path=db_path)
+    return True
 
 
 def settle(
@@ -240,14 +263,18 @@ def settle(
     from openexecutive.alerts.store import set_status_if_open, stamp_tidied
     from openexecutive.memory import decision_ledger
 
-    if alert.id is None or not _lapse_step(alert, db_path):
+    if alert.id is None:
+        return False
+    may_close, lapsed = _lapse_step(alert, db_path)
+    if not may_close:
         return False
     if not set_status_if_open(alert.id, status, db_path=db_path):
-        instance_id = decision_ledger.instance_id_of(alert)
-        if instance_id is not None:
+        if lapsed is not None:
             # Answered meanwhile: the step is not ours to have lapsed.
-            decision_ledger.unlapse(instance_id, db_path=db_path)
+            decision_ledger.unlapse(lapsed, db_path=db_path)
         return False
+    if lapsed is not None:
+        step_lapsed(lapsed, lapsed=True, db_path=db_path)
     stamp_tidied([alert.id], reason, at=(now or datetime.now(UTC)).isoformat(), db_path=db_path)
     resolve_alert_outreach(alert, status)
     return True
@@ -435,6 +462,8 @@ __all__ = [
     "TTL_EXEMPT_SOURCES",
     "expire_stale_alerts",
     "settle",
+    "step_lapsed",
+    "unlapse_step",
     "is_expired",
     "is_live",
     "list_live_alerts",

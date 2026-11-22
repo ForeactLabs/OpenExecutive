@@ -261,8 +261,11 @@ def test_tidied_up_lists_only_what_was_on_your_needs_you(
 def test_undo_puts_a_settled_waiting_step_back_and_it_waits_again(
     client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from openexecutive.api.routes import decisions
     from openexecutive.memory import decision_ledger
 
+    told: list[tuple[int, bool]] = []
+    monkeypatch.setattr(decisions, "run_after_lapse", lambda i, *, lapsed, db_path=None: told.append((i, lapsed)))
     iid = decision_ledger.create_decision_instance(
         decision_class="take_the_lead_action", department="", originating_session_id=None,
         proposed_payload={"tool": "send"}, idempotency_key=None, gate_mode="propose",
@@ -285,6 +288,8 @@ def test_undo_puts_a_settled_waiting_step_back_and_it_waits_again(
     step = decision_ledger.get_decision_instance(iid, db_path=db)
     assert step is not None and step.status == decision_ledger.STATUS_PROPOSED
     assert client.get("/alerts/tidied").json()["items"] == []
+    # Its class closed it out on the lapse and opened it again on Undo.
+    assert told == [(iid, True), (iid, False)]
     # A step someone answered since stays answered.
     assert lifecycle.settle(alert_store.get_alert(aid, db_path=db), "dismissed", "x", db_path=db)  # type: ignore[arg-type]
     decision_ledger.unlapse(iid, db_path=db)
