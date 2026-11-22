@@ -2134,6 +2134,9 @@ def list_awaiting_replies_by_person(
             # then nobody is waiting on the owner (the nudge engine uses the
             # same cut-off).
             "  AND NOT (kind = 'open_loop' AND awaiting_response_since > ?) "
+            # A task from someone's own chat is theirs and its assignee's
+            # (attunement.open_loops.visible_to): it counts for no one else.
+            "  AND NOT (kind = 'open_loop' AND private_to_person_id IS NOT NULL) "
             "GROUP BY assigned_to_person_id",
             (datetime.now(UTC).isoformat(),),
         ).fetchall()

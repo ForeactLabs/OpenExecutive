@@ -249,6 +249,14 @@ def test_the_principals_own_reads_keep_their_private_tasks(team: SimpleNamespace
     assert any("the Q3 deck" in d for d in overdue) and not any("Ortiz boxes" in d for d in overdue)
 
 
+def test_waiting_counts_skip_private_tasks(team: SimpleNamespace) -> None:
+    due = datetime.now(UTC) - timedelta(hours=1)
+    open_loops.open_loop(owner_person_id=team.ben, description="Pat Principal asked Ben Ortiz for: the deck", due_at=due)
+    open_loops.open_loop(owner_person_id=team.ben, description="Sara Kim asked Ben Ortiz for: the boxes",
+                         due_at=due, private_to_person_id=team.sara)
+    assert episodic.list_awaiting_replies_by_person()[team.ben][0] == 1
+
+
 def test_the_executive_is_told_others_private_things_stay_private() -> None:
     from openexecutive.prompts.executive_persona import EXECUTIVE_PERSONA_PROMPT
 
