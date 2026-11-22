@@ -311,6 +311,22 @@ def test_where_a_task_is_made_decides_who_it_is_kept_for(
     assert loop.private_to_person_id == team.sara
 
 
+def test_said_again_in_front_of_the_team_it_becomes_the_teams(team: SimpleNamespace) -> None:
+    """A private task said again where the team hears it is the team's; said
+    again privately it stays as it is."""
+    due = datetime.now(UTC) + timedelta(days=2)
+    text = "Ben Ortiz committed to: send the deck"
+    first = open_loops.open_loop(owner_person_id=team.ben, description=text, due_at=due,
+                                 private_to_person_id=team.ben)
+    assert first is not None
+    assert open_loops.open_loop(owner_person_id=team.ben, description=text, due_at=due,
+                                private_to_person_id=team.ben) is None
+    kept = open_loops.get_task(first)
+    assert kept is not None and kept.private_to_person_id == team.ben
+    assert open_loops.open_loop(owner_person_id=team.ben, description=text, due_at=due) is None
+    shared = open_loops.get_task(first, reader=team.principal)
+    assert shared is not None and shared.private_to_person_id is None
+
 def test_the_principals_own_reads_keep_their_private_tasks(team: SimpleNamespace) -> None:
     """The reflection block and Take the lead's overdue watch are written for
     the principal: their own private tasks show there, a teammate's don't."""

@@ -497,7 +497,24 @@ def open_loop(
             db_path=db_path,
         )
     except sqlite3.IntegrityError:
+        if private_to_person_id is None:
+            _make_teams(_scope_key(owner_person_id, text), db_path)
         return None
+
+
+def _make_teams(scope_key: str, db_path: Path | None) -> None:
+    """The same task, now said where the team hears it: a private copy of it
+    becomes the team's rather than hiding what was said in front of them."""
+    from openexecutive.memory.episodic import _get_conn
+
+    resolved = _db(db_path)
+    with _get_conn(resolved) as conn:
+        conn.execute(
+            "UPDATE scheduled_actions SET private_to_person_id = NULL "
+            "WHERE kind = ? AND scope_key = ? AND private_to_person_id IS NOT NULL",
+            (OPEN_LOOP_KIND, scope_key),
+        )
+        conn.commit()
 
 
 @dataclass(frozen=True)
