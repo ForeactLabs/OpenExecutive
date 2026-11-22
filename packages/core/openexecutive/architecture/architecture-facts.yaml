@@ -3876,7 +3876,7 @@ attunement:
       `scheduled_actions` row: kind='open_loop', channel='__internal__',
       channel_ref='person:{id}', status inserted as 'done' (runner never
       dispatches), assigned_to_person_id=owner, awaiting_response_since=due,
-      scope_key='loop:{owner}:{sha1(text)[:16]}'. Partial UNIQUE index
+      scope_key='loop:{owner}:{sha1(text)[:16]}', plus ':p{person}' when private to someone. Partial UNIQUE index
       `idx_scheduled_open_loop_scope` (kind='open_loop' AND awaiting NOT
       NULL) dedupes concurrent passes. Closing clears
       awaiting_response_since (reopenable later).

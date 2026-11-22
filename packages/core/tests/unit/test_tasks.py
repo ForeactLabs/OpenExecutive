@@ -311,21 +311,30 @@ def test_where_a_task_is_made_decides_who_it_is_kept_for(
     assert loop.private_to_person_id == team.sara
 
 
-def test_said_again_in_front_of_the_team_it_becomes_the_teams(team: SimpleNamespace) -> None:
-    """A private task said again where the team hears it is the team's; said
-    again privately it stays as it is."""
+def test_the_same_words_elsewhere_never_reveal_or_publish_a_private_task(team: SimpleNamespace) -> None:
+    """A private task and the same words said where others hear, or in
+    someone else's own chat, are separate tasks: nobody is told the private
+    one exists, and it stays private. Said again in the same place, it is a
+    duplicate."""
     due = datetime.now(UTC) + timedelta(days=2)
-    text = "Ben Ortiz committed to: send the deck"
-    first = open_loops.open_loop(owner_person_id=team.ben, description=text, due_at=due,
-                                 private_to_person_id=team.ben)
-    assert first is not None
+    text = "Sara Kim asked Ben Ortiz for: the Acme memo"
+    private = open_loops.open_loop(owner_person_id=team.ben, description=text, due_at=due,
+                                   private_to_person_id=team.sara)
+    assert private is not None
     assert open_loops.open_loop(owner_person_id=team.ben, description=text, due_at=due,
-                                private_to_person_id=team.ben) is None
-    kept = open_loops.get_task(first)
-    assert kept is not None and kept.private_to_person_id == team.ben
-    assert open_loops.open_loop(owner_person_id=team.ben, description=text, due_at=due) is None
-    shared = open_loops.get_task(first, reader=team.principal)
-    assert shared is not None and shared.private_to_person_id is None
+                                private_to_person_id=team.sara) is None
+    # The People page (the team's) and the principal's own chat each make their own.
+    page = open_loops.assign_open_loop(owner_person_id=team.ben, text="the Acme memo",
+                                       assigned_by_person_id=team.principal)
+    assert page.loop_id is not None and page.reason != "duplicate"
+    own = open_loops.assign_open_loop(owner_person_id=team.ben, text="the Acme memo",
+                                      assigned_by_person_id=team.principal,
+                                      private_to_person_id=team.principal)
+    assert own.loop_id is not None
+    kept = open_loops.get_task(private)
+    assert kept is not None and kept.private_to_person_id == team.sara
+    assert open_loops.get_task(private, reader=team.principal) is None
+
 
 def test_the_principals_own_reads_keep_their_private_tasks(team: SimpleNamespace) -> None:
     """The reflection block and Take the lead's overdue watch are written for

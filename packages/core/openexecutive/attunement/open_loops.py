@@ -395,10 +395,14 @@ def _clean(text: str, limit: int) -> str:
 _MARKUP_DEFANG = str.maketrans({"<": "‹", ">": "›", '"': "'"})
 
 
-def _scope_key(owner_person_id: int, text: str) -> str:
+def _scope_key(owner_person_id: int, text: str, private_to_person_id: int | None = None) -> str:
+    """One open task per owner and text within who sees it: a private one's
+    key carries whose it is, so the same words said elsewhere are their own
+    task, never a duplicate that tells anyone the private one exists."""
     norm = re.sub(r"[^a-z0-9 ]", "", " ".join(text.lower().split()))
     digest = hashlib.sha1(norm.encode("utf-8")).hexdigest()[:16]
-    return f"{SCOPE_PREFIX}:{owner_person_id}:{digest}"
+    key = f"{SCOPE_PREFIX}:{owner_person_id}:{digest}"
+    return f"{key}:p{private_to_person_id}" if private_to_person_id is not None else key
 
 
 def _person_names() -> dict[int, str]:
@@ -489,7 +493,7 @@ def open_loop(
             kind=OPEN_LOOP_KIND,
             assigned_to_person_id=owner_person_id,
             awaiting_response_since=due_at,
-            scope_key=_scope_key(owner_person_id, text),
+            scope_key=_scope_key(owner_person_id, text, private_to_person_id),
             # Recorded, never dispatched: `done` keeps the runner away from
             # it while the nudge engine's commitment source still reads it.
             status="done",
@@ -497,24 +501,7 @@ def open_loop(
             db_path=db_path,
         )
     except sqlite3.IntegrityError:
-        if private_to_person_id is None:
-            _make_teams(_scope_key(owner_person_id, text), db_path)
         return None
-
-
-def _make_teams(scope_key: str, db_path: Path | None) -> None:
-    """The same task, now said where the team hears it: a private copy of it
-    becomes the team's rather than hiding what was said in front of them."""
-    from openexecutive.memory.episodic import _get_conn
-
-    resolved = _db(db_path)
-    with _get_conn(resolved) as conn:
-        conn.execute(
-            "UPDATE scheduled_actions SET private_to_person_id = NULL "
-            "WHERE kind = ? AND scope_key = ? AND private_to_person_id IS NOT NULL",
-            (OPEN_LOOP_KIND, scope_key),
-        )
-        conn.commit()
 
 
 @dataclass(frozen=True)
@@ -893,7 +880,7 @@ def update_task(
         params += [owner.id, f"person:{owner.id}"]
     if description != loop.description or owner_id != loop.owner_person_id:
         sets += ["intent_text = ?", "scope_key = ?"]
-        params += [description, _scope_key(owner_id, description)]
+        params += [description, _scope_key(owner_id, description, loop.private_to_person_id)]
     if notes is not None:
         sets.append("task_notes = ?")
         params.append(_clean(notes, _NOTES_MAX).translate(_MARKUP_DEFANG))
