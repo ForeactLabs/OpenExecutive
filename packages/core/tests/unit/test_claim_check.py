@@ -79,6 +79,7 @@ def test_nudge_sends_what_was_asked_and_offers_the_rest() -> None:
     text = claim_check.nudge("I just messaged her")
     assert "If the person asked for it, make it now" in text
     assert "offer it instead" in text
+    assert "say plainly you couldn't" in text
 
 
 def test_judge_is_told_a_call_backs_only_what_it_made() -> None:

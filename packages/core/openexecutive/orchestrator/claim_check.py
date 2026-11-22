@@ -15,8 +15,9 @@ its last reply is checked against the tool calls the turn made:
    put up for approval) is not one.
 3. When it finds one, the claim must appear word for word in the reply (code
    check), or it is ignored. The loop then gets one more round with
-   ``nudge(claim)``: do it now with the right tool, or say plainly it couldn't
-   be done, in a whole new reply that replaces the first. Once a turn, so a
+   ``nudge(claim)``: when the person asked for it, do it now with the right
+   tool or say plainly it couldn't be done; when they didn't, offer it; in
+   a whole new reply that replaces the first. Once a turn, so a
    loop can't form.
 
 Never raises and never blocks a reply: a failure, a timeout or a missing
@@ -298,7 +299,8 @@ def nudge(claim: str) -> str:
     return (
         "[Check before you finish] Your reply says “" + claim + "”, but no "
         "tool call in this reply made that change. If the person asked for it, "
-        "make it now with the right tool; if they didn't, offer it instead "
+        "make it now with the right tool, or say plainly you couldn't; if they "
+        "didn't, offer it instead "
         "(\"want me to message her?\"). Then write your whole reply again, start to finish, "
         "saying only what is true: it replaces the one above, which the person "
         "will never see. No note about a correction."
