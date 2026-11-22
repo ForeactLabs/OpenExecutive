@@ -785,11 +785,18 @@ TIDIED_DAYS = 7
 
 def tidied_for(caller: int | None, *, is_principal: bool, viewer: object, since: str) -> list[Alert]:
     """The cards the tidy-up settled since ``since`` that were on this
-    reader's Needs you: routed to them, or unrouted when they are the
-    principal. Nobody else's."""
+    reader's Needs you: routed to them; unrouted when they are the
+    principal; and a teammate's own unrouted ask when they read it (who
+    raised it, its department's people, ``visible_alert``). Nobody else's."""
+    from openexecutive.alerts.models import TEAM_RAISED_SOURCE
+
     out: list[Alert] = []
-    for a in store.list_tidied(since, reader=caller, unrouted=is_principal):
-        mine = a.routed_to_person_id == caller if a.routed_to_person_id is not None else is_principal
+    rows = store.list_tidied(since, reader=caller, unrouted=is_principal, unrouted_source=TEAM_RAISED_SOURCE)
+    for a in rows:
+        if a.routed_to_person_id is not None:
+            mine = a.routed_to_person_id == caller
+        else:
+            mine = a.source == TEAM_RAISED_SOURCE or is_principal
         if not mine or (is_private_alert(a) and not is_principal) or not visible_alert(a, viewer):
             continue
         out.append(a)

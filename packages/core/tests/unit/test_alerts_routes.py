@@ -406,3 +406,17 @@ def test_tidied_up_finds_your_cards_past_a_busy_week_for_the_team(db: Path) -> N
     since = (datetime.now(UTC) - timedelta(days=1)).isoformat()
     assert [a.id for a in alert_store.list_tidied(since, reader=5, unrouted=False, limit=2, db_path=db)] == [mine]
     assert alert_store.list_tidied(since, reader=None, unrouted=True, db_path=db) == []
+
+
+def test_a_teammates_own_ask_shows_on_their_tidied_up(
+    client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openexecutive.alerts.models import TEAM_RAISED_SOURCE
+
+    ask = _insert(db, "Sam asks about pilot pricing", source=TEAM_RAISED_SOURCE, owner_person_id=7)
+    alert = alert_store.get_alert(ask, db_path=db)
+    assert alert is not None and lifecycle.settle(alert, "dismissed", "Pricing is set.", db_path=db)
+    _as(monkeypatch, 7, principal=False)
+    assert [i["alert_id"] for i in client.get("/alerts/tidied").json()["items"]] == [ask]
+    _as(monkeypatch, 8, principal=False)
+    assert client.get("/alerts/tidied").json()["items"] == []
