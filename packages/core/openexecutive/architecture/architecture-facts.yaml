@@ -5641,7 +5641,13 @@ chat:
     chat_live). Why: a simulated week on a test company (11-15) had 5 of 6
     retries misfire - a save early in a 30-step department turn fell off
     the list, an earlier turn's cards were flagged, and the web chat
-    showed "I did X" then "I didn't do X".
+    showed "I did X" then "I didn't do X". Saying a message went to
+    someone ("I just messaged her", "emailed Pat", "let Kendall know")
+    is a claim the word check catches and only a real send backs; a send
+    on a card backs only "waiting for your OK". The extra round makes
+    the change when the person asked for it, else offers it. Why: a
+    reply said "I just messaged her" with no send and skipped the word
+    check (no "messaged" in CLAIM_RE).
   memory_editing: |
     Everything it keeps about a person can be changed by that person, in
     their own words (Rufus's rule: gate who sees a memory, not what is

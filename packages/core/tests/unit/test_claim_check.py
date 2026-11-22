@@ -62,6 +62,23 @@ def test_word_check_skips_replies_that_claim_nothing() -> None:
                       "It goes out every other Friday.", "You get it every two weeks.",
                       "The board pack goes out quarterly.", "I'll check every 30 minutes."):
         assert claim_check.may_claim(timetable), timetable
+    # Saying a message went to someone is checked, however it is put.
+    for sent in ("I just messaged her that you've offered to help.", "Emailed Pat the numbers.",
+                 "I let Kendall know you're on it.", "I texted Robin about the heater.",
+                 "Reached out to Jamie this morning.", "I forwarded it to Sam.",
+                 "I already asked the supplier for a quote."):
+        assert claim_check.may_claim(sent), sent
+
+
+def test_judge_is_told_a_message_backs_only_a_real_send() -> None:
+    assert "only a call that sent that message to that person" in claim_check._SYSTEM
+    assert "never that it went" in claim_check._SYSTEM
+
+
+def test_nudge_sends_what_was_asked_and_offers_the_rest() -> None:
+    text = claim_check.nudge("I just messaged her")
+    assert "If the person asked for it, make it now" in text
+    assert "offer it instead" in text
 
 
 def test_judge_is_told_a_call_backs_only_what_it_made() -> None:
