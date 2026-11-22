@@ -55,7 +55,7 @@ from ._agent_loop_fakes import FinalMsg, ScriptedProvider, TextBlock, ToolUseBlo
 # And again: a greeting gets a greeting back, not a status report.
 # And again: Big jobs (do the whole job; a one-line heads-up for a long one).
 # And again: an email reply may quote a draft signed by the sender for them to send.
-TEAM_PERSONA_SHA256 = "b16459c46e03d45f20377a9c82b0f32900315fc3c351e522ccacd5790fd5be45"
+TEAM_PERSONA_SHA256 = "86ff587463bc704d9bb0ea85a288b56c0e8147f751b1665da0ca61981404a58e"
 
 SOLO_HEADINGS = (
     "## You Work for One Person",
