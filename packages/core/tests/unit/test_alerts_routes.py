@@ -336,4 +336,73 @@ def test_undo_never_brings_back_a_step_asked_for_again_since(
     _as(monkeypatch, 1, principal=True)
     assert client.post(f"/alerts/{aid}/reopen").status_code == 409
     step = decision_ledger.get_decision_instance(first, db_path=db)
+    assert step is not None and step.status == decision_ledger.STATUS_CLOSED_EXTERNALLY
+
+
+def _waiting_card(db: Path, headline: str, *, key: str | None = None, payload: dict | None = None) -> tuple[int, int]:
+    from openexecutive.memory import decision_ledger
+
+    iid = decision_ledger.create_decision_instance(
+        decision_class="take_the_lead_action", department="", originating_session_id=None,
+        proposed_payload=payload or {"tool": "send", "to": headline}, idempotency_key=key, gate_mode="propose",
+        approver_person_id=None, confidence=None, db_path=db,
+    )
+    aid = _insert(
+        db, headline, source="decision_scheduling",
+        external_id=decision_ledger.decision_alert_external_id(iid),
+        topic_tags=[decision_ledger.decision_instance_tag(iid)],
+    )
+    with sqlite3.connect(str(db)) as conn:
+        conn.execute("UPDATE alerts SET created_at=? WHERE id=?", ((datetime.now(UTC) - timedelta(days=90)).isoformat(), aid))
+        conn.commit()
+    return iid, aid
+
+
+def test_the_sweep_lets_an_old_waiting_step_lapse_with_its_card(db: Path) -> None:
+    from openexecutive.memory import decision_ledger
+
+    waiting, waiting_card = _waiting_card(db, "Send the old note")
+    running, running_card = _waiting_card(db, "Book the room")
+    answered, answered_card = _waiting_card(db, "Email Pat")
+    assert decision_ledger.claim_for_execution(running, db_path=db)
+    assert decision_ledger.mark_resolved(answered, decision_ledger.STATUS_REJECTED, db_path=db)
+    assert lifecycle.expire_stale_alerts(db_path=db) == 2
+    card = alert_store.get_alert(waiting_card, db_path=db)
+    assert card is not None and card.status == "expired" and card.tidied_reason.startswith("No change in")
+    step = decision_ledger.get_decision_instance(waiting, db_path=db)
     assert step is not None and step.status == decision_ledger.STATUS_AUTO_NO_RESPONSE
+    # A running step keeps its card; one answered elsewhere still lets it go.
+    assert alert_store.get_alert(running_card, db_path=db).status == "unread"  # type: ignore[union-attr]
+    assert alert_store.get_alert(answered_card, db_path=db).status == "expired"  # type: ignore[union-attr]
+
+
+def test_undo_never_brings_back_a_step_asked_again_under_its_key(
+    client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openexecutive.memory import decision_ledger
+
+    first, card = _waiting_card(db, "Book Lee", key="book-lee", payload={"title": "Sync", "note": "v1"})
+    alert = alert_store.get_alert(card, db_path=db)
+    assert alert is not None and lifecycle.settle(alert, "dismissed", "No longer needed.", db_path=db)
+    decision_ledger.create_decision_instance(
+        decision_class="take_the_lead_action", department="", originating_session_id=None,
+        proposed_payload={"title": "Sync", "note": "v2"}, idempotency_key="book-lee", gate_mode="propose",
+        approver_person_id=None, confidence=None, db_path=db,
+    )
+    _as(monkeypatch, 1, principal=True)
+    assert client.post(f"/alerts/{card}/reopen").status_code == 409
+    step = decision_ledger.get_decision_instance(first, db_path=db)
+    assert step is not None and step.status == decision_ledger.STATUS_CLOSED_EXTERNALLY
+
+
+def test_tidied_up_finds_your_cards_past_a_busy_week_for_the_team(db: Path) -> None:
+    mine = _insert(db, "Mine", routed_to_person_id=5)
+    alert_store.stamp_tidied([mine], "Done.", db_path=db)
+    alert_store.set_status(mine, "resolved", db_path=db)
+    for n in range(3):
+        other = _insert(db, f"Team {n}", routed_to_person_id=6)
+        alert_store.set_status(other, "resolved", db_path=db)
+        alert_store.stamp_tidied([other], "Done.", db_path=db)
+    since = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    assert [a.id for a in alert_store.list_tidied(since, reader=5, unrouted=False, limit=2, db_path=db)] == [mine]
+    assert alert_store.list_tidied(since, reader=None, unrouted=True, db_path=db) == []

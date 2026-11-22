@@ -788,6 +788,12 @@ def _close_or_annotate(ctx: _MoveContext) -> str:
             "Done." if new_status == lifecycle.RESOLVED_STATUS else "No longer needed."
         )
         if not lifecycle.settle(alert, new_status, reason, now=ctx.now, db_path=ctx.db_path):
+            # Answered meanwhile, or its step is running: looked at, so it
+            # waits out the interval like any other card.
+            alert_store.set_review(
+                ctx.alert_id, verdict="relevant", note=alert.review_note, recommended_move="",
+                why_now="", due_at=None, reviewed_at=ctx.now.isoformat(), db_path=ctx.db_path,
+            )
             return "relevant"
         alert_store.set_review(
             ctx.alert_id, verdict=v.verdict, note=ctx.note, recommended_move="close",

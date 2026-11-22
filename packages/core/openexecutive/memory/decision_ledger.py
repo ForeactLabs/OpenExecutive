@@ -206,10 +206,14 @@ def create_decision_instance(
     with _get_conn(db_path or _db_path()) as conn:
         if idempotency_key is not None:
             marks = ",".join("?" * len(FREES_KEY))
+            # A lapsed step asked for again is closed for good: the new
+            # step is that ask now, so Undo can never bring the old one back
+            # beside it (``unlapse``).
             conn.execute(
-                "UPDATE decision_instances SET idempotency_key = NULL"
+                "UPDATE decision_instances SET idempotency_key = NULL,"
+                " status = CASE WHEN status = ? THEN ? ELSE status END"
                 f" WHERE idempotency_key = ? AND status IN ({marks})",  # noqa: S608 - placeholders only
-                (idempotency_key, *FREES_KEY),
+                (STATUS_AUTO_NO_RESPONSE, STATUS_CLOSED_EXTERNALLY, idempotency_key, *FREES_KEY),
             )
         cur = conn.execute(sql, (
             decision_class, now, department, originating_session_id,

@@ -788,7 +788,7 @@ def tidied_for(caller: int | None, *, is_principal: bool, viewer: object, since:
     reader's Needs you: routed to them, or unrouted when they are the
     principal. Nobody else's."""
     out: list[Alert] = []
-    for a in store.list_tidied(since):
+    for a in store.list_tidied(since, reader=caller, unrouted=is_principal):
         mine = a.routed_to_person_id == caller if a.routed_to_person_id is not None else is_principal
         if not mine or (is_private_alert(a) and not is_principal) or not visible_alert(a, viewer):
             continue

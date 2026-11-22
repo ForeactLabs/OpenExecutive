@@ -300,8 +300,8 @@ def expire_stale_alerts(
 
     now = now or datetime.now(UTC)
     expired_ids: list[int] = []
+    monitoring_days, action_days = _ttl_settings()
     try:
-        monitoring_days, action_days = _ttl_settings()
         rows = list_alerts(status="unread", limit=_SWEEP_PAGE, db_path=db_path)
         for a in rows:
             if a.id is None:
@@ -314,8 +314,8 @@ def expire_stale_alerts(
             if settle(a, EXPIRED_STATUS, _age_reason(days), now=now, db_path=db_path):
                 expired_ids.append(a.id)
     except Exception:
+        # Each card settled on its own: still audit the ones that did.
         logger.exception("alerts.lifecycle: expiry sweep failed")
-        return len(expired_ids)
     count = len(expired_ids)
     if count:
         try:

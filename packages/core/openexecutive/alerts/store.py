@@ -826,16 +826,26 @@ def stamp_tidied(
             )
 
 
-def list_tidied(since: str, *, limit: int = 200, db_path: Path | None = None) -> list[Alert]:
+def list_tidied(
+    since: str,
+    *,
+    reader: int | None,
+    unrouted: bool,
+    limit: int = 500,
+    db_path: Path | None = None,
+) -> list[Alert]:
     """Cards the tidy-up settled since ``since`` (ISO) and nobody has put
-    back, newest first."""
+    back, newest first: those routed to ``reader``, plus the unrouted ones
+    when ``unrouted`` (the principal's). Filtered before the limit, so one
+    busy week for the team never crowds out someone's own."""
     if not _resolve_db_path(db_path).exists():
         return []
     with _get_conn(db_path) as conn:
         rows = conn.execute(
             "SELECT * FROM alerts WHERE tidied_at IS NOT NULL AND tidied_at >= ? "
-            "AND status != 'unread' ORDER BY tidied_at DESC, id DESC LIMIT ?",
-            (since, limit),
+            "AND status != 'unread' AND ((? IS NOT NULL AND routed_to_person_id = ?) "
+            "OR (? AND routed_to_person_id IS NULL)) ORDER BY tidied_at DESC, id DESC LIMIT ?",
+            (since, reader, reader, 1 if unrouted else 0, limit),
         ).fetchall()
     return [_row_to_alert(r) for r in rows]
 
