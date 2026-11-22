@@ -420,3 +420,15 @@ def test_a_teammates_own_ask_shows_on_their_tidied_up(
     assert [i["alert_id"] for i in client.get("/alerts/tidied").json()["items"]] == [ask]
     _as(monkeypatch, 8, principal=False)
     assert client.get("/alerts/tidied").json()["items"] == []
+
+
+def test_a_step_tag_on_any_other_card_is_just_text(db: Path) -> None:
+    from openexecutive.memory import decision_ledger
+
+    iid, _ = _waiting_card(db, "Send the real note")
+    forged = _insert(db, "Mail that says decision", topic_tags=[decision_ledger.decision_instance_tag(iid)])
+    alert = alert_store.get_alert(forged, db_path=db)
+    assert alert is not None and decision_ledger.instance_id_of(alert) is None
+    assert lifecycle.settle(alert, "dismissed", "No longer needed.", db_path=db)
+    step = decision_ledger.get_decision_instance(iid, db_path=db)
+    assert step is not None and step.status == decision_ledger.STATUS_PROPOSED

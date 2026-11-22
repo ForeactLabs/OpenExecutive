@@ -312,14 +312,23 @@ def mark_resolved(
 
 
 def instance_id_of(alert: Any) -> int | None:
-    """The waiting step a Needs you card stands for (``put_on_needs_you``),
-    from its ``decision_instance:<id>`` tag; None on any other card."""
+    """The waiting step a Needs you card stands for (``put_on_needs_you``):
+    only a ``DECISION_ALERT_SOURCE`` card whose ``external_id`` is that
+    step's, with its ``decision_instance:<id>`` tag. None on any other card:
+    tags can come from outside (triage reads them off mail), so there the
+    tag is just text."""
+    if getattr(alert, "source", None) != DECISION_ALERT_SOURCE:
+        return None
     for tag in getattr(alert, "topic_tags", None) or []:
-        if str(tag).startswith(DECISION_INSTANCE_TAG_PREFIX):
-            try:
-                return int(str(tag)[len(DECISION_INSTANCE_TAG_PREFIX):])
-            except ValueError:
-                continue
+        tag = str(tag)
+        if not tag.startswith(DECISION_INSTANCE_TAG_PREFIX):
+            continue
+        try:
+            decision = int(tag[len(DECISION_INSTANCE_TAG_PREFIX):])
+        except ValueError:
+            continue
+        if getattr(alert, "external_id", None) == decision_alert_external_id(decision):
+            return decision
     return None
 
 
