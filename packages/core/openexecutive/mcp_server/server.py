@@ -331,7 +331,7 @@ async def done_for_you() -> str:
 @mcp.resource(
     "oe://tasks",
     name="Tasks",
-    description="Open tasks, soonest due first: the owner sees everyone's, anyone else their own.",
+    description="Open tasks, soonest due first: the owner sees everyone's, anyone else their own; a task from someone's own chat only they and its assignee see.",
     mime_type="application/json",
 )
 async def tasks() -> str:

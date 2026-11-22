@@ -3932,7 +3932,16 @@ attunement:
       One helper, `people.store.is_principal_or_self(caller, owner)`, backs
       close_open_loop, list visibility, GET /people/{id}/open-loops,
       POST /open-loops/{id}/close and the feedback route. Owner None =
-      principal only.
+      principal only. Inside that, `open_loops.visible_to(loop, reader)`
+      (SQL twin `_reader_clause`, the `reader` argument of list_open_loops,
+      list_tasks, get_open_loop and get_task) hides a task made in someone's
+      own chat (`scheduled_actions.private_to_person_id`, set from
+      `fact_tools.private_owner` by the extraction pass and assign_open_loop)
+      from everyone but that person and its assignee, the principal
+      included; hidden reads as not found. The list tool never refuses and
+      always carries PRIVATE_TASKS_NOTE. Internal reads default to
+      EVERYONE; the reflection block and Take the lead's overdue watch read
+      only unkept tasks.
     verbatim_text: |
       The stored loop `text` must itself appear verbatim in the speaker's
       message (drop reason `text_not_verbatim`): it is re-injected into the

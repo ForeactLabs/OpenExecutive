@@ -627,9 +627,11 @@ def own_chat_person(session: Any) -> int | None:
     return person_id if isinstance(person_id, int) else None
 
 
-def _private_decision_owner(session: Any) -> int | None:
-    """Who a decision recorded this turn is private to: ``own_chat_person``
-    on a team install. A solo install has nobody to keep it from."""
+def private_owner(session: Any) -> int | None:
+    """Who what this turn makes is private to: ``own_chat_person`` on a team
+    install. A decision recorded or a task made in someone's own chat is
+    theirs (``memory.facts``, ``attunement.open_loops.visible_to``). A solo
+    install has nobody to keep it from."""
     try:
         from openexecutive.memory.workspace_settings import effective_workspace_mode
 
@@ -704,7 +706,7 @@ def _remember_fact(tool_input: dict[str, Any]) -> str | _Hold:
     elif decision and not held:
         # A decision made in the speaker's own chat is theirs until they
         # share it. Not one held for an emailed confirmation (never a chat).
-        owner = _private_decision_owner(session)
+        owner = private_owner(session)
     else:
         owner = None
     args: dict[str, Any] = {

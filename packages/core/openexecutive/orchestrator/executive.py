@@ -126,6 +126,7 @@ from openexecutive.orchestrator.fact_tools import (
     FACT_TOOL_HANDLERS,
     FACT_TOOLS,
     own_chat_person,
+    private_owner,
 )
 from openexecutive.orchestrator.figure_tools import (
     WORKED_OUT_TOOL_HANDLERS,
@@ -1737,6 +1738,7 @@ class Executive:
                     # surface verified the speaker is the principal.
                     workspace_mode=workspace_mode,
                     principal_verified=is_principal_on_verified_surface(session),
+                    private_to_person_id=private_owner(session),
                 )
             # Re-learn this speaker's working style once enough new
             # messages have arrived (paced and budgeted inside).
@@ -2338,6 +2340,7 @@ class Executive:
                     speaker_text, final_response, person_id=person_id,
                     session_id=session.session_id, workspace_mode=workspace_mode,
                     principal_verified=is_principal_on_verified_surface(session),
+                    private_to_person_id=private_owner(session),
                 )
             from openexecutive.attunement.style import schedule_style_pass
 

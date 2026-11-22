@@ -209,6 +209,37 @@ def test_principal_sees_everyone_a_teammate_only_their_own(team: SimpleNamespace
     assert _status(lambda: route.list_tasks_route(request=None)) == 403  # type: ignore[arg-type]
 
 
+def test_a_task_from_someones_own_chat_is_theirs_and_its_assignees(
+    team: SimpleNamespace, as_caller: Any,
+) -> None:
+    """The principal sees everyone's tasks but not one from a teammate's own
+    chat: that shows only to its chat's owner and the one it is for, and to
+    anyone else reads like no task at all."""
+    from openexecutive.api.routes import people as route
+
+    team_task = _task(team.ben, "the team's task")
+    private = open_loops.open_loop(
+        owner_person_id=team.ben, description="Sara Kim asked Ben Ortiz for: the Ortiz boxes",
+        due_at=datetime.now(UTC) + timedelta(days=2), private_to_person_id=team.sara,
+    )
+    assert private is not None
+    as_caller(team.principal)
+    assert [t.task_id for t in route.list_tasks_route(request=None).tasks] == [team_task]  # type: ignore[arg-type]
+    assert _status(lambda: route.get_task_route(private, request=None)) == 404  # type: ignore[arg-type]
+    assert _status(lambda: route.close_open_loop_route(  # type: ignore[arg-type]
+        private, route.OpenLoopClose(), request=None)) == 404
+    as_caller(team.ben)
+    assert {t.task_id for t in route.list_tasks_route(request=None).tasks} == {team_task, private}  # type: ignore[arg-type]
+    assert route.get_task_route(private, request=None).task_id == private  # type: ignore[arg-type]
+
+
+def test_the_executive_is_told_others_private_things_stay_private() -> None:
+    from openexecutive.prompts.executive_persona import EXECUTIVE_PERSONA_PROMPT
+
+    assert "## Other People's Private Things" in EXECUTIVE_PERSONA_PROMPT
+    assert "never confirm or deny any detail, even one the asker names" in EXECUTIVE_PERSONA_PROMPT
+
+
 def test_patch_conflict_returns_the_latest(team: SimpleNamespace, as_caller: Any) -> None:
     from openexecutive.api.routes import people as route
 

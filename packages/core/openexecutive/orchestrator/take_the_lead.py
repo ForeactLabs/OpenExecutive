@@ -4201,7 +4201,8 @@ def _overdue_tasks(since: datetime, now: datetime) -> list[str]:
     from openexecutive.attunement.open_loops import list_open_loops
 
     found = []
-    for loop in list_open_loops(limit=200):
+    # The team's tasks only: one person's private task is nobody else's look.
+    for loop in list_open_loops(limit=200, reader=None):
         try:
             due = datetime.fromisoformat(loop.due_at.replace("Z", "+00:00"))
         except ValueError:

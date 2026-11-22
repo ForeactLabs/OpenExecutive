@@ -189,7 +189,8 @@ def _visible_owner(requested: int | None) -> tuple[bool, int | None]:
     they read (``orchestrator.speaker.own_private_speaker``): the web chat, a
     call with the Executive, their own chat app. Anyone else, and the
     principal in a shared channel, sees only their own. No resolved speaker
-    sees nothing."""
+    sees nothing. Within that, a task from someone else's own chat is never
+    seen (``open_loops.visible_to``, read with ``_caller``)."""
     from openexecutive.orchestrator.schedule_tools import current_session
     from openexecutive.orchestrator.speaker import own_private_speaker
 
@@ -205,25 +206,26 @@ def _visible_owner(requested: int | None) -> tuple[bool, int | None]:
     return True, caller
 
 
+def _caller() -> int | None:
+    """This turn's resolved caller, the reader of every task lookup here."""
+    from openexecutive.orchestrator.schedule_tools import current_session
+
+    session = current_session.get()
+    caller = getattr(session, "caller_person_id", None) if session is not None else None
+    return int(caller) if caller is not None else None
+
+
 async def handle_list_open_loops(tool_input: dict[str, Any]) -> str:
-    from openexecutive.attunement.open_loops import list_open_loops
+    from openexecutive.attunement.open_loops import PRIVATE_TASKS_NOTE, list_open_loops, list_tasks
 
     raw = tool_input.get("person_id")
     allowed, person_id = _visible_owner(raw if isinstance(raw, int) else None)
-    if not allowed:
-        return json.dumps({
-            "status": "refused",
-            "detail": (
-                "tasks are visible to their owner, and to the principal in a "
-                "private conversation"
-            ),
-        })
-    if tool_input.get("state") == "done":
-        from openexecutive.attunement.open_loops import list_tasks
-
-        loops, _total = list_tasks(owner_person_id=person_id, state="done", limit=20)
-    else:
-        loops = list_open_loops(person_id=person_id, limit=50)
+    reader = _caller()
+    loops: list[Any] = []
+    if allowed and tool_input.get("state") == "done":
+        loops, _total = list_tasks(owner_person_id=person_id, state="done", limit=20, reader=reader)
+    elif allowed:
+        loops = list_open_loops(person_id=person_id, limit=50, reader=reader)
     return json.dumps({
         "open_loops": [
             {
@@ -237,7 +239,8 @@ async def handle_list_open_loops(tool_input: dict[str, Any]) -> str:
                 **({"completed_at": loop.completed_at} if loop.status == "done" else {}),
             }
             for loop in loops
-        ]
+        ],
+        "private": PRIVATE_TASKS_NOTE,
     })
 
 
@@ -269,7 +272,8 @@ async def handle_close_open_loop(tool_input: dict[str, Any]) -> str:
     reason = str(tool_input.get("reason") or "done")
     if reason not in ("done", "not_needed", "cancelled"):
         reason = "done"
-    loop = get_open_loop(loop_id)
+    # Someone else's private task reads like none.
+    loop = get_open_loop(loop_id, reader=_caller())
     if loop is None:
         return json.dumps({"status": "not_found", "loop_id": loop_id})
     allowed, caller = _may_close(loop.owner_person_id)
@@ -420,9 +424,13 @@ async def handle_assign_open_loop(tool_input: dict[str, Any]) -> str:
             ),
         })
 
+    from openexecutive.orchestrator.fact_tools import private_owner
+
     result = assign_open_loop(
         owner_person_id=person_id, text=task, assigned_by_person_id=assigner,
         due_date=due, originating_session_id=getattr(session, "session_id", None) or None,
+        # Made in the asker's own chat: theirs and the assignee's to see.
+        private_to_person_id=private_owner(session),
     )
     if result.loop_id is None:
         reason = result.reason or "not_assigned"
@@ -484,7 +492,7 @@ async def handle_update_open_loop(tool_input: dict[str, Any]) -> str:
         )
     except (KeyError, TypeError, ValueError) as exc:
         return json.dumps({"error": f"bad arguments: {exc}"})
-    loop = get_task(loop_id)
+    loop = get_task(loop_id, reader=_caller())
     if loop is None:
         return json.dumps({"status": "not_found", "loop_id": loop_id})
     allowed, caller = _may_close(loop.owner_person_id)
@@ -534,7 +542,7 @@ async def handle_reopen_open_loop(tool_input: dict[str, Any]) -> str:
         loop_id = int(tool_input["loop_id"])
     except (KeyError, TypeError, ValueError) as exc:
         return json.dumps({"error": f"bad arguments: {exc}"})
-    loop = get_task(loop_id)
+    loop = get_task(loop_id, reader=_caller())
     if loop is None:
         return json.dumps({"status": "not_found", "loop_id": loop_id})
     allowed, caller = _may_close(loop.owner_person_id)
