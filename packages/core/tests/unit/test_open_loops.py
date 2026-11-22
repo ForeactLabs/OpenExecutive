@@ -436,7 +436,10 @@ async def test_list_tool_teammate_sees_only_their_own(team: SimpleNamespace) -> 
     assert _owners(await _list_as(team.sara, web=True)) == {team.sara}
     assert _owners(await _list_as(team.sara, session_id="slack:dm:U_SARA")) == {team.sara}
     for hidden in (await _list_as(team.sara, web=True, person_id=team.ben), await _list_as(None, web=True)):
-        assert hidden["open_loops"] == [] and "status" not in hidden
+        # Not an empty list: the result says another person's tasks are not shown.
+        assert hidden["open_loops"] == [] and hidden["status"] == "not_shown"
+        assert "private" in hidden["detail"]
+    assert "status" not in await _list_as(team.sara, web=True, person_id=team.sara)
 
 
 async def test_list_tool_keeps_a_private_task_to_its_two_people(team: SimpleNamespace) -> None:

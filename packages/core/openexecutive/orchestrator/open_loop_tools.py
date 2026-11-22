@@ -215,6 +215,12 @@ def _caller() -> int | None:
     return int(caller) if caller is not None else None
 
 
+OTHERS_NOT_SHOWN = (
+    "Other people's tasks are not listed for this request. Say only that they are "
+    "private to them: never guess, confirm or deny what they hold."
+)
+
+
 async def handle_list_open_loops(tool_input: dict[str, Any]) -> str:
     from openexecutive.attunement.open_loops import PRIVATE_TASKS_NOTE, list_open_loops, list_tasks
 
@@ -241,6 +247,7 @@ async def handle_list_open_loops(tool_input: dict[str, Any]) -> str:
             for loop in loops
         ],
         "private": PRIVATE_TASKS_NOTE,
+        **({} if allowed else {"status": "not_shown", "detail": OTHERS_NOT_SHOWN}),
     })
 
 

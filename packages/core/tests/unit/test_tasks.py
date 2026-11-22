@@ -233,6 +233,67 @@ def test_a_task_from_someones_own_chat_is_theirs_and_its_assignees(
     assert route.get_task_route(private, request=None).task_id == private  # type: ignore[arg-type]
 
 
+def test_where_a_task_is_made_decides_who_it_is_kept_for(
+    team: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The real rule (``fact_tools.private_owner``), with no stand-in: a task
+    assigned in Sara's own web chat is kept for her, one assigned in a shared
+    channel is the team's, one from Sara's approved card stays hers, and the
+    pass after a turn stores whom it was given."""
+    from openexecutive.orchestrator import levels
+    from openexecutive.orchestrator.open_loop_tools import handle_assign_open_loop
+    from openexecutive.orchestrator.schedule_tools import current_session
+    from openexecutive.orchestrator.session import Session
+
+    monkeypatch.setattr("openexecutive.orchestrator.open_loop_tools._in_speakers_words", lambda t, s: True)
+
+    async def no_notice(**kwargs: Any) -> Any:
+        return SimpleNamespace(as_dict=lambda for_principal: {"status": "skipped"})
+
+    monkeypatch.setattr("openexecutive.attunement.assignment_notice.notify_assignee", no_notice)
+
+    def assign(session: Session, task: str, approved_by: int | None = None) -> Any:
+        token = current_session.set(session)
+        try:
+            if approved_by is None:
+                out = json.loads(asyncio.run(handle_assign_open_loop({"person_id": team.ben, "task": task})))
+            else:
+                with levels.approved(approved_by):
+                    out = json.loads(asyncio.run(handle_assign_open_loop({"person_id": team.ben, "task": task})))
+        finally:
+            current_session.reset(token)
+        assert out.get("loop_id"), out
+        made = open_loops.get_task(int(out["loop_id"]))
+        assert made is not None
+        return made.private_to_person_id
+
+    own = Session(session_id="web:s", caller_person_id=team.sara, from_web_chat=True,
+                  web_caller_signed_in=True)
+    assert assign(own, "the Ortiz boxes") == team.sara
+    shared = Session(session_id="slack:channel:C1:U_SARA", caller_person_id=team.sara,
+                     speaker_verified=True)
+    assert assign(shared, "the shared deck") is None
+    assert assign(Session(session_id="run", unattended=True), "the card's task", approved_by=team.sara) == team.sara
+
+    class _Fake:
+        async def messages_create(self, **kwargs: Any) -> Any:
+            block = SimpleNamespace(type="tool_use", name="record_open_loops", input={"loops": [{
+                "owner": "me", "kind": "commitment", "text": "call the landlord",
+                "due_date": None, "quote": "I'll call the landlord",
+            }], "closed": []})
+            return SimpleNamespace(content=[block])
+
+    monkeypatch.setattr("openexecutive.providers.get_provider", lambda model: _Fake())
+    monkeypatch.setattr("openexecutive.audit.usage.log_model_usage", lambda *a, **k: None)
+    counts = asyncio.run(open_loops.run_open_loop_pass(
+        "I'll call the landlord.", "Noted.", person_id=team.sara, session_id="web:s",
+        private_to_person_id=team.sara,
+    ))
+    assert counts["opened"] == 1
+    [loop] = [t for t in open_loops.list_open_loops(person_id=team.sara) if "landlord" in t.description]
+    assert loop.private_to_person_id == team.sara
+
+
 def test_the_principals_own_reads_keep_their_private_tasks(team: SimpleNamespace) -> None:
     """The reflection block and Take the lead's overdue watch are written for
     the principal: their own private tasks show there, a teammate's don't."""
