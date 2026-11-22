@@ -432,14 +432,10 @@ async def handle_assign_open_loop(tool_input: dict[str, Any]) -> str:
         })
 
     from openexecutive.orchestrator.fact_tools import private_owner
-    from openexecutive.orchestrator.people_tools import approved_speaker
 
-    # Made in the asker's own chat: theirs and the assignee's to see. A step
-    # carried out from their own card runs with no chat, so it stays theirs.
-    approved = approved_speaker()
+    # Made in the asker's own chat (or carried out from a card held there):
+    # theirs and the assignee's to see.
     private_to = private_owner(session)
-    if private_to is None and approved is not None and approved.id is not None:
-        private_to = int(approved.id)
     result = assign_open_loop(
         owner_person_id=person_id, text=task, assigned_by_person_id=assigner,
         due_date=due, originating_session_id=getattr(session, "session_id", None) or None,

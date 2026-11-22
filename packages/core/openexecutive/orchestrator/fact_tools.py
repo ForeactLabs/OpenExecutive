@@ -630,8 +630,9 @@ def own_chat_person(session: Any) -> int | None:
 def private_owner(session: Any) -> int | None:
     """Who what this turn makes is private to: ``own_chat_person`` on a team
     install. A decision recorded or a task made in someone's own chat is
-    theirs (``memory.facts``, ``attunement.open_loops.visible_to``). A solo
-    install has nobody to keep it from."""
+    theirs (``memory.facts``, ``attunement.open_loops.visible_to``). A step
+    carried out from a card keeps the turn that held it
+    (``Session.private_to``). A solo install has nobody to keep it from."""
     try:
         from openexecutive.memory.workspace_settings import effective_workspace_mode
 
@@ -639,6 +640,9 @@ def private_owner(session: Any) -> int | None:
             return None
     except Exception:  # noqa: BLE001 - unknown mode: treat as a team.
         logger.warning("fact_tools: workspace mode unreadable", exc_info=True)
+    kept = getattr(session, "private_to", None) if session is not None else None
+    if isinstance(kept, int) and not isinstance(kept, bool):
+        return kept
     return own_chat_person(session)
 
 

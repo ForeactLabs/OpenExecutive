@@ -238,8 +238,9 @@ def test_where_a_task_is_made_decides_who_it_is_kept_for(
 ) -> None:
     """The real rule (``fact_tools.private_owner``), with no stand-in: a task
     assigned in Sara's own web chat is kept for her, one assigned in a shared
-    channel is the team's, one from Sara's approved card stays hers, and the
-    pass after a turn stores whom it was given."""
+    channel is the team's, and the
+    pass after a turn stores whom it was given. A card keeps where it was
+    held."""
     from openexecutive.orchestrator import levels
     from openexecutive.orchestrator.open_loop_tools import handle_assign_open_loop
     from openexecutive.orchestrator.schedule_tools import current_session
@@ -273,7 +274,23 @@ def test_where_a_task_is_made_decides_who_it_is_kept_for(
     shared = Session(session_id="slack:channel:C1:U_SARA", caller_person_id=team.sara,
                      speaker_verified=True)
     assert assign(shared, "the shared deck") is None
-    assert assign(Session(session_id="run", unattended=True), "the card's task", approved_by=team.sara) == team.sara
+    # A card keeps the turn that held it (``take_the_lead.kept_for``): held
+    # in Sara's own chat it stays hers, held in a shared channel it is the
+    # team's, whoever asked.
+    from openexecutive.orchestrator.take_the_lead import kept_for
+
+    def held_in(session: Session) -> dict[str, Any]:
+        token = current_session.set(session)
+        try:
+            return kept_for()
+        finally:
+            current_session.reset(token)
+
+    assert held_in(own) == {"private_to": team.sara}
+    assert held_in(shared) == {}
+    run = Session(session_id="run", unattended=True, private_to=team.sara)
+    assert assign(run, "the card's task", approved_by=team.sara) == team.sara
+    assert assign(Session(session_id="run", unattended=True), "the channel card", approved_by=team.sara) is None
 
     class _Fake:
         async def messages_create(self, **kwargs: Any) -> Any:
