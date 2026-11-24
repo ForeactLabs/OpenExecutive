@@ -1326,6 +1326,23 @@ def list_signals_for_watchlist(
     return [_row_to_signal_dict(row) for row in rows]
 
 
+def signals_since(
+    watchlist_id: int, since: str, *, excluding: str = "", db_path: Path | None = None,
+) -> bool:
+    """Whether watch ``watchlist_id`` recorded any signal captured at or
+    after ``since`` (UTC ISO), told or not, leaving out dedup keys that start
+    with ``excluding``."""
+    if not _resolve_db_path(db_path).exists():
+        return False
+    with _get_conn(db_path) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM external_signals WHERE watchlist_id = ? AND captured_at >= ? "
+            "AND (? = '' OR substr(dedup_key, 1, length(?)) != ?) LIMIT 1",
+            (watchlist_id, since, excluding, excluding, excluding),
+        ).fetchone()
+    return row is not None
+
+
 def recorded_dedup_keys(keys: list[str], *, db_path: Path | None = None) -> set[str]:
     """Which of ``keys`` are already in ``external_signals``."""
     if not keys or not _resolve_db_path(db_path).exists():

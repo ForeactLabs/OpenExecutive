@@ -40,6 +40,7 @@ import logging
 import re
 from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime, time, timedelta
+from pathlib import Path
 from typing import Any
 
 from openexecutive.monitoring.models import SOURCE_KIND_MAILBOX, WatchlistItem
@@ -134,20 +135,27 @@ def _parse(value: object) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
-def quiet_ping_due(item: WatchlistItem, now: datetime, zone: Any) -> bool:
+def quiet_ping_due(item: WatchlistItem, now: datetime, zone: Any, *, db_path: Path | None = None) -> bool:
     """Whether to ping the owner that nothing came: its "nothing by" day's
-    morning (``zone``'s time) has come and nothing has matched since the
-    day was set. (Whether it pinged for that day already is the caller's:
-    the ping's dedup key.)"""
+    morning (``zone``'s time) has come, no later than the day after (a scan
+    that was down, or a watch turned off over the day, never pings weeks
+    late), and nothing has matched since the day was set: no email of it
+    recorded, told or not. (Whether it pinged for that day already is the
+    caller's: the ping's dedup key.)"""
+    from openexecutive.monitoring import store
+
     day = quiet_by(item)
-    if day is None:
+    if day is None or item.id is None:
         return False
-    config = item.config_json or {}
-    if now.astimezone(zone) < datetime.combine(day, QUIET_PING_AT, tzinfo=zone):
+    local = now.astimezone(zone)
+    if local < datetime.combine(day, QUIET_PING_AT, tzinfo=zone) or local.date() > day + timedelta(days=1):
         return False
-    since = _parse(config.get(QUIET_SINCE_KEY)) or _parse(item.created_at)
-    fired = _parse(item.last_fired_at)
-    return fired is None or since is None or fired < since
+    since = _parse((item.config_json or {}).get(QUIET_SINCE_KEY)) or _parse(item.created_at)
+    if since is None:
+        return True
+    return not store.signals_since(
+        item.id, since.astimezone(UTC).isoformat(), excluding=f"mailbox:{item.id}:quiet:", db_path=db_path,
+    )
 
 
 def who_from(item: WatchlistItem) -> str:

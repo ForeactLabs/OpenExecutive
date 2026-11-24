@@ -219,7 +219,7 @@ def quiet_signal(item: WatchlistItem, now: datetime, *, db_path: Path | None) ->
 
     assert item.id is not None
     day = mailbox.quiet_by(item)
-    if day is None or not mailbox.quiet_ping_due(item, now, get_user_timezone()):
+    if day is None or not mailbox.quiet_ping_due(item, now, get_user_timezone(), db_path=db_path):
         return None
     key = _quiet_dedup_key(item.id, day.isoformat())
     if store.recorded_dedup_keys([key], db_path=db_path):

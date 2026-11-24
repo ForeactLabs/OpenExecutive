@@ -759,11 +759,11 @@ def test_nothing_by_the_day_pings_that_morning_once(db: Path, monkeypatch: pytes
     item = ms.get_watchlist_item(item.id, db_path=db)
     assert item is not None
     morning = datetime(day.year, day.month, day.day, 9, 0, tzinfo=zone)
-    assert not mailbox.quiet_ping_due(item, morning - timedelta(minutes=1), zone)
-    assert mailbox.quiet_ping_due(item, morning, zone)
-    # Something matched since it was set: no ping.
-    heard = item.model_copy(update={"last_fired_at": (set_at + timedelta(days=1)).isoformat()})
-    assert not mailbox.quiet_ping_due(heard, morning, zone)
+    assert not mailbox.quiet_ping_due(item, morning - timedelta(minutes=1), zone, db_path=db)
+    assert mailbox.quiet_ping_due(item, morning, zone, db_path=db)
+    # The day after still pings (the scan may have been down); later never.
+    assert mailbox.quiet_ping_due(item, morning + timedelta(days=1, hours=14), zone, db_path=db)
+    assert not mailbox.quiet_ping_due(item, morning + timedelta(days=2), zone, db_path=db)
 
     monkeypatch.setattr(mailbox_source, "datetime", SimpleNamespace(now=lambda tz=None: morning.astimezone(UTC)))
     signals = asyncio.run(mailbox_source.MailboxSource().poll(item, db_path=db))
@@ -775,6 +775,32 @@ def test_nothing_by_the_day_pings_that_morning_once(db: Path, monkeypatch: pytes
     # Once a day: told, it doesn't ping again.
     ms.insert_signal(signals[0], db_path=db)
     assert asyncio.run(mailbox_source.MailboxSource().poll(item, db_path=db)) == []
+
+
+def test_an_email_that_came_but_was_never_told_still_means_something_came(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Robin's email is recorded on Tuesday (a watch in dry run tells
+    nothing); Wednesday morning brings no "nothing came" ping."""
+    from zoneinfo import ZoneInfo
+
+    _executive_inbox(monkeypatch)
+    zone = ZoneInfo("America/New_York")
+    set_at = datetime(2026, 11, 21, 15, 0, tzinfo=UTC)
+    day = set_at.date() + timedelta(days=4)
+    item = _email_watch(db, trigger={"from": ["robin@hale.example"]}, slug="robin-email")
+    assert item.id is not None
+    for key, value in mailbox.quiet_config(day, set_at).items():
+        ms.set_watchlist_config_key(item.id, key, value, db_path=db)
+    item = ms.get_watchlist_item(item.id, db_path=db)
+    assert item is not None and item.last_fired_at is None
+    morning = datetime(day.year, day.month, day.day, 9, 0, tzinfo=zone)
+    ms.insert_signal(Signal(
+        watchlist_id=item.id, source_kind=SOURCE_KIND_MAILBOX, source_external_id="exec:x1",
+        captured_at=(set_at + timedelta(days=1)).isoformat(), normalized_summary="Robin Hale: rent",
+        provenance_url="https://app.example/", dedup_key=f"mailbox:{item.id}:exec:x1",
+    ), db_path=db)
+    assert not mailbox.quiet_ping_due(item, morning, zone, db_path=db)
 
 
 def test_mail_that_comes_on_the_day_is_told_without_the_nothing_came_ping(
