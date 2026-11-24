@@ -2873,7 +2873,7 @@ def only_to(tool: str, tool_input: dict[str, Any], hit: Hit, person_id: int | No
     return person is not None and person.id == person_id and person.kind == "team"
 
 
-def still_waits(payload: dict[str, Any], *, approver: int | None) -> bool:
+def still_waits(payload: dict[str, Any]) -> bool:
     """Whether a held step nobody asked for would still wait if it came up
     now: the gate asked again (``_hit``), or a message only to the person
     its card is on (``only_to``). The tidy-up (``alerts.review``) asks this
@@ -2901,7 +2901,10 @@ def still_waits(payload: dict[str, Any], *, approver: int | None) -> bool:
         hit, _ = _hit(tool, tool_input, mcp=mcp)
         if hit is None:
             return False
-        return mcp or not only_to(tool, tool_input, hit, approver)
+        # Whose card it would be on today, as the gate would put it.
+        return mcp or not only_to(
+            tool, tool_input, hit, card_of(tool, tool_input, hit, source=str(payload.get("source") or "")),
+        )
     except Exception:
         logger.warning("take_the_lead: couldn't ask the gate again about a waiting step", exc_info=True)
         return True

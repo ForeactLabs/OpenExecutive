@@ -219,5 +219,9 @@ test("a waiting row says the job, who started it, why it waits and how long", as
     "Nothing for you to do. Each waits for its person's OK. Oldest 4 days.",
   );
   assert.equal(waitingNote([], people, now), "");
+  assert.equal(
+    waitingNote([{ ...held, routed_to_person_id: 99 }], [], now),
+    "Nothing for you to do. It waits for someone else's OK. Waiting 4 days.",
+  );
   assert.equal(waitedFor("2026-11-23T13:00:00Z", now), "1 day");
 });

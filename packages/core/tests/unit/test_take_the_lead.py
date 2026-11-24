@@ -2882,12 +2882,12 @@ def test_a_waits_rule_or_careful_still_holds_a_message_to_its_cards_person(
     gated = ttl.gated_handlers(_handlers(calls), source="reflection")
     result = json.loads(asyncio.run(gated["message_person"]({"person_id": morgan, "text": "The drafts are done."})))
     assert result["status"] == "waiting_for_approval" and calls == []
-    assert ttl.still_waits(_held_payload(morgan, "The drafts are done."), approver=morgan)
+    assert ttl.still_waits(_held_payload(morgan, "The drafts are done."))
 
     monkeypatch.setattr(outside_mode, "get_mode", lambda **_: outside_mode.ASK)
     result = json.loads(asyncio.run(gated["message_person"]({"person_id": morgan, "text": "See you at noon."})))
     assert result["status"] == "waiting_for_approval" and calls == []
-    assert ttl.still_waits(_held_payload(morgan, "See you at noon."), approver=morgan)
+    assert ttl.still_waits(_held_payload(morgan, "See you at noon."))
 
 
 # ── asked again: would a waiting step still wait today? ──────────────────────
@@ -2902,15 +2902,21 @@ def test_a_step_todays_rules_let_go_no_longer_waits(owner: Any, monkeypatch: pyt
     _balanced(monkeypatch)
     sam = _teammate()
     # Held once for a contract by a check since fixed: today it goes.
-    assert not ttl.still_waits(_held_payload(sam, "The drafts are done."), approver=owner.id)
+    assert not ttl.still_waits(_held_payload(sam, "The drafts are done."))
     # One that is about a contract still waits on Balanced.
-    assert ttl.still_waits(_held_payload(sam, "Please sign the NDA today."), approver=owner.id)
+    assert ttl.still_waits(_held_payload(sam, "Please sign the NDA today."))
 
 
 def test_a_message_to_its_own_approver_no_longer_waits(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Asked as the gate would today: a message to whoever signs contracts
+    now, and to no one else, goes; once signing moves on, it waits."""
+    _team(monkeypatch)
     _balanced(monkeypatch)
-    sam = _teammate()
-    assert not ttl.still_waits(_held_payload(sam, "Please sign the NDA today."), approver=sam)
+    lee = _holder("Lee Legal", "lee@co.example", AuthorityScope.LEGAL_SIGN)
+    assert not ttl.still_waits(_held_payload(lee, "Please sign the NDA today."))
+    people_store.set_authority_scope(lee, [])
+    _holder("Morgan Legal", "morgan@co.example", AuthorityScope.LEGAL_SIGN)
+    assert ttl.still_waits(_held_payload(lee, "Please sign the NDA today."))
 
 
 def test_careful_and_training_still_hold_a_waiting_step(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2918,16 +2924,16 @@ def test_careful_and_training_still_hold_a_waiting_step(owner: Any, monkeypatch:
 
     sam = _teammate()
     monkeypatch.setattr(outside_mode, "get_mode", lambda **_: outside_mode.ASK)
-    assert ttl.still_waits(_held_payload(sam, "The drafts are done."), approver=owner.id)
+    assert ttl.still_waits(_held_payload(sam, "The drafts are done."))
     _balanced(monkeypatch)
     _training()
-    assert ttl.still_waits(_held_payload(sam, "The drafts are done."), approver=owner.id)
+    assert ttl.still_waits(_held_payload(sam, "The drafts are done."))
 
 
 def test_a_step_someone_asked_for_is_not_asked_again(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     _hands_off(monkeypatch)
     sam = _teammate()
-    assert ttl.still_waits(_held_payload(sam, "hi", source="chat"), approver=owner.id)
-    assert ttl.still_waits(_held_payload(sam, "hi", source="scheduled"), approver=owner.id)
-    assert ttl.still_waits(_held_payload(sam, "hi", asked_by_person_id=owner.id), approver=owner.id)
-    assert ttl.still_waits({"tool": "message_person"}, approver=owner.id)  # not a held step
+    assert ttl.still_waits(_held_payload(sam, "hi", source="chat"))
+    assert ttl.still_waits(_held_payload(sam, "hi", source="scheduled"))
+    assert ttl.still_waits(_held_payload(sam, "hi", asked_by_person_id=owner.id))
+    assert ttl.still_waits({"tool": "message_person"})  # not a held step

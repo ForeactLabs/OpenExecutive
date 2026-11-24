@@ -813,7 +813,7 @@ def _settled_no_longer_waits(
             # Tidied this way once and put back with Undo: someone wants it
             # to wait, so it is left to the review like any other card.
             return False
-        if take_the_lead.still_waits(payload, approver=step.approver_person_id):
+        if take_the_lead.still_waits(payload):
             return False
         if not decision_ledger.update_open_payload(
             instance_id, {**payload, _RECHECKED: True}, expected_json=step.proposed_payload_json, db_path=db_path,

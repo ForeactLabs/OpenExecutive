@@ -275,7 +275,11 @@ export function waitingNote(
   const one = ids.size === 1 ? people.find((x) => x.id === [...ids][0]) : undefined;
   const who = one ? firstName(one.full_name) || one.full_name.trim() : "";
   const it = team.length === 1 ? "it" : "these";
-  const whose = who ? `${who} has to OK ${it}.` : `Each waits for its person's OK.`;
+  const whose = who
+    ? `${who} has to OK ${it}.`
+    : ids.size === 1
+      ? `${team.length === 1 ? "It waits" : "They wait"} for someone else's OK.`
+      : `Each waits for its person's OK.`;
   const oldest = team
     .map((p) => p.created_at)
     .reduce((a, b) => (Date.parse(b) < Date.parse(a) ? b : a));

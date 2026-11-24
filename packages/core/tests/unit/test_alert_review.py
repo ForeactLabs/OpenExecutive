@@ -1280,10 +1280,10 @@ def test_a_waiting_step_todays_rules_let_go_is_tidied_without_the_model(db: Path
     _person(full_name="Pat", role="CEO", is_principal=True)
     gone_iid, gone = _waiting_step(db, "Message Sam")
     kept_iid, kept = _waiting_step(db, "Message Lee")
-    asked: list[int | None] = []
+    asked: list[Any] = []
 
-    def fake_still_waits(payload: dict[str, Any], *, approver: int | None) -> bool:
-        asked.append(approver)
+    def fake_still_waits(payload: dict[str, Any]) -> bool:
+        asked.append(payload.get("tool"))
         return payload.get("tool") == "keep"
 
     with sqlite3.connect(db) as conn:
