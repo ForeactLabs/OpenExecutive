@@ -15,8 +15,9 @@ its last reply is checked against the tool calls the turn made:
    put up for approval) is not one.
 3. When it finds one, the claim must appear word for word in the reply (code
    check), or it is ignored. The loop then gets one more round with
-   ``nudge(claim)``: do it now with the right tool, or say plainly it couldn't
-   be done, in a whole new reply that replaces the first. Once a turn, so a
+   ``nudge(claim)``: when the person asked for it, do it now with the right
+   tool or say plainly it couldn't be done; when they didn't, offer it; in
+   a whole new reply that replaces the first. Once a turn, so a
    loop can't form.
 
 Never raises and never blocks a reply: a failure, a timeout or a missing
@@ -42,7 +43,13 @@ CLAIM_RE = re.compile(
     r"(?:every|each)(?: other| \d+| two| few)? "
     r"(?:minute|hour|day|week|month|quarter|morning|evening|weekday|monday|tuesday|wednesday|thursday|friday|saturday|sunday)s?|"
     r"hourly|daily|weekly|monthly|quarterly|keep(?:ing)? an eye|watching|"
-    r"(?:i['’]?ll|i will) (?:flag|ping|let you know|tell you|schedule|watch|send))\b",
+    r"(?:i['’]?ll|i will) (?:flag|ping|let you know|tell you|schedule|watch|send)|"
+    # Saying a message went to someone ("I just messaged her", "emailed
+    # Pat", "let Kendall know") and anything the reply says it "just" or
+    # "already" did.
+    r"messaged|emailed|e-mailed|texted|pinged|dm['’]?(?:e)?d|told|let (?!me\b|us\b)\w+ know|"
+    r"reached out|wrote (?:to|back)|replied|forwarded|notified|invited|shared|"
+    r"posted|followed up|nudged|(?:i|we) (?:just|already|also|went ahead and) \w+)\b",
     re.IGNORECASE,
 )
 
@@ -71,8 +78,11 @@ _SYSTEM = (
     "change during this reply (removed, closed, saved, scheduled, sent, "
     "updated, cancelled, set a reminder, will stop doing something, will "
     "treat something as done) and no tool call in the list made that change "
-    "or put it up for approval. A tool call that failed or was refused does "
-    "not back a claim.\n\n"
+    "or put it up for approval. Messaging, emailing, texting or telling "
+    "someone is a change: only a call that sent that message to that person "
+    "backs \"I messaged her\" or \"I let Pat know\". A step put up for approval "
+    "backs \"it's waiting for your OK\", never that it went. A tool call that "
+    "failed or was refused does not back a claim.\n\n"
     "A call backs only the kind of thing it made. A follow-up or reminder "
     "scheduled once does not back a claim that something is sent or run "
     "again on a timetable (every Friday, each morning); only a workflow "
@@ -288,8 +298,11 @@ def nudge(claim: str) -> str:
     never sent, and the web and phone chats swap it out (``rewrite``)."""
     return (
         "[Check before you finish] Your reply says “" + claim + "”, but no "
-        "tool call in this reply made that change. Make it now with the right "
-        "tool if you can. Then write your whole reply again, start to finish, "
+        "tool call in this reply backs that. If a call already put it up for "
+        "approval, don't make it again: say it's waiting for their OK. "
+        "Otherwise, if the person asked for it, make it now with the right "
+        "tool, or say plainly you couldn't; if they didn't, offer it instead "
+        "(\"want me to message her?\"). Then write your whole reply again, start to finish, "
         "saying only what is true: it replaces the one above, which the person "
         "will never see. No note about a correction."
     )
