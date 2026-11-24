@@ -474,3 +474,9 @@ def test_what_a_proven_teammate_forwards_is_labelled_as_others_words(turn: dict[
     [kw] = turn["turns"]
     assert 'source="email_quoted"' in kw["user_message"]
     assert "Is this legit?" in kw["user_message"].split("<untrusted_content")[0]
+
+
+def test_mail_whose_recipients_dont_name_the_executive_is_not_alone(turn: dict[str, Any]) -> None:
+    assert _handle(_mail(TEAMMATE, proven=True, send=_Sent(), to=["nobody-listed@elsewhere.example"])) == "answered"
+    [kw] = turn["turns"]
+    assert kw["session"].email_one_on_one is False

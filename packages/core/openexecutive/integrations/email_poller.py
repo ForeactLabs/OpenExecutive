@@ -1670,14 +1670,17 @@ async def _run_executive(
     # failures degrade to an empty list rather than blocking the turn.
     co_present_person_ids: list[int] = []
     # Nobody else on it: the sender's conversation with the Executive alone
-    # (Session.email_one_on_one). Unknown when the headers can't be read.
+    # (Session.email_one_on_one). Unknown when the headers can't be read or
+    # don't name us.
     others_on_mail = True
     try:
         recipients = _parse_recipients(raw_email)
         exec_email = get_settings().exec_email_address.lower()
         own_address = source.own_address.lower() if source is not None else exec_email
         from_addr_lower = (from_addr or "").lower()
-        others_on_mail = False
+        # Read only when our own address is among them: headers that came
+        # back empty prove nothing about who else is on it.
+        others_on_mail = not any(a.lower() in (exec_email, own_address) for a in recipients)
         for addr in recipients:
             addr_lower = addr.lower()
             if addr_lower in (exec_email, from_addr_lower, own_address):
