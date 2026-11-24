@@ -259,7 +259,6 @@ def _speaker(session: Any, alert: Any) -> tuple[Any, bool] | str:
         session is None
         or getattr(session, "unattended", False)
         or getattr(session, "shared_chat", False) is True
-        or getattr(session, "email_from", "")
         or getattr(session, "sender_off_team", False)
         or getattr(session, "from_host", False) is True
     ):

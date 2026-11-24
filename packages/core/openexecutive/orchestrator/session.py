@@ -200,6 +200,10 @@ class Session:
     # principal's) inbound email: only then does the turn read the mailbox as
     # that teammate (orchestrator.teammate_mail).
     email_sender_authenticated: bool = False
+    # Whether nobody but the sender and the Executive is on the inbound email
+    # (its To and Cc), so the conversation is theirs alone
+    # (``delegation.settings.private_conversation``). Set by the email poller.
+    email_one_on_one: bool = False
     # True when the inbound email this turn answers is from someone not in
     # People (a contact or a stranger): the whole turn counts as having read
     # outside content (``orchestrator.outside_content.SENDER``). Set by the

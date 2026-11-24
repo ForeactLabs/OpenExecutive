@@ -95,3 +95,36 @@ def test_a_web_or_ai_app_turn_without_a_sign_in_is_nobody(owner: int, monkeypatc
     # A server people sign in to locally has no signed callers.
     monkeypatch.setattr(deployment, "is_local_login", lambda: True)
     assert getattr(speaker(Session(session_id="web-1", from_web_chat=True, caller_person_id=owner)), "id", None) == owner
+
+
+def _mail(person_id: int, *, proven: bool, owner: bool = False, alone: bool = False) -> Session:
+    proof = "email_authenticated" if owner else "email_sender_authenticated"
+    return Session(
+        session_id="email:t1", origin_channel="email", caller_person_id=person_id,
+        email_from="olivia@co.example" if owner else "ben@co.example",
+        email_one_on_one=alone, **{proof: proven},
+    )
+
+
+def test_proven_mail_from_a_teammate_is_them_asking(teammate: int) -> None:
+    from openexecutive.delegation.settings import private_conversation, speaker_surface_ok
+
+    alone = _mail(teammate, proven=True, alone=True)
+    assert speaker(alone).id == teammate
+    assert own_private_speaker(alone).id == teammate
+    assert private_conversation(alone)
+    assert speaker_surface_ok(alone, people_store.get_person(teammate))
+    # Others on the mail: still them asking, but not their private conversation.
+    with_others = _mail(teammate, proven=True)
+    assert speaker(with_others).id == teammate
+    assert own_private_speaker(with_others) is None
+    # A From line nothing proved is nobody.
+    unproven = _mail(teammate, proven=False, alone=True)
+    assert speaker(unproven) is None
+    assert not private_conversation(unproven)
+
+
+def test_the_owners_proven_mail_to_the_executive_alone_is_their_own(owner: int) -> None:
+    session = _mail(owner, proven=True, owner=True, alone=True)
+    assert speaker(session).id == owner
+    assert own_private_speaker(session).id == owner

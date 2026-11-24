@@ -320,7 +320,6 @@ def _assigner(session: Any) -> int | None:
         session is None
         or getattr(session, "unattended", False)
         or getattr(session, "private_to_principal", False)
-        or getattr(session, "email_from", "")
     ):
         return None
     caller = getattr(session, "caller_person_id", None)
