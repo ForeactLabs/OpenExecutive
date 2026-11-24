@@ -1308,3 +1308,13 @@ def test_a_waiting_step_todays_rules_let_go_is_tidied_without_the_model(db: Path
     assert len(seen) == 1 and f"<alert id={gone}>" not in seen[0] and f"<alert id={kept}>" in seen[0]
     assert alert_store.get_alert(kept, db_path=db).status == "unread"  # type: ignore[union-attr]
     assert dms == []
+
+    # Undo puts it back, and the next pass leaves it waiting for the review.
+    assert lifecycle.unlapse_step(gone_iid, db_path=db)
+    assert alert_store.reopen_alert(gone, db_path=db)
+    asked.clear()
+    seen.clear()
+    asyncio.run(review.run_alert_review(
+        reason="heartbeat", now=NOW + timedelta(hours=7), db_path=db, settings=_settings()))
+    assert alert_store.get_alert(gone, db_path=db).status == "unread"  # type: ignore[union-attr]
+    assert len(asked) == 1 and len(seen) == 1 and f"<alert id={gone}>" in seen[0]

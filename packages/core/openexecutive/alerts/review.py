@@ -783,6 +783,11 @@ class _MoveContext:
 NO_LONGER_WAITS_NOTE = "No longer needs an OK: today's rules let this go."
 
 
+# Marks a waiting step this re-check tidied away, so after an Undo it is
+# never tidied the same way again.
+_RECHECKED = "tidied_no_longer_waits"
+
+
 def _settled_no_longer_waits(
     alert: Alert, *, now: datetime, summary: ReviewSummary, db_path: Path | None,
 ) -> bool:
@@ -804,9 +809,15 @@ def _settled_no_longer_waits(
         if step.status not in decision_ledger.OPEN_STATUSES:
             return False
         payload = json.loads(step.proposed_payload_json or "{}")
-        if not isinstance(payload, dict):
+        if not isinstance(payload, dict) or payload.get(_RECHECKED):
+            # Tidied this way once and put back with Undo: someone wants it
+            # to wait, so it is left to the review like any other card.
             return False
         if take_the_lead.still_waits(payload, approver=step.approver_person_id):
+            return False
+        if not decision_ledger.update_open_payload(
+            instance_id, {**payload, _RECHECKED: True}, expected_json=step.proposed_payload_json, db_path=db_path,
+        ):
             return False
         if not lifecycle.settle(alert, "dismissed", NO_LONGER_WAITS_NOTE, now=now, db_path=db_path):
             return False
