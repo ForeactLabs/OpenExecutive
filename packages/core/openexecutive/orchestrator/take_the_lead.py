@@ -2855,12 +2855,19 @@ def card_of(tool: str, tool_input: dict[str, Any], hit: Hit, *, source: str) -> 
     return approver
 
 
-def only_to(tool: str, tool_input: dict[str, Any], person_id: int | None) -> bool:
-    """Whether the step only sends ``person_id`` a message. When that person
-    is who its card would go to, approving it would only show them what it
-    says: there is nothing to approve, so it goes straight to them, as a
-    message to the owner always has (``_only_to_principal``)."""
+def only_to(tool: str, tool_input: dict[str, Any], hit: Hit, person_id: int | None) -> bool:
+    """Whether the step only sends ``person_id`` a message, held for a topic
+    whose card goes to whoever holds its approval range (money, contracts,
+    people decisions, board). When that person is who it's to, approving it
+    would only show them what it says: there is nothing to approve, so it
+    goes straight to them, as a message to the owner always has
+    (``_only_to_principal``). A Waits rule, Careful or In training is the
+    owner's own say-so, whoever the card is on, so it still waits."""
     if person_id is None or tool not in _DIRECT_MESSAGE_TOOLS:
+        return False
+    if hit.rule_id is not None or hit.kind in ("rule", "level", TRAINING):
+        return False
+    if not approval_ranges(hit.kind, "\n".join(_strings(tool_input))):
         return False
     person = _target_person(tool, tool_input)
     return person is not None and person.id == person_id and person.kind == "team"
@@ -2887,10 +2894,12 @@ def still_waits(payload: dict[str, Any], *, approver: int | None) -> bool:
         if mcp:
             if _mail_only_to_principal(tool, tool_input):
                 return False
-        elif _only_to_principal(tool, tool_input) or only_to(tool, tool_input, approver):
+        elif _only_to_principal(tool, tool_input):
             return False
         hit, _ = _hit(tool, tool_input, mcp=mcp)
-        return hit is not None
+        if hit is None:
+            return False
+        return mcp or not only_to(tool, tool_input, hit, approver)
     except Exception:
         logger.warning("take_the_lead: couldn't ask the gate again about a waiting step", exc_info=True)
         return True
@@ -3016,7 +3025,7 @@ async def _gated(name: str, inner: _Handler, tool_input: dict[str, Any], *, sour
         hit = None
     else:
         hit, allowed = _hit(name, tool_input, mcp=mcp)
-    if hit is not None and not mcp and only_to(name, tool_input, card_of(name, tool_input, hit, source=source)):
+    if hit is not None and not mcp and only_to(name, tool_input, hit, card_of(name, tool_input, hit, source=source)):
         # A message only to the person its card would go to: nothing to approve.
         hit = None
     if hit is not None and mcp and not str(name or "").strip():

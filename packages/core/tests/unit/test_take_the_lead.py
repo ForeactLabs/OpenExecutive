@@ -2867,6 +2867,29 @@ def test_a_message_to_someone_else_still_waits_on_its_card(owner: Any, monkeypat
     assert result["status"] == "waiting_for_approval" and calls == []
 
 
+def test_a_waits_rule_or_careful_still_holds_a_message_to_its_cards_person(
+    owner: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A Waits rule or Careful is the owner's own say-so: a message to the
+    teammate the card lands on (any-approval holder) still waits."""
+    from openexecutive.orchestrator import outside_mode
+
+    _team(monkeypatch)
+    _balanced(monkeypatch)
+    morgan = _holder("Morgan Any", "morgan@co.example", AuthorityScope.WILDCARD)
+    ttl.add_rule(ttl.SCOPE_COMPANY, "words", "drafts", created_by="t")
+    calls: list[Any] = []
+    gated = ttl.gated_handlers(_handlers(calls), source="reflection")
+    result = json.loads(asyncio.run(gated["message_person"]({"person_id": morgan, "text": "The drafts are done."})))
+    assert result["status"] == "waiting_for_approval" and calls == []
+    assert ttl.still_waits(_held_payload(morgan, "The drafts are done."), approver=morgan)
+
+    monkeypatch.setattr(outside_mode, "get_mode", lambda **_: outside_mode.ASK)
+    result = json.loads(asyncio.run(gated["message_person"]({"person_id": morgan, "text": "See you at noon."})))
+    assert result["status"] == "waiting_for_approval" and calls == []
+    assert ttl.still_waits(_held_payload(morgan, "See you at noon."), approver=morgan)
+
+
 # ── asked again: would a waiting step still wait today? ──────────────────────
 
 
