@@ -2880,9 +2880,11 @@ def still_waits(payload: dict[str, Any], *, approver: int | None) -> bool:
     of every waiting step, so a step whose hold no longer applies (a check
     fixed since, the level raised, a Goes rule added) leaves Needs you
     instead of waiting out its days. True for anything it can't ask again:
-    a step someone asked for, one that isn't a held step, or an error."""
+    a step someone asked for or scheduled, one that isn't a held step, or an error."""
     try:
-        if not payload.get("held") or payload.get("source") == "chat":
+        if not payload.get("held") or payload.get("source") in ("chat", "scheduled"):
+            # Asked for, or scheduled (perhaps by the owner): sending on would
+            # do what someone wanted, and dropping it would lose their ask.
             return True
         if payload.get("asked_by_person_id") or payload.get("requested_by_person_id"):
             return True

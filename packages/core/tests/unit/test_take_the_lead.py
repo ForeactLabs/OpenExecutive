@@ -2928,5 +2928,6 @@ def test_a_step_someone_asked_for_is_not_asked_again(owner: Any, monkeypatch: py
     _hands_off(monkeypatch)
     sam = _teammate()
     assert ttl.still_waits(_held_payload(sam, "hi", source="chat"), approver=owner.id)
+    assert ttl.still_waits(_held_payload(sam, "hi", source="scheduled"), approver=owner.id)
     assert ttl.still_waits(_held_payload(sam, "hi", asked_by_person_id=owner.id), approver=owner.id)
     assert ttl.still_waits({"tool": "message_person"}, approver=owner.id)  # not a held step
