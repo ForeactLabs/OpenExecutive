@@ -453,8 +453,8 @@ def test_a_flagged_quote_in_the_owners_mail_holds_a_new_server_below_hands_off(
 ) -> None:
     # The owner's own mail counts as them, but a stranger's words they quote
     # or forward are checked like any outside read: Balanced holds a flagged
-    # one (a new server can't wait on a card, so it is not run), and Hands-off
-    # runs it, as for every other read.
+    # one (a new server can't wait on a card, so it is not run), and so does
+    # Hands-off: a flagged read drops the turn to Balanced.
     from openexecutive.orchestrator import outside_mode
 
     level = {"mode": outside_mode.OUTSIDERS}
@@ -469,7 +469,7 @@ def test_a_flagged_quote_in_the_owners_mail_holds_a_new_server_below_hands_off(
 
     level["mode"] = outside_mode.TRUST
     provider = _run([load], gateway=_Gateway(), message=message)
-    assert json.loads(_result(provider, "tu1")) == {"ok": True}
+    assert "was not run here" in json.loads(_result(provider, "tu1"))["error"]
 
 
 def test_a_reply_with_no_tool_call_still_flags_the_attachment(monkeypatch: pytest.MonkeyPatch) -> None:

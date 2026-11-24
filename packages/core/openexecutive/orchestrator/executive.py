@@ -2510,7 +2510,6 @@ class Executive:
         # notice runs (Hands-off) or waits on an Approve card.
         not_offered = sandbox_missing | replay_withheld
         withheld_tools = tools_withheld_in_mode(workspace_mode) | not_offered
-        turn_level = levels.turn_level(current_session.get())
         # Act as me: ghostwrite_email joins the toolkit only on a turn
         # pin_turn_delegation offered it to. Its own registry, never
         # _ALL_SKILL_TOOLS, and a per-turn handler map built from it — so on
@@ -3160,7 +3159,10 @@ class Executive:
                 noticed.setdefault(tu["id"], (tu, levels.STRANGER if stranger else levels.outside_reason()))
             held_uses = [
                 (tu, reason) for tu, reason in noticed.values()
-                if levels.decide(reason, mode=turn_level) == levels.CARD
+                # The level now, not the turn's first: a flagged read drops
+                # Hands-off to Balanced for the rest of the turn
+                # (outside_content._flag).
+                if levels.decide(reason) == levels.CARD
                 and not levels.only_to_owner(tu["name"], tu["input"])
             ]
             held_ids = {tu["id"] for tu, _ in held_uses}
@@ -3764,7 +3766,7 @@ class Executive:
                         script_reason = levels.mail_reason()
                     if (
                         script_reason is not None
-                        and levels.decide(script_reason, mode=turn_level) == levels.CARD
+                        and levels.decide(script_reason) == levels.CARD
                         and not levels.only_to_owner(probe_name, probe_input)
                     ):
                         if isinstance(arguments, dict) and levels.carriable(tool, mcp=not own):
