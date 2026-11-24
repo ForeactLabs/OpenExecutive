@@ -9,6 +9,48 @@ From 0.3.0 on, entries are written by release-please from the titles of the
 merged pull requests (`feat` → Added, `fix` → Fixed). The open release PR holds
 the next entry; edit it there before merging if a line needs rewording.
 
+## [0.7.8](https://github.com/ForeactLabs/OpenExecutive/compare/v0.7.7...v0.7.8) (2026-11-24)
+
+
+### Added
+
+* **alerts:** tidy up Needs you on its own, each with why and Undo ([#969](https://github.com/ForeactLabs/OpenExecutive/issues/969)) ([663881a](https://github.com/ForeactLabs/OpenExecutive/commit/663881a167ea65175596004ad3c19d631e3bf937))
+* **chat:** give a chat turn one web search budget ([#963](https://github.com/ForeactLabs/OpenExecutive/issues/963)) ([da12e5a](https://github.com/ForeactLabs/OpenExecutive/commit/da12e5a267c0df13a7a030b54ed9e5ae27e31754))
+* **delegation:** let every email card go from the Executive, and show tables as tables ([#938](https://github.com/ForeactLabs/OpenExecutive/issues/938)) ([f720585](https://github.com/ForeactLabs/OpenExecutive/commit/f720585b3adf48bd88d7d24fca1672ae7245d121))
+* **monitoring:** watch your own inbox from the watch list ([#949](https://github.com/ForeactLabs/OpenExecutive/issues/949)) ([4a55d9e](https://github.com/ForeactLabs/OpenExecutive/commit/4a55d9ef5fd420361ef1e3e15c32687cda6da414))
+* **orchestrator:** add topic rules and a card's Next time rule, and stop wrong someone-new and contract holds ([#952](https://github.com/ForeactLabs/OpenExecutive/issues/952)) ([a95dea5](https://github.com/ForeactLabs/OpenExecutive/commit/a95dea5969bf14dc81302992e74d252703458ecd))
+* **watchlist:** watch the Executive's inbox, join the thread's card, ping if nothing comes ([#974](https://github.com/ForeactLabs/OpenExecutive/issues/974)) ([418a0b3](https://github.com/ForeactLabs/OpenExecutive/commit/418a0b37dc7ddbfe6dd9f3b28d21f8ec352e084e))
+
+
+### Fixed
+
+* **alerts:** email an alert to its own person, not the Executive's mailbox ([#959](https://github.com/ForeactLabs/OpenExecutive/issues/959)) ([9ba08ad](https://github.com/ForeactLabs/OpenExecutive/commit/9ba08ad159378335de93e73c94bd7cf32470799d))
+* **alerts:** show a teammate's card only to them and whom it is for ([#961](https://github.com/ForeactLabs/OpenExecutive/issues/961)) ([627a5ed](https://github.com/ForeactLabs/OpenExecutive/commit/627a5ed8ed54bc1ec4a3133a9b5cae036505a350))
+* **alerts:** show names, not numbers, on a waiting step's card ([#958](https://github.com/ForeactLabs/OpenExecutive/issues/958)) ([59897b7](https://github.com/ForeactLabs/OpenExecutive/commit/59897b7c7c5be2c9f2f79e37f69304a8b2d268f8))
+* **approvals:** never put a step only its speaker can do on a card ([#953](https://github.com/ForeactLabs/OpenExecutive/issues/953)) ([7025cb7](https://github.com/ForeactLabs/OpenExecutive/commit/7025cb7f2e398f0f042aef16a08dcc1dd7beaeff))
+* **approvals:** quote the amount an amount rule saw in why a step waits ([#957](https://github.com/ForeactLabs/OpenExecutive/issues/957)) ([db1ea17](https://github.com/ForeactLabs/OpenExecutive/commit/db1ea17d568384beedc5fc69c6161f016d03252a))
+* **approvals:** read money only in what a step sends or pays ([#947](https://github.com/ForeactLabs/OpenExecutive/issues/947)) ([b03d14d](https://github.com/ForeactLabs/OpenExecutive/commit/b03d14d6c863b065ebaaa02fa97351e4581edd17))
+* **approvals:** remember "on its own from now on" for the kind of step ([#965](https://github.com/ForeactLabs/OpenExecutive/issues/965)) ([8cb2d04](https://github.com/ForeactLabs/OpenExecutive/commit/8cb2d045315f88fb697bd43d532db7796382a5f0))
+* **approvals:** send an approved email with the asker's own document attached ([#962](https://github.com/ForeactLabs/OpenExecutive/issues/962)) ([e22e9b2](https://github.com/ForeactLabs/OpenExecutive/commit/e22e9b2383c3e51b4f408864401e9b8b80879cd6))
+* **auth:** keep a signed request good for 2 minutes ([#939](https://github.com/ForeactLabs/OpenExecutive/issues/939)) ([820fd4e](https://github.com/ForeactLabs/OpenExecutive/commit/820fd4e6b6ae82bab3036743cae1520024b3b496))
+* **browser:** keep a browser busy with a stuck step connected ([#937](https://github.com/ForeactLabs/OpenExecutive/issues/937)) ([ebc3d9d](https://github.com/ForeactLabs/OpenExecutive/commit/ebc3d9d0261ffa7191611272a324fe2371448d13))
+* **chat:** put a doubtful figure through with the doubt said ([#968](https://github.com/ForeactLabs/OpenExecutive/issues/968)) ([7199670](https://github.com/ForeactLabs/OpenExecutive/commit/7199670d3f78bc46c61dca10caac2cc281f44374))
+* **chat:** show each turn what the speaker asked for lately so a repeated ask isn't done twice ([#944](https://github.com/ForeactLabs/OpenExecutive/issues/944)) ([31f2abb](https://github.com/ForeactLabs/OpenExecutive/commit/31f2abbd2710008981f63295e99df493d3a66b2d))
+* **chat:** sign a draft the person sends themselves with their name ([#942](https://github.com/ForeactLabs/OpenExecutive/issues/942)) ([91288fd](https://github.com/ForeactLabs/OpenExecutive/commit/91288fd5df1ac26db3075be005432dcc8ebd2ab0))
+* **integrations:** tell the Executive what is really connected, and fix held steps, file links and follow-ups ([#950](https://github.com/ForeactLabs/OpenExecutive/issues/950)) ([6031449](https://github.com/ForeactLabs/OpenExecutive/commit/60314496f13ef5b90fced2232733b6afc3bc6b6e))
+* keep company resets to the principal and read sent PDFs in a child process ([#960](https://github.com/ForeactLabs/OpenExecutive/issues/960)) ([a3351b7](https://github.com/ForeactLabs/OpenExecutive/commit/a3351b70554c8c8ec921e9ca14bae322b2184432))
+* **memory:** send a standing wait rule said in chat to Your rules ([#955](https://github.com/ForeactLabs/OpenExecutive/issues/955)) ([da3173f](https://github.com/ForeactLabs/OpenExecutive/commit/da3173f621827b204cddeca99a7a2cf9f9f04488))
+* **memory:** use a one-kind example for a wait rule said in chat ([#956](https://github.com/ForeactLabs/OpenExecutive/issues/956)) ([8ce4024](https://github.com/ForeactLabs/OpenExecutive/commit/8ce402450ac6c219301045fff60cd308bb42bd56))
+* **onboarding:** make the setup saves follow the People role rule ([#975](https://github.com/ForeactLabs/OpenExecutive/issues/975)) ([500bac8](https://github.com/ForeactLabs/OpenExecutive/commit/500bac897955adaa13b1428374f1c4be0cd14122))
+* **orchestrator:** check every "I messaged her" line against a real send ([#964](https://github.com/ForeactLabs/OpenExecutive/issues/964)) ([9bb7b4f](https://github.com/ForeactLabs/OpenExecutive/commit/9bb7b4f7a30f3ef18c9dd525b9250c9b349bd476))
+* **orchestrator:** make repeating asks real repeats and check claimed repeats and watches ([#943](https://github.com/ForeactLabs/OpenExecutive/issues/943)) ([ea6f002](https://github.com/ForeactLabs/OpenExecutive/commit/ea6f002b88d486508652bcc02c388925971454c4))
+* **orchestrator:** send one clean answer, not working notes ([#946](https://github.com/ForeactLabs/OpenExecutive/issues/946)) ([0066450](https://github.com/ForeactLabs/OpenExecutive/commit/00664501a6370e746c6f37da48c4fa5d628577b0))
+* **people:** say a refused roster change plainly and pass it to no one ([#945](https://github.com/ForeactLabs/OpenExecutive/issues/945)) ([ce31001](https://github.com/ForeactLabs/OpenExecutive/commit/ce31001aecee930fb8bec9c4efbd9b7fc0310dff))
+* **people:** show the whole message on the someone-new card ([#966](https://github.com/ForeactLabs/OpenExecutive/issues/966)) ([daacb6b](https://github.com/ForeactLabs/OpenExecutive/commit/daacb6b52627e4ceb135a36d6ee082a3b368d5fd))
+* **scheduling:** read every time on the company's clock ([#948](https://github.com/ForeactLabs/OpenExecutive/issues/948)) ([d593e39](https://github.com/ForeactLabs/OpenExecutive/commit/d593e39abbf13f33740c9f0246fa84d7033aef27))
+* **tasks:** keep a task from someone's own chat to them and its assignee ([#967](https://github.com/ForeactLabs/OpenExecutive/issues/967)) ([0864e61](https://github.com/ForeactLabs/OpenExecutive/commit/0864e61bc72276952facd94c52acf5cd77f0a90f))
+* **today:** date an approved step in Done for you when it went out ([#940](https://github.com/ForeactLabs/OpenExecutive/issues/940)) ([683c410](https://github.com/ForeactLabs/OpenExecutive/commit/683c4105e04f8367aff2f859a89dfc5430b61569))
+
 ## [0.7.7](https://github.com/ForeactLabs/OpenExecutive/compare/v0.7.6...v0.7.7) (2026-11-18)
 
 
