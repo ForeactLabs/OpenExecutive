@@ -553,3 +553,34 @@ def test_a_question_from_the_same_turn_keeps_the_reports_title() -> None:
     kept = _get(report)
     assert kept.headline == "Q3 revenue down 12%" and kept.suggested_action == "Review the forecast"
     assert kept.question == "Freeze?" and kept.choices == ["Yes", "No"]
+
+
+def test_an_email_watch_card_joins_the_card_of_its_mail_thread(mail_turn: Session) -> None:
+    """The Executive's handling of Robin's email made a card for Kendall; the
+    watch Kendall set tells her about the same email: one card, not two,
+    whichever comes first. No turn is bound when the watch's card is written:
+    the thread and sender it names say what it is about."""
+    with set_turn(session_id="s", turn_id="turn-1"):
+        turn_card = _note("Robin Hale: December rent")
+    token = current_session.set(None)
+    try:
+        with one_card.about(
+            raised=True, thread=one_card.mail_thread("thread-1"),
+            person=one_card.mail_person("Dana@Northpeak.example"),
+        ):
+            watch_card = alerts_store.insert_alert(
+                source="mailbox", external_id="watch-1", severity="high", headline="Dana: December rent",
+                body="You asked me to watch for this.", routed_to_person_id=OWNER,
+            )
+        assert watch_card is not None
+        assert _get(watch_card).superseded_by_alert_id == turn_card
+        # Another thread, or another reader, is a card of its own.
+        with one_card.about(raised=True, thread=one_card.mail_thread("thread-2"),
+                            person=one_card.mail_person("dana@northpeak.example")):
+            other = alerts_store.insert_alert(
+                source="mailbox", external_id="watch-2", severity="high", headline="Dana: another thing",
+                body="x", routed_to_person_id=OWNER,
+            )
+        assert other is not None and _get(other).superseded_by_alert_id is None
+    finally:
+        current_session.reset(token)

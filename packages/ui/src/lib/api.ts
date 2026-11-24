@@ -6585,6 +6585,8 @@ export interface WatchlistItem {
   tells_you_when: string;
   /** "It checks every 15 minutes." */
   checks: string;
+  /** An email watch's "nothing by" day ("Ping if nothing by Wed Nov 25"); "" when none. */
+  quiet_line?: string;
   /** The newest thing it told you; null when it has said nothing yet. */
   last_told: { at: string; summary: string; url: string } | null;
   goal_title: string;

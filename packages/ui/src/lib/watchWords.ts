@@ -81,8 +81,14 @@ function triggerBase(signalType: string, t: Record<string, unknown>): string {
     case "query":
       return `A new result turns up${mention}`;
     case "mailbox": {
+      // It reads the Executive's inbox, and theirs when it is connected.
       const senders = strings(t.from);
-      return `An email comes in${senders.length ? ` from ${joinOr(senders)}` : ""}${mention}`;
+      if (senders.length) {
+        return `${joinOr(senders)} emails the Executive or you${keywords.length ? ` about ${quoted}` : ""}`;
+      }
+      return keywords.length
+        ? `An email that mentions ${quoted} reaches the Executive or you`
+        : "An email reaches the Executive or you";
     }
     default:
       return "Something new turns up";

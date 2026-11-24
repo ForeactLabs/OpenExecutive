@@ -27,6 +27,7 @@ from openexecutive.monitoring.describe import (
     WatchDraft,
     checks_line,
     describe_watch,
+    quiet_line,
     trigger_line,
     watch_title,
 )
@@ -165,6 +166,8 @@ class WatchlistView(WatchlistItem):
     title: str = ""
     tells_you_when: str = ""
     checks: str = ""
+    # An email watch's "nothing by" day ("Ping if nothing by Wed Nov 25").
+    quiet_line: str = ""
     last_told: LastTold | None = None
     goal_title: str = ""
     # Who it tells, when that is a teammate ("" = the owner), and their role.
@@ -243,6 +246,7 @@ def _view(item: WatchlistItem, names: _Names) -> dict[str, Any]:
         "title": watch_title(item),
         "tells_you_when": trigger_line(item.signal_type, item.trigger_json),
         "checks": checks_line(item.signal_type, item.cadence),
+        "quiet_line": quiet_line(item),
         "last_told": LastTold(
             at=str(told.get("processed_at") or told.get("captured_at") or ""),
             summary=_told_summary(str(told.get("normalized_summary") or "")),

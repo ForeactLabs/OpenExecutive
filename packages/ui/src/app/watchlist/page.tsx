@@ -72,7 +72,7 @@ const SIGNAL_TYPES: { value: WatchlistSignalType; label: string; hint: string }[
   {
     value: "mailbox",
     label: "Email",
-    hint: "What to watch your inbox for, e.g. sign-up emails. Say who it's from or a word in its subject below.",
+    hint: "What email to watch for, e.g. sign-up emails. It watches email to the Executive, and your own inbox when it's connected. Say who it's from or a word in its subject below.",
   },
 ];
 
@@ -235,6 +235,7 @@ function WatchCard({
         {item.mode === "dry_run" && (
           <div className="text-sm text-fg-subtle mt-1.5">Only in your brief</div>
         )}
+        {item.quiet_line && <div className="text-sm text-fg-subtle mt-1.5">{item.quiet_line}</div>}
         {forLines(item).map((line) => (
           <div key={line} className="text-sm text-fg-subtle mt-1.5 truncate">
             {line}

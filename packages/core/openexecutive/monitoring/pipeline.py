@@ -32,6 +32,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from openexecutive.alerts.models import SEVERITY_RANK, AlertEvent, AlertSeverity
 from openexecutive.alerts.pipeline import schedule_evaluation
@@ -326,6 +327,19 @@ def _signal_to_alert_event(
         if isinstance(link, dict) and link.get("url"):
             text = _without_links(collapse_whitespace(str(link.get("text") or "")))[:200]
             parts.append(f"New: {text} — {_safe_url(str(link['url']))}")
+    if mailbox.is_mailbox(item):
+        # An email watch's own words, written by its source, never by a feed:
+        # the mail thread its email came on, and the ping's choice.
+        payload = signal.raw_payload
+        mail: dict[str, Any] = {k: str(payload.get(k) or "") for k in ("mail_thread", "mail_from")}
+        card: dict[str, Any] = {
+            "needs": str(payload.get("needs") or ""),
+            "question": str(payload.get("question") or ""),
+            "choices": [str(c) for c in payload.get("choices") or [] if str(c).strip()],
+        }
+    else:
+        mail = {}
+        card = {}
     target = signal.raw_payload.get("target_url")
     if target:
         parts.append(f"Source: {target}")
@@ -357,6 +371,8 @@ def _signal_to_alert_event(
         # set to tell.
         routed_to_person_id=mailbox.owner_id(item) if mailbox.is_mailbox(item) else item.route_to_person_id,
         department="" if mailbox.is_mailbox(item) else item.route_to_department,
+        **mail,
+        **card,
     )
 
 

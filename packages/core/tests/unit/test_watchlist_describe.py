@@ -200,7 +200,9 @@ async def test_email_draft_matches_by_subject_every_time(db: Path) -> None:
     })
     assert draft.trigger == {"keywords": ["sign up", "signed up"]}
     assert draft.cadence == "real_time"
-    assert draft.tell_you_when == "An email comes in that mentions \u201csign up\u201d or \u201csigned up\u201d"
+    assert draft.tell_you_when == (
+        "An email that mentions \u201csign up\u201d or \u201csigned up\u201d reaches the Executive or you"
+    )
     with pytest.raises(describe.DescribeError):
         await describe.build_draft({"signal_type": "mailbox", "target": "email", "trigger": {}})
 

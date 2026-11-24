@@ -467,7 +467,7 @@ def watching_line(signal_type: str, target: str, label: str = "") -> str:
     if signal_type == "query":
         return "The web for \u201c" + target + "\u201d"
     if signal_type == SOURCE_KIND_MAILBOX:
-        return f"Your inbox for {label or target}"
+        return f"Email for {label or target}"
     return label or target
 
 
@@ -498,14 +498,22 @@ def _trigger_base(signal_type: str, trigger: dict[str, Any], quoted: str, mentio
     if signal_type == "query":
         return f"A new result turns up{mention}"
     if signal_type == SOURCE_KIND_MAILBOX:
+        # It reads the Executive's inbox, and theirs when it is connected.
         senders = [str(a) for a in trigger.get(mailbox.FROM_KEY) or [] if str(a).strip()]
-        line = "An email comes in"
         if senders:
-            line += " from " + _join_or(senders)
-        if quoted:
-            line += " that mentions " + quoted
-        return line
+            line = _join_or(senders) + " emails the Executive or you"
+            return line + (" about " + quoted if quoted else "")
+        return "An email that mentions " + quoted + " reaches the Executive or you" if quoted else (
+            "An email reaches the Executive or you"
+        )
     return "Something new turns up"
+
+
+def quiet_line(item: Any) -> str:
+    """An email watch's "nothing by" day, as the watch list says it
+    ("Ping if nothing by Wed Nov 25"), else empty."""
+    day = mailbox.quiet_by(item) if mailbox.is_mailbox(item) else None
+    return f"Ping if nothing by {day:%a %b} {day.day}" if day else ""
 
 
 # The row's own cadence in minutes (monitoring.pipeline._CADENCE_MINUTES).
@@ -591,6 +599,7 @@ def watch_title(item: WatchlistItem) -> str:
 
 
 __all__ = [
+    "quiet_line",
     "DESCRIBE_PER_HOUR",
     "TEXT_MAX_CHARS",
     "DescribeError",

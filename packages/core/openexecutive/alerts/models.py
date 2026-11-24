@@ -218,6 +218,12 @@ class AlertEvent(BaseModel):
     needs: str = ""
     question: str = ""
     choices: list[str] = Field(default_factory=list)
+    # An email watch's card for one email that reached the Executive: its
+    # mail thread and sender, so it joins the card the Executive's handling
+    # of that email made for the same person (``alerts.one_card``). Set only
+    # by server code (``monitoring.pipeline``).
+    mail_thread: str = ""
+    mail_from: str = ""
 
 
 # The source of every alert a team member raises from chat (see
