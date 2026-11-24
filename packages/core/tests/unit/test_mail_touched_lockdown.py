@@ -1091,6 +1091,36 @@ def test_the_executives_own_verified_mail_in_a_search_is_not_checked(monkeypatch
         current_session.reset(token)
 
 
+def test_a_left_out_entry_keeps_hands_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A flagged entry taken out of a search before the model reads it is
+    # still flagged, but its words never reach the turn: Hands-off stays.
+    from openexecutive.orchestrator import (
+        content_scan,
+        content_trust,
+        outside_content,
+        outside_mode,
+    )
+
+    monkeypatch.setattr(content_trust, "principal_only_withheld", lambda session: frozenset())
+
+    async def says_of_list(entries: list[Any], *, model: str | None = None) -> Any:
+        if any("evil" in str(e.get("subject")) for e in entries):
+            return content_scan.Verdict(flagged=True, categories=("forward_or_share",), items=(3,))
+        return content_scan.CLEAN
+
+    _level(monkeypatch, "trust", content_scan.CLEAN)
+    monkeypatch.setattr(content_scan, "scan_list", says_of_list)
+    session, token, state = _pinned_turn("trust", mail_verified={"t1": OWN, "t3": OWN})
+    try:
+        pinned = session.turn_delegation  # type: ignore[attr-defined]
+        result, _ = asyncio.run(outside_content.check_mail_read(pinned, OWN_SEARCH))
+        assert json.loads(result)["threads"][3]["subject"] == "(left out)"
+        assert state.flags and state.mode == outside_mode.TRUST
+    finally:
+        outside_content.end_turn(state)
+        current_session.reset(token)
+
+
 def test_a_search_of_only_the_executives_own_mail_is_not_checked(monkeypatch: pytest.MonkeyPatch) -> None:
     from openexecutive.orchestrator import content_trust, outside_content
 
