@@ -413,8 +413,8 @@ def require_people_admin(request: Request) -> None:
     is none yet (``_require_roster_owner``). Setup's saves (the form and the
     interview) write every person and role, the departments and the company
     profile in one go, so they ask this rather than a rule of their own. Who
-    holds the owner seat and the owner's own address stay the owner's
-    (``onboarding.commit``), as on the People form."""
+    holds the owner seat and the owner's sign-in address stay the owner's
+    (``onboarding.commit``)."""
     _require_roster_owner(request)
 
 
