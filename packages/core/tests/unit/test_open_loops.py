@@ -435,8 +435,40 @@ async def test_list_tool_teammate_sees_only_their_own(team: SimpleNamespace) -> 
     open_loops.open_loop(owner_person_id=team.ben, description="send the plan", due_at=datetime.now(UTC))
     assert _owners(await _list_as(team.sara, web=True)) == {team.sara}
     assert _owners(await _list_as(team.sara, session_id="slack:dm:U_SARA")) == {team.sara}
-    assert (await _list_as(team.sara, web=True, person_id=team.ben))["status"] == "refused"
-    assert (await _list_as(None, web=True))["status"] == "refused"
+    for hidden in (await _list_as(team.sara, web=True, person_id=team.ben), await _list_as(None, web=True)):
+        # Not an empty list: the result says another person's tasks are not shown.
+        assert hidden["open_loops"] == [] and hidden["status"] == "not_shown"
+        assert "private" in hidden["detail"]
+    assert "status" not in await _list_as(team.sara, web=True, person_id=team.sara)
+
+
+async def test_list_tool_keeps_a_private_task_to_its_two_people(team: SimpleNamespace) -> None:
+    """A task from Sara's own chat shows to Sara and to Ben, whom it is for,
+    and to no one else, the principal included; the result says others'
+    private tasks are private, and a lookup by id reads like no task."""
+    from openexecutive.orchestrator.open_loop_tools import handle_close_open_loop
+    from openexecutive.orchestrator.schedule_tools import current_session
+
+    private = open_loops.open_loop(
+        owner_person_id=team.ben, description="Sara Kim asked Ben Ortiz for: the Ortiz boxes",
+        due_at=datetime.now(UTC), private_to_person_id=team.sara,
+    )
+    open_loops.open_loop(owner_person_id=team.sara, description="Sara Kim committed to: call the landlord",
+                         due_at=datetime.now(UTC), private_to_person_id=team.sara)
+    assert _owners(await _list_as(team.sara, web=True)) == {team.sara}
+    assert _owners(await _list_as(team.ben, web=True)) == {team.ben}
+    # In a channel others read, neither Sara's nor Ben's list shows it.
+    for who in (team.sara, team.ben):
+        assert _owners(await _list_as(who, session_id="slack:channel:C1:U_X")) == set()
+    assert _owners(await _list_as(team.ben, session_id="slack:dm:U_BEN")) == {team.ben}
+    owner = await _list_as(team.principal, web=True)
+    assert owner["open_loops"] == [] and "never confirm or deny" in owner["private"]
+    token = current_session.set(Session(session_id="w", caller_person_id=team.principal,
+                                        from_web_chat=True, web_caller_signed_in=True))
+    try:
+        assert json.loads(await handle_close_open_loop({"loop_id": private}))["status"] == "not_found"
+    finally:
+        current_session.reset(token)
 
 
 async def test_paraphrased_loop_text_is_dropped(

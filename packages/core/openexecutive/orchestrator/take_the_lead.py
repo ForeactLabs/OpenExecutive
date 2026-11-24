@@ -2778,6 +2778,9 @@ def hold(
         # theirs: whoever approves someone else's work never opens that
         # person's documents with the tap.
         **documents_for(approver),
+        # Who what the step makes stays private to when it runs: the same as
+        # on the turn that held it (``kept_for``).
+        **kept_for(),
         # Who asked, the owner included, for the card's "You asked" /
         # "Olivia asked" (``card_details.top``); a step no one asked for has
         # none and reads "I started this".
@@ -3371,6 +3374,7 @@ async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bo
         whose = None
     token = current_session.set(Session(
         unattended=True, documents_viewer=viewer_for_person(whose if isinstance(whose, int) else None),
+        private_to=kept if isinstance(kept := payload.get("private_to"), int) and not isinstance(kept, bool) else None,
     ))
     try:
         with (
@@ -3445,6 +3449,20 @@ async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bo
     finally:
         current_session.reset(token)
     return _as_text(result)
+
+
+def kept_for() -> dict[str, Any]:
+    """What a held step's card records about who what it makes is private
+    to (``fact_tools.private_owner`` of this turn): approved later, from a
+    run with no chat (``carry_out``), it keeps the same. Never raises."""
+    try:
+        from openexecutive.orchestrator.fact_tools import private_owner
+        from openexecutive.orchestrator.schedule_tools import current_session
+
+        kept = private_owner(current_session.get())
+    except Exception:
+        return {}
+    return {"private_to": kept} if isinstance(kept, int) else {}
 
 
 def documents_for(approver: int | None) -> dict[str, Any]:
@@ -4144,10 +4162,12 @@ def _failed_runs(since: datetime) -> list[str]:
 
 
 def _overdue_tasks(since: datetime, now: datetime) -> list[str]:
-    from openexecutive.attunement.open_loops import list_open_loops
+    from openexecutive.attunement.open_loops import list_open_loops, principal_reader
 
     found = []
-    for loop in list_open_loops(limit=200):
+    # What the owner sees: the look is theirs, and a teammate's private task
+    # is not.
+    for loop in list_open_loops(limit=200, reader=principal_reader()):
         try:
             due = datetime.fromisoformat(loop.due_at.replace("Z", "+00:00"))
         except ValueError:

@@ -3884,7 +3884,7 @@ attunement:
       `scheduled_actions` row: kind='open_loop', channel='__internal__',
       channel_ref='person:{id}', status inserted as 'done' (runner never
       dispatches), assigned_to_person_id=owner, awaiting_response_since=due,
-      scope_key='loop:{owner}:{sha1(text)[:16]}'. Partial UNIQUE index
+      scope_key='loop:{owner}:{sha1(text)[:16]}', plus ':p{person}' when private to someone. Partial UNIQUE index
       `idx_scheduled_open_loop_scope` (kind='open_loop' AND awaiting NOT
       NULL) dedupes concurrent passes. Closing clears
       awaiting_response_since (reopenable later).
@@ -3940,7 +3940,16 @@ attunement:
       One helper, `people.store.is_principal_or_self(caller, owner)`, backs
       close_open_loop, list visibility, GET /people/{id}/open-loops,
       POST /open-loops/{id}/close and the feedback route. Owner None =
-      principal only.
+      principal only. Inside that, `open_loops.visible_to(loop, reader)`
+      (SQL twin `_reader_clause`, the `reader` argument of list_open_loops,
+      list_tasks, get_open_loop and get_task) hides a task made in someone's
+      own chat (`scheduled_actions.private_to_person_id`, set from
+      `fact_tools.private_owner` by the extraction pass and assign_open_loop)
+      from everyone but that person and its assignee, the principal
+      included; hidden reads as not found. The list tool never refuses and
+      always carries PRIVATE_TASKS_NOTE. Internal reads default to
+      EVERYONE; the reflection block and Take the lead's overdue watch read
+      as the principal (`principal_reader`).
     verbatim_text: |
       The stored loop `text` must itself appear verbatim in the speaker's
       message (drop reason `text_not_verbatim`): it is re-injected into the
