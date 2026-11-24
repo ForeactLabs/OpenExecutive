@@ -654,10 +654,6 @@ def _first_name(full: str) -> str:
     return (full or "").strip().split(" ")[0] if (full or "").strip() else ""
 
 
-# The one long reason a hold gives, in a few words for a row's pill.
-_SHORT_BECAUSE = {"it came up while nobody was chatting, and Approvals is on Careful": "Approvals is on Careful"}
-
-
 def top(payload: dict[str, Any], *, approver_id: int | None, viewer_id: int | None) -> dict[str, str]:
     """The lines every held step's card opens with, the same on every app
     (web, phone, chat apps):
@@ -700,7 +696,12 @@ def top(payload: dict[str, Any], *, approver_id: int | None, viewer_id: int | No
     reason = " ".join(str(payload.get("reason") or "").split()).removesuffix(".")
     # A few words for a row's pill: the reason as held ("it's about money",
     # "your rule about Dana says to wait"), shortened only where it is long.
-    because = "it's a new kind of step" if payload.get("kind") == "training" else _SHORT_BECAUSE.get(reason, reason)
+    from openexecutive.orchestrator.take_the_lead import CAREFUL_UNATTENDED
+
+    because = (
+        "it's a new kind of step" if payload.get("kind") == "training"
+        else "Approvals is on Careful" if reason == CAREFUL_UNATTENDED else reason
+    )
     if payload.get("kind") == "training":
         waits = "It's a new kind of step for me, so it waits for an OK once."
     elif reason:
