@@ -27,6 +27,7 @@ from openexecutive.api.models import (
 )
 from openexecutive.audit import log_event as audit_log
 from openexecutive.audit import principal_turn_rows, rows_for_person
+from openexecutive.config import background_turn_limit
 from openexecutive.integrations.attachments import build_attachment_output
 from openexecutive.orchestrator import outside_content
 from openexecutive.orchestrator.action_chips import drop_replaced
@@ -409,6 +410,8 @@ _SSE_KEEPALIVE = ": keepalive\n\n"
 # The steps of a reply the other pages of a shared chat follow live
 # (``chat_live.turn_event``), besides its text and the thinking pings.
 _LIVE_STEPS = frozenset({"activity", "action_taken", "phase", "rewrite"})
+# How long a cancelled step gets to unwind before the turn ends without it.
+STEP_UNWIND_S = 10.0
 
 
 async def _cancel_stream_step(anext_task: asyncio.Task[Any], turn_id: str) -> None:
@@ -428,17 +431,25 @@ async def _cancel_stream_step(anext_task: asyncio.Task[Any], turn_id: str) -> No
     if anext_task.done():
         return
     anext_task.cancel()
+    # Bounded: a step that never unwinds (something it awaits swallows the
+    # cancel) must not hold the turn past its deadline. It is left cancelled
+    # and the turn ends, saving what it wrote. An OUTER cancel re-delivered
+    # during this wait is suppressed: we are called from a `finally` while
+    # that cancellation is already propagating, so it continues on its way
+    # regardless — and the inner `cancel()` above has already been requested,
+    # which is the part that must not be skipped.
+    with contextlib.suppress(asyncio.CancelledError):
+        await asyncio.wait({anext_task}, timeout=STEP_UNWIND_S)
+    if not anext_task.done():
+        logger.warning("chat.stream_step_stuck turn_id=%s unwind_s=%s", turn_id, STEP_UNWIND_S)
+        return
     try:
-        await anext_task
+        anext_task.result()
     except (asyncio.CancelledError, StopAsyncIteration):
-        # Deliberately not `suppress(BaseException)`: that would hide real
-        # cleanup errors. Catching CancelledError here can also swallow an
-        # OUTER cancel re-delivered during this await, but we are called from a
-        # `finally` while that cancellation is already propagating, so it
-        # continues on its way regardless — and the inner `cancel()` above has
-        # already been requested, which is the part that must not be skipped.
         pass
     except Exception:
+        # Deliberately not `suppress(BaseException)`: that would hide real
+        # cleanup errors.
         logger.exception("chat.stream_step_failed turn_id=%s", turn_id)
 
 
@@ -2211,24 +2222,35 @@ def _is_error_event(event: Any) -> bool:
 
 async def _drain_background_turn(
     body: Any, session_id: str, on_finished: Callable[[bool], None] | None = None,
+    *, limit_s: float | None = None,
 ) -> None:
-    """Run the turn's stream to its end. Its events have no reader; the turn
-    persists itself as it would for /chat. ``on_finished`` hears whether the
-    turn answered (False when it ended on an error event or raised)."""
-    answered = True
+    """Run the turn's stream to its end, or to ``limit_s``. Its events have
+    no reader; the turn persists itself as it would for /chat.
+    ``on_finished`` always hears whether the turn answered (False when it
+    ended on an error event, raised, ran past ``limit_s`` or was cancelled)."""
+    answered = False
     try:
-        async with contextlib.aclosing(body) as events:
-            async for event in events:
-                if _is_error_event(event):
-                    answered = False
+        async with asyncio.timeout(limit_s):
+            async with contextlib.aclosing(body) as events:
+                answered = True
+                async for event in events:
+                    if _is_error_event(event):
+                        answered = False
+    except TimeoutError:
+        answered = False
+        logger.warning("chat.background_overran session_id=%s limit_s=%s", session_id, limit_s)
     except Exception:
         answered = False
         logger.exception("chat.background_failed session_id=%s", session_id)
-    if on_finished is not None:
-        try:
-            on_finished(answered)
-        except Exception:
-            logger.exception("chat.background_on_finished_failed session_id=%s", session_id)
+    except asyncio.CancelledError:
+        answered = False
+        raise
+    finally:
+        if on_finished is not None:
+            try:
+                on_finished(answered)
+            except Exception:
+                logger.exception("chat.background_on_finished_failed session_id=%s", session_id)
 
 
 async def start_background_turn(
@@ -2270,7 +2292,10 @@ async def start_background_turn(
         _release_background_slot(owner)
         raise
     task = asyncio.create_task(
-        _drain_background_turn(response.body_iterator, session_id, on_finished)
+        _drain_background_turn(
+            response.body_iterator, session_id, on_finished,
+            limit_s=background_turn_limit().total_seconds(),
+        )
     )
     _background_tasks.add(task)
 

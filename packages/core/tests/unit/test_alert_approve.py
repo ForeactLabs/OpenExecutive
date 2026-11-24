@@ -406,3 +406,41 @@ def test_closing_a_waiting_on_you_card_without_done_is_a_stop(
     assert client.post(f"/alerts/{one}/ack", json={"status": "dismissed"}).status_code == 200
     assert client.post("/alerts/bulk-ack", json={"status": "ack", "alert_ids": [two, other]}).status_code == 200
     assert closed == [one, two]
+
+
+def test_a_background_turn_that_overruns_still_reports() -> None:
+    import asyncio
+
+    async def _stuck():
+        yield 'data: {"type": "text", "content": "hi"}\n\n'
+        await asyncio.sleep(60)
+        yield 'data: {"type": "done"}\n\n'
+
+    heard: list[bool] = []
+    asyncio.run(chat_route._drain_background_turn(_stuck(), "s3", heard.append, limit_s=0.05))
+    assert heard == [False]
+
+
+def test_a_step_that_ignores_its_cancel_does_not_hold_the_turn(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    monkeypatch.setattr(chat_route, "STEP_UNWIND_S", 0.05)
+    release = {"go": False}
+
+    async def _stubborn() -> None:
+        while not release["go"]:
+            try:
+                await asyncio.sleep(0.01)
+            except asyncio.CancelledError:
+                continue
+
+    async def _run() -> bool:
+        task = asyncio.ensure_future(_stubborn())
+        await asyncio.sleep(0)
+        await asyncio.wait_for(chat_route._cancel_stream_step(task, "t-stuck"), timeout=2)
+        left_running = not task.done()
+        release["go"] = True
+        await task
+        return left_running
+
+    assert asyncio.run(_run()) is True
