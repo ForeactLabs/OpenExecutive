@@ -2838,3 +2838,72 @@ def test_the_executives_own_account_keeps_a_team_step_with_its_holder(owner: Any
                            source="reflection", mcp=True)
     decision = ledger.get_decision_instance(decision_id)
     assert decision is not None and decision.approver_person_id == board
+
+
+# ── a message only to the person its card would go to ───────────────────────
+
+
+def test_a_message_only_to_its_cards_person_just_goes(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Held for a contract, the card would go to the teammate who signs
+    them: a message only to that teammate has nothing to approve."""
+    _team(monkeypatch)
+    _balanced(monkeypatch)
+    legal = _holder("Lee Legal", "lee@co.example", AuthorityScope.LEGAL_SIGN)
+    calls: list[Any] = []
+    gated = ttl.gated_handlers(_handlers(calls), source="reflection")
+    result = json.loads(asyncio.run(gated["message_person"]({"person_id": legal, "text": "Please sign the NDA today."})))
+    assert result["status"] == "sent" and len(calls) == 1
+    assert ledger.list_instances(ttl.DECISION_CLASS) == []
+
+
+def test_a_message_to_someone_else_still_waits_on_its_card(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    _team(monkeypatch)
+    _balanced(monkeypatch)
+    _holder("Lee Legal", "lee@co.example", AuthorityScope.LEGAL_SIGN)
+    sam = _teammate()
+    calls: list[Any] = []
+    gated = ttl.gated_handlers(_handlers(calls), source="reflection")
+    result = json.loads(asyncio.run(gated["message_person"]({"person_id": sam, "text": "Please sign the NDA today."})))
+    assert result["status"] == "waiting_for_approval" and calls == []
+
+
+# ── asked again: would a waiting step still wait today? ──────────────────────
+
+
+def _held_payload(person_id: int, text: str, **extra: Any) -> dict[str, Any]:
+    return {"held": True, "tool": "message_person", "input": {"person_id": person_id, "text": text},
+            "mcp": False, "kind": "contracts", "source": "reflection", **extra}
+
+
+def test_a_step_todays_rules_let_go_no_longer_waits(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    _balanced(monkeypatch)
+    sam = _teammate()
+    # Held once for a contract by a check since fixed: today it goes.
+    assert not ttl.still_waits(_held_payload(sam, "The drafts are done."), approver=owner.id)
+    # One that is about a contract still waits on Balanced.
+    assert ttl.still_waits(_held_payload(sam, "Please sign the NDA today."), approver=owner.id)
+
+
+def test_a_message_to_its_own_approver_no_longer_waits(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    _balanced(monkeypatch)
+    sam = _teammate()
+    assert not ttl.still_waits(_held_payload(sam, "Please sign the NDA today."), approver=sam)
+
+
+def test_careful_and_training_still_hold_a_waiting_step(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.orchestrator import outside_mode
+
+    sam = _teammate()
+    monkeypatch.setattr(outside_mode, "get_mode", lambda **_: outside_mode.ASK)
+    assert ttl.still_waits(_held_payload(sam, "The drafts are done."), approver=owner.id)
+    _balanced(monkeypatch)
+    _training()
+    assert ttl.still_waits(_held_payload(sam, "The drafts are done."), approver=owner.id)
+
+
+def test_a_step_someone_asked_for_is_not_asked_again(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    _hands_off(monkeypatch)
+    sam = _teammate()
+    assert ttl.still_waits(_held_payload(sam, "hi", source="chat"), approver=owner.id)
+    assert ttl.still_waits(_held_payload(sam, "hi", asked_by_person_id=owner.id), approver=owner.id)
+    assert ttl.still_waits({"tool": "message_person"}, approver=owner.id)  # not a held step

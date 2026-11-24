@@ -665,6 +665,8 @@ def top(payload: dict[str, Any], *, approver_id: int | None, viewer_id: int | No
       this" when no one on the team asked (Take the lead's own work).
     - ``waits``: why it waits, in a sentence.
     - ``title``: the card's title, naming the file it works on (``served``).
+    - ``because``: why it waits in a few words ("it's about money"), for a
+      one-line row (Home's Waiting on list); may be empty.
     """
     from openexecutive.people.store import get_person
 
@@ -692,6 +694,7 @@ def top(payload: dict[str, Any], *, approver_id: int | None, viewer_id: int | No
     # before, rather than name someone who may be the reader.
     waiting_on = name(approver_id) if None not in (approver_id, viewer_id) and approver_id != viewer_id else ""
     reason = " ".join(str(payload.get("reason") or "").split()).removesuffix(".")
+    because = "it's a new kind of step" if payload.get("kind") == "training" else reason
     if payload.get("kind") == "training":
         waits = "It's a new kind of step for me, so it waits for an OK once."
     elif reason:
@@ -703,7 +706,7 @@ def top(payload: dict[str, Any], *, approver_id: int | None, viewer_id: int | No
     title = ""
     with contextlib.suppress(Exception):
         title = str(served(payload).get("headline") or "")
-    return {"waiting_on": waiting_on, "started": started, "waits": waits, "title": title}
+    return {"waiting_on": waiting_on, "started": started, "waits": waits, "title": title, "because": because}
 
 
 def held_top(decision_id: int, viewer_id: int | None) -> dict[str, str] | None:

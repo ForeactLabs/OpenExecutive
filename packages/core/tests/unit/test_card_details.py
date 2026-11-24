@@ -355,6 +355,7 @@ def test_a_held_cards_top_says_who_it_waits_on_who_started_it_and_why_it_waits(m
     assert card_details.top(lead, approver_id=12, viewer_id=1) == {
         "waiting_on": "Alex", "started": "I started this",
         "waits": "It waits because it's about money. It's on Alex's list.", "title": "",
+        "because": "it's about money",
     }
     # Alex reads their own card.
     assert card_details.top(lead, approver_id=12, viewer_id=12)["waiting_on"] == ""
@@ -369,6 +370,7 @@ def test_a_held_cards_top_says_who_it_waits_on_who_started_it_and_why_it_waits(m
         "started"] == "Someone asked"
     training = card_details.top({"kind": "training", "reason": "x"}, approver_id=1, viewer_id=1)
     assert training["waits"] == "It's a new kind of step for me, so it waits for an OK once."
+    assert training["because"] == "it's a new kind of step"
 
 
 def test_our_own_tools_name_people_departments_and_goals_never_a_number(monkeypatch) -> None:

@@ -1186,7 +1186,12 @@ routing:
     ask, a waiting step) is read with `list_live_alerts(whole_board=True)`
     but only settled or merged with the same reader's cards (`_may_see`),
     never routed, nudged, escalated or drafted on, and never evidence for
-    a card someone else reads. A waiting step never merges. `GET
+    a card someone else reads. A waiting step never merges. Before the
+    model, each waiting step nobody asked for is asked again through the
+    gate (`take_the_lead.still_waits`); one that would no longer wait is
+    settled as dismissed, not sent ("No longer needs an OK: today's rules
+    let this go."). A message only to the person its card would go to has
+    nothing to approve and goes (`take_the_lead.only_to`). `GET
     /alerts/tidied` lists a reader's last 7 days with reasons; `reopen`
     is the Undo (`decision_ledger.unlapse`, 409 if the step was answered
     since).

@@ -229,3 +229,58 @@ export function watchingRow(
   const more = signals.length - 1;
   return { title, detail: first ? `${first}, and ${more} more` : "", line: title };
 }
+
+/** What a teammate's waiting card carries that Home's Waiting on list reads:
+ *  its title, when it came, and how its held step opens (the server's
+ *  `card_details.top`). */
+export interface WaitingItem {
+  headline: string;
+  created_at: string;
+  view?: { top?: Record<string, string> | null } | null;
+}
+
+/** "today", "1 day", "5 days": how long something has waited. */
+export function waitedFor(iso: string | null | undefined, now: Date = new Date()): string {
+  const t = iso ? Date.parse(iso) : NaN;
+  if (Number.isNaN(t)) return "";
+  const days = Math.floor(Math.max(0, now.getTime() - t) / 86_400_000);
+  return days === 0 ? "today" : `${days} ${days === 1 ? "day" : "days"}`;
+}
+
+/** One row of Home's Waiting on list: the job in words, who started it,
+ *  why it waits ("Waits: it's about money") and how long. */
+export function waitingRow(
+  item: WaitingItem,
+  now: Date = new Date(),
+): { title: string; started: string; because: string; age: string } {
+  const top = item.view?.top ?? {};
+  const because = (top.because ?? "").trim();
+  return {
+    title: (top.title ?? "").trim() || item.headline.trim(),
+    started: (top.started ?? "").trim(),
+    because: because ? `Waits: ${because}` : "",
+    age: waitedFor(item.created_at, now),
+  };
+}
+
+/** The line under Home's "Waiting on …" heading: that it needs nothing from
+ *  the reader, whose OK it waits for, and how old the oldest is. */
+export function waitingNote(
+  team: { created_at: string; routed_to_person_id?: number | null }[],
+  people: { id: number; full_name: string }[],
+  now: Date = new Date(),
+): string {
+  if (team.length === 0) return "";
+  const ids = new Set(team.map((p) => p.routed_to_person_id ?? null));
+  const one = ids.size === 1 ? people.find((x) => x.id === [...ids][0]) : undefined;
+  const who = one ? firstName(one.full_name) || one.full_name.trim() : "";
+  const it = team.length === 1 ? "it" : "these";
+  const whose = who ? `${who} has to OK ${it}.` : `Each waits for its person's OK.`;
+  const oldest = team
+    .map((p) => p.created_at)
+    .reduce((a, b) => (Date.parse(b) < Date.parse(a) ? b : a));
+  const age = waitedFor(oldest, now);
+  const since =
+    age === "" ? "" : age === "today" ? " Since today." : team.length === 1 ? ` Waiting ${age}.` : ` Oldest ${age}.`;
+  return `Nothing for you to do. ${whose}${since}`;
+}

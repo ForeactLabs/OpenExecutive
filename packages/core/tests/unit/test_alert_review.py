@@ -1268,3 +1268,43 @@ def test_a_teammates_own_card_is_tidied_but_never_evidence(db: Path, dms) -> Non
     assert _apply(db, theirs, v) == "relevant"
     assert dms == []
     assert alert_store.get_alert(theirs, db_path=db).routed_to_person_id is None  # type: ignore[union-attr]
+
+def test_a_waiting_step_todays_rules_let_go_is_tidied_without_the_model(db: Path, dms, monkeypatch) -> None:
+    """Asked again (``take_the_lead.still_waits``), a step that would no
+    longer wait leaves Needs you on the next pass: settled, not sent, with
+    why on Tidied up. One that still waits goes to the model as before."""
+    from openexecutive.agents import alert_review as agent_module
+    from openexecutive.memory import decision_ledger
+    from openexecutive.orchestrator import take_the_lead
+
+    _person(full_name="Pat", role="CEO", is_principal=True)
+    gone_iid, gone = _waiting_step(db, "Message Sam")
+    kept_iid, kept = _waiting_step(db, "Message Lee")
+    asked: list[int | None] = []
+
+    def fake_still_waits(payload: dict[str, Any], *, approver: int | None) -> bool:
+        asked.append(approver)
+        return payload.get("tool") == "keep"
+
+    with sqlite3.connect(db) as conn:
+        conn.execute("UPDATE decision_instances SET proposed_payload_json = ? WHERE id = ?",
+                     ('{"tool": "keep"}', kept_iid))
+    monkeypatch.setattr(take_the_lead, "still_waits", fake_still_waits)
+    seen: list[str] = []
+
+    async def fake_review(self, batch_context: str) -> list[AlertVerdict]:
+        seen.append(batch_context)
+        return [_verdict(kept, note="still waiting")]
+
+    monkeypatch.setattr(agent_module.AlertReviewAgent, "review", fake_review)
+    monkeypatch.setattr(review, "_seed_outbound_session", lambda: None)
+    summary = asyncio.run(review.run_alert_review(reason="heartbeat", now=NOW, db_path=db, settings=_settings()))
+
+    assert len(asked) == 2 and summary.closed == 1
+    row = alert_store.get_alert(gone, db_path=db)
+    assert row is not None and row.status == "dismissed" and row.tidied_reason == review.NO_LONGER_WAITS_NOTE
+    step = decision_ledger.get_decision_instance(gone_iid, db_path=db)
+    assert step is not None and step.status == decision_ledger.STATUS_AUTO_NO_RESPONSE
+    assert len(seen) == 1 and f"<alert id={gone}>" not in seen[0] and f"<alert id={kept}>" in seen[0]
+    assert alert_store.get_alert(kept, db_path=db).status == "unread"  # type: ignore[union-attr]
+    assert dms == []

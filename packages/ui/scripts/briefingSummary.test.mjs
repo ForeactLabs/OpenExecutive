@@ -185,3 +185,39 @@ test("the watching row says what changed, and counts several", () => {
     },
   );
 });
+
+test("a waiting row says the job, who started it, why it waits and how long", async () => {
+  const { waitingRow, waitingNote, waitedFor } = await import("../src/lib/briefingSummary.ts");
+  const now = new Date("2026-11-24T14:00:00Z");
+  const held = {
+    headline: "Message Dana Price",
+    created_at: "2026-11-19T15:07:45Z",
+    routed_to_person_id: 12,
+    view: { top: { title: "Message Dana Price", started: "I started this", because: "it's about money" } },
+  };
+  assert.deepEqual(waitingRow(held, now), {
+    title: "Message Dana Price",
+    started: "I started this",
+    because: "Waits: it's about money",
+    age: "4 days",
+  });
+  // A card with no held step keeps its headline and says nothing it can't.
+  assert.deepEqual(waitingRow({ headline: "Reply to Dana", created_at: "2026-11-24T09:00:00Z" }, now), {
+    title: "Reply to Dana",
+    started: "",
+    because: "",
+    age: "today",
+  });
+  const people = [{ id: 12, full_name: "Dana Price" }, { id: 7, full_name: "Sam Lee" }];
+  assert.equal(waitingNote([held], people, now), "Nothing for you to do. Dana has to OK it. Waiting 4 days.");
+  assert.equal(
+    waitingNote([held, { ...held, created_at: "2026-11-23T10:00:00Z" }], people, now),
+    "Nothing for you to do. Dana has to OK these. Oldest 4 days.",
+  );
+  assert.equal(
+    waitingNote([held, { ...held, routed_to_person_id: 7, created_at: "2026-11-24T10:00:00Z" }], people, now),
+    "Nothing for you to do. Each waits for its person's OK. Oldest 4 days.",
+  );
+  assert.equal(waitingNote([], people, now), "");
+  assert.equal(waitedFor("2026-11-23T13:00:00Z", now), "1 day");
+});
