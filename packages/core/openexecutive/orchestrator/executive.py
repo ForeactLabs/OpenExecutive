@@ -221,10 +221,7 @@ from openexecutive.orchestrator.watchlist_tools import (
     WATCHLIST_TOOLS,
     speakers_own_row,
 )
-from openexecutive.orchestrator.web_search_tool import (
-    WEB_SEARCH_TOOL_NAME,
-    build_web_search_tool,
-)
+from openexecutive.orchestrator.web_search_tool import WEB_SEARCH_TOOL_NAME
 from openexecutive.orchestrator.workflow_authoring_tools import (
     WORKFLOW_AUTHORING_TOOL_HANDLERS,
     WORKFLOW_AUTHORING_TOOLS,
@@ -992,6 +989,9 @@ STEPS_EMPTY_REPLY = (
     "I've used all the steps I get for one message. Ask me to carry on and "
     "I'll pick up the rest."
 )
+# A long web search can pause a round (``pause_turn``); at most this many
+# are carried on in one turn.
+MAX_PAUSES = 5
 FULL_EMPTY_REPLY = (
     "I've read all I can hold for this one question. Ask me to carry on and "
     "I'll pick up the rest."
@@ -2601,8 +2601,13 @@ class Executive:
         # again: the working notes among them leave the reply at the end
         # (_without_notes).
         rounds: list[tuple[str, bool]] = []
-        # Set once a failed web search got its one more round this turn.
-        searched_again = False
+        # Web searches this turn has run: one budget for the whole turn
+        # (web_search_tool.turn_search_tool); spent_at is the count when the
+        # turn was told it had spent it.
+        searches_used = 0
+        spent_at: int | None = None
+        # Rounds a long web search paused (pause_turn), carried on.
+        pauses = 0
         # Set by a round cut off mid-text: the next round's text carries it
         # on, so that round alone gets no paragraph break before its text.
         run_on = False
@@ -2693,7 +2698,7 @@ class Executive:
                 *client_tools[:-1],
                 {**client_tools[-1], "cache_control": {"type": "ephemeral", "ttl": "1h"}},
             ]
-            web_search_tool = build_web_search_tool()
+            web_search_tool = web_searches.turn_search_tool()
             if web_search_tool is not None:
                 tools_with_cache.append(web_search_tool)
             stream_model = model or self._settings.default_model
@@ -2776,6 +2781,7 @@ class Executive:
             # A web search is a look, like any read: the after-reply check
             # sees it with the turn's other calls.
             claim_calls.extend(web_searches.searched(response_content))
+            searches_used += web_searches.searches_run(response_content)
 
             if web_search_queries:
                 session_id = getattr(current_session.get(), "session_id", None)
@@ -2860,6 +2866,25 @@ class Executive:
                     # after the next gets the break as usual.
                     run_on = bool(full_text)
                     continue
+            if (
+                final_msg.stop_reason == "pause_turn" and response_content and pauses < MAX_PAUSES
+                and not repeating and not handing_over
+            ):
+                # A long web search paused the round (the API's pause_turn):
+                # sent back as it is, it carries on where it stopped. It
+                # counts as a step; at most MAX_PAUSES in a turn. Past the
+                # turn's searches, it is told to write up instead.
+                pauses += 1
+                logger.info("round %d paused by a long web search; carrying on (%d)", iteration, pauses)
+                current_messages.append({"role": "assistant", "content": response_content})
+                if web_search_tool is not None and web_searches.spent(searches_used):
+                    current_messages.append(
+                        {"role": "user", "content": [{"type": "text", "text": web_searches.SEARCHES_OVER_NOTE}]},
+                    )
+                    repeating = True
+                    write_up_empty = web_searches.SEARCHES_EMPTY_REPLY
+                run_on = bool(full_text)
+                continue
             if final_msg.stop_reason != "tool_use" and not cut_off:
                 # A reply with no tool call still gets the queued files and
                 # synced excerpts checked, so what they tried is flagged to
@@ -2879,30 +2904,6 @@ class Executive:
                         # refusal, not on what the refused round began.
                         yield ("\n\n" if streamed_tail else "") + REFUSED_REPLY
                     return
-                # A web search stopped by the limit for one step gets one more
-                # round, once a turn, to search for what is still open: the
-                # limit starts over each step.
-                if (
-                    not (searched_again or handing_over or repeating)
-                    and web_searches.search_failed(response_content)
-                ):
-                    searched_again = True
-                    audit_log(
-                        "search_again",
-                        "A web search didn't run; one more round",
-                        session_id=getattr(current_session.get(), "session_id", None),
-                        turn_id=turn_id,
-                        actor="executive",
-                        details={"iteration": iteration},
-                        private=private_turn,
-                    )
-                    current_messages.append({"role": "assistant", "content": response_content})
-                    # Written again whole, as on the claim check's round below.
-                    yield {"type": "rewrite"}
-                    streamed_tail, rounds, cut_text = "", [], ""
-                    again: list[dict[str, Any]] = [{"type": "text", "text": web_searches.SEARCH_AGAIN_NOTE}]
-                    current_messages.append({"role": "user", "content": again})
-                    continue
                 # Do what it says: a reply that claims a change no call this
                 # turn made gets one more round to make it or say it can't.
                 claim: str | None = None
@@ -4153,6 +4154,19 @@ class Executive:
                 tool_results.append({"type": "text", "text": STEPS_NOTE})
                 repeating = True
                 write_up_empty = STEPS_EMPTY_REPLY
+            if web_search_tool is not None and web_searches.spent(searches_used) and not repeating:
+                if spent_at is None:
+                    # Spent: told once, and its other steps still run.
+                    tool_results.append({"type": "text", "text": web_searches.SEARCHES_SPENT_NOTE})
+                    spent_at = searches_used
+                elif searches_used > spent_at and not handing_over:
+                    # Searched again after being told: the next round writes
+                    # up with no more calls, so a turn's searches stay bounded
+                    # (the tool can't shrink without missing the cache).
+                    logger.info("round %d: searched past the turn's budget; writing up", iteration)
+                    tool_results.append({"type": "text", "text": web_searches.SEARCHES_OVER_NOTE})
+                    repeating = True
+                    write_up_empty = web_searches.SEARCHES_EMPTY_REPLY
             if sees:
                 # Only the newest screenshots ride along: older ones would be
                 # sent again every round.
