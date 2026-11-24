@@ -765,7 +765,10 @@ def test_nothing_by_the_day_pings_that_morning_once(db: Path, monkeypatch: pytes
     assert mailbox.quiet_ping_due(item, morning + timedelta(days=1, hours=14), zone, db_path=db)
     assert not mailbox.quiet_ping_due(item, morning + timedelta(days=2), zone, db_path=db)
 
-    monkeypatch.setattr(mailbox_source, "datetime", SimpleNamespace(now=lambda tz=None: morning.astimezone(UTC)))
+    monkeypatch.setattr(
+        mailbox_source, "datetime",
+        SimpleNamespace(now=lambda tz=None: morning.astimezone(UTC), fromisoformat=datetime.fromisoformat),
+    )
     signals = asyncio.run(mailbox_source.MailboxSource().poll(item, db_path=db))
     assert [s.normalized_summary for s in signals] == ["No email from Robin Hale yet"]
     assert signals[0].raw_payload["needs"] == NEEDS_CHOICE
@@ -823,7 +826,10 @@ def test_mail_that_comes_on_the_day_is_told_without_the_nothing_came_ping(
     item = ms.get_watchlist_item(item.id, db_path=db)
     assert item is not None
     at = datetime(day.year, day.month, day.day, 9, 5, tzinfo=zone)
-    monkeypatch.setattr(mailbox_source, "datetime", SimpleNamespace(now=lambda tz=None: at.astimezone(UTC)))
+    monkeypatch.setattr(
+        mailbox_source, "datetime",
+        SimpleNamespace(now=lambda tz=None: at.astimezone(UTC), fromisoformat=datetime.fromisoformat),
+    )
     signals = asyncio.run(mailbox_source.MailboxSource().poll(item, db_path=db))
     assert [s.normalized_summary for s in signals] == ["Robin Hale: December rent, $480 due Tue Dec 1"]
 
@@ -900,3 +906,39 @@ def test_two_emails_with_the_same_sender_and_subject_are_both_told(
     _both_inboxes(monkeypatch, [_rent(item, header="<rent-2@hale.example>")])
     assert _robin(mail_of=OWNER, header_id=_header("<rent-1@hale.example>")) == 1
     assert sorted(s.source_external_id for s in _poll_and_record(item.id, db)) == ["exec:x1", "own1"]
+
+
+def test_nothing_by_today_said_after_the_morning_waits_for_the_next_morning(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """At 2 PM: "ping me if nothing from Robin by today". No ping at 2:01."""
+    from zoneinfo import ZoneInfo
+
+    _executive_inbox(monkeypatch)
+    zone = ZoneInfo("America/New_York")
+    set_at = datetime(2026, 11, 24, 14, 0, tzinfo=zone)
+    item = _email_watch(db, trigger={"from": ["robin@hale.example"]}, slug="robin-email")
+    assert item.id is not None
+    for key, value in mailbox.quiet_config(set_at.date(), set_at.astimezone(UTC)).items():
+        ms.set_watchlist_config_key(item.id, key, value, db_path=db)
+    item = ms.get_watchlist_item(item.id, db_path=db)
+    assert item is not None
+    assert not mailbox.quiet_ping_due(item, set_at + timedelta(minutes=1), zone, db_path=db)
+    next_morning = datetime(2026, 11, 25, 9, 0, tzinfo=zone)
+    assert not mailbox.quiet_ping_due(item, next_morning - timedelta(minutes=1), zone, db_path=db)
+    assert mailbox.quiet_ping_due(item, next_morning, zone, db_path=db)
+
+
+def test_an_email_to_the_executive_while_the_watch_was_off_is_not_told(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _executive_inbox(monkeypatch)
+    item = _email_watch(db, trigger={"from": ["robin@hale.example"]}, slug="robin-email")
+    assert item.id is not None
+    assert _robin(mail_of=OWNER) == 1
+    ms.set_enabled(item.id, False, db_path=db)
+    ms.set_enabled(item.id, True, db_path=db)
+    fresh = ms.get_watchlist_item(item.id, db_path=db)
+    assert fresh is not None
+    assert asyncio.run(mailbox_source.MailboxSource().poll(fresh, db_path=db)) == []
+    assert ms.executive_mail_for(item.id, db_path=db) == []

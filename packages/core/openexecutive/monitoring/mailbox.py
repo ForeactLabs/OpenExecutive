@@ -137,20 +137,25 @@ def _parse(value: object) -> datetime | None:
 
 def quiet_ping_due(item: WatchlistItem, now: datetime, zone: Any, *, db_path: Path | None = None) -> bool:
     """Whether to ping the owner that nothing came: its "nothing by" day's
-    morning (``zone``'s time) has come, no later than the day after (a scan
-    that was down, or a watch turned off over the day, never pings weeks
-    late), and nothing has matched since the day was set: no email of it
-    recorded, told or not. (Whether it pinged for that day already is the
-    caller's: the ping's dedup key.)"""
+    morning (``zone``'s time) has come (the next morning for a day set after
+    its own morning, so "nothing by today" said at 2 PM waits for the night),
+    no later than the day after that (a scan that was down, or a watch
+    turned off over the day, never pings weeks late), and nothing has
+    matched since the day was set: no email of it recorded, told or not.
+    (Whether it pinged for that day already is the caller's: the ping's
+    dedup key.)"""
     from openexecutive.monitoring import store
 
     day = quiet_by(item)
     if day is None or item.id is None:
         return False
-    local = now.astimezone(zone)
-    if local < datetime.combine(day, QUIET_PING_AT, tzinfo=zone) or local.date() > day + timedelta(days=1):
-        return False
     since = _parse((item.config_json or {}).get(QUIET_SINCE_KEY)) or _parse(item.created_at)
+    due = datetime.combine(day, QUIET_PING_AT, tzinfo=zone)
+    if since is not None and since >= due:
+        due = datetime.combine(since.astimezone(zone).date() + timedelta(days=1), QUIET_PING_AT, tzinfo=zone)
+    local = now.astimezone(zone)
+    if local < due or local.date() > due.date() + timedelta(days=1):
+        return False
     if since is None:
         return True
     return not store.signals_since(

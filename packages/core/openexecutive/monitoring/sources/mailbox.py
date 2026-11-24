@@ -183,7 +183,14 @@ def executive_signals(item: WatchlistItem, now: datetime, *, db_path: Path | Non
     oldest first (``PER_POLL`` at most; the rest wait for the next poll).
     Those already told are forgotten."""
     assert item.id is not None
-    kept = store.executive_mail_for(item.id, db_path=db_path)
+    # Only mail from since it was set or last turned back on (``_start``):
+    # what came while it was off is forgotten, as in their own inbox.
+    start = _start(item, now)
+    rows = store.executive_mail_for(item.id, db_path=db_path)
+    store.drop_executive_mail(
+        item.id, [m["message_id"] for m in rows if (_parse(m["received_at"]) or now) < start], db_path=db_path,
+    )
+    kept = [m for m in rows if (_parse(m["received_at"]) or now) >= start]
     keys = {
         m["message_id"]: _rfc_key(item.id, m.get("rfc_id", "")) or _executive_dedup_key(item.id, m["message_id"])
         for m in kept
