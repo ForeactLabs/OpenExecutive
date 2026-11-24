@@ -1190,8 +1190,11 @@ routing:
     model, each waiting step nobody asked for is asked again through the
     gate (`take_the_lead.still_waits`); one that would no longer wait is
     settled as dismissed, not sent ("No longer needs an OK: today's rules
-    let this go."). A message only to the person its card would go to has
-    nothing to approve and goes (`take_the_lead.only_to`). `GET
+    let this go."), and never tidied that way again after an Undo. A step
+    someone asked for or scheduled is left to the model. A message only to
+    the person its card would go to today, held for a topic routed by
+    approval range, has nothing to approve and goes
+    (`take_the_lead.only_to`). `GET
     /alerts/tidied` lists a reader's last 7 days with reasons; `reopen`
     is the Undo (`decision_ledger.unlapse`, 409 if the step was answered
     since).
