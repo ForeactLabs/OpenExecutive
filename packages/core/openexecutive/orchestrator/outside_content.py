@@ -611,7 +611,9 @@ def _flag(
     Hands-off is for the person's own words (``outside_mode.for_turn``): a
     flagged read is someone else's words trying to steer the turn, so from
     here to the end of the turn it runs at Balanced, as a turn whose words
-    may be someone else's does. The next message starts at its own level."""
+    may be someone else's does. The next message starts at its own level.
+    Reads checked before the flag keep what Hands-off made of them; the
+    flagged read itself marks the turn, so its writes still wait."""
     from openexecutive.audit import log_event
     from openexecutive.orchestrator import outside_mode
     from openexecutive.orchestrator.content_scan import describe
