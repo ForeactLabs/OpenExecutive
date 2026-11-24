@@ -694,7 +694,14 @@ def top(payload: dict[str, Any], *, approver_id: int | None, viewer_id: int | No
     # before, rather than name someone who may be the reader.
     waiting_on = name(approver_id) if None not in (approver_id, viewer_id) and approver_id != viewer_id else ""
     reason = " ".join(str(payload.get("reason") or "").split()).removesuffix(".")
-    because = "it's a new kind of step" if payload.get("kind") == "training" else reason
+    # A few words for a row's pill: the reason as held ("it's about money",
+    # "your rule about Dana says to wait"), shortened only where it is long.
+    from openexecutive.orchestrator.take_the_lead import CAREFUL_UNATTENDED
+
+    because = (
+        "it's a new kind of step" if payload.get("kind") == "training"
+        else "Approvals is on Careful" if reason == CAREFUL_UNATTENDED else reason
+    )
     if payload.get("kind") == "training":
         waits = "It's a new kind of step for me, so it waits for an OK once."
     elif reason:

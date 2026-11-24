@@ -101,6 +101,9 @@ KINDS: tuple[str, ...] = (MONEY, CONTRACTS, PEOPLE_DECISIONS, DELETE, SHARE, SOM
 BIG_SEND_RECIPIENTS = 5
 # The kind of a hold in training: nothing else held it, it just isn't allowed yet.
 TRAINING = "training"
+# Why unattended work waits on Careful; Waiting on rows shorten it
+# (``card_details.top``).
+CAREFUL_UNATTENDED = "it came up while nobody was chatting, and Approvals is on Careful"
 # What it's learned: at most this many allowed actions, each example this long.
 ALLOWED_MAX = 200
 EXAMPLE_MAX = 1000
@@ -2990,7 +2993,7 @@ def _hit(name: str, tool_input: dict[str, Any], *, mcp: bool) -> tuple[Hit | Non
         if rule is not None:
             return rule, None
         if _careful():
-            return Hit("level", "it came up while nobody was chatting, and Approvals is on Careful"), None
+            return Hit("level", CAREFUL_UNATTENDED), None
         # In training only caps the level: a kind of step allowed from its
         # card goes on by the level from then on, like any other step.
         found: Allowed | None = None
