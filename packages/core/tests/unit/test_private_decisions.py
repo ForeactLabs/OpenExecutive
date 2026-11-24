@@ -41,7 +41,7 @@ def roster(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[SimpleNa
         "openexecutive.audit.log_event",
         lambda event_type, summary, **kw: events.append({"event_type": event_type, "summary": summary, **kw}),
     )
-    monkeypatch.setattr(fact_tools, "_private_decision_owner", fact_tools.own_chat_person)
+    monkeypatch.setattr(fact_tools, "private_owner", fact_tools.own_chat_person)
     people_registry.invalidate()
     ids = SimpleNamespace(
         owner=people_store.upsert_person(full_name="Olivia Owner", is_principal=True,

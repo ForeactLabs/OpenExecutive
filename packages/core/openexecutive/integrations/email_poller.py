@@ -1292,7 +1292,8 @@ async def _hold_for_roster(
     new_lines, _fw = _new_text_lines(body_lines)
     subject_line = next((ln for ln in header if ln.lower().startswith("subject:")), "")
     subject = subject_line[len("subject:"):].strip()
-    preview = f"{subject} — {' '.join(new_lines)}" if subject else " ".join(new_lines)
+    message = "\n".join(new_lines).strip()
+    preview = f"{subject}\n\n{message}" if subject else message
 
     async def _ack(_text: str) -> None:
         from openexecutive.integrations.workspace.registry import get_mail_provider

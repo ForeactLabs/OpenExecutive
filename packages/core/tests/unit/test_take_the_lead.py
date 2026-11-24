@@ -1244,17 +1244,25 @@ def test_under_hands_off_it_goes(owner: Any, monkeypatch: pytest.MonkeyPatch) ->
 
 def test_what_one_allow_covers(owner: Any) -> None:
     sam = _teammate()
-    # Any channel that reaches Sam is one "Message Sam".
-    assert ttl.allowance("message_person", {"person_id": sam})[0] == f"take_the_lead|message|person:{sam}"  # type: ignore[index]
-    book = ttl.allowance("create_calendar_event", {"attendee_person_ids": [sam, owner.id]})
-    assert book == (f"take_the_lead|book|people:{min(sam, owner.id)},{max(sam, owner.id)}",
-                    "Book meetings with " + " and ".join(
-                        ["Olivia Owner", "Sam Teammate"] if owner.id < sam else ["Sam Teammate", "Olivia Owner"]))
-    # Someone not on the People list can't be allowed.
-    assert ttl.allowance("message_person", {"person_id": 9999}) is None
-    assert ttl.allowance("create_calendar_event", {"attendee_person_ids": [9999]}) is None
+    # One tick covers the kind of step, whoever it is for: any message on
+    # any channel and any email are one "Send messages and emails".
+    message = ("take_the_lead|message", "Send messages and emails")
+    assert ttl.allowance("message_person", {"person_id": sam}) == message
+    assert ttl.allowance("message_person", {"person_id": 9999}) == message
+    assert ttl.allowance("send_slack_dm", {"user_id": "U1"}) == message
+    assert ttl.allowance("google_workspace__send_gmail_message",
+                         {"to": "pat@far.example", "subject": "Hi", "body": "x"}, mcp=True) == message
+    assert ttl.allowance("create_calendar_event", {"attendee_person_ids": [sam, owner.id]}) == (
+        "take_the_lead|book", "Book meetings")
+    assert ttl.allowance("create_calendar_event", {"attendee_person_ids": [9999]}) == (
+        "take_the_lead|book", "Book meetings")
+    assert ttl.allowance("assign_open_loop", {"person_id": sam}) == ("take_the_lead|assign", "Assign things to people")
+    # Each workflow is its own kind.
     assert ttl.allowance("run_workflow", {"workflow_id": "weekly_review"}) == (
         "take_the_lead|workflow|weekly_review", "Start Weekly Review")
+    # Any other step is the kind its tool is, so every kind can be allowed.
+    assert ttl.allowance("cancel_calendar_event", {"event_id": "e1"}) == (
+        "take_the_lead|tool|cancel_calendar_event", "Cancel a meeting")
 
 
 def test_a_workflow_step_reads_by_its_name_never_its_key(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1309,7 +1317,7 @@ def test_approve_and_allow(client: TestClient, owner: Any, monkeypatch: pytest.M
     assert response.status_code == 200, response.text
     assert response.json()["status"] == ledger.STATUS_APPROVED_UNCHANGED and len(done) == 1
     [learned] = client.get("/take-the-lead").json()["learned"]
-    assert learned["label"] == "Message Sam Teammate" and learned["example"] == {}
+    assert learned["label"] == "Send messages and emails" and learned["example"] == {}
 
 
 def test_the_tick_is_kept_when_the_step_fails(client: TestClient, owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1323,7 +1331,7 @@ def test_the_tick_is_kept_when_the_step_fails(client: TestClient, owner: Any, mo
     response = client.post(f"/decisions/{decision_id}/approve", json={"edits": {"allow": True}})
     assert response.status_code == 502, response.text
     [learned] = client.get("/take-the-lead").json()["learned"]
-    assert learned["label"] == "Message Sam Teammate"
+    assert learned["label"] == "Send messages and emails"
 
 
 def test_the_tick_is_kept_when_the_step_raises(client: TestClient, owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1336,7 +1344,7 @@ def test_the_tick_is_kept_when_the_step_raises(client: TestClient, owner: Any, m
     response = client.post(f"/decisions/{decision_id}/approve", json={"edits": {"allow": True}})
     assert response.status_code == 502, response.text
     [learned] = client.get("/take-the-lead").json()["learned"]
-    assert learned["label"] == "Message Sam Teammate"
+    assert learned["label"] == "Send messages and emails"
 
 
 def test_a_department_card_carries_documents_only_for_its_own_approver(owner: Any) -> None:
@@ -1422,7 +1430,7 @@ def test_edit_then_do_it_like_this(client: TestClient, owner: Any, monkeypatch: 
     assert learned["example"] == {"text": "Hi Sam, still on for Thursday at 2? Olivia"}
     # The acting passes read it as an example.
     note = ttl.learned_note()
-    assert "in training" in note and "Message Sam Teammate" in note and "still on for Thursday" in note
+    assert "in training" in note and "Send messages and emails" in note and "still on for Thursday" in note
 
 
 def test_a_bad_edit_is_refused_before_anything_happens(client: TestClient, owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1462,10 +1470,10 @@ def test_suggests_after_unchanged_approvals_and_allows_from_settings(
                                ttl.Hit(ttl.TRAINING, "it's in training"), source="reflection", mcp=False)
         assert client.post(f"/decisions/{decision_id}/approve", json={}).status_code == 200
     [suggested] = client.get("/take-the-lead").json()["suggested"]
-    assert suggested["label"] == "Message Sam Teammate" and suggested["approvals"] == ttl.SUGGEST_AFTER
+    assert suggested["label"] == "Send messages and emails" and suggested["approvals"] == ttl.SUGGEST_AFTER
     assert client.post("/take-the-lead/learned", json={"key": "take_the_lead|message|person:1"}).status_code == 404
     body = client.post("/take-the-lead/learned", json={"key": suggested["key"]}).json()
-    assert body["suggested"] == [] and [a["label"] for a in body["learned"]] == ["Message Sam Teammate"]
+    assert body["suggested"] == [] and [a["label"] for a in body["learned"]] == ["Send messages and emails"]
     assert client.delete(f"/take-the-lead/learned/{body['learned'][0]['id']}").json()["learned"] == []
 
 
@@ -1505,22 +1513,15 @@ def test_an_older_switch_table_gains_training(db: Path) -> None:
     assert lead.enabled is True and lead.training is False
 
 
-def test_a_connected_tool_that_reaches_people_is_never_allowed() -> None:
-    # A mail send names no file and reaches whoever it's sent to: no Allow.
-    assert ttl.allowance("google_workspace__send_gmail_message",
-                         {"to": "sam@co.example", "subject": "Hi", "body": "x"}, mcp=True) is None
-    assert ttl.allowance("gdrive__share_file", {"title": "Plan", "email_address": "a@b.example"}, mcp=True) is None
-    assert ttl.allowance("gsheets__update_values", {"values": [[1]]}, mcp=True) is None
-    key, _ = ttl.allowance("gsheets__update_values", {"title": "Supplier deliveries"}, mcp=True)  # type: ignore[misc]
-    assert key == "take_the_lead|mcp|gsheets__update_values|supplier deliveries|title"
-    # The same file with an argument that opens it up is never allowed…
-    for extra in ({"share_with_domain": "example.com"}, {"anyone_with_link": True}, {"permission": "writer"}):
-        assert ttl.allowance("gdocs__update", {"title": "Budget", **extra}, mcp=True) is None
-    # …and with any other new argument it's a different action.
-    plain = ttl.allowance("gdocs__update", {"title": "Budget", "body": "x"}, mcp=True)
-    more = ttl.allowance("gdocs__update", {"title": "Budget", "body": "x", "folder": "y"}, mcp=True)
-    assert plain is not None and more is not None and plain[0] != more[0]
-
+def test_a_connected_tool_is_allowed_by_its_kind() -> None:
+    # One tool is one kind of step, whichever file it touches or who it
+    # reaches: sharing and someone new still wait by the level.
+    sheet = ("take_the_lead|mcp|gsheets__update_values", "Update a spreadsheet in Google Sheets")
+    assert ttl.allowance("gsheets__update_values", {"title": "Supplier deliveries"}, mcp=True) == sheet
+    assert ttl.allowance("gsheets__update_values", {"values": [[1]]}, mcp=True) == sheet
+    assert ttl.allowance("gdrive__share_file", {"title": "Plan", "email_address": "a@b.example"}, mcp=True) == (
+        "take_the_lead|mcp|gdrive__share_file", "Share a file in Google Drive")
+    assert ttl.allowance("", {}, mcp=True) is None
 
 def test_only_the_principal_edits_a_card(client: TestClient, owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     done: list[dict[str, Any]] = []
@@ -1737,7 +1738,7 @@ def test_in_training_nothing_goes_on_any_level(owner: Any, monkeypatch: pytest.M
     assert result["status"] == "waiting_for_approval" and calls == []
     [decision] = ledger.list_instances(ttl.DECISION_CLASS)
     payload = json.loads(decision.proposed_payload_json)
-    assert payload["kind"] == ttl.TRAINING and payload["allow"]["label"] == "Message Sam Teammate"
+    assert payload["kind"] == ttl.TRAINING and payload["allow"]["label"] == "Send messages and emails"
 
 
 def test_a_training_card_says_who_where_and_the_whole_message(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1835,11 +1836,25 @@ def test_once_allowed_it_goes_where_approvals_lets_it(owner: Any, monkeypatch: p
     _balanced(monkeypatch)
     result, calls = _gated_message(sam, "Are we on for Friday?")
     assert result["status"] == "sent" and len(calls) == 1
-    # Someone not allowed yet still gets a card.
+    # The tick covers the kind of step, so a message to someone else goes
+    # by the level too, with no new In training card.
     pat = people_store.upsert_person(full_name="Pat Other", email="pat@co.example")
     people_registry.invalidate()
     result, calls = _gated_message(pat, "Hello")
+    assert result["status"] == "sent" and len(calls) == 1
+
+
+def test_an_allowed_kind_still_goes_by_the_level(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    # In training only caps the level: on Balanced, an allowed kind of step
+    # that touches one of its topics waits as the level says, not as
+    # In training.
+    _training()
+    _balanced(monkeypatch)
+    key, label = ttl.allowance("message_person", {"person_id": 1})  # type: ignore[misc]
+    ttl.allow(key, label, created_by="t")
+    result, calls = _gated_message(_teammate(), "Please pay the $4,000 invoice today.")
     assert result["status"] == "waiting_for_approval" and calls == []
+    assert json.loads(ledger.list_instances(ttl.DECISION_CLASS)[0].proposed_payload_json)["kind"] != ttl.TRAINING
 
 
 def test_out_of_training_balanced_holds_the_kinds_and_hands_off_runs(
