@@ -6,8 +6,11 @@ import { waitingNote, waitingOnTeam, waitingRow } from "@/lib/briefingSummary";
 // What waits on someone else on the team, out of Needs you (it needs nothing
 // from the reader): a heading naming whose OK it waits for, a line saying so
 // and how old the oldest is, then one row per card with the job in words,
-// who started it, why it waits and how long. A row opens the full cards.
+// who started it, why it waits and how long, the first few only, then
+// "N more". A row opens the full cards.
 // The phone app shows the same.
+const SHOWN = 3;
+
 export function WaitingOnTeam({
   proposals,
   people,
@@ -19,6 +22,7 @@ export function WaitingOnTeam({
 }) {
   const heading = waitingOnTeam(proposals, people);
   if (!heading) return null;
+  const more = proposals.length - SHOWN;
   return (
     <section aria-labelledby="waiting-on-team" className="mb-8">
       <h2 id="waiting-on-team" className="text-lg font-semibold text-fg">
@@ -27,7 +31,7 @@ export function WaitingOnTeam({
       </h2>
       <p className="mb-3 text-sm text-fg-muted">{waitingNote(proposals, people)}</p>
       <div className="divide-y divide-line rounded-2xl border border-line bg-surface-elevated px-4">
-        {proposals.map((p) => {
+        {proposals.slice(0, SHOWN).map((p) => {
           const row = waitingRow(p);
           return (
             <button
@@ -59,6 +63,16 @@ export function WaitingOnTeam({
             </button>
           );
         })}
+        {more > 0 && (
+          <button
+            type="button"
+            onClick={onOpen}
+            aria-haspopup="dialog"
+            className="flex w-full items-center gap-3 py-3 text-left text-sm font-medium text-accent hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+          >
+            {more} more
+          </button>
+        )}
       </div>
     </section>
   );
