@@ -406,3 +406,72 @@ def test_closing_a_waiting_on_you_card_without_done_is_a_stop(
     assert client.post(f"/alerts/{one}/ack", json={"status": "dismissed"}).status_code == 200
     assert client.post("/alerts/bulk-ack", json={"status": "ack", "alert_ids": [two, other]}).status_code == 200
     assert closed == [one, two]
+
+
+def test_a_cancelled_background_turn_still_reports() -> None:
+    import asyncio
+
+    async def _slow():
+        yield 'data: {"type": "text", "content": "hi"}\n\n'
+        await asyncio.sleep(60)
+        yield 'data: {"type": "done"}\n\n'
+
+    heard: list[bool] = []
+
+    async def _run() -> None:
+        task = asyncio.ensure_future(chat_route._drain_background_turn(_slow(), "s3", heard.append))
+        await asyncio.sleep(0.01)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(_run())
+    assert heard == [False]
+
+
+def test_a_step_that_ignores_its_cancel_does_not_hold_the_turn(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    monkeypatch.setattr(chat_route, "STEP_UNWIND_S", 0.05)
+    release = {"go": False}
+
+    async def _stubborn() -> None:
+        while not release["go"]:
+            try:
+                await asyncio.sleep(0.01)
+            except asyncio.CancelledError:
+                continue
+
+    async def _run() -> bool:
+        task = asyncio.ensure_future(_stubborn())
+        await asyncio.sleep(0)
+        await asyncio.wait_for(chat_route._cancel_stream_step(task, "t-stuck"), timeout=2)
+        left_running = not task.done()
+        release["go"] = True
+        await task
+        return left_running
+
+    assert asyncio.run(_run()) is True
+
+
+def test_a_step_still_unwinds_when_the_outer_turn_is_cancelled_again() -> None:
+    import asyncio
+
+    async def _slow_unwind() -> None:
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            await asyncio.sleep(0.2)
+            raise
+
+    async def _run() -> bool:
+        step = asyncio.ensure_future(_slow_unwind())
+        await asyncio.sleep(0)
+        waiter = asyncio.ensure_future(chat_route._cancel_stream_step(step, "t-again"))
+        for _ in range(5):
+            await asyncio.sleep(0.01)
+            waiter.cancel()
+        await asyncio.gather(waiter, return_exceptions=True)
+        return step.done()
+
+    assert asyncio.run(_run()) is True
