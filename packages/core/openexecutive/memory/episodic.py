@@ -355,6 +355,9 @@ def initialize_db(db_path: Path | None = None) -> None:
             ("task_completed_at", "TEXT"),
             ("task_closed_reason", "TEXT"),
             ("task_closed_due_at", "TEXT"),
+            # A task from someone's own chat: theirs and its assignee's to
+            # see (attunement.open_loops.visible_to). NULL: the team's.
+            ("private_to_person_id", "INTEGER"),
             # ScheduledAction.repeat.
             ("repeat", "TEXT"),
         ):
@@ -1288,6 +1291,7 @@ def insert_scheduled_action(
     status: str = "pending",
     created_by_person_id: int | None = None,
     repeat: str | None = None,
+    private_to_person_id: int | None = None,
     db_path: Path | None = None,
 ) -> int:
     if channel not in _VALID_SCHEDULED_CHANNELS:
@@ -1310,12 +1314,12 @@ def insert_scheduled_action(
             "INSERT INTO scheduled_actions "
             "(created_at, run_at, channel, channel_ref, intent_text, originating_session_id, "
             "department, kind, assigned_to_person_id, awaiting_response_since, scope_key, "
-            "required_scope, status, created_by_person_id, repeat) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "required_scope, status, created_by_person_id, repeat, private_to_person_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 now, run_at, channel, channel_ref, intent_text, originating_session_id,
                 department, kind, assigned_to_person_id, awaiting_str, scope_key,
-                required_scope, status, created_by_person_id, repeat or None,
+                required_scope, status, created_by_person_id, repeat or None, private_to_person_id,
             ),
         )
         return int(cursor.lastrowid or 0)
@@ -2130,6 +2134,11 @@ def list_awaiting_replies_by_person(
             # then nobody is waiting on the owner (the nudge engine uses the
             # same cut-off).
             "  AND NOT (kind = 'open_loop' AND awaiting_response_since > ?) "
+            # A task from someone's own chat is theirs and its assignee's
+            # (attunement.open_loops.visible_to). These counts are the same for
+            # everyone who opens Today, so only the team's tasks count, the
+            # principal's own private ones included.
+            "  AND NOT (kind = 'open_loop' AND private_to_person_id IS NOT NULL) "
             "GROUP BY assigned_to_person_id",
             (datetime.now(UTC).isoformat(),),
         ).fetchall()
