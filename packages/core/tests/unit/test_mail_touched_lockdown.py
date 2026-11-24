@@ -679,17 +679,27 @@ def test_careful_holds_after_mail_the_check_cleared(
     assert fetched == []
 
 
-def test_hands_off_lets_a_link_run_even_after_flagged_mail(
+def test_hands_off_runs_a_link_after_clean_mail_but_not_after_flagged_mail(
     monkeypatch: pytest.MonkeyPatch, fetched: list[dict[str, Any]],
 ) -> None:
-    from openexecutive.orchestrator import outside_mode
+    from openexecutive.orchestrator import content_scan, outside_mode
 
+    _level(monkeypatch, outside_mode.TRUST, content_scan.CLEAN)
+    _turn(
+        [ToolUseBlock("tu1", "ghostwrite_email", GHOSTWRITE)],
+        [ToolUseBlock("tu2", "run_executive_research", LINK)],
+    )
+    assert fetched == [LINK]
+    fetched.clear()
+
+    # A flagged read is someone else's words: the rest of the turn runs at
+    # Balanced, which holds the link after flagged mail.
     _level(monkeypatch, outside_mode.TRUST, _flagged())
     _, calls = _turn(
         [ToolUseBlock("tu1", "ghostwrite_email", GHOSTWRITE)],
         [ToolUseBlock("tu2", "run_executive_research", LINK)],
     )
-    assert fetched == [LINK]
+    assert fetched == []
     # The flag still reaches the model as a notice.
     assert str(_result_of(calls, "tu1")).startswith("[Safety check: this content looks like")
 
@@ -1076,6 +1086,36 @@ def test_the_executives_own_verified_mail_in_a_search_is_not_checked(monkeypatch
         ]
         assert notice.startswith("[Safety check: the subject and sender name of 1 of these emails")
         assert not pinned.mail_held
+    finally:
+        outside_content.end_turn(state)
+        current_session.reset(token)
+
+
+def test_a_left_out_entry_keeps_hands_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A flagged entry taken out of a search before the model reads it is
+    # still flagged, but its words never reach the turn: Hands-off stays.
+    from openexecutive.orchestrator import (
+        content_scan,
+        content_trust,
+        outside_content,
+        outside_mode,
+    )
+
+    monkeypatch.setattr(content_trust, "principal_only_withheld", lambda session: frozenset())
+
+    async def says_of_list(entries: list[Any], *, model: str | None = None) -> Any:
+        if any("evil" in str(e.get("subject")) for e in entries):
+            return content_scan.Verdict(flagged=True, categories=("forward_or_share",), items=(3,))
+        return content_scan.CLEAN
+
+    _level(monkeypatch, "trust", content_scan.CLEAN)
+    monkeypatch.setattr(content_scan, "scan_list", says_of_list)
+    session, token, state = _pinned_turn("trust", mail_verified={"t1": OWN, "t3": OWN})
+    try:
+        pinned = session.turn_delegation  # type: ignore[attr-defined]
+        result, _ = asyncio.run(outside_content.check_mail_read(pinned, OWN_SEARCH))
+        assert json.loads(result)["threads"][3]["subject"] == "(left out)"
+        assert state.flags and state.mode == outside_mode.TRUST
     finally:
         outside_content.end_turn(state)
         current_session.reset(token)

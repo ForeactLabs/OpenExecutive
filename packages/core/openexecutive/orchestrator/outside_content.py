@@ -67,9 +67,9 @@ search, with no notice (its results arrive encrypted inside the model's own
 response, so nothing can check them or go before them; ``mark``). A Gmail search's list of ids, a Gmail message
 Gmail authenticated as a teammate's, or a calendar read naming only the team
 is not even checked. Under Hands-off (``trust``), on the principal's own
-turn, nothing but mail from someone not in People marks it, and an attachment
-or synced excerpt the check flagged (the model read it before its check, so
-no notice could reach it first; Balanced holds it too). A flagged read is
+turn, nothing but mail from someone not in People marks it, and a read the
+check flagged drops the rest of the turn to Balanced (``_flag``), which holds
+it. A flagged read is
 remembered for the person at every level (``TurnOutside.flags``,
 ``pending_flags``: the web chat shows it only as the reason on a held step's
 card, since a flag that held nothing changes nothing the person sees), it
@@ -604,12 +604,25 @@ _LEFT_OUT = "(left out)"
 
 def _flag(
     state: TurnOutside, source: str, categories: tuple[str, ...], what: str = "", evidence: str = "",
+    *, read: bool = True,
 ) -> None:
     """Remember a flag for the person (``pending_flags``) and log it, with
-    which item it was, so the person can find and check it."""
+    which item it was, so the person can find and check it.
+
+    Hands-off is for the person's own words (``outside_mode.for_turn``): a
+    flagged read is someone else's words trying to steer the turn, so from
+    here to the end of the turn it runs at Balanced, as a turn whose words
+    may be someone else's does. The next message starts at its own level.
+    Reads checked before the flag keep what Hands-off made of them; the
+    flagged read itself marks the turn, so its writes still wait. ``read``:
+    the flagged words reach the model; a mail-list entry taken out before it
+    reads them (``check_mail_read``) is flagged but drops nothing."""
     from openexecutive.audit import log_event
+    from openexecutive.orchestrator import outside_mode
     from openexecutive.orchestrator.content_scan import describe
 
+    if read and state.mode == outside_mode.TRUST:
+        state.mode = outside_mode.OUTSIDERS
     state.flags.append((source, categories, what))
     log_event(
         "content_flagged",
@@ -1128,7 +1141,7 @@ async def check_mail_read(pinned: Any, result: Any) -> tuple[Any, str]:
             for n in sorted(flagged):
                 _flag(
                     state, MAIL, tuple(verdict.categories), _mail_label(entries[n]),
-                    getattr(verdict, "evidence", ""),
+                    getattr(verdict, "evidence", ""), read=False,
                 )
             if state.mode == outside_mode.ASK:
                 pinned.mail_held = True
