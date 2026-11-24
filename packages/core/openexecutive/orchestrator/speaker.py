@@ -81,10 +81,8 @@ def own_private_speaker(session: Any = None) -> Any:
         session is None
         or getattr(session, "meeting_call", False) is True
         or getattr(session, "from_meeting", False) is True
-        or bool(getattr(session, "email_from", None))
     ):
-        # A call with others in it, or mail (which can carry cc's), is never
-        # one person's own conversation.
+        # A call with others in it is never one person's own conversation.
         return None
     person = speaker(session)
     if person is None:

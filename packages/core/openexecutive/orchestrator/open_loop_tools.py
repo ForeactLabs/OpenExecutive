@@ -302,8 +302,9 @@ async def handle_close_open_loop(tool_input: dict[str, Any]) -> str:
 def _assigner(session: Any) -> int | None:
     """Who may assign in this turn: the principal on a verified surface, or a
     rostered teammate on one (``people_tools.teammate_on_verified_surface``).
-    None for anyone else — an email (even the principal's own address), a
-    turn private to the principal, an unattended run, an unrostered or
+    Their own email counts when its mail service proved it is from them
+    (``people_tools.email_sender_proven``). None for anyone else — an
+    unproven email, a turn private to the principal, an unattended run, an unrostered or
     archived caller. The person whose own card is being carried out assigns
     as they would have in their turn (``people_tools.approved_speaker``).
     Fails closed."""
@@ -320,7 +321,6 @@ def _assigner(session: Any) -> int | None:
         session is None
         or getattr(session, "unattended", False)
         or getattr(session, "private_to_principal", False)
-        or getattr(session, "email_from", "")
     ):
         return None
     caller = getattr(session, "caller_person_id", None)

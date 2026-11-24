@@ -1523,13 +1523,14 @@ def _forwarded_by_principal_notice(principal: Any) -> str:
     )
 
 
-def _principal_email_text(raw_email: str, from_addr: str) -> str:
-    """The principal's own authenticated email as the turn shows it.
+def _proven_email_text(raw_email: str, from_addr: str) -> str:
+    """Email the mail service proved is its sender's own (the owner's or a
+    teammate's, ``people_tools.email_sender_proven``) as the turn shows it.
 
     Their new text is theirs. What it quotes or forwards — a stranger's
     message they replied to or passed on — is not, whoever sent it on: left
     unlabelled beside every other inbound mail, labelled, it would read as
-    the principal speaking. So when anything was cut from their new text, the
+    them speaking. So when anything was cut from their new text, the
     message as received goes in an ``<untrusted_content>`` block below their
     own words (which it repeats: the cut is a heuristic, and the whole message
     is what the Executive must be able to read)."""
@@ -1543,7 +1544,7 @@ def _principal_email_text(raw_email: str, from_addr: str) -> str:
     if "\n".join(ln for ln in own.splitlines() if ln.strip()) == whole:
         return raw_email
     return (
-        "The mailbox authenticated this email as the principal's own. Their new text "
+        "The mailbox authenticated this email as the sender's own. Their new text "
         "in it:\n"
         f"{own or '(none)'}\n\n"
         "The message as received, including what it quotes or forwards — "
@@ -1668,15 +1669,23 @@ async def _run_executive(
     # (we ARE the executive — never a peer). Best-effort: parse
     # failures degrade to an empty list rather than blocking the turn.
     co_present_person_ids: list[int] = []
+    # Nobody else on it: the sender's conversation with the Executive alone
+    # (Session.email_one_on_one). Unknown when the headers can't be read or
+    # don't name us.
+    others_on_mail = True
     try:
         recipients = _parse_recipients(raw_email)
         exec_email = get_settings().exec_email_address.lower()
         own_address = source.own_address.lower() if source is not None else exec_email
         from_addr_lower = (from_addr or "").lower()
+        # Read only when our own address is among them: headers that came
+        # back empty prove nothing about who else is on it.
+        others_on_mail = not any(a.lower() in (exec_email, own_address) for a in recipients)
         for addr in recipients:
             addr_lower = addr.lower()
             if addr_lower in (exec_email, from_addr_lower, own_address):
                 continue
+            others_on_mail = True
             other = resolve_email_sender(addr)
             if other and other.id is not None and other.id not in co_present_person_ids:
                 co_present_person_ids.append(other.id)
@@ -1697,6 +1706,7 @@ async def _run_executive(
     # they are a contact or a teammate nothing proves wrote it — then to the
     # principal, never on the strength of an unproven From.
     answer_to = from_addr.strip().lower()
+    session.email_one_on_one = not others_on_mail
     unproven_teammate = (
         source is not None and person is not None and person.is_principal is not True
         and session.email_sender_authenticated is not True
@@ -1802,15 +1812,18 @@ async def _run_executive(
                 attachment_text, attachment_blocks = read.text, read.image_blocks
         except Exception:
             logger.exception("email: reading attachments failed for message=%s", message_id)
-    # The mail itself is someone else's text unless Gmail authenticated the
-    # principal's own address on it: it goes in labelled as such, with its
-    # sender, so nothing in it reads as the principal or the system speaking
-    # (`content_trust.wrap_untrusted`). The framing and the [POLICY] notice
-    # above it are ours and stay outside the block.
-    principal_sent = session.email_authenticated and getattr(person, "is_principal", False) is True
+    # The mail itself is someone else's text unless the mail service proved it
+    # is the sender's own and they are on the team: it goes in labelled as
+    # such, with its sender, so nothing in it reads as them or the system
+    # speaking (`content_trust.wrap_untrusted`). What proven mail quotes or
+    # forwards is still labelled (`_proven_email_text`). The framing and the
+    # [POLICY] notice above it are ours and stay outside the block.
+    from openexecutive.orchestrator.people_tools import email_sender_proven
+
+    own_mail = person is not None and email_sender_proven(session)
     email_text = (
-        _principal_email_text(raw_email, from_addr)
-        if principal_sent
+        _proven_email_text(raw_email, from_addr)
+        if own_mail
         else wrap_untrusted(raw_email, source="email", author=from_addr)
     )
     if source is None:

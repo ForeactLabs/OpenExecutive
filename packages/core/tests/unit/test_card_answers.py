@@ -58,8 +58,8 @@ def _alert(**kw: Any) -> int:
 
 
 @contextmanager
-def _turn(person_id: int, message: str, own_words: str | None = None) -> Iterator[Session]:
-    s = Session(from_web_chat=True, caller_person_id=person_id)
+def _turn(person_id: int, message: str, own_words: str | None = None, **surface: Any) -> Iterator[Session]:
+    s = Session(caller_person_id=person_id, **({"from_web_chat": True} | surface))
     render_and_trust(s)
     token = current_session.set(s)
     state = outside_content.begin_turn(s, user_message=message, own_words=own_words)
@@ -187,6 +187,22 @@ def test_a_teammate_cant_answer_someone_elses_card(people: SimpleNamespace) -> N
         out = _call(alert_id=alert_id, reply="approve")
     assert "error" in out
     assert alert_store.get_alert(alert_id).status == "unread"
+
+
+@pytest.mark.parametrize("proven", [True, False])
+def test_a_teammate_answers_their_own_card_by_email_only_when_it_is_proven(
+    people: SimpleNamespace, proven: bool
+) -> None:
+    alert_id = _alert(routed_to_person_id=people.teammate)
+    mail = {"from_web_chat": False, "origin_channel": "email", "email_from": "teammate@example.com",
+            "email_sender_authenticated": proven}
+    with _turn(people.teammate, "yes, send it", **mail):
+        out = _call(alert_id=alert_id, reply="approve")
+    if proven:
+        assert out["status"] == "approved"
+    else:
+        assert "error" in out
+        assert alert_store.get_alert(alert_id).status == "unread"
 
 
 def test_a_shared_chat_answers_nothing(people: SimpleNamespace) -> None:

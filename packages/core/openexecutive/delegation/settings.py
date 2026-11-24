@@ -309,7 +309,8 @@ def private_conversation(session: Any) -> bool:
     conversation: the web chat, an AI app's (``mcp_server``), a Slack or
     Discord DM, a Telegram chat
     (``is_principal_on_verified_surface`` already accepts only a private one),
-    or one a channel adapter marked so (``Session.private_chat``) for a
+    an email proven to be from its sender with nobody else on it
+    (``Session.email_one_on_one``), or one a channel adapter marked so (``Session.private_chat``) for a
     sender it verified (``Session.speaker_verified``).
     Also the morning brief's rule for reading what is private to the
     principal from a chat turn (``workflows.morning_brief``). A web chat
@@ -327,6 +328,10 @@ def private_conversation(session: Any) -> bool:
     channel = str(getattr(session, "origin_channel", "") or "")
     if channel == "telegram":
         return True
+    if channel == "email":
+        from openexecutive.orchestrator.people_tools import email_sender_proven
+
+        return getattr(session, "email_one_on_one", False) is True and email_sender_proven(session)
     prefix = _DM_SESSION_PREFIXES.get(channel)
     session_id = str(getattr(session, "session_id", "") or "")
     return prefix is not None and session_id.startswith(prefix)

@@ -361,6 +361,17 @@ def _audit(tool: str, kind: str, ok: bool, summary: str, details: dict[str, Any]
 _VERIFIED_SPEAKER_CHANNELS = frozenset({"slack", "discord"})
 
 
+def email_sender_proven(session: Any) -> bool:
+    """Whether this turn's inbound email is proven to come from its sender's
+    own address: the owner's (``Session.email_authenticated``) or a
+    teammate's (``Session.email_sender_authenticated``), as the email poller
+    checked them. The one answer for "is this email really them"."""
+    return (
+        getattr(session, "email_authenticated", False) is True
+        or getattr(session, "email_sender_authenticated", False) is True
+    )
+
+
 def _adapter_verified_turn(session: Any) -> bool:
     """The rest of what an adapter's ``speaker_verified`` needs to count, as
     ``history_chat.verified_speaker`` asks of it: a resolved caller, a turn
@@ -393,13 +404,12 @@ def _is_verified_speaker_surface(session: Any) -> bool:
     channel = str(getattr(session, "origin_channel", "") or "")
     if channel in _VERIFIED_SPEAKER_CHANNELS:
         return True
-    # The principal's own mail, which their mail service authenticated as
-    # coming from their address (``Session.email_authenticated``, set by the
-    # email poller): they are signed in there as on any other channel, so
-    # their Approvals level decides what runs. Anyone else's mail, or a From
-    # header nothing proved, still isn't.
+    # Mail from someone on the team that their mail service authenticated as
+    # coming from their own address (``email_sender_proven``): they are signed
+    # in there as on any other channel, so their Approvals level decides what
+    # runs. A From header nothing proved still isn't.
     if channel == "email":
-        return getattr(session, "email_authenticated", False) is True
+        return email_sender_proven(session)
     if channel != "telegram":
         return False
     # Telegram identifies the chat, not the sender, and its webhook is exempt
@@ -443,11 +453,12 @@ def contacts_reachable_now() -> bool:
 
     Contacts are the team's: a turn someone on the team started on a
     verified surface (the principal or a teammate: the web app, their own
-    Slack or Discord, a verified private Telegram chat), an unattended run
+    Slack or Discord, a verified private Telegram chat, their own email its
+    mail service proved), an unattended run
     (Approvals decides what it sends, as Take the lead's gate does), or code
     inside ``grant_contact_egress`` sees them. A turn whose words may come
-    from someone not in People (an inbound email from outside — a From header
-    proves nothing — a page in another app, someone else's AI app) does not:
+    from someone not in People (an inbound email nothing proved — a From header
+    alone proves nothing — a page in another app, someone else's AI app) does not:
     there a contact is indistinguishable from someone who is not on the
     roster, so no refusal, listing or error message can reveal that one
     exists.
@@ -567,10 +578,7 @@ def teammate_turn_owner(session: Any) -> int | None:
         or getattr(session, "private_to_principal", False)
     ):
         return None
-    if getattr(session, "email_from", ""):
-        if getattr(session, "email_sender_authenticated", False) is not True:
-            return None
-    elif not _is_verified_speaker_surface(session):
+    if not _is_verified_speaker_surface(session):
         return None
     return team_member_id(getattr(session, "caller_person_id", None))
 
@@ -870,10 +878,11 @@ def teammate_on_verified_surface(session: Any) -> Any:
     """The rostered teammate talking, when this turn is one a teammate may act
     in on their own account (record an attributed fact, assign a task): a team
     member (not a contact, not archived, not the principal) on a surface that
-    verified who they are — the web app signed in, their own Slack or Discord —
-    in a turn someone is watching, that no email started, or their own card
-    being carried out (``approved_speaker``). None otherwise, or when the
-    lookup fails (fails closed)."""
+    verified who they are — the web app signed in, their own Slack or Discord,
+    their own email proven theirs (``email_sender_proven``) — in a turn
+    someone is watching, or their own card being carried out
+    (``approved_speaker``). None otherwise, or when the lookup fails (fails
+    closed)."""
     speaker = approved_speaker()
     if speaker is not None:
         return None if getattr(speaker, "is_principal", False) else speaker
@@ -881,7 +890,6 @@ def teammate_on_verified_surface(session: Any) -> Any:
         session is None
         or getattr(session, "unattended", False)
         or getattr(session, "private_to_principal", False)
-        or getattr(session, "email_from", "")
         or not _is_verified_speaker_surface(session)
     ):
         return None

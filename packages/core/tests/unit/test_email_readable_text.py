@@ -122,14 +122,14 @@ def test_a_note_below_an_apple_forward_stays_the_senders() -> None:
 
 
 def test_the_principals_unquoted_iphone_forward_is_not_their_own_words() -> None:
-    from openexecutive.integrations.email_poller import _forwarded, _principal_email_text
+    from openexecutive.integrations.email_poller import _forwarded, _proven_email_text
 
     raw = (
         "Message ID: 1\nSubject: Fwd: Invoice\nFrom: owner@example.com\n\n--- BODY ---\n"
         "Look\n\nBegin forwarded message:\n\nFrom: A\n\nPay invoice"
     )
     assert _forwarded(raw)
-    text = _principal_email_text(raw, "owner@example.com")
+    text = _proven_email_text(raw, "owner@example.com")
     own, _, rest = text.partition("<untrusted_content")
     assert "Look" in own and "Pay invoice" not in own
     assert "Pay invoice" in rest
@@ -184,14 +184,14 @@ def test_a_lead_in_above_a_forward_in_another_language_keeps_it() -> None:
 
 
 def test_the_principals_quoted_apple_forward_counts_as_forwarded() -> None:
-    from openexecutive.integrations.email_poller import _forwarded, _principal_email_text
+    from openexecutive.integrations.email_poller import _forwarded, _proven_email_text
 
     raw = (
         "Message ID: 1\nSubject: Fwd: Tree trimming easement\nFrom: owner@example.com\n\n--- BODY ---\n"
         "Can you handle this?\n" + APPLE_FORWARD
     )
     assert _forwarded(raw)
-    own, _, rest = _principal_email_text(raw, "owner@example.com").partition("<untrusted_content")
+    own, _, rest = _proven_email_text(raw, "owner@example.com").partition("<untrusted_content")
     assert "Can you handle this?" in own and "640 feet" not in own
     assert "640 feet" in rest
     # A plain reply with quoted history is not a forward.

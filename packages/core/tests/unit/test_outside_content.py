@@ -432,7 +432,7 @@ def _owners_mail(quoted: str) -> str:
     from openexecutive.orchestrator.content_trust import wrap_untrusted
 
     return (
-        "The mailbox authenticated this email as the principal's own. Their new text in it:\n"
+        "The mailbox authenticated this email as the sender's own. Their new text in it:\n"
         "Sorting this out now.\n\n"
         + wrap_untrusted(quoted, source="email_quoted", author="owner@co.example")
     )

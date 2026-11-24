@@ -193,6 +193,15 @@ async def test_tool_teammate_assigns_anyone_on_the_team(team: SimpleNamespace) -
     assert (await _tool(person_id=team.principal, task="the Q3 numbers"))["status"] == "assigned"
 
 
+async def test_tool_teammate_assigns_from_their_proven_email(team: SimpleNamespace) -> None:
+    _speak(team.sara, from_web_chat=False, origin_channel="email", email_from="sara@northwind.test",
+           email_sender_authenticated=True)
+    assert (await _tool(person_id=team.ben, task="send me the Q3 numbers"))["status"] == "assigned"
+    _speak(team.sara, from_web_chat=False, origin_channel="email", email_from="sara@northwind.test",
+           email_sender_authenticated=False)
+    assert (await _tool(person_id=team.ben, task="send me the Q3 numbers"))["status"] == "refused"
+
+
 @pytest.mark.parametrize(
     ("who", "surface"),
     [

@@ -122,8 +122,8 @@ APP = "app"
 SENDER = "sender"
 # A read of one of the company's own Drive items (``vet_reads``).
 COMPANY = "company"
-# What the owner's own authenticated mail quotes or forwards: other people's
-# words, whoever passed them on (``integrations.email_poller._principal_email_text``).
+# What proven mail from someone on the team quotes or forwards: other people's
+# words, whoever passed them on (``integrations.email_poller._proven_email_text``).
 QUOTED = "quoted"
 # A read of the owner's own mailbox or notes (Act as me): checked like any
 # read (``check_mail_read``), but it decides the Act as me lockdown
