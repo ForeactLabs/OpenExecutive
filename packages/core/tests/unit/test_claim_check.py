@@ -50,6 +50,7 @@ def _verdict(payload: dict[str, Any]):
 def test_word_check_skips_replies_that_claim_nothing() -> None:
     assert not claim_check.may_claim("Revenue was up 4% on last quarter.")
     assert not claim_check.may_claim("   ")
+    assert not claim_check.may_claim("Let me know if you want the numbers.")
     assert claim_check.may_claim("Done.")
     assert claim_check.may_claim("I'll treat the draft as closed.")
     assert claim_check.may_claim("Removed it from the brief")
@@ -62,6 +63,26 @@ def test_word_check_skips_replies_that_claim_nothing() -> None:
                       "It goes out every other Friday.", "You get it every two weeks.",
                       "The board pack goes out quarterly.", "I'll check every 30 minutes."):
         assert claim_check.may_claim(timetable), timetable
+    # Saying a message went to someone is checked, however it is put.
+    for sent in ("I just messaged her that you've offered to help.", "Emailed Pat the numbers.",
+                 "I let Kendall know you're on it.", "I texted Robin about the heater.",
+                 "Reached out to Jamie this morning.", "I forwarded it to Sam.",
+                 "I already asked the supplier for a quote."):
+        assert claim_check.may_claim(sent), sent
+
+
+def test_judge_is_told_a_message_backs_only_a_real_send() -> None:
+    assert "only a call that sent that message to that person" in claim_check._SYSTEM
+    assert "never that it went" in claim_check._SYSTEM
+
+
+def test_nudge_sends_what_was_asked_and_offers_the_rest() -> None:
+    text = claim_check.nudge("I just messaged her")
+    assert "if the person asked for it, make it now" in text
+    assert "offer it instead" in text
+    assert "say plainly you couldn't" in text
+    # A send already on a card is not made a second time.
+    assert "don't make it again: say it's waiting for their OK" in text
 
 
 def test_judge_is_told_a_call_backs_only_what_it_made() -> None:
