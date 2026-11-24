@@ -27,6 +27,7 @@ import asyncio
 import contextlib
 import json
 import logging
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -138,16 +139,30 @@ class ReviewSettings:
             return cls()
 
 
-def _off_limits(alert: Alert) -> bool:
-    """Whether the review leaves this card alone, as a candidate, as
-    evidence for another and as a merge target: a source its own code keeps
-    (``TTL_EXEMPT_SOURCES``), or a card that is one person's alone, the
-    principal's (``is_private_alert``) or its own person's
-    (``PERSONAL_SOURCES``, an email watch's sender and subject), or the ask
-    a teammate raised from their own chat (``TEAM_RAISED_SOURCE``, shown
-    only to them and whom it is for). The review routes, nudges and writes
-    audit rows for the team, so it never touches those: their person
-    handles them."""
+# Cards their own code keeps current and closes: a meeting's notes,
+# questions and tasks; a browser hand-over
+# (closing it ends the hand-over); a document (it is the gallery entry); a
+# roster request (it ends with its request). The review never touches them.
+REVIEW_EXEMPT_SOURCES: frozenset[str] = frozenset(
+    {"meetings", "browser_handover", "artifact", "roster_request"}
+)
+
+
+def _kept_by_own_code(alert: Alert) -> bool:
+    """A card the review leaves alone entirely: not a candidate, not
+    evidence, never a merge target."""
+    return alert.source in REVIEW_EXEMPT_SOURCES
+
+
+def _quiet(alert: Alert) -> bool:
+    """A card that is one person's alone: the principal's (``is_private_alert``),
+    its own person's (``PERSONAL_SOURCES``, an email watch's sender and
+    subject), the ask a teammate raised from their own chat
+    (``TEAM_RAISED_SOURCE``), or a step waiting on its approver. The review
+    tidies these (settle, merge with the same reader's cards) but never
+    routes, nudges, escalates or drafts on them, and never shows them as
+    evidence for a card someone else reads: privacy hides, it never stops
+    the tidy-up."""
     from openexecutive.alerts.models import PERSONAL_SOURCES, TEAM_RAISED_SOURCE, is_private_alert
 
     return (
@@ -156,6 +171,78 @@ def _off_limits(alert: Alert) -> bool:
         or alert.source == TEAM_RAISED_SOURCE
         or is_private_alert(alert)
     )
+
+
+def _off_limits(alert: Alert) -> bool:
+    """Whether the review keeps this card out of what it does for the team:
+    kept by its own code, or one person's alone (``_quiet``)."""
+    return _kept_by_own_code(alert) or _quiet(alert)
+
+
+def _reader_key(alert: Alert) -> tuple[Any, ...]:
+    """Who reads this card, as a key two cards share only when the same
+    people read both: the team's cards all share one; a one-person card's
+    key is its source, whom it is routed to, who raised it and its privacy
+    and department tags. A waiting step's readers come from its step (the
+    one who asked and its approver), so it shares its key with no other
+    card."""
+    if not _quiet(alert):
+        return ("team",)
+    if alert.source in TTL_EXEMPT_SOURCES:
+        return ("own", alert.id)
+    tags = frozenset(
+        t for t in alert.topic_tags or [] if t.startswith(("private:", "department:"))
+    )
+    return ("one", alert.source, alert.routed_to_person_id, alert.owner_person_id, tags)
+
+
+def _may_see(candidate: Alert, other: Alert) -> bool:
+    """Whether ``other`` may be shown as evidence for (or absorb) ``candidate``:
+    never a card kept by its own code, and otherwise only a card the very
+    same people read (``_reader_key``): a team card for a team card, one
+    person's card only for a card of theirs read by nobody else."""
+    if _kept_by_own_code(other):
+        return False
+    return _reader_key(candidate) == _reader_key(other)
+
+
+# Whose audit rows the verdict being applied writes: a one-person card's
+# are theirs alone (``_audit``), never the team's Handled overnight.
+_AUDIT_OWNER: ContextVar[tuple[bool, int | None]] = ContextVar("alert_review_audit_owner", default=(False, None))
+
+
+def _audit_owner(alert: Alert) -> tuple[bool, int | None]:
+    """(private, private_to_person) for the audit rows about ``alert``: the
+    team's for a team card; the person it is routed to (else who raised it)
+    for one person's card; the principal's for a private or unowned one."""
+    from openexecutive.alerts.models import is_private_alert
+
+    if not _quiet(alert):
+        return (False, None)
+    if is_private_alert(alert):
+        return (True, None)
+    owner = alert.routed_to_person_id or alert.owner_person_id
+    return (owner is None, owner)
+
+
+def _batches(candidates: list[Alert], size: int) -> list[list[Alert]]:
+    """The pass's batches: one person's cards share a prompt only with
+    cards the same people read, so nothing one card says can echo another
+    reader's card."""
+    from openexecutive.alerts import own_chat
+
+    readers = own_chat.readers(candidates)
+    groups: dict[tuple[Any, ...], list[Alert]] = {}
+    for a in candidates:
+        key = _reader_key(a)
+        if a.source in TTL_EXEMPT_SOURCES:
+            # Waiting steps read by the very same people share a prompt
+            # (never evidence: ``_reader_key`` keeps each to itself).
+            tags = frozenset(t for t in a.topic_tags or [] if t.startswith("private:"))
+            key = ("steps", a.routed_to_person_id, readers.get(a.id or 0), tags)
+        groups.setdefault(key, []).append(a)
+    step = max(1, size)
+    return [g[i : i + step] for g in groups.values() for i in range(0, len(g), step)]
 
 
 # --------------------------------------------------------------------------- #
@@ -172,12 +259,12 @@ def select_candidates(
 ) -> list[Alert]:
     """Live alerts worth a second look: old enough, not recently reviewed,
     not an exempt source. Oldest first, capped at ``max_per_scan``."""
-    live = lifecycle.list_live_alerts(limit=500, db_path=db_path, now=now)
+    live = lifecycle.list_live_alerts(limit=500, db_path=db_path, now=now, whole_board=True)
     min_age = timedelta(hours=max(0, settings.min_age_hours))
     interval = timedelta(hours=max(0, settings.interval_hours))
     out: list[Alert] = []
     for a in live:
-        if _off_limits(a):
+        if _kept_by_own_code(a):
             continue
         created = parse_aware(a.created_at)
         if created is None or now - created < min_age:
@@ -383,13 +470,13 @@ def gather_evidence(
         except Exception:
             logger.debug("alert_review: watch evidence failed", exc_info=True)
 
-    pool = all_live if all_live is not None else lifecycle.list_live_alerts(limit=200, db_path=db_path, now=now)
+    pool = all_live if all_live is not None else lifecycle.list_live_alerts(limit=200, db_path=db_path, now=now, whole_board=True)
     tags = set(alert.topic_tags or [])
     for other in pool:
         if other.id == alert.id:
             continue
-        # One person's card is never evidence for one the team may act on.
-        if _off_limits(other):
+        # One person's card is never evidence for one someone else reads.
+        if not _may_see(alert, other):
             continue
         other_created = parse_aware(other.created_at)
         if other_created is None or other_created <= created:
@@ -467,6 +554,8 @@ def render_batch(
             f"routed_to_person_id: {a.routed_to_person_id} | age_hours: {ev.get('age_hours')} | "
             f"seen_x: {ev.get('occurrence_count')} | prior_verdict: {ev.get('prior_verdict') or '-'}"
         )
+        if _quiet(a):
+            parts.append("one person's card: judge open or not, or merge; move none or merge only.")
         if a.suggested_action:
             parts.append(f"suggested_action: {_untrusted(a.suggested_action, 300)}")
         parts.append(f"body: {_untrusted(a.body, 800)}")
@@ -507,7 +596,7 @@ def render_batch(
                 )
         else:
             parts.append("EXECUTIVE ACTIVITY SINCE RAISED: (none)")
-        roster = ev.get("roster") or []
+        roster = [] if _quiet(a) else ev.get("roster") or []
         if roster:
             parts.append("ROSTER SLICE (only these ids may be routed to):")
             for p in roster:
@@ -515,7 +604,7 @@ def render_batch(
                 parts.append(f"  - id={p['id']} {p['name']} — {p['role']} — SLA {p['response_sla_hours']}h{flag}")
         else:
             parts.append("ROSTER SLICE: (nobody listed — do not route)")
-        if ev.get("workflows"):
+        if ev.get("workflows") and not _quiet(a):
             parts.append(f"WORKFLOWS THAT FIT: {', '.join(ev['workflows'])}")
         parts.append("</alert>")
         parts.append("")
@@ -531,7 +620,11 @@ def _audit(event_type: str, summary: str, details: dict[str, Any]) -> None:
     try:
         from openexecutive.audit import log_event as audit_log
 
-        audit_log(event_type, summary[:300], actor="executive", details=details)
+        private, owner = _AUDIT_OWNER.get()
+        audit_log(
+            event_type, summary[:300], actor="executive", details=details,
+            private=private, private_to_person=owner,
+        )
     except Exception:
         logger.debug("alert_review: audit failed", exc_info=True)
 
@@ -697,12 +790,20 @@ def _close_or_annotate(ctx: _MoveContext) -> str:
     strong = v.confidence == "high" and cited
     if strong:
         new_status = lifecycle.RESOLVED_STATUS if v.verdict == "resolved" else "dismissed"
-        alert_store.set_status(ctx.alert_id, new_status, db_path=ctx.db_path)
-        # The review's own earlier DMs about this alert: resolved means they
-        # landed; stale means they didn't matter (voided, never "ignored").
-        lifecycle.resolve_alert_outreach(
-            alert, "resolved" if new_status == lifecycle.RESOLVED_STATUS else "stale"
+        # Settled like every close of the tidy-up: its waiting step lapses,
+        # and its reader sees why on Tidied up. The review's own earlier DMs
+        # about it: resolved means they landed; dismissed voids them.
+        reason = ctx.note or (
+            "Done." if new_status == lifecycle.RESOLVED_STATUS else "No longer needed."
         )
+        if not lifecycle.settle(alert, new_status, reason, now=ctx.now, db_path=ctx.db_path):
+            # Answered meanwhile, or its step is running: looked at, so it
+            # waits out the interval like any other card.
+            alert_store.set_review(
+                ctx.alert_id, verdict="relevant", note=alert.review_note, recommended_move="",
+                why_now="", due_at=None, reviewed_at=ctx.now.isoformat(), db_path=ctx.db_path,
+            )
+            return "relevant"
         alert_store.set_review(
             ctx.alert_id, verdict=v.verdict, note=ctx.note, recommended_move="close",
             why_now="", due_at=None, reviewed_at=ctx.now.isoformat(), db_path=ctx.db_path,
@@ -802,6 +903,8 @@ def _apply_merge(ctx: _MoveContext) -> bool:
     v, alert = ctx.verdict, ctx.alert
     if not v.superseded_by_alert_id or v.superseded_by_alert_id == ctx.alert_id:
         return False
+    if alert.source in TTL_EXEMPT_SOURCES:
+        return False  # a waiting step is its own step: it closes only by settling
     if v.confidence != "high":
         return False  # folding a card away is a close in disguise — same bar
     # The survivor must be one of the RELATED ALERTS the model was shown, and
@@ -813,12 +916,14 @@ def _apply_merge(ctx: _MoveContext) -> bool:
     survivor = alert_store.get_alert(v.superseded_by_alert_id, db_path=ctx.db_path)
     if (
         survivor is None or not lifecycle.is_live(survivor, ctx.now)
-        or _off_limits(survivor)
+        or not _may_see(alert, survivor)
         or not alert_store.mark_superseded(ctx.alert_id, survivor.id or -1, db_path=ctx.db_path)
     ):
         return False
+    reason = f"Same as “{survivor.headline[:80]}”, which is still open."
+    alert_store.stamp_tidied([ctx.alert_id], reason, at=ctx.now.isoformat(), db_path=ctx.db_path)
     alert_store.set_review(
-        ctx.alert_id, verdict="merged", note=ctx.note or f"Folded into '{survivor.headline[:80]}'",
+        ctx.alert_id, verdict="merged", note=ctx.note or reason,
         recommended_move="merge", reviewed_at=ctx.now.isoformat(), db_path=ctx.db_path,
     )
     _audit(EVENT_MERGED, f"Merged '{alert.headline[:80]}' into '{survivor.headline[:80]}'",
@@ -1038,6 +1143,29 @@ async def apply_verdict(
     db_path: Path | None = None,
     standing_facts: str = "",
 ) -> str:
+    """Execute one verdict deterministically (``_apply_verdict``), its audit
+    rows owned by whoever reads the card (``_audit_owner``)."""
+    token = _AUDIT_OWNER.set(_audit_owner(alert))
+    try:
+        return await _apply_verdict(
+            alert, verdict, evidence, now=now, settings=settings, summary=summary,
+            db_path=db_path, standing_facts=standing_facts,
+        )
+    finally:
+        _AUDIT_OWNER.reset(token)
+
+
+async def _apply_verdict(
+    alert: Alert,
+    verdict: AlertVerdict,
+    evidence: dict[str, Any],
+    *,
+    now: datetime,
+    settings: ReviewSettings,
+    summary: ReviewSummary,
+    db_path: Path | None = None,
+    standing_facts: str = "",
+) -> str:
     """Execute one verdict deterministically. Returns the stored verdict label.
 
     The model proposes; this function decides — within department authority,
@@ -1045,7 +1173,7 @@ async def apply_verdict(
     Each move is a small handler above; this is the dispatcher.
     """
     assert alert.id is not None
-    if _off_limits(alert):
+    if _kept_by_own_code(alert):
         return ""  # never touched (candidates already exclude these; belt and braces)
 
     roster = evidence.get("roster") or []
@@ -1077,6 +1205,19 @@ async def apply_verdict(
     # Closing verdicts end here: either the row closes, or it is annotated.
     if verdict.verdict in {"resolved", "stale"}:
         return _close_or_annotate(ctx)
+
+    # One person's card: the tidy-up only settles or merges it. Nothing
+    # reaches anyone, and its text stays as its person last saw it.
+    if _quiet(alert):
+        if verdict.recommended_move == "merge" and _apply_merge(ctx):
+            return "merged"
+        alert_store.set_review(
+            ctx.alert_id, verdict="relevant", note=ctx.note, recommended_move="none",
+            why_now=verdict.why_now or alert.why_now, due_at=alert.due_at,
+            reviewed_at=now.isoformat(), db_path=db_path,
+        )
+        summary.annotated += 1
+        return "relevant"
 
     if verdict.verdict == "changed" and (verdict.headline or verdict.body or verdict.severity):
         _apply_changed(ctx)
@@ -1182,14 +1323,13 @@ async def _run_locked(
 
     seeded = _seed_outbound_session()
     try:
-        all_live = lifecycle.list_live_alerts(limit=200, db_path=db_path, now=now)
+        all_live = lifecycle.list_live_alerts(limit=200, db_path=db_path, now=now, whole_board=True)
         agent = AlertReviewAgent()
         # Read once per pass: every batch of it sees the same facts.
         from openexecutive.memory.facts import render_facts_for_prompt
 
         standing_facts = await asyncio.to_thread(render_facts_for_prompt, db_path=db_path)
-        for start in range(0, len(candidates), settings.batch_size):
-            batch = candidates[start : start + settings.batch_size]
+        for batch in _batches(candidates, settings.batch_size):
             evidence: dict[int, dict[str, Any]] = {}
             for a in batch:
                 try:

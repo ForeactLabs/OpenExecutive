@@ -766,14 +766,87 @@ def bulk_ack_alerts(body: BulkAckBody, request: Request) -> BulkAckResponse:
     return BulkAckResponse(count=count)
 
 
+class TidiedItem(BaseModel):
+    """One card the tidy-up settled on its own, for its reader."""
+
+    alert_id: int
+    headline: str
+    reason: str
+    tidied_at: str
+
+
+class TidiedResponse(BaseModel):
+    items: list[TidiedItem]
+
+
+# How far back the Tidied up list reaches.
+TIDIED_DAYS = 7
+
+
+def tidied_for(caller: int | None, *, is_principal: bool, viewer: object, since: str) -> list[Alert]:
+    """The cards the tidy-up settled since ``since`` that were on this
+    reader's Needs you: routed to them; unrouted when they are the
+    principal; and a teammate's own unrouted ask when they read it (who
+    raised it, its department's people, ``visible_alert``). Nobody else's."""
+    from openexecutive.alerts.models import TEAM_RAISED_SOURCE
+
+    out: list[Alert] = []
+    rows = store.list_tidied(since, reader=caller, unrouted=is_principal, unrouted_source=TEAM_RAISED_SOURCE)
+    for a in rows:
+        if a.source == TEAM_RAISED_SOURCE and caller is not None and a.owner_person_id == caller:
+            mine = True  # they raised it, wherever it was routed
+        elif a.routed_to_person_id is not None:
+            mine = a.routed_to_person_id == caller
+        else:
+            mine = a.source == TEAM_RAISED_SOURCE or is_principal
+        if not mine or (is_private_alert(a) and not is_principal) or not visible_alert(a, viewer):
+            continue
+        out.append(a)
+    return out
+
+
+@router.get("/alerts/tidied", response_model=TidiedResponse)
+def list_tidied(request: Request) -> TidiedResponse:
+    """What the Executive settled for the caller in the last week, each with
+    why: done, no longer needed, the same as another card, or unchanged past
+    its time. ``POST /alerts/{id}/reopen`` puts one back."""
+    since = (datetime.now(UTC) - timedelta(days=TIDIED_DAYS)).isoformat()
+    rows = tidied_for(
+        _caller_person_id(request), is_principal=_caller_is_principal(request),
+        viewer=_caller_viewer(request), since=since,
+    )
+    return TidiedResponse(items=[
+        TidiedItem(
+            alert_id=a.id or 0, headline=a.headline, reason=a.tidied_reason,
+            tidied_at=a.tidied_at or "",
+        )
+        for a in rows if a.id is not None
+    ])
+
+
+# Cards their own code ends, which Undo never brings back.
+_NOT_REOPENED = ("artifact", "roster_request")
+
+
 @router.post("/alerts/{alert_id}/reopen", response_model=Alert)
 def reopen_alert(alert_id: int, request: Request) -> Alert:
-    """Undo for a close / dismiss / expiry: back to ``unread``, verdict cleared."""
+    """Undo for a close / dismiss / expiry: back to ``unread``, verdict cleared.
+    A waiting step the tidy-up let lapse waits again with its card; one
+    someone answered stays answered."""
+    from openexecutive.alerts import lifecycle
+    from openexecutive.memory import decision_ledger
+
     existing = _visible_alert(alert_id, request)
     prior = existing.status
-    if not store.reopen_alert(
-        alert_id, exclude_sources=tuple(lifecycle.TTL_EXEMPT_SOURCES)
+    instance_id = decision_ledger.instance_id_of(existing)
+    if existing.source == decision_ledger.DECISION_ALERT_SOURCE and (
+        instance_id is None or not lifecycle.unlapse_step(instance_id)
     ):
+        raise HTTPException(status_code=409, detail="That step was answered or asked for again since.")
+    if not store.reopen_alert(alert_id, exclude_sources=_NOT_REOPENED):
+        # Only a step this request put back is lapsed again.
+        if instance_id is not None and decision_ledger.lapse(instance_id):
+            lifecycle.step_lapsed(instance_id, lapsed=True)
         raise HTTPException(
             status_code=409,
             detail="Only resolved, expired or dismissed alerts can be reopened",

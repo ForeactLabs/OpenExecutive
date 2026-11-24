@@ -328,6 +328,10 @@ class Alert(BaseModel):
     # The step Approve does, in a few words for its button ("Send the
     # reply"); "" keeps Approve (alerts.store.clean_label).
     action_label: str = ""
+    # When the tidy-up settled this card on its own, and why
+    # (``alerts.lifecycle.settle``). None / '' otherwise.
+    tidied_at: str | None = None
+    tidied_reason: str = ""
 
 
 class UserPreferences(BaseModel):

@@ -23,6 +23,7 @@ import json
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal
 
@@ -378,6 +379,9 @@ class DecisionClassSpec:
     approve: _Approve
     # Best effort, after a reject has been recorded.
     after_reject: Callable[[DecisionInstance], Awaitable[None]] | None = None
+    # Best effort, after the tidy-up let a waiting step lapse (True) or its
+    # Undo put it back (False): the class's own close-out, like Skip's.
+    after_lapse: Callable[[DecisionInstance, bool], None] | None = None
     # Undoes what an approval did; None when it can't be undone (409).
     cancel: Callable[[DecisionInstance], Awaitable[None]] | None = None
     # Only the person an instance went to for approval (``approver_person_id``)
@@ -386,6 +390,19 @@ class DecisionClassSpec:
     # Only the principal and the person it went to for approval may see or
     # resolve it; nobody else on the team, whatever its payload says.
     principal_and_approver: bool = False
+
+
+def run_after_lapse(instance_id: int, *, lapsed: bool, db_path: Path | None = None) -> None:
+    """Run a waiting step's class close-out for a lapse (or its Undo):
+    ``alerts.lifecycle.settle`` and the card's reopen call it, so a lapse
+    ends a step the way Skip does in each class's own records."""
+    from openexecutive.memory.decision_ledger import get_decision_instance
+
+    instance = get_decision_instance(instance_id, db_path=db_path)
+    spec = DECISION_CLASSES.get(instance.decision_class) if instance is not None else None
+    if instance is None or spec is None or spec.after_lapse is None:
+        return
+    spec.after_lapse(instance, lapsed)
 
 
 def _spec_for(instance: DecisionInstance) -> DecisionClassSpec:
@@ -806,6 +823,14 @@ async def _lead_declined(instance: DecisionInstance) -> None:
     take_the_lead.resolved(instance.id, "declined")
 
 
+def _lead_lapsed(instance: DecisionInstance, lapsed: bool) -> None:
+    """The log reads it as lapsed, or waiting again on Undo; its text stays,
+    so Undo brings the same step back."""
+    from openexecutive.orchestrator import take_the_lead
+
+    take_the_lead.mark_lapsed(instance.id, lapsed=lapsed)
+
+
 # Take the lead: an action the gate held (orchestrator.take_the_lead), for
 # the person whose authority covers it or the principal. What it would do
 # quotes the Executive's context, so it is private to them.
@@ -816,6 +841,7 @@ _TAKE_THE_LEAD = DecisionClassSpec(
     alert_source=DECISION_ALERT_SOURCE,
     approve=_carry_out_lead,
     after_reject=_lead_declined,
+    after_lapse=_lead_lapsed,
 )
 
 async def _carry_out_actions(
@@ -1020,18 +1046,20 @@ async def _run_department_action(
 
 def _audit_department_action(
     log_event: Any, event_type: str, instance: DecisionInstance, payload: dict[str, Any],
-    resolver: int | None,
+    resolver: int | None, *, actor: str | None = None,
 ) -> None:
     verb = {
         "department_action_done": "Approved and done",
         "department_action_failed": "Approved, but it failed",
         "department_action_declined": "Declined",
+        "department_action_lapsed": "Left to lapse",
+        "department_action_waiting": "Waiting again",
     }[event_type]
     try:
         log_event(
             event_type,
             f"{verb}: {payload.get('summary') or payload.get('tool')}"[:240],
-            actor=f"person:{resolver}" if resolver is not None else "user",
+            actor=actor or (f"person:{resolver}" if resolver is not None else "user"),
             details={
                 "decision_id": instance.id,
                 "tool": payload.get("tool"),
@@ -1055,6 +1083,15 @@ async def _department_action_declined(instance: DecisionInstance) -> None:
     )
 
 
+def _department_action_lapsed(instance: DecisionInstance, lapsed: bool) -> None:
+    from openexecutive.audit import log_event
+
+    _audit_department_action(
+        log_event, "department_action_lapsed" if lapsed else "department_action_waiting", instance,
+        _parse_payload(instance), None, actor="executive" if lapsed else "user",
+    )
+
+
 # A send or edit a team member asked for in chat that their department's
 # authority held (orchestrator.department_gate), for the approver it went to
 # or the principal. What it says quotes the conversation, so nobody else on
@@ -1066,6 +1103,7 @@ _DEPARTMENT_ACTION = DecisionClassSpec(
     alert_source=DECISION_ALERT_SOURCE,
     approve=_carry_out_department_action,
     after_reject=_department_action_declined,
+    after_lapse=_department_action_lapsed,
 )
 
 async def _carry_out_app_action(

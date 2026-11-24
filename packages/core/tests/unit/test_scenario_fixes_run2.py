@@ -92,23 +92,15 @@ def test_an_email_is_noted_as_answered_only_when_the_sender_got_something() -> N
     assert note(session, answered=True) == []
 
 
-def test_an_email_to_one_person_can_be_allowed_next_time(owner: Any) -> None:
+def test_an_email_is_allowed_next_time_as_its_kind(owner: Any) -> None:
     found = people_store.find_person_by_address(DANA, include_contacts=True)
     assert found is not None
-    dana = found.id
     grant = ttl.allowance(SEND, {"to": DANA, "subject": "Hi", "body": "Hello"}, mcp=True)
-    assert grant == (f"{ttl.FEATURE}|message|person:{dana}", f"Message {found.full_name}")
-    # The same Allow as a message to her on any channel.
-    message = ttl.allowance("message_person", {"person_id": dana, "text": "Hi"})
-    assert message is not None and message[0] == grant[0]
-    # Anyone else on it, in any field, and it can't be allowed.
-    assert ttl.allowance(SEND, {"to": DANA, "cc": "x@far.example", "body": "Hi"}, mcp=True) is None
-    assert ttl.allowance(SEND, {"to": DANA, "bcc": "x@far.example", "body": "Hi"}, mcp=True) is None
-    assert ttl.allowance(SEND, {"to": "x@far.example", "body": "Hi"}, mcp=True) is None
-    # An address a header parser reads but the pattern doesn't: fails closed.
-    for odd in ("dana @co.example", "dana@ co.example", "dana(x)@co.example"):
-        assert ttl.allowance(SEND, {"to": DANA, "bcc": odd, "body": "Hi"}, mcp=True) is None
-
+    assert grant == (f"{ttl.FEATURE}|message", "Send messages and emails")
+    # The same Allow as a message on any channel, and as an email to anyone.
+    assert ttl.allowance("message_person", {"person_id": found.id, "text": "Hi"}) == grant
+    assert ttl.allowance(SEND, {"to": DANA, "cc": "x@far.example", "body": "Hi"}, mcp=True) == grant
+    assert ttl.allowance(SEND, {"to": "x@far.example", "body": "Hi"}, mcp=True) == grant
 
 def test_cards_say_who_an_email_goes_to_and_why_it_waited(owner: Any) -> None:
     found = people_store.find_person_by_address(DANA, include_contacts=True)

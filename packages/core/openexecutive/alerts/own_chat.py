@@ -161,26 +161,11 @@ def decision_shown_to(instance: Any, reader: int | None) -> bool:
 
 
 def _decision_id(alert: Any) -> int | None:
-    """The decision ``alert`` is the card of, or None."""
-    from openexecutive.memory.decision_ledger import (
-        DECISION_ALERT_SOURCE,
-        DECISION_INSTANCE_TAG_PREFIX,
-        decision_alert_external_id,
-    )
+    """The decision ``alert`` is the card of, or None
+    (``decision_ledger.instance_id_of``)."""
+    from openexecutive.memory.decision_ledger import instance_id_of
 
-    if getattr(alert, "source", None) != DECISION_ALERT_SOURCE:
-        return None
-    for tag in getattr(alert, "topic_tags", None) or []:
-        tag = str(tag)
-        if not tag.startswith(DECISION_INSTANCE_TAG_PREFIX):
-            continue
-        try:
-            decision = int(tag[len(DECISION_INSTANCE_TAG_PREFIX):])
-        except ValueError:
-            continue
-        if getattr(alert, "external_id", None) == decision_alert_external_id(decision):
-            return decision
-    return None
+    return instance_id_of(alert)
 
 
 def readers(alerts: Iterable[Any]) -> dict[int, frozenset[int]]:
