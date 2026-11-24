@@ -27,7 +27,6 @@ from openexecutive.api.models import (
 )
 from openexecutive.audit import log_event as audit_log
 from openexecutive.audit import principal_turn_rows, rows_for_person
-from openexecutive.config import background_turn_limit
 from openexecutive.integrations.attachments import build_attachment_output
 from openexecutive.orchestrator import outside_content
 from openexecutive.orchestrator.action_chips import drop_replaced
@@ -414,6 +413,19 @@ _LIVE_STEPS = frozenset({"activity", "action_taken", "phase", "rewrite"})
 STEP_UNWIND_S = 10.0
 
 
+def _stuck_step_ended(task: asyncio.Task[Any], turn_id: str) -> None:
+    """A step left running past its unwind has ended: say so, so anything it
+    did after its turn was saved shows in the logs."""
+    if task.cancelled():
+        logger.info("chat.stuck_step_ended turn_id=%s cancelled", turn_id)
+        return
+    exc = task.exception()
+    if exc is not None and not isinstance(exc, StopAsyncIteration):
+        logger.warning("chat.stuck_step_ended turn_id=%s error=%s", turn_id, type(exc).__name__)
+    else:
+        logger.info("chat.stuck_step_ended turn_id=%s", turn_id)
+
+
 async def _cancel_stream_step(anext_task: asyncio.Task[Any], turn_id: str) -> None:
     """Cancel an in-flight `__anext__` step and wait for it to unwind.
 
@@ -442,6 +454,7 @@ async def _cancel_stream_step(anext_task: asyncio.Task[Any], turn_id: str) -> No
         await asyncio.wait({anext_task}, timeout=STEP_UNWIND_S)
     if not anext_task.done():
         logger.warning("chat.stream_step_stuck turn_id=%s unwind_s=%s", turn_id, STEP_UNWIND_S)
+        anext_task.add_done_callback(lambda t: _stuck_step_ended(t, turn_id))
         return
     try:
         anext_task.result()
@@ -2222,23 +2235,19 @@ def _is_error_event(event: Any) -> bool:
 
 async def _drain_background_turn(
     body: Any, session_id: str, on_finished: Callable[[bool], None] | None = None,
-    *, limit_s: float | None = None,
 ) -> None:
-    """Run the turn's stream to its end, or to ``limit_s``. Its events have
-    no reader; the turn persists itself as it would for /chat.
-    ``on_finished`` always hears whether the turn answered (False when it
-    ended on an error event, raised, ran past ``limit_s`` or was cancelled)."""
+    """Run the turn's stream to its end. Its events have no reader; the turn
+    persists itself as it would for /chat, within its own deadline
+    (``_next_stream_step``, ``_cancel_stream_step``). ``on_finished`` always
+    hears whether the turn answered (False when it ended on an error event,
+    raised or was cancelled)."""
     answered = False
     try:
-        async with asyncio.timeout(limit_s):
-            async with contextlib.aclosing(body) as events:
-                answered = True
-                async for event in events:
-                    if _is_error_event(event):
-                        answered = False
-    except TimeoutError:
-        answered = False
-        logger.warning("chat.background_overran session_id=%s limit_s=%s", session_id, limit_s)
+        async with contextlib.aclosing(body) as events:
+            answered = True
+            async for event in events:
+                if _is_error_event(event):
+                    answered = False
     except Exception:
         answered = False
         logger.exception("chat.background_failed session_id=%s", session_id)
@@ -2292,10 +2301,7 @@ async def start_background_turn(
         _release_background_slot(owner)
         raise
     task = asyncio.create_task(
-        _drain_background_turn(
-            response.body_iterator, session_id, on_finished,
-            limit_s=background_turn_limit().total_seconds(),
-        )
+        _drain_background_turn(response.body_iterator, session_id, on_finished)
     )
     _background_tasks.add(task)
 

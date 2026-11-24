@@ -408,16 +408,24 @@ def test_closing_a_waiting_on_you_card_without_done_is_a_stop(
     assert closed == [one, two]
 
 
-def test_a_background_turn_that_overruns_still_reports() -> None:
+def test_a_cancelled_background_turn_still_reports() -> None:
     import asyncio
 
-    async def _stuck():
+    async def _slow():
         yield 'data: {"type": "text", "content": "hi"}\n\n'
         await asyncio.sleep(60)
         yield 'data: {"type": "done"}\n\n'
 
     heard: list[bool] = []
-    asyncio.run(chat_route._drain_background_turn(_stuck(), "s3", heard.append, limit_s=0.05))
+
+    async def _run() -> None:
+        task = asyncio.ensure_future(chat_route._drain_background_turn(_slow(), "s3", heard.append))
+        await asyncio.sleep(0.01)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(_run())
     assert heard == [False]
 
 
