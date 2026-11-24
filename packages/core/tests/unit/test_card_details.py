@@ -374,6 +374,8 @@ def test_a_held_cards_top_says_who_it_waits_on_who_started_it_and_why_it_waits(m
     long = "it came up while nobody was chatting, and Approvals is on Careful"
     careful = card_details.top({"kind": "level", "reason": long}, approver_id=1, viewer_id=1)
     assert careful["because"] == "Approvals is on Careful"
+    for kind, said in (("rule", "its rules couldn't be read"), ("rule", "your rule about Dana says to wait")):
+        assert card_details.top({"kind": kind, "reason": said}, approver_id=1, viewer_id=1)["because"] == said
 
 
 def test_our_own_tools_name_people_departments_and_goals_never_a_number(monkeypatch) -> None:

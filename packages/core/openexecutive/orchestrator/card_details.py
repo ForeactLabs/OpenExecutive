@@ -654,11 +654,8 @@ def _first_name(full: str) -> str:
     return (full or "").strip().split(" ")[0] if (full or "").strip() else ""
 
 
-_SHORT_BECAUSE = {
-    "training": "it's a new kind of step",
-    "level": "Approvals is on Careful",
-    "rule": "your rule says to wait",
-}
+# The one long reason a hold gives, in a few words for a row's pill.
+_SHORT_BECAUSE = {"it came up while nobody was chatting, and Approvals is on Careful": "Approvals is on Careful"}
 
 
 def top(payload: dict[str, Any], *, approver_id: int | None, viewer_id: int | None) -> dict[str, str]:
@@ -701,9 +698,9 @@ def top(payload: dict[str, Any], *, approver_id: int | None, viewer_id: int | No
     # before, rather than name someone who may be the reader.
     waiting_on = name(approver_id) if None not in (approver_id, viewer_id) and approver_id != viewer_id else ""
     reason = " ".join(str(payload.get("reason") or "").split()).removesuffix(".")
-    # A few words for a row's pill: the topic as held ("it's about money"),
-    # or the short form of a long reason.
-    because = _SHORT_BECAUSE.get(str(payload.get("kind") or ""), reason)
+    # A few words for a row's pill: the reason as held ("it's about money",
+    # "your rule about Dana says to wait"), shortened only where it is long.
+    because = "it's a new kind of step" if payload.get("kind") == "training" else _SHORT_BECAUSE.get(reason, reason)
     if payload.get("kind") == "training":
         waits = "It's a new kind of step for me, so it waits for an OK once."
     elif reason:
