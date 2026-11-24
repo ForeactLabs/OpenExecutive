@@ -452,3 +452,26 @@ def test_a_step_that_ignores_its_cancel_does_not_hold_the_turn(monkeypatch: pyte
         return left_running
 
     assert asyncio.run(_run()) is True
+
+
+def test_a_step_still_unwinds_when_the_outer_turn_is_cancelled_again() -> None:
+    import asyncio
+
+    async def _slow_unwind() -> None:
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            await asyncio.sleep(0.2)
+            raise
+
+    async def _run() -> bool:
+        step = asyncio.ensure_future(_slow_unwind())
+        await asyncio.sleep(0)
+        waiter = asyncio.ensure_future(chat_route._cancel_stream_step(step, "t-again"))
+        for _ in range(5):
+            await asyncio.sleep(0.01)
+            waiter.cancel()
+        await asyncio.gather(waiter, return_exceptions=True)
+        return step.done()
+
+    assert asyncio.run(_run()) is True

@@ -445,13 +445,18 @@ async def _cancel_stream_step(anext_task: asyncio.Task[Any], turn_id: str) -> No
     anext_task.cancel()
     # Bounded: a step that never unwinds (something it awaits swallows the
     # cancel) must not hold the turn past its deadline. It is left cancelled
-    # and the turn ends, saving what it wrote. An OUTER cancel re-delivered
-    # during this wait is suppressed: we are called from a `finally` while
-    # that cancellation is already propagating, so it continues on its way
-    # regardless — and the inner `cancel()` above has already been requested,
-    # which is the part that must not be skipped.
-    with contextlib.suppress(asyncio.CancelledError):
-        await asyncio.wait({anext_task}, timeout=STEP_UNWIND_S)
+    # and the turn ends, saving what it wrote. An OUTER cancel (a disconnect;
+    # anyio re-delivers it until the body leaves its scope) wakes the wait
+    # early, so it waits again until the step is done or the bound passes.
+    # The outer cancel is already propagating from the `finally` that called
+    # us, so it continues on its way regardless.
+    until = time.monotonic() + STEP_UNWIND_S
+    while not anext_task.done():
+        left = until - time.monotonic()
+        if left <= 0:
+            break
+        with contextlib.suppress(asyncio.CancelledError):
+            await asyncio.wait({anext_task}, timeout=left)
     if not anext_task.done():
         logger.warning("chat.stream_step_stuck turn_id=%s unwind_s=%s", turn_id, STEP_UNWIND_S)
         anext_task.add_done_callback(lambda t: _stuck_step_ended(t, turn_id))
