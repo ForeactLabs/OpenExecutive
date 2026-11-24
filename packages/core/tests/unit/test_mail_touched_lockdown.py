@@ -679,17 +679,27 @@ def test_careful_holds_after_mail_the_check_cleared(
     assert fetched == []
 
 
-def test_hands_off_lets_a_link_run_even_after_flagged_mail(
+def test_hands_off_runs_a_link_after_clean_mail_but_not_after_flagged_mail(
     monkeypatch: pytest.MonkeyPatch, fetched: list[dict[str, Any]],
 ) -> None:
-    from openexecutive.orchestrator import outside_mode
+    from openexecutive.orchestrator import content_scan, outside_mode
 
+    _level(monkeypatch, outside_mode.TRUST, content_scan.CLEAN)
+    _turn(
+        [ToolUseBlock("tu1", "ghostwrite_email", GHOSTWRITE)],
+        [ToolUseBlock("tu2", "run_executive_research", LINK)],
+    )
+    assert fetched == [LINK]
+    fetched.clear()
+
+    # A flagged read is someone else's words: the rest of the turn runs at
+    # Balanced, which holds the link after flagged mail.
     _level(monkeypatch, outside_mode.TRUST, _flagged())
     _, calls = _turn(
         [ToolUseBlock("tu1", "ghostwrite_email", GHOSTWRITE)],
         [ToolUseBlock("tu2", "run_executive_research", LINK)],
     )
-    assert fetched == [LINK]
+    assert fetched == []
     # The flag still reaches the model as a notice.
     assert str(_result_of(calls, "tu1")).startswith("[Safety check: this content looks like")
 

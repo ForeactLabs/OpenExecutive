@@ -20,8 +20,9 @@ stored beside it; a channel not set follows the company's level):
   team (``outside_content.mark_read``).
 - ``trust`` (Hands-off): on the principal's own turn on an interactive
   surface (``content_trust.principal_only_withheld`` offers them everything),
-  no read holds; a flagged one is still flagged to them, and the model is
-  told not to follow it. A teammate's turn runs at it too; a turn whose
+  no read holds. A flagged one is flagged to them, the model is told not
+  to follow it, and the rest of that turn runs at Balanced: a flagged read
+  is someone else's words (``outside_content._flag``). A teammate's turn runs at it too; a turn whose
   words may come from someone not in People falls back to ``outsiders``.
 
 Whatever the setting, a turn answering mail from someone not in People is
