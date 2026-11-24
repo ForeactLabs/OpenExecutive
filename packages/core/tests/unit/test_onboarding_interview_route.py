@@ -878,18 +878,51 @@ def test_the_owner_can_hand_the_role_on(
     assert owner is not None and owner.full_name == "Bob Lin"
 
 
-def test_anyone_may_rerun_setup_that_keeps_the_owner(
-    client: TestClient, seeded: list[Any], people_db: Path
+def test_a_teammate_cannot_rerun_setup_even_keeping_the_owner(
+    client: TestClient, seeded: list[Any], people_db: Path, profile_path: Path
 ) -> None:
+    # The save rewrites roles, people, departments and the profile: People
+    # administration, as on the People page.
+    from openexecutive.people import store as people_store
+
     _seed_owner_and_teammate()
     seeded.append(_draft())
     sid = _start(client, caller="bob@example.com")
+    body = _commit_body(sid)
+    body["people"] = [
+        {"full_name": "Dana Reyes", "role": "CEO", "is_principal": True},
+        {"full_name": "Bob Lin", "role": "CFO"},
+        {"full_name": "New Person", "role": "COO"},
+    ]
     resp = client.post(
-        "/onboard/interview/commit",
-        json=_commit_body(sid),
-        headers={"x-caller-email": "bob@example.com"},
+        "/onboard/interview/commit", json=body, headers={"x-caller-email": "bob@example.com"}
+    )
+    assert resp.status_code == 403
+    assert not profile_path.exists()
+    bob = people_store.find_person_by_email("bob@example.com", db_path=people_db)
+    assert bob is not None and bob.role != "CFO"
+    assert all(p.full_name != "New Person" for p in people_store.list_people(db_path=people_db))
+
+
+def test_the_owner_can_rerun_setup_and_change_roles(
+    client: TestClient, seeded: list[Any], people_db: Path
+) -> None:
+    from openexecutive.people import store as people_store
+
+    _seed_owner_and_teammate()
+    seeded.append(_draft())
+    sid = _start(client, caller="dana@example.com")
+    body = _commit_body(sid)
+    body["people"] = [
+        {"full_name": "Dana Reyes", "role": "CEO", "is_principal": True},
+        {"full_name": "Bob Lin", "role": "CFO"},
+    ]
+    resp = client.post(
+        "/onboard/interview/commit", json=body, headers={"x-caller-email": "dana@example.com"}
     )
     assert resp.status_code == 200, resp.text
+    bob = people_store.find_person_by_email("bob@example.com", db_path=people_db)
+    assert bob is not None and bob.role == "CFO"
 
 
 def test_local_login_and_the_cli_count_as_the_owner(
@@ -1045,14 +1078,15 @@ def test_local_login_and_the_cli_can_link_any_owner_email(
     assert dana is not None and dana.email == "dana@example.com"
 
 
-def test_a_teammate_rerun_that_keeps_the_owners_email_still_saves(
-    client: TestClient, seeded: list[Any], people_db: Path
+def test_a_teammate_rerun_that_keeps_the_owners_email_is_refused(
+    client: TestClient, seeded: list[Any], people_db: Path, profile_path: Path
 ) -> None:
     # What the review screen pre-fills on a re-run: the owner's current email.
     _seed_owner_and_teammate()
     seeded.append(_draft())
     resp = _commit_with_owner_email(client, "dana@example.com", caller="bob@example.com")
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 403
+    assert not profile_path.exists()
 
 
 # ── solo: one person, no new departments, workspace settings untouched ───────
@@ -1743,25 +1777,6 @@ def test_commit_with_an_unknown_zone_still_saves_and_leaves_the_zone(
     body = {**_commit_body(sid), "timezone": "Mars/Olympus"}
     assert client.post("/onboard/interview/commit", json=body).status_code == 200
     assert profile_path.exists() and saved == []
-
-
-def test_a_teammates_setup_leaves_the_companys_clock_alone(
-    client: TestClient, seeded: list[Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The zone is a company-wide setting: setup saves it only for someone
-    Settings lets change it. The rest of the setup still saves."""
-    saved = _zone_calls(monkeypatch, None)
-    monkeypatch.setattr(
-        "openexecutive.api.routes.chat._caller_is_principal_or_unclaimed", lambda request: False
-    )
-    monkeypatch.setattr(
-        "openexecutive.api.routes.people.caller_is_admin_teammate", lambda request: False, raising=False
-    )
-    seeded.append(_draft())
-    sid = _start(client)
-    body = {**_commit_body(sid), "timezone": "Asia/Tokyo"}
-    assert client.post("/onboard/interview/commit", json=body).status_code == 200
-    assert saved == []
 
 
 def test_setup_keeps_a_clock_the_server_was_configured_with(
