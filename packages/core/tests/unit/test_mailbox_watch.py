@@ -1,9 +1,10 @@
-"""Email watches: one person's own inbox on the watch list
+"""Email watches: the email a person can see, on the watch list
 (monitoring/mailbox.py, monitoring/sources/mailbox.py).
 
 "Tell me every time a sign-up email comes in" (11-19 1:1): match by sender,
 by subject words or both, every email, until turned off, and only its owner
-sees it."""
+sees it. "Watch for Robin's email, ping me if nothing by Wednesday" (Test lab
+11-21): it watches the Executive's inbox too, and pings on the day."""
 from __future__ import annotations
 
 import asyncio
@@ -425,9 +426,11 @@ def test_its_audit_rows_are_its_owners() -> None:
 
 
 def test_it_says_what_it_watches_in_plain_words() -> None:
-    assert describe.trigger_line(SOURCE_KIND_MAILBOX, {"keywords": ["sign up"]}) == "An email comes in that mentions “sign up”"
+    assert describe.trigger_line(SOURCE_KIND_MAILBOX, {"keywords": ["sign up"]}) == (
+        "An email that mentions “sign up” reaches the Executive or you"
+    )
     assert describe.trigger_line(SOURCE_KIND_MAILBOX, {"from": ["pat@acme.example", "sam@acme.example"]}) == (
-        "An email comes in from pat@acme.example or sam@acme.example"
+        "pat@acme.example or sam@acme.example emails the Executive or you"
     )
     # Checked every few minutes, not every 15.
     assert describe.checks_every(SOURCE_KIND_MAILBOX, "real_time") == "every 5 minutes"
@@ -439,19 +442,15 @@ def test_it_says_what_it_watches_in_plain_words() -> None:
 
 
 def _speaker(monkeypatch: pytest.MonkeyPatch, person_id: int | None, *, status: str = "connected") -> None:
-    from openexecutive.orchestrator import delegation_tools
-
     monkeypatch.setattr(wt, "_speaker_id", lambda: person_id)
 
-    def writer(tool: str) -> Any:
-        if person_id is None:
-            return json.dumps({"error": f"{tool} is not available on this turn. Do not retry."})
-        return SimpleNamespace(person=SimpleNamespace(id=person_id), email="jordan@acme.example", mailbox=None)
+    def get_person(pid: int, **_: Any) -> Any:
+        return SimpleNamespace(id=pid, email="jordan@acme.example", archived=False, is_principal=pid == PRINCIPAL) if pid == person_id else None
 
     async def gmail_status(email: str, **_: Any) -> str:
         return status
 
-    monkeypatch.setattr(delegation_tools, "_writer", writer)
+    monkeypatch.setattr("openexecutive.people.store.get_person", get_person)
     monkeypatch.setattr(gm, "gmail_status", gmail_status)
     monkeypatch.setattr(wt, "_scan_soon", lambda: None)
     monkeypatch.setattr("openexecutive.delegation.lockdown.outside_reach_refusal", lambda *a, **k: None)
@@ -483,29 +482,48 @@ def test_an_email_watch_needs_a_sender_or_a_word(db: Path, monkeypatch: pytest.M
     assert ms.list_watchlist(db_path=db, every_watch=True) == []
 
 
-def test_an_unconnected_inbox_says_how_to_connect(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_without_their_own_inbox_it_watches_the_executives(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test lab 11-21: "No watch was set" for everyone without Act as me. Now
+    it is set, and the reply says what it watches: the Executive's inbox for
+    the principal, who reads it; a teammate's own inbox."""
     _speaker(monkeypatch, OWNER, status="not_configured")
-    out = _add(trigger={"keywords": ["sign up"]})
-    assert out["status"] == "not_configured" and "note" in out
-    assert ms.get_watchlist_item_by_slug("email-sign-ups", db_path=db) is None
-
-
-def test_no_mailbox_this_turn_says_how_to_connect_not_that_a_tool_was_missing(
-    db: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from openexecutive.orchestrator import delegation_tools
-
+    out = _add(trigger={"from": ["robin@hale.example"]})
+    assert out["ok"] is True and out["watches"].startswith("nothing yet")
+    assert "emails you." in out["note"] and "connected" in out["note"]
     _speaker(monkeypatch, OWNER)
-    monkeypatch.setattr(delegation_tools, "_writer", lambda tool: json.dumps({"error": f"{tool} is not available"}))
-    out = _add(trigger={"from": ["jamie@acme.example"]})
-    # Its own reason (it isn't "not connected"), with words for the reply.
-    assert "status" not in out and out["note"] == wt.NOT_HERE_NOTE
-    assert "not available" not in out["error"] and "retry" not in out["error"]
-    assert "shows up on Today" in out["note"] and "try again in another chat" in out["note"]
-    _speaker(monkeypatch, OWNER, status="not_configured")
-    out = _add(trigger={"from": ["jamie@acme.example"]})
-    assert out["status"] == "not_configured" and out["note"] == wt.NO_MAILBOX_NOTE
+    both = _add(trigger={"from": ["robin@hale.example"]})
+    assert both["watches"] == "their own inbox" and "emails your inbox" in both["note"]
+    words = wt._watch_words(False, None, principal=True)
+    assert words["watches"] == "the Executive's inbox" and "emails me." in words["note"]
+    words = wt._watch_words(True, None, principal=True)
+    assert words["watches"] == "the Executive's inbox and their own" and "emails me or your inbox" in words["note"]
+
+
+def test_no_one_asking_sets_no_watch(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _speaker(monkeypatch, None)
+    assert "error" in _add(trigger={"from": ["robin@hale.example"]})
     assert ms.list_watchlist(db_path=db, every_watch=True) == []
+
+
+def test_if_nothing_by_a_day_is_kept_and_said(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _speaker(monkeypatch, OWNER, status="not_configured")
+    day = (datetime.now(UTC) + timedelta(days=4)).date()
+    out = _add(trigger={"from": ["robin@hale.example"]}, quiet_by=day.isoformat())
+    assert out["quiet_by"] == day.isoformat() and "I'll ping you that morning" in out["note"]
+    row = ms.get_watchlist_item_by_slug(out["slug"], db_path=db)
+    assert row is not None and mailbox.quiet_by(row) == day
+    assert describe.quiet_line(row) == f"Ping if nothing by {day:%a %b} {day.day}"
+    assert "error" in _add(trigger={"from": ["robin@hale.example"]}, quiet_by="2020-01-01")
+    # "Wait another day": the day moves on, and so does when matches count from.
+    later = day + timedelta(days=1)
+    tuned = json.loads(asyncio.run(wt.handle_tune_watchlist_entry({"slug": out["slug"], "quiet_by": later.isoformat()})))
+    assert tuned["ok"] is True
+    row = ms.get_watchlist_item_by_slug(out["slug"], db_path=db)
+    assert row is not None and mailbox.quiet_by(row) == later
+    cleared = json.loads(asyncio.run(wt.handle_tune_watchlist_entry({"slug": out["slug"], "quiet_by": None})))
+    assert cleared["ok"] is True
+    row = ms.get_watchlist_item_by_slug(out["slug"], db_path=db)
+    assert row is not None and mailbox.quiet_by(row) is None and describe.quiet_line(row) == ""
 
 
 def test_someone_else_cant_see_or_change_an_email_watch(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -520,7 +538,9 @@ def test_someone_else_cant_see_or_change_an_email_watch(db: Path, monkeypatch: p
     _speaker(monkeypatch, OWNER)
     listed = json.loads(asyncio.run(wt.handle_list_watchlist({"enabled_only": False})))
     assert [w["slug"] for w in listed["watchlist"]] == ["email-sign-ups"]
-    assert listed["watchlist"][0]["tells_you_when"] == "An email comes in that mentions “sign up” or “signed up”"
+    assert listed["watchlist"][0]["tells_you_when"] == (
+        "An email that mentions “sign up” or “signed up” reaches the Executive or you"
+    )
     tuned = json.loads(asyncio.run(wt.handle_tune_watchlist_entry({"slug": "email-sign-ups", "trigger": {"from": ["x"]}})))
     assert "error" in tuned  # no real address and no word: nothing would ever match
 
@@ -612,3 +632,341 @@ def test_a_sender_never_sets_or_changes_a_watch_on_the_owners_inbox(
     monkeypatch.setattr(outside_content, "answers_off_team_mail", lambda: True)
     assert lockdown.outside_reach_reason("add_watchlist_entry", add) == levels.STRANGER
     assert lockdown.outside_reach_reason("tune_watchlist_entry", tune) == levels.STRANGER
+
+
+# --------------------------------------------------------------------------- #
+# The Executive's inbox
+# --------------------------------------------------------------------------- #
+
+PRINCIPAL = 1
+
+
+def _executive_inbox(monkeypatch: pytest.MonkeyPatch, *, own: str = "not_configured") -> list[str]:
+    """No own inbox for the owner; the principal is someone else."""
+    box = _Mailbox([], [])
+    _patch_mailbox(monkeypatch, box, status=own)
+    monkeypatch.setattr(
+        "openexecutive.people.store.find_principal_person", lambda **_: SimpleNamespace(id=PRINCIPAL),
+    )
+    monkeypatch.setattr("openexecutive.monitoring.pipeline.scan_soon", lambda *a, **k: True)
+    notes: list[str] = []
+    monkeypatch.setattr(mailbox_source, "observe", lambda item, note: notes.append(note))
+    return notes
+
+
+async def _proven() -> bool:
+    return True
+
+
+def _robin(**kw: Any) -> int:
+    args: dict[str, Any] = {
+        "message_id": "x1", "thread_id": "th1", "from_addr": "Robin@Hale.example", "from_name": "Robin Hale",
+        "subject": "December rent, $480 due Tue Dec 1", "private": False, "mail_of": None, "proven": _proven, **kw,
+    }
+    return asyncio.run(mailbox.note_executive_mail(**args))
+
+
+def test_an_email_to_the_executive_is_told_to_whoever_watches_for_it(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    notes = _executive_inbox(monkeypatch)
+    item = _email_watch(db, trigger={"from": ["robin@hale.example"]}, slug="robin-email")
+    ms.mark_polled(item.id, datetime.now(UTC), db_path=db)
+    # Robin's email as this teammate's own mail with the Executive (mail_of).
+    assert _robin(mail_of=OWNER) == 1
+    assert _robin(message_id="x2", from_addr="pat@acme.example", mail_of=OWNER) == 0  # not from Robin
+    # Due at once, whatever its cadence: it has something to tell.
+    fresh = ms.get_watchlist_item(item.id, db_path=db)
+    assert fresh is not None and fresh.last_polled_at is None
+    signals = asyncio.run(mailbox_source.MailboxSource().poll(fresh, db_path=db))
+    assert [s.normalized_summary for s in signals] == ["Robin Hale: December rent, $480 due Tue Dec 1"]
+    assert signals[0].raw_payload == {"mail_thread": "th1", "mail_from": "robin@hale.example"}
+    assert signals[0].dedup_key == f"mailbox:{item.id}:exec:x1" and notes == []
+    # Its card names the mail thread, so it joins the turn's card on it.
+    event = _signal_to_alert_event(signals[0], fresh)
+    assert (event.mail_thread, event.mail_from, event.routed_to_person_id) == ("th1", "robin@hale.example", OWNER)
+    # Once told, it is forgotten and never told again.
+    ms.insert_signal(signals[0], db_path=db)
+    assert asyncio.run(mailbox_source.MailboxSource().poll(fresh, db_path=db)) == []
+    assert ms.executive_mail_for(item.id, db_path=db) == []
+    assert notes == [mailbox_source.NOT_CONNECTED]
+
+
+def test_only_email_its_owner_could_already_see_is_told(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Privacy hides, never stops: the watch is set either way; it tells only
+    what its owner already sees elsewhere (the audit log, the chats)."""
+    _executive_inbox(monkeypatch)
+    mine = _email_watch(db, trigger={"from": ["robin@hale.example"]}, slug="robin-mine")
+    principals = _email_watch(db, owner=PRINCIPAL, trigger={"from": ["robin@hale.example"]}, slug="robin-principal")
+    # Mail private to the principal (one they forwarded): theirs alone.
+    assert _robin(message_id="p1", private=True) == 1
+    assert [m["message_id"] for m in ms.executive_mail_for(principals.id, db_path=db)] == ["p1"]
+    assert ms.executive_mail_for(mine.id, db_path=db) == []
+    # A teammate's own mail: only that teammate's.
+    assert _robin(message_id="t1", mail_of=OWNER) == 1
+    assert [m["message_id"] for m in ms.executive_mail_for(mine.id, db_path=db)] == ["t1"]
+    # Any other mail to the Executive (the principal's own, a contact's, a
+    # teammate's nothing proved): the principal, who reads its inbox.
+    assert _robin(message_id="c1") == 1
+    assert [m["message_id"] for m in ms.executive_mail_for(mine.id, db_path=db)] == ["t1"]
+    assert mailbox.seen_by(OTHER, private=False, mail_of=None, principal_id=PRINCIPAL) is False
+    assert mailbox.seen_by(PRINCIPAL, private=False, mail_of=None, principal_id=PRINCIPAL) is True
+
+
+def test_a_sender_nothing_proved_joins_no_card(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A forged From with a real thread's References must not add its subject
+    to the card already open on that thread: it is told on a card of its own."""
+    _executive_inbox(monkeypatch)
+    item = _email_watch(db, owner=PRINCIPAL, trigger={"from": ["robin@hale.example"]}, slug="robin-email")
+
+    async def unproven() -> bool:
+        return False
+
+    async def broken() -> bool:
+        raise RuntimeError("no proof")
+
+    assert _robin(message_id="f1", proven=unproven) == 1
+    assert _robin(message_id="f2", proven=broken) == 1
+    assert _robin(message_id="f3", proven=None) == 1
+    assert _robin(message_id="ok") == 1
+    kept = {m["message_id"]: m["thread_id"] for m in ms.executive_mail_for(item.id, db_path=db)}
+    assert kept == {"f1": "", "f2": "", "f3": "", "ok": "th1"}
+    calls: list[int] = []
+
+    async def counted() -> bool:
+        calls.append(1)
+        return True
+
+    # Asked only when a watch matches.
+    assert _robin(message_id="n1", from_addr="pat@acme.example", proven=counted) == 0 and calls == []
+
+
+def test_nothing_by_the_day_pings_that_morning_once(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from zoneinfo import ZoneInfo
+
+    from openexecutive.alerts.models import NEEDS_CHOICE
+
+    _executive_inbox(monkeypatch)
+    zone = ZoneInfo("America/New_York")
+    monkeypatch.setattr("openexecutive.memory.workspace_settings.get_user_timezone", lambda *a, **k: zone)
+    set_at = datetime(2026, 11, 21, 15, 0, tzinfo=UTC)
+    day = set_at.date() + timedelta(days=4)
+    item = _email_watch(db, trigger={"from": ["robin@hale.example"]}, slug="robin-email")
+    assert item.id is not None
+    ms.set_watchlist_config_key(item.id, "display_label", "Robin Hale's email", db_path=db)
+    for key, value in mailbox.quiet_config(day, set_at).items():
+        ms.set_watchlist_config_key(item.id, key, value, db_path=db)
+    item = ms.get_watchlist_item(item.id, db_path=db)
+    assert item is not None
+    morning = datetime(day.year, day.month, day.day, 9, 0, tzinfo=zone)
+    assert not mailbox.quiet_ping_due(item, morning - timedelta(minutes=1), zone, db_path=db)
+    assert mailbox.quiet_ping_due(item, morning, zone, db_path=db)
+    # The day after still pings (the scan may have been down); later never.
+    assert mailbox.quiet_ping_due(item, morning + timedelta(days=1, hours=14), zone, db_path=db)
+    assert not mailbox.quiet_ping_due(item, morning + timedelta(days=2), zone, db_path=db)
+
+    monkeypatch.setattr(
+        mailbox_source, "datetime",
+        SimpleNamespace(now=lambda tz=None: morning.astimezone(UTC), fromisoformat=datetime.fromisoformat),
+    )
+    signals = asyncio.run(mailbox_source.MailboxSource().poll(item, db_path=db))
+    assert [s.normalized_summary for s in signals] == ["No email from Robin Hale yet"]
+    assert signals[0].raw_payload["needs"] == NEEDS_CHOICE
+    assert signals[0].raw_payload["choices"] == ["Ask Robin Hale", mailbox_source.WAIT_A_DAY]
+    event = _signal_to_alert_event(signals[0], item)
+    assert event.needs == NEEDS_CHOICE and event.choices == ["Ask Robin Hale", "Wait another day"]
+    # Once a day: told, it doesn't ping again.
+    ms.insert_signal(signals[0], db_path=db)
+    assert asyncio.run(mailbox_source.MailboxSource().poll(item, db_path=db)) == []
+
+
+def test_an_email_that_came_but_was_never_told_still_means_something_came(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Robin's email is recorded on Tuesday (a watch in dry run tells
+    nothing); Wednesday morning brings no "nothing came" ping."""
+    from zoneinfo import ZoneInfo
+
+    _executive_inbox(monkeypatch)
+    zone = ZoneInfo("America/New_York")
+    set_at = datetime(2026, 11, 21, 15, 0, tzinfo=UTC)
+    day = set_at.date() + timedelta(days=4)
+    item = _email_watch(db, trigger={"from": ["robin@hale.example"]}, slug="robin-email")
+    assert item.id is not None
+    for key, value in mailbox.quiet_config(day, set_at).items():
+        ms.set_watchlist_config_key(item.id, key, value, db_path=db)
+    item = ms.get_watchlist_item(item.id, db_path=db)
+    assert item is not None and item.last_fired_at is None
+    morning = datetime(day.year, day.month, day.day, 9, 0, tzinfo=zone)
+    ms.insert_signal(Signal(
+        watchlist_id=item.id, source_kind=SOURCE_KIND_MAILBOX, source_external_id="exec:x1",
+        captured_at=(set_at + timedelta(days=1)).isoformat(), normalized_summary="Robin Hale: rent",
+        provenance_url="https://app.example/", dedup_key=f"mailbox:{item.id}:exec:x1",
+    ), db_path=db)
+    assert not mailbox.quiet_ping_due(item, morning, zone, db_path=db)
+
+
+def test_mail_that_comes_on_the_day_is_told_without_the_nothing_came_ping(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Robin writes at 9:03 on the day; the 9:05 poll tells that, not "no
+    email from Robin yet" as well."""
+    from zoneinfo import ZoneInfo
+
+    _executive_inbox(monkeypatch)
+    zone = ZoneInfo("America/New_York")
+    monkeypatch.setattr("openexecutive.memory.workspace_settings.get_user_timezone", lambda *a, **k: zone)
+    set_at = datetime(2026, 11, 21, 15, 0, tzinfo=UTC)
+    day = set_at.date() + timedelta(days=4)
+    item = _email_watch(db, trigger={"from": ["robin@hale.example"]}, slug="robin-email")
+    assert item.id is not None
+    for key, value in mailbox.quiet_config(day, set_at).items():
+        ms.set_watchlist_config_key(item.id, key, value, db_path=db)
+    assert _robin(mail_of=OWNER) == 1
+    item = ms.get_watchlist_item(item.id, db_path=db)
+    assert item is not None
+    at = datetime(day.year, day.month, day.day, 9, 5, tzinfo=zone)
+    monkeypatch.setattr(
+        mailbox_source, "datetime",
+        SimpleNamespace(now=lambda tz=None: at.astimezone(UTC), fromisoformat=datetime.fromisoformat),
+    )
+    signals = asyncio.run(mailbox_source.MailboxSource().poll(item, db_path=db))
+    assert [s.normalized_summary for s in signals] == ["Robin Hale: December rent, $480 due Tue Dec 1"]
+
+
+def _both_inboxes(monkeypatch: pytest.MonkeyPatch, messages: list[Any]) -> None:
+    """The owner's own inbox is connected and holds ``messages``."""
+    _patch_mailbox(monkeypatch, _Mailbox(messages, []))
+    monkeypatch.setattr(
+        "openexecutive.people.store.find_principal_person", lambda **_: SimpleNamespace(id=PRINCIPAL),
+    )
+    monkeypatch.setattr("openexecutive.monitoring.pipeline.scan_soon", lambda *a, **k: True)
+
+
+def _rent(item: Any, *, id: str = "own1", header: str = "<RENT-1@hale.example>") -> Any:
+    at = (datetime.fromisoformat(item.created_at) + timedelta(minutes=1)).isoformat()
+    return gm.MailMessage(
+        id=id, thread_id="ot1", from_addr="robin@hale.example", from_name="Robin Hale",
+        subject="December rent, $480 due Tue Dec 1", received_at=at, message_id_header=header,
+    )
+
+
+def _header(value: str) -> Any:
+    async def read() -> str:
+        return value
+
+    return read
+
+
+def _poll_and_record(item_id: int, db: Path) -> list[Signal]:
+    fresh = ms.get_watchlist_item(item_id, db_path=db)
+    assert fresh is not None
+    signals = asyncio.run(mailbox_source.MailboxSource().poll(fresh, db_path=db))
+    for signal in signals:
+        ms.insert_signal(signal, db_path=db)
+    return signals
+
+
+def test_an_email_to_them_and_the_executive_is_told_once_from_the_executives_copy(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Robin writes to the owner and cc's the Executive: one card, on the
+    thread, and the next poll reads on past it rather than telling it again."""
+    item = _email_watch(db, trigger={"from": ["robin@hale.example"]}, slug="robin-email")
+    assert item.id is not None
+    _both_inboxes(monkeypatch, [_rent(item)])
+    assert _robin(mail_of=OWNER, header_id=_header("<rent-1@hale.example>")) == 1
+
+    first = _poll_and_record(item.id, db)
+    assert [s.source_external_id for s in first] == ["exec:x1"]
+    assert first[0].raw_payload["mail_thread"] == "th1"
+    assert _poll_and_record(item.id, db) == []
+    fresh = ms.get_watchlist_item(item.id, db_path=db)
+    assert fresh is not None and mailbox_source._read_through(fresh, db_path=db) is not None
+
+
+def test_an_email_read_in_their_own_inbox_first_is_not_told_again_from_the_executives(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    item = _email_watch(db, trigger={"from": ["robin@hale.example"]}, slug="robin-email")
+    assert item.id is not None
+    _both_inboxes(monkeypatch, [_rent(item)])
+    assert [s.source_external_id for s in _poll_and_record(item.id, db)] == ["own1"]
+    # The Executive's copy arrives a minute later.
+    assert _robin(mail_of=OWNER, header_id=_header("<rent-1@hale.example>")) == 1
+    assert _poll_and_record(item.id, db) == []
+    assert ms.executive_mail_for(item.id, db_path=db) == []
+
+
+def test_two_emails_with_the_same_sender_and_subject_are_both_told(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    item = _email_watch(db, trigger={"from": ["robin@hale.example"]}, slug="robin-email")
+    assert item.id is not None
+    _both_inboxes(monkeypatch, [_rent(item, header="<rent-2@hale.example>")])
+    assert _robin(mail_of=OWNER, header_id=_header("<rent-1@hale.example>")) == 1
+    assert sorted(s.source_external_id for s in _poll_and_record(item.id, db)) == ["exec:x1", "own1"]
+
+
+def test_nothing_by_today_said_after_the_morning_waits_for_the_next_morning(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """At 2 PM: "ping me if nothing from Robin by today". No ping at 2:01."""
+    from zoneinfo import ZoneInfo
+
+    _executive_inbox(monkeypatch)
+    zone = ZoneInfo("America/New_York")
+    set_at = datetime(2026, 11, 24, 14, 0, tzinfo=zone)
+    item = _email_watch(db, trigger={"from": ["robin@hale.example"]}, slug="robin-email")
+    assert item.id is not None
+    for key, value in mailbox.quiet_config(set_at.date(), set_at.astimezone(UTC)).items():
+        ms.set_watchlist_config_key(item.id, key, value, db_path=db)
+    item = ms.get_watchlist_item(item.id, db_path=db)
+    assert item is not None
+    assert not mailbox.quiet_ping_due(item, set_at + timedelta(minutes=1), zone, db_path=db)
+    next_morning = datetime(2026, 11, 25, 9, 0, tzinfo=zone)
+    assert not mailbox.quiet_ping_due(item, next_morning - timedelta(minutes=1), zone, db_path=db)
+    assert mailbox.quiet_ping_due(item, next_morning, zone, db_path=db)
+
+
+def test_an_email_to_the_executive_while_the_watch_was_off_is_not_told(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _executive_inbox(monkeypatch)
+    item = _email_watch(db, trigger={"from": ["robin@hale.example"]}, slug="robin-email")
+    assert item.id is not None
+    assert _robin(mail_of=OWNER) == 1
+    ms.set_enabled(item.id, False, db_path=db)
+    ms.set_enabled(item.id, True, db_path=db)
+    fresh = ms.get_watchlist_item(item.id, db_path=db)
+    assert fresh is not None
+    assert asyncio.run(mailbox_source.MailboxSource().poll(fresh, db_path=db)) == []
+    assert ms.executive_mail_for(item.id, db_path=db) == []
+
+
+def test_a_teammate_watch_that_sees_no_inbox_never_says_nothing_came(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from zoneinfo import ZoneInfo
+
+    _executive_inbox(monkeypatch)
+    monkeypatch.setattr(
+        "openexecutive.people.store.get_person",
+        lambda pid: SimpleNamespace(**{**vars(_person()), "is_principal": False}) if pid == OWNER else None,
+    )
+    zone = ZoneInfo("America/New_York")
+    monkeypatch.setattr("openexecutive.memory.workspace_settings.get_user_timezone", lambda *a, **k: zone)
+    set_at = datetime(2026, 11, 21, 15, 0, tzinfo=UTC)
+    day = set_at.date() + timedelta(days=4)
+    item = _email_watch(db, trigger={"from": ["robin@hale.example"]}, slug="robin-email")
+    assert item.id is not None
+    for key, value in mailbox.quiet_config(day, set_at).items():
+        ms.set_watchlist_config_key(item.id, key, value, db_path=db)
+    item = ms.get_watchlist_item(item.id, db_path=db)
+    assert item is not None
+    morning = datetime(day.year, day.month, day.day, 9, 0, tzinfo=zone)
+    monkeypatch.setattr(
+        mailbox_source, "datetime",
+        SimpleNamespace(now=lambda tz=None: morning.astimezone(UTC), fromisoformat=datetime.fromisoformat),
+    )
+    assert asyncio.run(mailbox_source.MailboxSource().poll(item, db_path=db)) == []

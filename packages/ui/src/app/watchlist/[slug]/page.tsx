@@ -692,6 +692,7 @@ export default function WatchDetailPage() {
                 }
               >
                 {item.tells_you_when}
+                {item.quiet_line && <div className="text-sm text-fg-muted mt-1">{item.quiet_line}</div>}
                 {editing === "trigger" && (
                   <TriggerEditor item={item} onSaved={patched} onCancel={() => setEditing(null)} />
                 )}

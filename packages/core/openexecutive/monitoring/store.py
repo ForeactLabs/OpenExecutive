@@ -154,6 +154,24 @@ def initialize_db(db_path: Path | None = None) -> None:
                 outcome TEXT NOT NULL,
                 at TEXT NOT NULL
             );
+
+            -- Email that reached the Executive and matched an email watch
+            -- (monitoring.mailbox.note_executive_mail): the watch's next
+            -- poll tells its owner (sources.mailbox). Sender and subject
+            -- only, never the text; gone once told.
+            CREATE TABLE IF NOT EXISTS mailbox_executive_mail (
+                watchlist_id INTEGER NOT NULL REFERENCES watchlist(id),
+                message_id TEXT NOT NULL,
+                thread_id TEXT NOT NULL DEFAULT '',
+                from_addr TEXT NOT NULL DEFAULT '',
+                from_name TEXT NOT NULL DEFAULT '',
+                subject TEXT NOT NULL DEFAULT '',
+                received_at TEXT NOT NULL,
+                -- Its Message-ID header: the same email in the watcher's
+                -- own inbox is told once (sources.mailbox).
+                rfc_id TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (watchlist_id, message_id)
+            );
         """)
         # Additive migration for DBs created before enrichment landed.
         # ``CREATE TABLE IF NOT EXISTS`` above is a no-op on an existing
@@ -714,8 +732,60 @@ def delete_watchlist_item(item_id: int, db_path: Path | None = None) -> bool:
     """
     with _get_conn(db_path) as conn:
         conn.execute("DELETE FROM external_signals WHERE watchlist_id = ?", (item_id,))
+        conn.execute("DELETE FROM mailbox_executive_mail WHERE watchlist_id = ?", (item_id,))
         cursor = conn.execute("DELETE FROM watchlist WHERE id = ?", (item_id,))
         return cursor.rowcount > 0
+
+
+def add_executive_mail(
+    item_id: int, *, message_id: str, thread_id: str, from_addr: str, from_name: str, subject: str,
+    received_at: str, rfc_id: str = "", db_path: Path | None = None,
+) -> None:
+    """Keep an email the Executive got that matches email watch ``item_id``
+    for its next poll to tell (once per email)."""
+    with _get_conn(db_path) as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO mailbox_executive_mail "
+            "(watchlist_id, message_id, thread_id, from_addr, from_name, subject, received_at, rfc_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (item_id, message_id, thread_id, from_addr, from_name[:200], subject[:300], received_at, rfc_id[:500]),
+        )
+
+
+def poll_soon(item_id: int, *, db_path: Path | None = None) -> None:
+    """Make watch ``item_id`` due on the scan's next pass, whatever its
+    cadence: it has something to tell."""
+    with _get_conn(db_path) as conn:
+        conn.execute("UPDATE watchlist SET last_polled_at = NULL WHERE id = ?", (item_id,))
+
+
+# How many kept emails one poll of an email watch tells.
+EXECUTIVE_MAIL_PER_POLL = 50
+
+
+def executive_mail_for(item_id: int, *, db_path: Path | None = None) -> list[dict[str, str]]:
+    """The emails kept for email watch ``item_id``, oldest first, at most
+    ``EXECUTIVE_MAIL_PER_POLL`` (the rest wait for the next poll)."""
+    with _get_conn(db_path) as conn:
+        rows = conn.execute(
+            "SELECT message_id, thread_id, from_addr, from_name, subject, received_at, rfc_id "
+            "FROM mailbox_executive_mail WHERE watchlist_id = ? ORDER BY received_at, message_id LIMIT ?",
+            (item_id, EXECUTIVE_MAIL_PER_POLL),
+        ).fetchall()
+    names = ("message_id", "thread_id", "from_addr", "from_name", "subject", "received_at", "rfc_id")
+    return [{k: str(r[k]) for k in names} for r in rows]
+
+
+def drop_executive_mail(item_id: int, message_ids: list[str], *, db_path: Path | None = None) -> None:
+    """Forget the kept emails ``message_ids`` of watch ``item_id``: told."""
+    if not message_ids:
+        return
+    with _get_conn(db_path) as conn:
+        conn.execute(
+            f"DELETE FROM mailbox_executive_mail WHERE watchlist_id = ? AND message_id IN "
+            f"({','.join('?' * len(message_ids))})",
+            (item_id, *message_ids),
+        )
 
 
 def set_enabled(
@@ -1256,6 +1326,23 @@ def list_signals_for_watchlist(
     return [_row_to_signal_dict(row) for row in rows]
 
 
+def signals_since(
+    watchlist_id: int, since: str, *, excluding: str = "", db_path: Path | None = None,
+) -> bool:
+    """Whether watch ``watchlist_id`` recorded any signal captured at or
+    after ``since`` (UTC ISO), told or not, leaving out dedup keys that start
+    with ``excluding``."""
+    if not _resolve_db_path(db_path).exists():
+        return False
+    with _get_conn(db_path) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM external_signals WHERE watchlist_id = ? AND captured_at >= ? "
+            "AND (? = '' OR substr(dedup_key, 1, length(?)) != ?) LIMIT 1",
+            (watchlist_id, since, excluding, excluding, excluding),
+        ).fetchone()
+    return row is not None
+
+
 def recorded_dedup_keys(keys: list[str], *, db_path: Path | None = None) -> set[str]:
     """Which of ``keys`` are already in ``external_signals``."""
     if not keys or not _resolve_db_path(db_path).exists():
@@ -1303,8 +1390,12 @@ def watchlist_ids_with_held_signals(db_path: Path | None = None) -> list[int]:
 # memory.episodic — keeps the public surface symmetric with alerts.store.
 __all__ = [
     "DB_PATH",
+    "add_executive_mail",
     "delete_watchlist_item",
+    "drop_executive_mail",
+    "executive_mail_for",
     "get_watchlist_item",
+    "poll_soon",
     "record_confirmation",
     "record_dismissal",
     "get_watchlist_item_by_slug",

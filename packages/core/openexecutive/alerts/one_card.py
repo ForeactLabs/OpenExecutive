@@ -102,7 +102,7 @@ _given: ContextVar[dict[str, Any] | None] = ContextVar("one_card_given", default
 @contextlib.contextmanager
 def about(
     *, thread: str = "", step: str = "", joins: int | None = None, raised: bool = False,
-    own_words: bool = False, label: str = "",
+    own_words: bool = False, label: str = "", person: str = "",
 ) -> Iterator[None]:
     """Cards written inside the block take part in the check: a held step's
     Approve card (about ``thread``, holding ``step``), or a card a turn
@@ -111,10 +111,12 @@ def about(
     (a teammate's message) joins only by its conversation, never by turn, so
     its words never mix with a card the Executive wrote on the same turn.
     ``label`` is the "Raised by <name>." its text opens with, said once when
-    it joins a card that opens with the same."""
+    it joins a card that opens with the same. ``person`` is who the card is
+    about when no turn says so (an email watch's card for one mail thread:
+    ``mail_person``)."""
     token = _given.set({
         "thread": thread, "step": step, "joins": joins, "raised": raised, "own_words": own_words,
-        "label": label,
+        "label": label, "person": person,
     })
     try:
         yield
@@ -166,7 +168,7 @@ def person_key(session: Any = None) -> str:
         return ""
     sender = str(getattr(session, "email_from", "") or "").strip().lower()
     if getattr(session, "origin_channel", "") == "email" and sender:
-        return f"mail:{sender}"
+        return mail_person(sender)
     speaker = getattr(session, "caller_person_id", None)
     if isinstance(speaker, int) and not isinstance(speaker, bool):
         return f"person:{speaker}"
@@ -182,6 +184,12 @@ def person_key(session: Any = None) -> str:
     if isinstance(runner, int) and not isinstance(runner, bool):
         return f"person:{runner}"
     return ""
+
+
+def mail_person(sender: str) -> str:
+    """Who a turn on mail from ``sender`` is with (``person_key``)."""
+    sender = str(sender or "").strip().lower()
+    return f"mail:{sender}" if sender else ""
 
 
 def mail_thread(thread_id: str) -> str:
@@ -575,7 +583,7 @@ def _place(alert_id: int, db_path: Path | None) -> int:
             "INSERT OR REPLACE INTO card_topics (alert_id, reader, person, turn, thread, step, decision_id, created_at) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                alert_id, _card_reader(row, tags), person_key(session),
+                alert_id, _card_reader(row, tags), str(given.get("person") or "") or person_key(session),
                 "" if given.get("own_words") else _turn_id(),
                 _conversation(conn, str(given.get("thread") or "") or _turn_thread(session)),
                 str(given.get("step") or ""),

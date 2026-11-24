@@ -49,11 +49,14 @@ test("raiseTheBar asks for big changes only otherwise, through the trigger", () 
 });
 
 test("an email watch says who it is from and what its subject mentions, and has no bar to raise", () => {
-  assert.equal(triggerInWords("mailbox", { from: ["pat@example.com"] }), "An email comes in from pat@example.com");
+  assert.equal(triggerInWords("mailbox", { from: ["pat@example.com"] }), "pat@example.com emails the Executive or you");
   assert.equal(
     triggerInWords("mailbox", { from: ["pat@example.com", "sam@example.com"], keywords: ["contract"] }),
-    "An email comes in from pat@example.com or sam@example.com that mentions “contract”",
+    "pat@example.com or sam@example.com emails the Executive or you about “contract”",
   );
-  assert.equal(triggerInWords("mailbox", { keywords: ["sign up"] }), "An email comes in that mentions “sign up”");
+  assert.equal(
+    triggerInWords("mailbox", { keywords: ["sign up"] }),
+    "An email that mentions “sign up” reaches the Executive or you",
+  );
   assert.equal(raiseTheBar({ signal_type: "mailbox", trigger_json: { keywords: ["sign up"] } }), null);
 });

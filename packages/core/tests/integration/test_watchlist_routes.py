@@ -363,7 +363,7 @@ def test_an_email_watch_reads_the_callers_inbox_and_only_they_see_it(
     made = client.post("/watchlist", json=body, headers=as_sam)
     assert made.status_code == 201, made.text
     assert made.json()["config_json"]["mailbox_of"] == sam_id
-    assert made.json()["tells_you_when"] == "An email comes in that mentions “sign up”"
+    assert made.json()["tells_you_when"] == "An email that mentions “sign up” reaches the Executive or you"
     slug = made.json()["slug"]
     assert slug.startswith("email-sign-ups-")  # its own name, never anyone else's
 
