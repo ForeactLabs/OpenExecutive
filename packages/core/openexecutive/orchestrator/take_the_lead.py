@@ -14,9 +14,9 @@ Everything else, in order:
   level: while it is on, everything not yet allowed waits, on any level, as
   a card that says what it would have done (``hold`` with kind
   ``TRAINING``). Approving does it once; ticked "Do this on its own next
-  time" it also allows that action (``allowance``: the same action for the
-  same person or thing, ``allow``), and from then on it runs on its own,
-  except on Careful;
+  time" it also allows that kind of step (``allowance``: sending messages
+  and emails, booking meetings, one connected tool, ``allow``), and from then
+  on steps of that kind go by the level like any other;
 - Hands-off runs everything else;
 - a Goes rule (``rule_goes``) lets it go where Balanced would hold it:
   a person or company rule everything but a delete or a share, an amount rule the
@@ -1547,105 +1547,48 @@ def check(
 _BOOK_TOOLS = frozenset({"create_calendar_event", "create_instant_meeting"})
 
 
-def _name(person_id: Any) -> str | None:
-    from openexecutive.people.store import get_person
-
-    try:
-        person = get_person(int(person_id))
-    except Exception:
-        return None
-    if person is None:
-        return None
-    return person.full_name or person.email or None
-
-
-def _names(names: list[str]) -> str:
-    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
-
-
-def _mail_to_one_person(tool: str, tool_input: dict[str, Any]) -> Any:
-    """The People entry (a contact too) a mail send reaches when it reaches
-    exactly one address, in every recipient field (To, Cc, Bcc, however
-    spelled), and that address is theirs. Else None. Never raises."""
-    try:
-        from openexecutive.orchestrator.mcp_gateway import _norm_key, _normalize_tool_name
-        from openexecutive.people.store import find_person_by_address
-
-        if _normalize_tool_name(str(tool or "")) not in _MAIL_SEND_TOOLS:
-            return None
-        found = _mail_addresses(tool_input, _norm_key)
-        if found is None or len(found) != 1:
-            return None
-        person = find_person_by_address(next(iter(found)), include_contacts=True)
-        return person if person is not None and person.id is not None else None
-    except Exception:
-        logger.warning("take_the_lead: couldn't read who an email reaches", exc_info=True)
-        return None
+def _mcp_kind_label(tool: str) -> str:
+    """A connected tool's kind of step in plain words, with no file or
+    person in it: "Update a spreadsheet in Google Sheets"."""
+    verb = next((v for rx, v in _MCP_VERBS if rx.search(tool)), None)
+    app, noun = next(((a, n) for rx, a, n in _MCP_APPS if rx.search(tool)), (None, None))
+    if verb is not None and noun is not None:
+        return f"{verb} {noun} in {app}"
+    return _tool_words(tool).replace("_", " ").strip().capitalize() or "Use a connected app"
 
 
 def allowance(tool: str, tool_input: dict[str, Any], *, mcp: bool = False) -> tuple[str, str] | None:
-    """The action and who (or what) it is for, as ``(key, label)``: what one
-    Allow covers. "Message Priya Nair" covers any message to her on any
-    channel; "Book meetings with Priya Nair and Sam Lee" meetings with
-    exactly them. None when it can't be pinned to someone or something on
-    the People list (nothing to allow, so it keeps asking)."""
+    """The kind of step, as ``(key, label)``: what one "on its own from now
+    on" covers. In training makes a new kind of step a card once; ticked,
+    every later step of that kind goes by the Approvals level, whoever it
+    is for and whichever file it touches ("Send messages and emails" covers
+    an email to anyone and a message on any channel). None only for a step
+    with no tool name."""
+    if not mcp and tool in _DIRECT_MESSAGE_TOOLS:
+        return f"{FEATURE}|message", "Send messages and emails"
     if mcp:
-        mailed = _mail_to_one_person(tool, tool_input)
-        if mailed is not None:
-            # An email to one person on People (a contact too) is "Message
-            # them", the same Allow as a message to them on any channel.
-            return f"{FEATURE}|message|person:{mailed.id}", f"Message {mailed.full_name or mailed.email}"[:200]
-        # A connected tool is allowed for one named file or record, and
-        # never when it reaches people: who it reaches isn't on the People
-        # list, so one Allow would cover anyone (a mail send, a share).
-        if any(tool_input.get(k) for k in (*_MCP_RECIPIENT_KEYS, *_MCP_PEOPLE_KEYS)) or _EMAIL_RE.search(
-            "\n".join(_strings(tool_input))
-        ):
-            return None
-        bare = tool.split("__", 1)[-1].replace("_", " ").strip().capitalize()
-        what = _first_text(tool_input, _MCP_NAME_KEYS)
-        if not what:
-            return None
-        # Bound to the call's shape too: the same tool on the same file with
-        # an argument it didn't have before (a share setting, a link) is a
-        # different action and asks again.
-        if any(_MCP_REACH_ARG_RE.search(str(k)) for k in tool_input):
-            return None
-        shape = ",".join(sorted(str(k) for k in tool_input))
-        label = _connected_label(tool, tool_input, recipient=False) or (f"{bare}: {what}" if what else bare)
-        return f"{FEATURE}|mcp|{tool}|{what.lower()}|{shape}", label[:200]
-    if tool in _DIRECT_MESSAGE_TOOLS:
-        person = _target_person(tool, tool_input)
-        if person is None or person.id is None:
-            return None
-        return f"{FEATURE}|message|person:{person.id}", f"Message {person.full_name or person.email}"[:200]
-    if tool == "assign_open_loop":
-        name = _name(tool_input.get("person_id"))
-        if name is None:
-            return None
-        return f"{FEATURE}|assign|person:{int(tool_input['person_id'])}", f"Assign things to {name}"[:200]
+        from openexecutive.orchestrator.mcp_gateway import _normalize_tool_name
+
+        if _normalize_tool_name(str(tool or "")) in _MAIL_SEND_TOOLS:
+            return f"{FEATURE}|message", "Send messages and emails"
+        name = str(tool or "").strip()
+        return (f"{FEATURE}|mcp|{name}", _mcp_kind_label(name)[:200]) if name else None
     if tool in _BOOK_TOOLS:
-        raw = tool_input.get("attendee_person_ids")
-        if not isinstance(raw, list):
-            return None
-        try:
-            ids = sorted({int(i) for i in raw})
-        except (TypeError, ValueError):
-            return None
-        names = [_name(i) for i in ids]
-        if any(n is None for n in names):
-            return None
-        who = f" with {_names([n for n in names if n])}" if names else ""
-        return f"{FEATURE}|book|people:{','.join(str(i) for i in ids)}", f"Book meetings{who}"[:200]
+        return f"{FEATURE}|book", "Book meetings"
+    if tool == "assign_open_loop":
+        return f"{FEATURE}|assign", "Assign things to people"
     if tool == "run_workflow" and isinstance(tool_input.get("workflow_id"), str) and tool_input["workflow_id"]:
+        # Each workflow is its own kind of step.
         workflow = str(tool_input["workflow_id"])
         from openexecutive.workflows import workflow_label
 
         return f"{FEATURE}|workflow|{workflow}", f"Start {workflow_label(workflow)}"[:200]
-    if tool == "send_department_message" and isinstance(tool_input.get("department_slug"), str):
-        slug = str(tool_input["department_slug"])
-        return f"{FEATURE}|department|{slug}", f"Message the {slug} department"[:200]
-    return None
+    if tool == "send_department_message":
+        return f"{FEATURE}|department", "Message departments"
+    name = str(tool or "").strip()
+    if not name:
+        return None
+    return f"{FEATURE}|tool|{name}", _TOOL_LABELS.get(name, name.replace("_", " ").capitalize())[:200]
 
 
 # What a card lets you change before approving, per tool: (field, label, long).
@@ -2835,6 +2778,9 @@ def hold(
         # theirs: whoever approves someone else's work never opens that
         # person's documents with the tap.
         **documents_for(approver),
+        # Who what the step makes stays private to when it runs: the same as
+        # on the turn that held it (``kept_for``).
+        **kept_for(),
         # Who asked, the owner included, for the card's "You asked" /
         # "Olivia asked" (``card_details.top``); a step no one asked for has
         # none and reads "I started this".
@@ -2984,18 +2930,21 @@ def _hit(name: str, tool_input: dict[str, Any], *, mcp: bool) -> tuple[Hit | Non
             return rule, None
         if _careful():
             return Hit("level", "it came up while nobody was chatting, and Approvals is on Careful"), None
+        # In training only caps the level: a kind of step allowed from its
+        # card goes on by the level from then on, like any other step.
+        found: Allowed | None = None
         if lead.training:
             grant = allowance(name, tool_input, mcp=mcp)
             found = find_allowed(grant[0]) if grant is not None else None
             if found is None:
-                return Hit(TRAINING, "it's in training and you haven't allowed this yet"), None
-            return None, found
+                return Hit(TRAINING, "it's in training and this kind of step hasn't been allowed yet"), None
         if _level_runs():
-            return None, None
+            return None, found
         # Balanced: the topics wait unless a Goes rule lets them go.
-        return _balanced(
+        hit, goes = _balanced(
             name, tool_input, rules, addresses=_reached(name, tool_input, addresses, mcp=mcp), spends=spends, mcp=mcp,
         )
+        return hit, (goes or found) if hit is None else None
     except Exception:
         logger.warning("take_the_lead: the gate failed — holding the action", exc_info=True)
         return Hit("rule", "its rules couldn't be read"), None
@@ -3265,7 +3214,7 @@ def _asked_hit(name: str, tool_input: dict[str, Any], *, mcp: bool) -> Hit | Non
         if lead.training:
             grant = allowance(name, tool_input, mcp=mcp)
             if (find_allowed(grant[0]) if grant is not None else None) is None:
-                return Hit(TRAINING, "it's in training and you haven't allowed this yet")
+                return Hit(TRAINING, "it's in training and this kind of step hasn't been allowed yet")
         return None
     except Exception:
         logger.warning("take_the_lead: the rules check failed — holding the step", exc_info=True)
@@ -3425,6 +3374,7 @@ async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bo
         whose = None
     token = current_session.set(Session(
         unattended=True, documents_viewer=viewer_for_person(whose if isinstance(whose, int) else None),
+        private_to=kept if isinstance(kept := payload.get("private_to"), int) and not isinstance(kept, bool) else None,
     ))
     try:
         with (
@@ -3501,6 +3451,20 @@ async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bo
     return _as_text(result)
 
 
+def kept_for() -> dict[str, Any]:
+    """What a held step's card records about who what it makes is private
+    to (``fact_tools.private_owner`` of this turn): approved later, from a
+    run with no chat (``carry_out``), it keeps the same. Never raises."""
+    try:
+        from openexecutive.orchestrator.fact_tools import private_owner
+        from openexecutive.orchestrator.schedule_tools import current_session
+
+        kept = private_owner(current_session.get())
+    except Exception:
+        return {}
+    return {"private_to": kept} if isinstance(kept, int) else {}
+
+
 def documents_for(approver: int | None) -> dict[str, Any]:
     """What a held step's card records about whose documents it may read
     when approved (``carry_out``): this turn's viewer, only when the card
@@ -3517,6 +3481,12 @@ def documents_for(approver: int | None) -> dict[str, Any]:
 
 def _as_text(result: Any) -> str:
     return result if isinstance(result, str) else json.dumps(result, default=str)
+
+
+def mark_lapsed(decision_id: int, *, lapsed: bool, db_path: Path | None = None) -> None:
+    """A held step the tidy-up let lapse reads as lapsed in the log (not
+    waiting); its Undo makes it waiting again. Best effort."""
+    _set_log_status(decision_id, "lapsed" if lapsed else _LATELY_WAITING, db_path=db_path)
 
 
 def resolved(
@@ -4198,10 +4168,12 @@ def _failed_runs(since: datetime) -> list[str]:
 
 
 def _overdue_tasks(since: datetime, now: datetime) -> list[str]:
-    from openexecutive.attunement.open_loops import list_open_loops
+    from openexecutive.attunement.open_loops import list_open_loops, principal_reader
 
     found = []
-    for loop in list_open_loops(limit=200):
+    # What the owner sees: the look is theirs, and a teammate's private task
+    # is not.
+    for loop in list_open_loops(limit=200, reader=principal_reader()):
         try:
             due = datetime.fromisoformat(loop.due_at.replace("Z", "+00:00"))
         except ValueError:

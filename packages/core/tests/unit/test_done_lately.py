@@ -214,3 +214,20 @@ def test_a_steps_own_words_are_shown(monkeypatch: pytest.MonkeyPatch, roster: Si
     _step(monkeypatch, roster.principal, summary=summary)
     block = ttl.done_lately_block(_web(roster.principal))
     assert summary.strip()[:250] in block
+
+
+def test_a_step_the_tidy_up_let_lapse_stops_waiting_and_undo_brings_it_back(
+    monkeypatch: pytest.MonkeyPatch, roster: SimpleNamespace,
+) -> None:
+    from openexecutive.alerts import lifecycle
+    from openexecutive.memory import decision_ledger
+
+    card = _card()
+    _step(monkeypatch, roster.principal, status="waiting", decision_id=card, subject="Pallet wrap order")
+    assert decision_ledger.lapse(card)
+    lifecycle.step_lapsed(card, lapsed=True)
+    assert ttl.done_today()[1] == 0
+    assert "Pallet wrap order" not in ttl.done_lately_block(_web(roster.principal))
+    assert lifecycle.unlapse_step(card)
+    block = ttl.done_lately_block(_web(roster.principal))
+    assert f"waiting on their OK (card {card})" in block and "Pallet wrap order" in block

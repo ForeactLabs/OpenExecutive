@@ -1454,7 +1454,7 @@ def test_a_team_member_clears_only_alerts_assigned_to_them(
     ).status_code == 200
 
 
-def test_alert_review_never_touches_a_private_alert(
+def test_alert_review_tidies_a_private_alert_but_never_shows_it_to_the_team(
     db: Path, roster: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from datetime import UTC, datetime, timedelta
@@ -1462,12 +1462,16 @@ def test_alert_review_never_touches_a_private_alert(
     from openexecutive.alerts import review
 
     _alerts_db(db, monkeypatch)
-    _insert("Board seat for Jordan", private=True)
+    private_id = _insert("Board seat for Jordan", private=True)
     public_id = _insert("Server down", private=False)
     later = datetime.now(UTC) + timedelta(days=2)
     settings = SimpleNamespace(min_age_hours=0, interval_hours=0, max_per_scan=50)
-    picked = review.select_candidates(later, settings, ignore_interval=True)  # type: ignore[arg-type]
-    assert [a.id for a in picked] == [public_id]
+    picked = {a.id: a for a in review.select_candidates(later, settings, ignore_interval=True)}  # type: ignore[arg-type]
+    assert set(picked) == {private_id, public_id}
+    assert not review._may_see(picked[public_id], picked[private_id])
+    assert [[a.id for a in b] for b in review._batches(list(picked.values()), 8)] in (
+        [[private_id], [public_id]], [[public_id], [private_id]],
+    )
 
 
 def test_a_dm_to_a_contact_stays_off_the_activity_rail(

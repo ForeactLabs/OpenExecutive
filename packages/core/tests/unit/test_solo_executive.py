@@ -56,7 +56,7 @@ from ._agent_loop_fakes import FinalMsg, ScriptedProvider, TextBlock, ToolUseBlo
 # And again: Big jobs (do the whole job; a one-line heads-up for a long one).
 # And again: an email reply may quote a draft signed by the sender for them to send.
 # And again: Doing what was asked (a figure that looks off goes through, with the doubt said).
-TEAM_PERSONA_SHA256 = "f48be0ad4e5067c21e8e10bbac609aa2b32889d0e52a2d9143f2eb52b6434d6e"
+TEAM_PERSONA_SHA256 = "d078430adb4412899b8e812aa0b74195386eca88f09941452e9aef8de2939ba0"
 
 SOLO_HEADINGS = (
     "## You Work for One Person",
@@ -68,6 +68,7 @@ TEAM_ONLY_HEADINGS = (
     "## You Are a Member of This Executive Team",
     "## Choosing Who to Tell",
     "## Departments & Org Coordination",
+    "## Other People's Private Things",
 )
 
 

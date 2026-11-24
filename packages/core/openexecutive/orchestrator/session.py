@@ -247,6 +247,11 @@ class Session:
     # pinned to that turn's viewer, so what it drafts is theirs. An
     # ``artifact_records.Viewer``; None derives it from this session.
     documents_viewer: Any = None
+    # Who what this run makes is private to, for a step carried out from a
+    # card (``take_the_lead.carry_out``): ``fact_tools.private_owner`` of the
+    # turn that held it, so an approved step keeps what it makes to the same
+    # people as the turn itself would have. None: the team's.
+    private_to: int | None = None
     # Run as if the speaker had Act as me, against the mailbox it carries
     # (``delegation.settings.DelegationOverride``): an eval's or test's fake
     # one, or the person's own for the inbox's work turn

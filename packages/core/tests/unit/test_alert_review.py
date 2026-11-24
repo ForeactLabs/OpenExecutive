@@ -523,17 +523,100 @@ def test_move_cap_stops_outbound_moves_but_not_bookkeeping(db: Path, dms) -> Non
 
 def test_exempt_sources_are_never_touched(db: Path, dms) -> None:
     _person(full_name="Pat", role="CEO", is_principal=True)
-    aid = _insert(db, "decision", source="decision_scheduling")
-    assert _apply(db, aid, _verdict(aid, verdict="resolved", confidence="high", evidence="x",
-                                    evidence_ref="S1", recommended_move="close"), refs=["S1"]) == ""
-    row = alert_store.get_alert(aid, db_path=db)
-    assert row is not None and row.status == "unread" and row.last_reviewed_at is None
+    for source in ("artifact", "meetings", "roster_request", "browser_handover"):
+        aid = _insert(db, f"kept {source}", source=source)
+        assert _apply(db, aid, _verdict(aid, verdict="resolved", confidence="high", evidence="x",
+                                        evidence_ref="S1", recommended_move="close"), refs=["S1"]) == ""
+        row = alert_store.get_alert(aid, db_path=db)
+        assert row is not None and row.status == "unread" and row.last_reviewed_at is None
     assert dms == []
 
 
-# --------------------------------------------------------------------------- #
-# Orchestration
-# --------------------------------------------------------------------------- #
+def _waiting_step(db: Path, headline: str, *, hours_ago: float = 30) -> tuple[int, int]:
+    from openexecutive.memory import decision_ledger
+
+    iid = decision_ledger.create_decision_instance(
+        decision_class="take_the_lead_action", department="", originating_session_id=None,
+        proposed_payload={"tool": "send"}, idempotency_key=None, gate_mode="propose",
+        approver_person_id=None, confidence=None, db_path=db,
+    )
+    aid = _insert(
+        db, headline, hours_ago=hours_ago, source="decision_scheduling",
+        external_id=decision_ledger.decision_alert_external_id(iid),
+        topic_tags=[decision_ledger.decision_instance_tag(iid), "private:principal"],
+    )
+    return iid, aid
+
+
+def test_a_waiting_step_the_evidence_shows_is_over_is_settled_with_its_step(db: Path, dms) -> None:
+    from openexecutive.memory import decision_ledger
+
+    _person(full_name="Pat", role="CEO", is_principal=True)
+    iid, aid = _waiting_step(db, "Send the launch note")
+    v = _verdict(aid, verdict="stale", confidence="high", evidence="launch moved", evidence_ref="A1",
+                 note="The launch moved to December, so this note no longer applies.", recommended_move="close")
+    assert _apply(db, aid, v, refs=["A1"]) == "stale"
+    row = alert_store.get_alert(aid, db_path=db)
+    assert row is not None and row.status == "dismissed"
+    assert row.tidied_reason == "The launch moved to December, so this note no longer applies."
+    step = decision_ledger.get_decision_instance(iid, db_path=db)
+    assert step is not None and step.status == decision_ledger.STATUS_AUTO_NO_RESPONSE
+    assert dms == []
+
+
+def test_a_waiting_step_never_merges_away(db: Path) -> None:
+    _person(full_name="Pat", role="CEO", is_principal=True)
+    _iid, aid = _waiting_step(db, "Create the outreach log")
+    newer = _insert(db, "Create the outreach log", hours_ago=2, topic_tags=["private:principal"])
+    v = _verdict(aid, recommended_move="merge", superseded_by_alert_id=newer)
+    assert _apply(db, aid, v) == "relevant"
+    assert alert_store.get_alert(aid, db_path=db).status == "unread"  # type: ignore[union-attr]
+
+
+def test_one_persons_cards_merge_only_with_their_own(db: Path) -> None:
+    _person(full_name="Pat", role="CEO", is_principal=True)
+    dana = _person()
+    old = _insert(db, "Offer letter", hours_ago=30, source="mailbox", topic_tags=["offer"])
+    theirs = _insert(db, "Offer letter again", hours_ago=2, source="mailbox", topic_tags=["offer"],
+                     routed_to_person_id=dana)
+    mine = _insert(db, "Offer letter, newer", hours_ago=1, source="mailbox", topic_tags=["offer"])
+    related = review.gather_evidence(alert_store.get_alert(old, db_path=db), NOW, db_path=db)  # type: ignore[arg-type]
+    shown = {r.get("alert_id") for r in related.get("related_alerts") or []}
+    assert mine in shown and theirs not in shown
+    assert _apply(db, old, _verdict(old, recommended_move="merge", superseded_by_alert_id=mine)) == "merged"
+    row = alert_store.get_alert(old, db_path=db)
+    assert row is not None and row.status == "dismissed" and row.tidied_at is not None
+    assert "Offer letter, newer" in row.tidied_reason
+
+
+def test_one_persons_card_is_audited_as_theirs_alone(db: Path, monkeypatch) -> None:
+    rows: list[tuple[str, bool, int | None]] = []
+    monkeypatch.setattr(audit_pkg, "log_event", lambda event_type, summary, **kw: rows.append(
+        (summary, bool(kw.get("private")), kw.get("private_to_person"))
+    ))
+    _person(full_name="Pat", role="CEO", is_principal=True)
+    dana = _person()
+    mine = _insert(db, "Dana Lee: Offer letter", hours_ago=30, source="mailbox", routed_to_person_id=dana)
+    team = _insert(db, "Pilot pricing", hours_ago=30)
+    for aid in (mine, team):
+        v = _verdict(aid, verdict="stale", evidence="offer withdrawn", evidence_ref="A1",
+                     note="The offer was withdrawn.", recommended_move="close")
+        assert _apply(db, aid, v, refs=["A1"]) == "stale"
+    assert [(p, o) for s, p, o in rows if "Offer letter" in s] == [(False, dana)]
+    assert [(p, o) for s, p, o in rows if "Pilot pricing" in s] == [(False, None)]
+
+
+def test_one_persons_cards_are_batched_only_with_cards_the_same_people_read(db: Path) -> None:
+    dana = _person()
+    cards = [
+        alert_store.get_alert(_insert(db, h, hours_ago=30, **kw), db_path=db)
+        for h, kw in (
+            ("team a", {}), ("dana mail", {"source": "mailbox", "routed_to_person_id": dana}),
+            ("team b", {}), ("pat mail", {"source": "mailbox"}),
+        )
+    ]
+    batches = [[a.headline for a in b] for b in review._batches(cards, 8)]  # type: ignore[union-attr]
+    assert sorted(batches) == [["dana mail"], ["pat mail"], ["team a", "team b"]]
 
 
 def test_run_alert_review_end_to_end_with_stubbed_agent(db: Path, audit_events, dms, monkeypatch) -> None:
@@ -1136,15 +1219,21 @@ def test_a_card_already_on_their_list_is_not_a_nudge(db: Path, audit_events, mon
     assert not any(e[0] == review.EVENT_NUDGED for e in audit_events)
 
 
-def test_a_personal_card_is_never_reviewed_nor_evidence(db: Path) -> None:
-    # An email watch's card is one person's alone: the review never routes,
-    # nudges or audits it, nor shows it as evidence for another card.
+def test_a_personal_card_is_tidied_but_never_evidence_for_the_team(db: Path, dms) -> None:
+    # An email watch's card is one person's alone: the tidy-up looks at it,
+    # but never routes or nudges on it, nor shows it as evidence for a card
+    # the team acts on.
+    _person(full_name="Pat", role="CEO", is_principal=True)
     old = _insert(db, "Pilot pricing", hours_ago=30, topic_tags=["pilot"])
     mine = _insert(db, "Dana Lee: Offer letter", hours_ago=30, source="mailbox", topic_tags=["pilot"])
-    assert [a.id for a in review.select_candidates(NOW, _settings(), db_path=db)] == [old]
+    assert {a.id for a in review.select_candidates(NOW, _settings(), db_path=db)} == {old, mine}
     related = review.gather_evidence(alert_store.get_alert(old, db_path=db), NOW, db_path=db)  # type: ignore[arg-type]
     assert mine not in {r.get("alert_id") for r in related.get("related_alerts") or []}
-    assert _apply(db, mine, AlertVerdict(alert_id=mine, verdict="stale"), evidence={}) == ""
+    dana = _person()
+    v = _verdict(mine, recommended_move="route", target_person_id=dana, message="Take this")
+    assert _apply(db, mine, v) == "relevant"
+    assert dms == []
+    assert alert_store.get_alert(mine, db_path=db).routed_to_person_id is None  # type: ignore[union-attr]
 
 
 def test_an_escalation_with_no_chat_app_says_no_message_went(db: Path, audit_events, monkeypatch) -> None:
@@ -1165,15 +1254,17 @@ def test_an_escalation_with_no_chat_app_says_no_message_went(db: Path, audit_eve
     assert esc[2]["dm_ok"] is False and "no message sent" in esc[1]
 
 
-def test_a_teammates_own_card_is_never_reviewed_nor_evidence(db: Path) -> None:
+def test_a_teammates_own_card_is_tidied_but_never_evidence(db: Path, dms) -> None:
     # A teammate's card is their one ask, shown only to them and whom it is
-    # for: the review never routes, nudges or quotes it onto another card.
+    # for: the tidy-up may settle it, but never routes, nudges or quotes it
+    # onto another card.
     from openexecutive.alerts.models import TEAM_RAISED_SOURCE
 
     old = _insert(db, "Pilot pricing", hours_ago=30, topic_tags=["pilot"])
     theirs = _insert(db, "Dana asks about pilot pricing", hours_ago=30, source=TEAM_RAISED_SOURCE, topic_tags=["pilot"])
-    assert [a.id for a in review.select_candidates(NOW, _settings(), db_path=db)] == [old]
     related = review.gather_evidence(alert_store.get_alert(old, db_path=db), NOW, db_path=db)  # type: ignore[arg-type]
     assert theirs not in {r.get("alert_id") for r in related.get("related_alerts") or []}
-    assert _apply(db, theirs, AlertVerdict(alert_id=theirs, verdict="stale"), evidence={}) == ""
+    v = _verdict(theirs, recommended_move="nudge", message="Ping")
+    assert _apply(db, theirs, v) == "relevant"
+    assert dms == []
     assert alert_store.get_alert(theirs, db_path=db).routed_to_person_id is None  # type: ignore[union-attr]
