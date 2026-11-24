@@ -281,8 +281,11 @@ class MailboxSource:
                 s for s in await self._own_inbox(item, email, now, db_path=db_path)
                 if s.dedup_key not in told
             ]
-        # Something came this poll, so it isn't the day nothing came.
-        quiet = None if signals else quiet_signal(item, now, db_path=db_path)
+        # Something came this poll, so it isn't the day nothing came. A
+        # teammate's watch with no inbox of theirs sees no outside mail at
+        # all (``mailbox.seen_by``), so it can't say nothing came either.
+        blind = not connected and not getattr(person, "is_principal", False)
+        quiet = None if signals or blind else quiet_signal(item, now, db_path=db_path)
         if quiet is not None:
             signals.append(quiet)
         if not signals:

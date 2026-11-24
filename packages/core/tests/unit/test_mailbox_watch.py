@@ -942,3 +942,31 @@ def test_an_email_to_the_executive_while_the_watch_was_off_is_not_told(
     assert fresh is not None
     assert asyncio.run(mailbox_source.MailboxSource().poll(fresh, db_path=db)) == []
     assert ms.executive_mail_for(item.id, db_path=db) == []
+
+
+def test_a_teammate_watch_that_sees_no_inbox_never_says_nothing_came(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from zoneinfo import ZoneInfo
+
+    _executive_inbox(monkeypatch)
+    monkeypatch.setattr(
+        "openexecutive.people.store.get_person",
+        lambda pid: SimpleNamespace(**{**vars(_person()), "is_principal": False}) if pid == OWNER else None,
+    )
+    zone = ZoneInfo("America/New_York")
+    monkeypatch.setattr("openexecutive.memory.workspace_settings.get_user_timezone", lambda *a, **k: zone)
+    set_at = datetime(2026, 11, 21, 15, 0, tzinfo=UTC)
+    day = set_at.date() + timedelta(days=4)
+    item = _email_watch(db, trigger={"from": ["robin@hale.example"]}, slug="robin-email")
+    assert item.id is not None
+    for key, value in mailbox.quiet_config(day, set_at).items():
+        ms.set_watchlist_config_key(item.id, key, value, db_path=db)
+    item = ms.get_watchlist_item(item.id, db_path=db)
+    assert item is not None
+    morning = datetime(day.year, day.month, day.day, 9, 0, tzinfo=zone)
+    monkeypatch.setattr(
+        mailbox_source, "datetime",
+        SimpleNamespace(now=lambda tz=None: morning.astimezone(UTC), fromisoformat=datetime.fromisoformat),
+    )
+    assert asyncio.run(mailbox_source.MailboxSource().poll(item, db_path=db)) == []
