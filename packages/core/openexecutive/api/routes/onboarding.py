@@ -112,9 +112,14 @@ async def start_onboarding() -> OnboardStatusResponse:
 
 @router.post("/onboard/answer", response_model=OnboardStatusResponse)
 async def submit_answer(body: OnboardAnswerRequest, request: Request) -> OnboardStatusResponse:
+    from openexecutive.api.routes.people import require_people_admin
+
     state = _wizard_sessions.get(body.session_id)
     if state is None:
         raise HTTPException(status_code=404, detail="Onboarding session not found")
+    # Its save adds people, their emails (the web sign-in allow-list) and the
+    # owner: People administration.
+    require_people_admin(request)
     if state.completed:
         raise HTTPException(status_code=400, detail="Onboarding already completed")
     if len(body.answer) > ONBOARD_ANSWER_MAX_CHARS:
@@ -131,19 +136,8 @@ async def submit_answer(body: OnboardAnswerRequest, request: Request) -> Onboard
     state = process_answer(state, body.answer)
 
     if state.completed:
-        from openexecutive.api.routes.chat import _caller_is_principal_or_unclaimed
         from openexecutive.onboarding.profile_builder import build_and_save_profile
 
-        # Saving adds people with their emails (the web sign-in allow-list)
-        # and a principal, so once there is an owner it is theirs to do — the
-        # People routes' rule. Rolled back like a failed build, so the owner
-        # can still finish this session.
-        if not _caller_is_principal_or_unclaimed(request):
-            _wizard_sessions[body.session_id] = snapshot
-            raise HTTPException(
-                status_code=403,
-                detail="Only the owner can save this form, because it adds people and their emails.",
-            )
         try:
             build_and_save_profile(state)
         except Exception as exc:
@@ -766,6 +760,7 @@ async def commit_interview(body: OnboardCommitRequest, request: Request) -> Comp
         check_owner_email,
         derive_org_structure,
         link_owner_email,
+        links_own_owner_email,
         owner_change_blocked,
         owner_email_blocked,
         reconcile_onboarding_departments,
@@ -863,6 +858,7 @@ async def commit_interview(body: OnboardCommitRequest, request: Request) -> Comp
     # with the address they signed in with (owner_email_blocked explains why).
     try:
         email_blocked = owner_email_blocked(owner_email, caller_person_id, caller_email)
+        links_own = links_own_owner_email(owner_email, caller_person_id, caller_email)
     except (OSError, sqlite3.Error) as exc:
         logger.warning("onboarding commit: owner lookup failed (%s)", type(exc).__name__)
         raise HTTPException(
@@ -876,6 +872,15 @@ async def commit_interview(body: OnboardCommitRequest, request: Request) -> Comp
                 "are the owner, use the email you signed in with; if not, leave it blank."
             ),
         )
+
+    # The save rewrites people and their roles, the departments, the goals and
+    # the company profile: People administration, like the People page. The
+    # one save that isn't is someone linking their own sign-in to the owner's
+    # entry, which makes them the owner.
+    if not links_own:
+        from openexecutive.api.routes.people import require_people_admin
+
+        require_people_admin(request)
 
     profile = derive_org_structure(profile, people, departments, goals)
 
@@ -902,19 +907,15 @@ async def commit_interview(body: OnboardCommitRequest, request: Request) -> Comp
 
     # The company's clock, from the device setup ran on, when it has none
     # yet: a later setup run never moves a clock someone set (Settings is
-    # where it changes). The zone is a company-wide setting, so it is saved
-    # for whoever Settings lets change it (the same role rule as
-    # PUT /workspace); setup itself still saves for anyone. Best effort, and
-    # audited like a Settings change.
+    # where it changes). Whoever may save setup may change company-wide
+    # settings too. Best effort, and audited like a Settings change.
     if body.timezone:
         try:
-            from openexecutive.api.routes.chat import _caller_is_principal_or_unclaimed
             from openexecutive.audit import log_event as audit_log
             from openexecutive.memory import workspace_settings
 
-            may_set = _caller_is_principal_or_unclaimed(request)
             # Off the event loop: a zone change re-times pending rows.
-            if may_set and await asyncio.to_thread(
+            if await asyncio.to_thread(
                 workspace_settings.set_timezone_if_unset, body.timezone
             ):
                 audit_log(

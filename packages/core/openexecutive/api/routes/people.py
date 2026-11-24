@@ -408,6 +408,16 @@ def _require_roster_owner(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Only the principal can change the People list")
 
 
+def require_people_admin(request: Request) -> None:
+    """People administration as a whole: the principal, or anyone while there
+    is none yet (``_require_roster_owner``). Setup's saves (the form and the
+    interview) write every person and role, the departments and the company
+    profile in one go, so they ask this rather than a rule of their own. Who
+    holds the owner seat and the owner's own address stay the owner's
+    (``onboarding.commit``), as on the People form."""
+    _require_roster_owner(request)
+
+
 @router.post("/people", response_model=Person, status_code=status.HTTP_201_CREATED)
 def create_person(body: PersonCreate, request: Request) -> Person:
     _require_roster_owner(request)
