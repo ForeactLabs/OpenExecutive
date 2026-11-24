@@ -453,11 +453,12 @@ def contacts_reachable_now() -> bool:
 
     Contacts are the team's: a turn someone on the team started on a
     verified surface (the principal or a teammate: the web app, their own
-    Slack or Discord, a verified private Telegram chat), an unattended run
+    Slack or Discord, a verified private Telegram chat, their own email its
+    mail service proved), an unattended run
     (Approvals decides what it sends, as Take the lead's gate does), or code
     inside ``grant_contact_egress`` sees them. A turn whose words may come
-    from someone not in People (an inbound email from outside — a From header
-    proves nothing — a page in another app, someone else's AI app) does not:
+    from someone not in People (an inbound email nothing proved — a From header
+    alone proves nothing — a page in another app, someone else's AI app) does not:
     there a contact is indistinguishable from someone who is not on the
     roster, so no refusal, listing or error message can reveal that one
     exists.
