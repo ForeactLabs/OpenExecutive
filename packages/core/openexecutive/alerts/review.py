@@ -780,6 +780,64 @@ class _MoveContext:
         return f"person {person_id}"
 
 
+NO_LONGER_WAITS_NOTE = "No longer needs an OK: today's rules let this go."
+
+
+# Marks a waiting step this re-check tidied away, so after an Undo it is
+# never tidied the same way again.
+_RECHECKED = "tidied_no_longer_waits"
+
+
+def _settled_no_longer_waits(
+    alert: Alert, *, now: datetime, summary: ReviewSummary, db_path: Path | None,
+) -> bool:
+    """Settle a waiting step's card when the step would not wait if it came
+    up now (``take_the_lead.still_waits``: the one gate asked again). It
+    goes to its reader's Tidied up with why, where Undo puts it back; the
+    step lapses and is not sent, since what it said is old by now. True
+    when settled. Never raises."""
+    try:
+        from openexecutive.memory import decision_ledger
+        from openexecutive.orchestrator import take_the_lead
+
+        instance_id = decision_ledger.instance_id_of(alert)
+        if instance_id is None:
+            return False
+        step = decision_ledger.get_decision_instance(instance_id, db_path=db_path)
+        if step is None or step.decision_class != take_the_lead.DECISION_CLASS:
+            return False
+        if step.status not in decision_ledger.OPEN_STATUSES:
+            return False
+        payload = json.loads(step.proposed_payload_json or "{}")
+        if not isinstance(payload, dict) or payload.get(_RECHECKED):
+            # Tidied this way once and put back with Undo: someone wants it
+            # to wait, so it is left to the review like any other card.
+            return False
+        if take_the_lead.still_waits(payload):
+            return False
+        if not decision_ledger.update_open_payload(
+            instance_id, {**payload, _RECHECKED: True}, expected_json=step.proposed_payload_json, db_path=db_path,
+        ):
+            return False
+        if not lifecycle.settle(alert, "dismissed", NO_LONGER_WAITS_NOTE, now=now, db_path=db_path):
+            return False
+        alert_store.set_review(
+            alert.id or -1, verdict="stale", note=NO_LONGER_WAITS_NOTE, recommended_move="close",
+            why_now="", due_at=None, reviewed_at=now.isoformat(), db_path=db_path,
+        )
+        token = _AUDIT_OWNER.set(_audit_owner(alert))
+        try:
+            _audit(EVENT_CLOSED, f"No longer waits: '{alert.headline[:80]}'",
+                   {"alert_id": alert.id, "decision_id": instance_id, "new_status": "dismissed"})
+        finally:
+            _AUDIT_OWNER.reset(token)
+        summary.closed += 1
+        return True
+    except Exception:
+        logger.exception("alert_review: couldn't ask again whether alert %s still waits", alert.id)
+        return False
+
+
 def _close_or_annotate(ctx: _MoveContext) -> str:
     """resolved / stale: close only on high confidence with named evidence,
     otherwise stamp ``likely_stale`` and leave it for the principal."""
@@ -1318,6 +1376,7 @@ async def _run_locked(
     except Exception:
         logger.exception("alert_review: candidate selection failed")
         return summary
+    candidates = [a for a in candidates if not _settled_no_longer_waits(a, now=now, summary=summary, db_path=db_path)]
     if not candidates:
         return summary
 

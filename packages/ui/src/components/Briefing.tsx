@@ -24,7 +24,7 @@ import {
   type RightNowRow,
   type Today,
 } from "@/lib/api";
-import { greeting, homeHeadline, teamOffTrack, waitingOnTeam, watchingRow } from "@/lib/briefingSummary";
+import { greeting, homeHeadline, teamOffTrack, waitingNote, waitingOnTeam, watchingRow } from "@/lib/briefingSummary";
 import { cardFromSearch } from "@/lib/cardMentions";
 import { FIRST_RUN_LINKS } from "@/lib/firstRun";
 import {
@@ -52,6 +52,7 @@ import { RightNowItem } from "./briefing/RightNow";
 import WaitingElsewhereRow from "./briefing/WaitingElsewhere";
 import HandMeSomething from "./briefing/HandMeSomething";
 import WatchingNext from "./briefing/WatchingNext";
+import { WaitingOnTeam } from "./briefing/WaitingOnTeam";
 import ProposalCard from "./briefing/ProposalCard";
 import RequestGroupCard from "./briefing/RequestGroupCard";
 import { TONE_TEXT, type ContinueHandler } from "./briefing/shared";
@@ -488,8 +489,6 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
   const tiles: Tile[] = [];
   if (today) {
     for (const c of today.to_act_on ?? []) tiles.push({ key: c.key, href: c.href, text: c.text });
-    const waitingOn = waitingOnTeam(otherProposals, today.people ?? []);
-    if (waitingOn) tiles.push({ key: "team", panel: "team", text: waitingOn.line });
     const watched = watchingRow(monitoringProposals);
     if (watched) tiles.push({ key: "monitoring", panel: "monitoring", text: watched.line, hint: watched.detail || undefined });
     if (solo && weeklyReview)
@@ -869,6 +868,14 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
                 </section>
               )}
 
+              {/* What waits on a teammate: its own short list, out of Needs
+                  you; a row opens the full cards. */}
+              <WaitingOnTeam
+                proposals={otherProposals}
+                people={today.people ?? []}
+                onOpen={() => setOpenPanel("team")}
+              />
+
               <DoneForYou
                 rows={doneRows}
                 onRetry={(row) => void handleRetryApproval(row)}
@@ -909,8 +916,8 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
               <SidePanel
                 open={openPanel === "team"}
                 onClose={() => setOpenPanel(null)}
-                title="Across the team"
-                subtitle="Waiting on someone else"
+                title={waitingOnTeam(otherProposals, today.people ?? [])?.title ?? "Waiting on someone else"}
+                subtitle={waitingNote(otherProposals, today.people ?? []) || undefined}
                 width="lg"
               >
                 <div className="space-y-4">

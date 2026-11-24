@@ -2732,19 +2732,7 @@ def hold(
     summary = summarize(tool, tool_input, mcp=mcp)
     training = hit.kind == TRAINING
     grant = allowance(tool, tool_input, mcp=mcp) if training else None
-    if training or (hit.kind == "level" and source == "chat"):
-        # Teaching it is the principal's: only they can allow anything. So is
-        # a step Careful held on a turn someone is in, the owner's own ask
-        # included: never a delegate's card.
-        approver = _principal_id()
-    elif _team_only(tool, tool_input):
-        approver = _approver_for(hit.kind, "\n".join(_strings(tool_input)), hit.reason)
-    else:
-        approver = _principal_id()
-    if source == "chat" and approver is not None and approver == _asker_id():
-        # Someone asked for it on their own turn: the owner's rule holds it
-        # for the owner, never for the one who asked.
-        approver = _principal_id()
+    approver = card_of(tool, tool_input, hit, source=source)
     # A teammate's own ask: the card says they asked (web and phone show
     # "<name> asked"), not that the Executive wants to.
     asker = _teammate_asking() if source == "chat" else None
@@ -2847,6 +2835,79 @@ def hold(
 
 
 _HOLD_KEY_TRIES = 50
+
+
+def card_of(tool: str, tool_input: dict[str, Any], hit: Hit, *, source: str) -> int | None:
+    """Whose list a step held for ``hit`` goes on."""
+    if hit.kind == TRAINING or (hit.kind == "level" and source == "chat"):
+        # Teaching it is the principal's: only they can allow anything. So is
+        # a step Careful held on a turn someone is in, the owner's own ask
+        # included: never a delegate's card.
+        return _principal_id()
+    approver = (
+        _approver_for(hit.kind, "\n".join(_strings(tool_input)), hit.reason)
+        if _team_only(tool, tool_input) else _principal_id()
+    )
+    if source == "chat" and approver is not None and approver == _asker_id():
+        # Someone asked for it on their own turn: the owner's rule holds it
+        # for the owner, never for the one who asked.
+        return _principal_id()
+    return approver
+
+
+def only_to(tool: str, tool_input: dict[str, Any], hit: Hit, person_id: int | None) -> bool:
+    """Whether the step only sends ``person_id`` a message, held for a topic
+    whose card goes to whoever holds its approval range (money, contracts,
+    people decisions, board). When that person is who it's to, approving it
+    would only show them what it says: there is nothing to approve, so it
+    goes straight to them, as a message to the owner always has
+    (``_only_to_principal``). A Waits rule, Careful or In training is the
+    owner's own say-so, whoever the card is on, so it still waits."""
+    if person_id is None or tool not in _DIRECT_MESSAGE_TOOLS:
+        return False
+    if hit.rule_id is not None or hit.kind in ("rule", "level", TRAINING):
+        return False
+    if not approval_ranges(hit.kind, "\n".join(_strings(tool_input))):
+        return False
+    person = _target_person(tool, tool_input)
+    return person is not None and person.id == person_id and person.kind == "team"
+
+
+def still_waits(payload: dict[str, Any]) -> bool:
+    """Whether a held step nobody asked for would still wait if it came up
+    now: the gate asked again (``_hit``), or a message only to the person
+    its card is on (``only_to``). The tidy-up (``alerts.review``) asks this
+    of every waiting step, so a step whose hold no longer applies (a check
+    fixed since, the level raised, a Goes rule added) leaves Needs you
+    instead of waiting out its days. True for anything it can't ask again:
+    a step someone asked for or scheduled, one that isn't a held step, or an error."""
+    try:
+        if not payload.get("held") or payload.get("source") in ("chat", "scheduled"):
+            # Asked for, or scheduled (perhaps by the owner): sending on would
+            # do what someone wanted, and dropping it would lose their ask.
+            return True
+        if payload.get("asked_by_person_id") or payload.get("requested_by_person_id"):
+            return True
+        tool = str(payload.get("tool") or "")
+        tool_input = payload.get("input")
+        mcp = bool(payload.get("mcp"))
+        if not tool or not isinstance(tool_input, dict):
+            return True
+        if mcp:
+            if _mail_only_to_principal(tool, tool_input):
+                return False
+        elif _only_to_principal(tool, tool_input):
+            return False
+        hit, _ = _hit(tool, tool_input, mcp=mcp)
+        if hit is None:
+            return False
+        # Whose card it would be on today, as the gate would put it.
+        return mcp or not only_to(
+            tool, tool_input, hit, card_of(tool, tool_input, hit, source=str(payload.get("source") or "")),
+        )
+    except Exception:
+        logger.warning("take_the_lead: couldn't ask the gate again about a waiting step", exc_info=True)
+        return True
 
 
 def _shown_in(approver: int | None) -> str | None:
@@ -2969,6 +3030,9 @@ async def _gated(name: str, inner: _Handler, tool_input: dict[str, Any], *, sour
         hit = None
     else:
         hit, allowed = _hit(name, tool_input, mcp=mcp)
+    if hit is not None and not mcp and only_to(name, tool_input, hit, card_of(name, tool_input, hit, source=source)):
+        # A message only to the person its card would go to: nothing to approve.
+        hit = None
     if hit is not None and mcp and not str(name or "").strip():
         # A connected-app call naming no tool is nothing anyone
         # could approve; an empty "The Executive wants to:" card helps no one.
