@@ -27,6 +27,7 @@ text.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -136,7 +137,20 @@ async def _read_back_to(client: Any, since: datetime) -> list[Any]:
 
 
 def _dedup_key(watch_id: int, message: Any) -> str:
-    return f"mailbox:{watch_id}:{message.id}"
+    """An own-inbox email's key: its Message-ID's (``_rfc_key``), the same
+    as the Executive's copy of it, so one email sent to both is told once
+    whichever copy is read first; else its own id."""
+    rfc = _rfc_key(watch_id, str(getattr(message, "message_id_header", "") or ""))
+    return rfc or f"mailbox:{watch_id}:{message.id}"
+
+
+def _rfc_key(watch_id: int, header: str) -> str:
+    """The key of the email whose Message-ID header is ``header`` ("" for
+    none): the same in every mailbox it reached."""
+    value = header.strip().strip("<>").strip().lower()
+    if not value:
+        return ""
+    return f"mailbox:{watch_id}:rfc:{hashlib.sha256(value.encode()).hexdigest()[:32]}"
 
 
 def summary_of(message: Any) -> str:
@@ -170,7 +184,10 @@ def executive_signals(item: WatchlistItem, now: datetime, *, db_path: Path | Non
     Those already told are forgotten."""
     assert item.id is not None
     kept = store.executive_mail_for(item.id, db_path=db_path)
-    keys = {m["message_id"]: _executive_dedup_key(item.id, m["message_id"]) for m in kept}
+    keys = {
+        m["message_id"]: _rfc_key(item.id, m.get("rfc_id", "")) or _executive_dedup_key(item.id, m["message_id"])
+        for m in kept
+    }
     told = store.recorded_dedup_keys(list(keys.values()), db_path=db_path)
     store.drop_executive_mail(item.id, [mid for mid, key in keys.items() if key in told], db_path=db_path)
     signals: list[Signal] = []
@@ -248,12 +265,14 @@ class MailboxSource:
         email = normalize_email(person.email)
         connected = await gmail_status(email) == "connected"
         if connected:
-            # One email sent to them and the Executive both is told once:
-            # on the card of its thread, from the Executive's copy.
-            told = {s.normalized_summary for s in signals}
+            # One email sent to them and the Executive both is told once,
+            # by its Message-ID (``_dedup_key``): read in the same poll, from
+            # the Executive's copy, on the card of its thread. Its key is
+            # still recorded, so the read point moves past it.
+            told = {s.dedup_key for s in signals}
             signals += [
                 s for s in await self._own_inbox(item, email, now, db_path=db_path)
-                if s.normalized_summary not in told
+                if s.dedup_key not in told
             ]
         # Something came this poll, so it isn't the day nothing came.
         quiet = None if signals else quiet_signal(item, now, db_path=db_path)

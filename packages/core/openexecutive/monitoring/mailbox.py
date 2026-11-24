@@ -174,13 +174,15 @@ def seen_by(person_id: int, *, private: bool, mail_of: int | None, principal_id:
 async def note_executive_mail(
     *, message_id: str, thread_id: str, from_addr: str, from_name: str, subject: str,
     private: bool, mail_of: int | None, proven: Callable[[], Awaitable[bool | None]] | None = None,
-    received_at: datetime | None = None,
+    received_at: datetime | None = None, header_id: Callable[[], Awaitable[str]] | None = None,
 ) -> int:
     """Check one email the Executive got against every email watch and keep
     it for each watch it matches whose owner could see it (``seen_by``): the
     watch's next poll tells them. ``proven`` says whether its sender is who
     it says, asked only when a watch matches: an email nothing proved is told
-    without its thread, so a forged one never joins a card. Returns how many
+    without its thread, so a forged one never joins a card. ``header_id``
+    reads its Message-ID, also only on a match: the same email in the
+    watcher's own inbox is then told once (``sources.mailbox``). Returns how many
     watches it matched. Never raises: the email is handled whatever happens
     here."""
     try:
@@ -195,9 +197,15 @@ async def note_executive_mail(
                 sure = await proven() is True
             except Exception:  # noqa: BLE001 - unproven is the safe reading
                 logger.warning("email watch: couldn't tell who sent message=%s", message_id, exc_info=True)
+        rfc_id = ""
+        if header_id is not None:
+            try:
+                rfc_id = await header_id()
+            except Exception:  # noqa: BLE001 - without it, only a second copy is the risk
+                logger.warning("email watch: couldn't read the Message-ID of message=%s", message_id, exc_info=True)
         _keep(
             kept, message_id=message_id, thread_id=thread_id if sure else "", from_addr=from_addr,
-            from_name=from_name, subject=subject, received_at=received_at,
+            from_name=from_name, subject=subject, received_at=received_at, rfc_id=rfc_id,
         )
         return len(kept)
     except Exception:  # noqa: BLE001 - a watch missing one email is the worst case
@@ -232,7 +240,7 @@ def _watches_for(
 
 def _keep(
     watches: list[WatchlistItem], *, message_id: str, thread_id: str, from_addr: str, from_name: str,
-    subject: str, received_at: datetime | None,
+    subject: str, received_at: datetime | None, rfc_id: str = "",
 ) -> None:
     from openexecutive.monitoring import store
     from openexecutive.monitoring.pipeline import scan_soon
@@ -242,7 +250,7 @@ def _keep(
         assert watch.id is not None
         store.add_executive_mail(
             watch.id, message_id=message_id, thread_id=thread_id, from_addr=from_addr.strip().lower(),
-            from_name=from_name, subject=subject, received_at=at,
+            from_name=from_name, subject=subject, received_at=at, rfc_id=rfc_id,
         )
         store.poll_soon(watch.id)
     scan_soon()

@@ -167,6 +167,9 @@ def initialize_db(db_path: Path | None = None) -> None:
                 from_name TEXT NOT NULL DEFAULT '',
                 subject TEXT NOT NULL DEFAULT '',
                 received_at TEXT NOT NULL,
+                -- Its Message-ID header: the same email in the watcher's
+                -- own inbox is told once (sources.mailbox).
+                rfc_id TEXT NOT NULL DEFAULT '',
                 PRIMARY KEY (watchlist_id, message_id)
             );
         """)
@@ -736,16 +739,16 @@ def delete_watchlist_item(item_id: int, db_path: Path | None = None) -> bool:
 
 def add_executive_mail(
     item_id: int, *, message_id: str, thread_id: str, from_addr: str, from_name: str, subject: str,
-    received_at: str, db_path: Path | None = None,
+    received_at: str, rfc_id: str = "", db_path: Path | None = None,
 ) -> None:
     """Keep an email the Executive got that matches email watch ``item_id``
     for its next poll to tell (once per email)."""
     with _get_conn(db_path) as conn:
         conn.execute(
             "INSERT OR IGNORE INTO mailbox_executive_mail "
-            "(watchlist_id, message_id, thread_id, from_addr, from_name, subject, received_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (item_id, message_id, thread_id, from_addr, from_name[:200], subject[:300], received_at),
+            "(watchlist_id, message_id, thread_id, from_addr, from_name, subject, received_at, rfc_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (item_id, message_id, thread_id, from_addr, from_name[:200], subject[:300], received_at, rfc_id[:500]),
         )
 
 
@@ -765,11 +768,11 @@ def executive_mail_for(item_id: int, *, db_path: Path | None = None) -> list[dic
     ``EXECUTIVE_MAIL_PER_POLL`` (the rest wait for the next poll)."""
     with _get_conn(db_path) as conn:
         rows = conn.execute(
-            "SELECT message_id, thread_id, from_addr, from_name, subject, received_at "
+            "SELECT message_id, thread_id, from_addr, from_name, subject, received_at, rfc_id "
             "FROM mailbox_executive_mail WHERE watchlist_id = ? ORDER BY received_at, message_id LIMIT ?",
             (item_id, EXECUTIVE_MAIL_PER_POLL),
         ).fetchall()
-    names = ("message_id", "thread_id", "from_addr", "from_name", "subject", "received_at")
+    names = ("message_id", "thread_id", "from_addr", "from_name", "subject", "received_at", "rfc_id")
     return [{k: str(r[k]) for k in names} for r in rows]
 
 

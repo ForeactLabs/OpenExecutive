@@ -800,3 +800,77 @@ def test_mail_that_comes_on_the_day_is_told_without_the_nothing_came_ping(
     monkeypatch.setattr(mailbox_source, "datetime", SimpleNamespace(now=lambda tz=None: at.astimezone(UTC)))
     signals = asyncio.run(mailbox_source.MailboxSource().poll(item, db_path=db))
     assert [s.normalized_summary for s in signals] == ["Robin Hale: December rent, $480 due Tue Dec 1"]
+
+
+def _both_inboxes(monkeypatch: pytest.MonkeyPatch, messages: list[Any]) -> None:
+    """The owner's own inbox is connected and holds ``messages``."""
+    _patch_mailbox(monkeypatch, _Mailbox(messages, []))
+    monkeypatch.setattr(
+        "openexecutive.people.store.find_principal_person", lambda **_: SimpleNamespace(id=PRINCIPAL),
+    )
+    monkeypatch.setattr("openexecutive.monitoring.pipeline.scan_soon", lambda *a, **k: True)
+
+
+def _rent(item: Any, *, id: str = "own1", header: str = "<RENT-1@hale.example>") -> Any:
+    at = (datetime.fromisoformat(item.created_at) + timedelta(minutes=1)).isoformat()
+    return gm.MailMessage(
+        id=id, thread_id="ot1", from_addr="robin@hale.example", from_name="Robin Hale",
+        subject="December rent, $480 due Tue Dec 1", received_at=at, message_id_header=header,
+    )
+
+
+def _header(value: str) -> Any:
+    async def read() -> str:
+        return value
+
+    return read
+
+
+def _poll_and_record(item_id: int, db: Path) -> list[Signal]:
+    fresh = ms.get_watchlist_item(item_id, db_path=db)
+    assert fresh is not None
+    signals = asyncio.run(mailbox_source.MailboxSource().poll(fresh, db_path=db))
+    for signal in signals:
+        ms.insert_signal(signal, db_path=db)
+    return signals
+
+
+def test_an_email_to_them_and_the_executive_is_told_once_from_the_executives_copy(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Robin writes to the owner and cc's the Executive: one card, on the
+    thread, and the next poll reads on past it rather than telling it again."""
+    item = _email_watch(db, trigger={"from": ["robin@hale.example"]}, slug="robin-email")
+    assert item.id is not None
+    _both_inboxes(monkeypatch, [_rent(item)])
+    assert _robin(mail_of=OWNER, header_id=_header("<rent-1@hale.example>")) == 1
+
+    first = _poll_and_record(item.id, db)
+    assert [s.source_external_id for s in first] == ["exec:x1"]
+    assert first[0].raw_payload["mail_thread"] == "th1"
+    assert _poll_and_record(item.id, db) == []
+    fresh = ms.get_watchlist_item(item.id, db_path=db)
+    assert fresh is not None and mailbox_source._read_through(fresh, db_path=db) is not None
+
+
+def test_an_email_read_in_their_own_inbox_first_is_not_told_again_from_the_executives(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    item = _email_watch(db, trigger={"from": ["robin@hale.example"]}, slug="robin-email")
+    assert item.id is not None
+    _both_inboxes(monkeypatch, [_rent(item)])
+    assert [s.source_external_id for s in _poll_and_record(item.id, db)] == ["own1"]
+    # The Executive's copy arrives a minute later.
+    assert _robin(mail_of=OWNER, header_id=_header("<rent-1@hale.example>")) == 1
+    assert _poll_and_record(item.id, db) == []
+    assert ms.executive_mail_for(item.id, db_path=db) == []
+
+
+def test_two_emails_with_the_same_sender_and_subject_are_both_told(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    item = _email_watch(db, trigger={"from": ["robin@hale.example"]}, slug="robin-email")
+    assert item.id is not None
+    _both_inboxes(monkeypatch, [_rent(item, header="<rent-2@hale.example>")])
+    assert _robin(mail_of=OWNER, header_id=_header("<rent-1@hale.example>")) == 1
+    assert sorted(s.source_external_id for s in _poll_and_record(item.id, db)) == ["exec:x1", "own1"]

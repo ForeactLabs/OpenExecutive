@@ -864,7 +864,10 @@ async def _handle_mail(
         # time a sign-up email comes in"): the principal, who reads the
         # Executive's inbox (sign-in codes and resets come this way). Nothing
         # proves who sent it, so it joins no card.
-        await _note_watches(msg, private=True, mail_of=None, proven=None)
+        await _note_watches(
+            msg, private=True, mail_of=None, proven=None,
+            header_id=_header_id_reader(gateway, msg, in_mailbox=mailbox is not None),
+        )
         return _SKIPPED
     if not message_id.strip("0"):
         # No real message behind it: a fetch of id "0" returns an error text,
@@ -1097,6 +1100,7 @@ async def _handle_mail(
         await _note_watches(
             msg, private=private, mail_of=teammate_id,
             proven=_known_proof if teammate_authenticated is True else prove,
+            header_id=_header_id_reader(gateway, msg, in_mailbox=mailbox is not None),
         )
         outcome = "turn failed"
         try:
@@ -1151,18 +1155,52 @@ async def _handle_mail(
 
 async def _note_watches(
     msg: Any, *, private: bool, mail_of: int | None, proven: Callable[[], Awaitable[bool | None]] | None,
+    header_id: Callable[[], Awaitable[str]] | None = None,
 ) -> None:
     """Check the email against the email watches (``monitoring.mailbox``):
     each one it matches whose owner could see it tells them, on the card of
     its mail thread only when ``proven`` (asked only on a match) says the
-    sender is who it says. Never raises."""
+    sender is who it says. ``header_id`` (also asked only on a match) reads
+    its Message-ID, so the same email in the watcher's own inbox is told
+    once. Never raises."""
     from openexecutive.monitoring.mailbox import note_executive_mail
 
     await note_executive_mail(
         message_id=msg.message_id, thread_id=msg.thread_id or "", from_addr=msg.from_addr,
         from_name="" if msg.from_name.strip().lower() == msg.from_addr.lower() else msg.from_name,
-        subject=msg.subject, private=private, mail_of=mail_of, proven=proven,
+        subject=msg.subject, private=private, mail_of=mail_of, proven=proven, header_id=header_id,
     )
+
+
+def _message_id_in(text: str) -> str:
+    """The Message-ID among the header lines of ``text`` (a fetched message
+    or raw MIME; never its body, which the sender writes), or ""."""
+    header, _body, _attachments = _split_gmail_content(text)
+    for line in header:
+        name, sep, value = line.partition(":")
+        if sep and name.strip().lower() == "message-id" and value.strip():
+            return value.strip().split()[0]
+    return ""
+
+
+def _header_id_reader(gateway: Any, msg: Any, *, in_mailbox: bool) -> Callable[[], Awaitable[str]]:
+    """Reads the email's Message-ID header: from its own text when that
+    carries it, else, for mail in the Executive's mailbox, from the mailbox
+    (Gmail's raw message, Outlook's headers). "" when it can't be read."""
+
+    async def read() -> str:
+        found = _message_id_in(str(getattr(msg, "raw_text", "") or ""))
+        if found or not in_mailbox or gateway is None:
+            return found
+        from openexecutive.integrations import fact_confirmation
+        from openexecutive.integrations.workspace.registry import get_mail_provider
+
+        if get_mail_provider().name == "microsoft":
+            headers = await fact_confirmation.read_outlook_headers(gateway, msg.message_id)
+            return str(headers.get("Message-ID") or "").strip() if headers is not None else ""
+        return _message_id_in(await fact_confirmation.read_raw(gateway, msg.message_id))
+
+    return read
 
 
 async def _known_proof() -> bool:
