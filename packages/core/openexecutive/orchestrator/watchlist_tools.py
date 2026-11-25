@@ -732,6 +732,9 @@ async def handle_add_watchlist_entry(tool_input: dict[str, Any]) -> str:
     route_to = _default_person(for_ids)
     if signal_type != SOURCE_KIND_MAILBOX and (own := _own_watch_of(route_to, for_ids)) is not None:
         config = mailbox.own_config(config, own)
+        # Hidden like an email watch, so named like one: no one else's watch
+        # name runs into it, and trying names can't find it.
+        slug = mailbox.own_slug(slug)
 
     try:
         new_id = ms.insert_watchlist_item(
