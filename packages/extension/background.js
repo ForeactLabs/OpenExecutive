@@ -271,6 +271,12 @@ async function keepTexts() {
   if (id !== null) {
     tab = await chrome.tabs.create({ windowId: id, url: MESSAGES, pinned: true, active: false });
   } else {
+    // A window of its own only as keepConnected would open one: never once
+    // the person closed it or turned staying connected off, and never into
+    // a Chrome with no windows open.
+    const { stayConnected } = await chrome.storage.local.get("stayConnected");
+    const { ownClosed } = await chrome.storage.session.get("ownClosed");
+    if (stayConnected === false || ownClosed === true || !(await chrome.tabs.query({})).length) return null;
     const win = await makeOwnWindow(MESSAGES);
     tab = win.tabs && win.tabs[0];
     if (tab) await chrome.tabs.update(tab.id, { pinned: true });
@@ -347,7 +353,7 @@ async function sendOneText(send) {
   const number = typeof send.number === "string" ? send.number : "";
   if (!text.trim() || (!key && !number)) return { ok: false, error: "Nothing to send, or no one to send it to." };
   const tab = await keepTexts();
-  if (!tab) return { ok: false, error: "Texts are off in this browser." };
+  if (!tab) return { ok: false, error: "Google Messages isn't open in Chrome. Nothing went." };
   const url = key ? `${MESSAGES}/${encodeURIComponent(key)}` : `${MESSAGES}/new`;
   // Google Messages runs in one tab at a time, so this may be the person's
   // own. Never take it from under a half-typed text of theirs.

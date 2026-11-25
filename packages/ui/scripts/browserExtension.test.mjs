@@ -493,6 +493,13 @@ test("texts: a send never takes the person's own tab from under a half-typed tex
   assert.ok(texts.includes('msg.type === "texts_busy"'));
 });
 
+test("texts: Google Messages never reopens a window the person closed", () => {
+  const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
+  const keep = bg.slice(bg.indexOf("async function keepTexts"), bg.indexOf("const TEXTS_ALARM"));
+  const guard = keep.indexOf("if (stayConnected === false || ownClosed === true || !(await chrome.tabs.query({})).length) return null;");
+  assert.ok(guard > 0 && guard < keep.indexOf("makeOwnWindow(MESSAGES)"));
+});
+
 test("texts: the conversation is checked again right before Send", () => {
   const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
   const body = texts.slice(texts.indexOf("async function send(msg)"), texts.indexOf("chrome.runtime.onMessage.addListener((msg, sender, reply)"));
