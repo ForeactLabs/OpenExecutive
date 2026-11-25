@@ -365,6 +365,12 @@ def test_a_message_goes_to_the_person_its_title_names() -> None:
         "Get Q3 numbers from Sam",
     ]
     assert dropped == {"title names someone other than its To": 3}
+    # A To written as the teammate's address goes to them.
+    by_address = [{"kind": "message", "title": "I can ask Sam to send the deck", "source": "x",
+                   "preview": [{"label": "To", "value": "slee@co.example"}]}]
+    inputs = maker.Inputs("INBOUND\n- x\n\nTEAM\n- Sam Lee <slee@co.example>", calendar=False, apps=[],
+                          team=[("Sam Lee", "slee@co.example")])
+    assert [o.title for o in maker.check(by_address, inputs, set())] == ["I can ask Sam to send the deck"]
 
 
 def test_check_keeps_only_steps_that_can_be_done() -> None:
