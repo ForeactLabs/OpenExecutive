@@ -1135,6 +1135,20 @@ def test_a_miss_runs_the_fixes_even_when_nothing_was_left_undone(db: Path, roste
     assert "learn_lesson" in {t["name"] for t in provider.calls[0]["tools"]}
 
 
+def test_a_lesson_with_a_bad_turn_number_is_refused_not_a_crash(db: Path, roster: SimpleNamespace,
+                                                                provider: _Provider) -> None:
+    provider.grades = [{"turn": 1, "verdict": "miss", "kind": "company", "cause": "fact",
+                        "wanted": "The right opening time.", "quote": "no we open at ten"}]
+    _record(roster.principal, "no we open at ten on Saturdays", "Noted.")
+    lesson = {"lesson": "We open at ten on Saturdays.", "source_quote": "no we open at ten"}
+    provider.script = [[("learn_lesson", {**lesson, "turn": "2nd"}), ("learn_lesson", {**lesson, "turn": 9}),
+                        ("learn_lesson", {**lesson, "turn": 1})]]
+    _review(db)
+    first, second, third = _tool_results(provider)
+    assert first["status"] == second["status"] == "refused"
+    assert third["status"] == "kept"
+
+
 def test_the_grader_is_asked_whether_anything_was_left_undone() -> None:
     schema = cr.GRADE_TOOL["input_schema"]
     assert "left_undone" in schema["required"]

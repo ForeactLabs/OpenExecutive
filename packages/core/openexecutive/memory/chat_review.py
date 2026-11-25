@@ -1982,8 +1982,13 @@ async def _apply(
     if name == "learn_lesson":
         from openexecutive.memory import lessons
 
-        number = int(tool_input.get("turn") or 0)
-        row_id = int(turns[number - 1]["id"]) if turns and 0 < number <= len(turns) else None
+        try:
+            number = int(tool_input.get("turn") or 0)
+        except (TypeError, ValueError):
+            number = 0
+        if not turns or not 0 < number <= len(turns):
+            return json.dumps({"status": "refused", "detail": "turn must be the number of a turn shown"})
+        row_id = int(turns[number - 1]["id"])
         text = str(tool_input.get("lesson") or "")
         # A lesson comes from their own words and says what they say: text
         # a reply quoted (mail, a document) is never one.
