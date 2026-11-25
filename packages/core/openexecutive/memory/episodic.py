@@ -1869,10 +1869,10 @@ def _queue_next(conn: sqlite3.Connection, action_id: int) -> int | None:
         "INSERT INTO scheduled_actions "
         "(created_at, run_at, channel, channel_ref, intent_text, originating_session_id, "
         "department, kind, assigned_to_person_id, scope_key, required_scope, status, "
-        "created_by_person_id, repeat, read_since, title) "
+        "created_by_person_id, repeat, title, read_since) "
         "SELECT ?, ?, channel, channel_ref, intent_text, originating_session_id, department, kind, "
         "assigned_to_person_id, scope_key, required_scope, 'pending', created_by_person_id, "
-        "repeat, ?, title FROM scheduled_actions WHERE id = ?",
+        "repeat, title, ? FROM scheduled_actions WHERE id = ?",
         (now, run_at.isoformat(), now, action_id),
     )
     return int(cursor.lastrowid or 0) or None
