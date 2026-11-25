@@ -764,7 +764,8 @@ async def _change_setting(request: Any, setting: str, value: str) -> str:
     on = _on(value)
     if on and setting in _AS_YOU:
         # Why it couldn't work is said now, so no card is left that can only fail.
-        await _call(delegation.check_can_turn_on, request, inbox=setting == "inbox_drafts")
+        if await _call(delegation.check_can_turn_on, request, inbox=setting == "inbox_drafts"):
+            return f"{label} is already on"
         _own_tap(f"Turning {label} on takes your tap.")
     if setting == "act_as_me":
         await delegation.update_delegation(request, delegation.DelegationUpdate(enabled=on))

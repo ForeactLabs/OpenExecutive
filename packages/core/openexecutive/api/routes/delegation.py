@@ -928,10 +928,18 @@ async def _can_turn_on(person: Person, *, inbox: bool) -> None:
         raise _refuse(409, _BLOCKING_CODES.get(status, "gmail_error"), STATUS_MESSAGES[status])
 
 
-async def check_can_turn_on(request: Request, *, inbox: bool) -> None:
+async def check_can_turn_on(request: Request, *, inbox: bool) -> bool:
     """``_can_turn_on`` for the caller, so a chat asking to turn either on
-    hears why it can't before any card is left for their tap."""
-    await _can_turn_on(_caller(request), inbox=inbox)
+    hears why it can't before any card is left for their tap. True when it
+    is already on, so there is nothing to change."""
+    from openexecutive.delegation import inbox as inbox_watch
+
+    person = _caller(request)
+    person_id = _person_id(person)
+    if inbox_watch.get_watch(person_id).enabled if inbox else is_enabled(person_id):
+        return True
+    await _can_turn_on(person, inbox=inbox)
+    return False
 
 
 def _set_inbox(person_id: int, enabled: bool) -> None:

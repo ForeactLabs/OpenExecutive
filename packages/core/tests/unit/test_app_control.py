@@ -553,6 +553,7 @@ def test_turning_on_as_you_from_chat_takes_the_persons_tap(
     roster: dict[str, Any], client: TestClient, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from openexecutive.api.routes import delegation as delegation_route
+    from openexecutive.delegation import inbox
     from openexecutive.delegation.settings import is_enabled
 
     async def connected(_email: Any) -> str:
@@ -570,8 +571,14 @@ def test_turning_on_as_you_from_chat_takes_the_persons_tap(
     res = client.post(f"/decisions/{held['decision_id']}/approve", json={}, headers=OWNER)
     assert res.status_code == 200, res.text
     assert is_enabled(owner.id)
-    out = _run(app_control.handle_do_in_app, {"action": "change_setting", "id": "inbox_drafts", "value": "on"}, session)
-    assert out.get("status") == "waiting_for_approval", out
+    out = _run(app_control.handle_do_in_app, {"action": "change_setting", "id": "act_as_me", "value": "on"}, session)
+    assert out == {"status": "done", "did": "As you is already on"}, out
+    held = _run(app_control.handle_do_in_app, {"action": "change_setting", "id": "inbox_drafts", "value": "on"}, session)
+    assert held.get("status") == "waiting_for_approval", held
+    assert not inbox.get_watch(owner.id).enabled
+    res = client.post(f"/decisions/{held['decision_id']}/approve", json={}, headers=OWNER)
+    assert res.status_code == 200, res.text
+    assert inbox.get_watch(owner.id).enabled
     # Turning it off is done in the turn.
     out = _run(app_control.handle_do_in_app, {"action": "change_setting", "id": "act_as_me", "value": "off"}, session)
     assert out["status"] == "done", out
