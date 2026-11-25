@@ -814,3 +814,20 @@ def test_a_text_that_didnt_go_from_a_turn_no_chat_shows_is_their_card(ids: dict[
     tx.take_send(owner)
     tx.settle_send(owner, ok.id, status=tx.SENT, conversation_key="k7")
     assert len([a for a in list_alerts() if a.source == tx.TEXTS_SOURCE]) == 1
+
+
+def test_texts_reported_after_turning_off_are_never_kept(ids: dict[str, int], monkeypatch: pytest.MonkeyPatch) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    real = tx.get_settings
+
+    def checked_then_off(person_id: int, **kw: Any) -> Any:
+        got = real(person_id, **kw)
+        monkeypatch.setattr(tx, "get_settings", real)
+        tx.save_settings(person_id, enabled=False)
+        return got
+
+    monkeypatch.setattr(tx, "get_settings", checked_then_off)
+    assert tx.record(owner, [_item("a")]) == []
+    monkeypatch.setattr(tx, "get_settings", real)
+    assert tx.conversations(owner) == []

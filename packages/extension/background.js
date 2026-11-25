@@ -342,6 +342,13 @@ async function sendOneText(send) {
   const tab = await keepTexts();
   if (!tab) return { ok: false, error: "Texts are off in this browser." };
   const url = key ? `${MESSAGES}/${encodeURIComponent(key)}` : `${MESSAGES}/new`;
+  // Google Messages runs in one tab at a time, so this may be the person's
+  // own. Never take it from under a half-typed text of theirs.
+  const { textsTabId } = await chrome.storage.session.get("textsTabId");
+  if (tab.id !== textsTabId) {
+    const busy = await chrome.tabs.sendMessage(tab.id, { type: "texts_busy" }).catch(() => null);
+    if (busy && busy.busy) return { ok: false, error: "They were typing in Google Messages. Nothing went." };
+  }
   await chrome.tabs.update(tab.id, { url });
   await waitLoaded(tab.id);
   // The page script starts after the page loads: ask until it answers.

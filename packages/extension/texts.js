@@ -348,6 +348,12 @@
       reply({ ok: true, paired: paired() });
       return false;
     }
+    if (msg.type === "texts_busy") {
+      // Something half-typed in the box: the person is writing here.
+      const box = first(document, COMPOSE);
+      reply({ busy: Boolean(box && T.squeeze(box.value !== undefined ? box.value : textOf(box), 10)) });
+      return false;
+    }
     return false;
   });
 })();

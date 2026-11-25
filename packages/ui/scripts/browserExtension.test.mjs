@@ -468,6 +468,14 @@ test("texts: new texts count as seen only once the site took them", () => {
   assert.ok(!report.includes("[SEEN_KEY]: out.seen"));
 });
 
+test("texts: a send never takes the person's own tab from under a half-typed text", () => {
+  const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
+  const one = bg.slice(bg.indexOf("async function sendOneText"), bg.indexOf("function waitLoaded"));
+  assert.ok(one.indexOf('{ type: "texts_busy" }') > 0 && one.indexOf('{ type: "texts_busy" }') < one.indexOf("chrome.tabs.update(tab.id, { url })"));
+  const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
+  assert.ok(texts.includes('msg.type === "texts_busy"'));
+});
+
 test("texts: the conversation is checked again right before Send", () => {
   const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
   const body = texts.slice(texts.indexOf("async function send(msg)"), texts.indexOf("chrome.runtime.onMessage.addListener((msg, sender, reply)"));

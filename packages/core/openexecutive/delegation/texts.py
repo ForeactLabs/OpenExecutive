@@ -283,6 +283,12 @@ def record(person_id: int, items: list[Incoming], *, db_path: Path | None = None
     now = _now()
     cutoff = now - timedelta(days=KEEP_DAYS)
     with _connect(db_path) as conn:
+        # Turned off since the check above: off forgets them, so keep none.
+        conn.commit()
+        conn.execute("BEGIN IMMEDIATE")
+        on = conn.execute(f"SELECT enabled FROM {TEXT_SETTINGS_TABLE} WHERE person_id=?", (person_id,)).fetchone()
+        if on is None or not on["enabled"]:
+            return []
         _prune(conn, person_id)
         for item in items[:MAX_REPORT]:
             if not str(item.conversation or "").strip() or not str(item.ref or "").strip():
