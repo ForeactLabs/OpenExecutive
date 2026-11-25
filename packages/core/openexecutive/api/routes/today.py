@@ -2539,12 +2539,13 @@ def _header_context(
     # the day it was saved, an open item after that.
     raise_lines: list[str] = []
     raise_older: list[str] = []
+    fixed_lines: list[str] = []
     leave_out = ""
     dismissed: list[Any] = []
     if own:
         from openexecutive.briefing import right_now
 
-        raise_lines, raise_older, leave_out = brief_requests.raise_split(tz)
+        raise_lines, raise_older, fixed_lines, leave_out = brief_requests.raise_split(tz, principal_id())
         # What they cleared from Right now today stays out of the next one.
         dismissed = right_now.dismissed(narrative_cache.DEFAULT_SCOPE, narrative_cache.local_today())
     # A person's own header reads their private decisions too; the whole
@@ -2568,6 +2569,7 @@ def _header_context(
             standing_facts=standing_facts,
             raise_lines=raise_lines,
             raise_older=raise_older,
+            fixed_lines=fixed_lines,
             leave_out_block=leave_out,
             reader=reader,
             dismissed=dismissed,

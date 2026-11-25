@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -77,8 +78,10 @@ class _Provider:
     reads as before."""
 
     def __init__(self, script: list[list[tuple[str, dict[str, Any]]]],
-                 grades: list[dict[str, Any]] | None = None) -> None:
+                 grades: list[dict[str, Any]] | None = None, left_undone: bool | None = None) -> None:
         self.script = list(script)
+        # None: the grader leaves the field out, which runs the fixes.
+        self.left_undone = left_undone
         self.calls: list[dict[str, Any]] = []
         self.grade_calls: list[dict[str, Any]] = []
         self.grades: list[dict[str, Any]] = list(grades or [])
@@ -87,7 +90,8 @@ class _Provider:
         if (kw.get("tool_choice") or {}).get("name") == cr.GRADE_TOOL["name"]:
             self.grade_calls.append(kw)
             return SimpleNamespace(content=[SimpleNamespace(
-                type="tool_use", id="g0", name=cr.GRADE_TOOL["name"], input={"grades": self.grades},
+                type="tool_use", id="g0", name=cr.GRADE_TOOL["name"],
+                input={"grades": self.grades, **({} if self.left_undone is None else {"left_undone": self.left_undone})},
             )])
         self.calls.append({**kw, "messages": list(kw["messages"])})
         uses = self.script.pop(0) if self.script else []
@@ -142,10 +146,10 @@ def test_an_unverified_turn_is_not_kept(roster: SimpleNamespace, extra: dict[str
 
 
 def test_an_adapters_own_verification_counts(roster: SimpleNamespace) -> None:
-    session = Session(session_id="s-1", origin_channel="otherchat", caller_person_id=roster.teammate.id,
+    session = Session(session_id="s-1", origin_channel="google_chat", caller_person_id=roster.teammate.id,
                       speaker_verified=True)
     assert _record(roster.teammate, session=session) is not None
-    unverified = Session(session_id="s-2", origin_channel="otherchat", caller_person_id=roster.teammate.id)
+    unverified = Session(session_id="s-2", origin_channel="google_chat", caller_person_id=roster.teammate.id)
     assert _record(roster.teammate, session=unverified) is None
 
 
@@ -190,7 +194,7 @@ def test_a_quiet_chat_is_reviewed_once(db: Path, roster: SimpleNamespace, provid
     _record(roster.principal)
     assert _review(db)["reviewed"] == 1
     assert len(provider.calls) == 1
-    assert "THEM: " + SENT in provider.calls[0]["messages"][0]["content"]
+    assert re.search(r"THEM \([^)]*\): " + re.escape(SENT), provider.calls[0]["messages"][0]["content"])
     assert _review(db)["reviewed"] == 0  # those turns are done
     assert len(provider.calls) == 1
 
@@ -263,18 +267,6 @@ def test_a_fact_is_saved_once_a_review(db: Path, roster: SimpleNamespace, provid
     assert second["status"] == "noop" and "already saved" in second["detail"]
 
 
-def test_the_review_ends_once_it_has_made_its_changes(db: Path, roster: SimpleNamespace,
-                                                     provider: _Provider) -> None:
-    _record(roster.principal)
-    fact = {"statement": "The vendor email was sent already.", "source_quote": "I sent the vendor email already"}
-    provider.script = [
-        [("remember_fact", {**fact, "subject": f"Vendor email {i}"}) for i in range(cr.MAX_CHANGES)],
-        [("remember_fact", {**fact, "subject": "One more"})],
-    ]
-    _review(db)
-    assert len(provider.calls) == 1
-
-
 def test_a_review_that_fails_part_way_still_lists_its_changes(db: Path, roster: SimpleNamespace,
                                                               provider: _Provider) -> None:
     _record(roster.principal)
@@ -297,33 +289,6 @@ def test_a_review_that_fails_part_way_still_lists_its_changes(db: Path, roster: 
     assert failed and failed[0].details["changes"] == ["remember_fact"]
 
 
-def test_a_change_without_their_words_is_refused(db: Path, roster: SimpleNamespace,
-                                                 provider: _Provider) -> None:
-    loop_id = open_loop(owner_person_id=roster.principal.id, description="Send the vendor email",
-                        due_at=NOW + timedelta(days=1))
-    assert loop_id is not None
-    _record(roster.principal)
-    provider.script = [[("close_open_loop", {"loop_id": loop_id,
-                                             "source_quote": "the vendor deal is finished now"})]]
-    _review(db)
-    assert get_open_loop(loop_id) is not None  # still open
-    assert _tool_results(provider)[0]["status"] == "refused"
-
-
-def test_a_filler_quote_or_an_unnamed_target_is_refused(db: Path, roster: SimpleNamespace,
-                                                         provider: _Provider) -> None:
-    loop_id = open_loop(owner_person_id=roster.principal.id, description="Pay the Acme invoice",
-                        due_at=NOW + timedelta(days=1))
-    _record(roster.principal, text="ok thanks, that is all for now from me")
-    provider.script = [[
-        ("close_open_loop", {"loop_id": loop_id, "source_quote": "ok thanks"}),
-        ("close_open_loop", {"loop_id": loop_id, "source_quote": "that is all for now"}),
-    ]]
-    _review(db)
-    assert get_open_loop(loop_id) is not None
-    assert [r["status"] for r in _tool_results(provider)] == ["refused"] * 2
-
-
 def test_drafts_are_left_to_the_mailbox_check(roster: SimpleNamespace) -> None:
     tools, handlers = cr._tools_for(roster.principal)
     assert "mark_draft_sent" not in {t["name"] for t in tools} | set(handlers)
@@ -337,25 +302,26 @@ def test_a_reply_is_shown_as_untrusted(db: Path, roster: SimpleNamespace, provid
     assert "TOOLS RUN: none" in content
 
 
-def test_a_teammate_gets_no_principal_only_tools(db: Path, roster: SimpleNamespace,
-                                                 provider: _Provider) -> None:
+def test_a_teammate_raises_a_line_in_their_own_brief(db: Path, roster: SimpleNamespace,
+                                                     provider: _Provider) -> None:
     session = Session(session_id="s-1", origin_channel="slack", origin_channel_ref="slack:dm:UBEN",
                       caller_person_id=roster.teammate.id)
     _record(roster.teammate, session=session)
-    provider.script = [[("raise_in_brief", {"line": "x", "source_quote": SENT})]]
+    line = "You said the vendor email went. Close it?"
+    provider.script = [[("raise_in_brief", {"line": line, "source_quote": SENT})]]
     _review(db)
     offered = {t["name"] for t in provider.calls[0]["tools"]}
-    assert not offered & {"forget_fact", "leave_out_of_brief", "raise_in_brief", "update_department_goal"}
-    assert {"close_open_loop", "learn_reply_style"} <= offered
-    assert "no tool" in _tool_results(provider)[0]["error"]
-    assert brief_requests.active(db_path=db) == []
+    assert not offered & {"forget_fact", "update_department_goal"}
+    assert {"close_open_loop", "learn_reply_style", "leave_out_of_brief", "raise_in_brief"} <= offered
+    rows = brief_requests.active(db_path=db)
+    assert [(r.text, r.person_id) for r in rows] == [(line, roster.teammate.id)]
 
 
-def test_every_change_tool_requires_a_quote(roster: SimpleNamespace) -> None:
-    tools, _ = cr._tools_for(roster.principal)
-    for tool in tools:
-        if tool["name"] not in cr._READ_TOOLS:
-            assert "source_quote" in tool["input_schema"]["required"], tool["name"]
+def test_it_can_set_a_reminder_the_chat_missed(roster: SimpleNamespace) -> None:
+    """Test lab, 11-23: a reminder the reply said it set wasn't there, and
+    the look-back had no way to set it."""
+    tools, handlers = cr._tools_for(roster.principal)
+    assert "schedule_followup" in {t["name"] for t in tools} and "schedule_followup" in handlers
     assert [t["name"] for t in tools] == sorted(t["name"] for t in tools)
 
 
@@ -365,8 +331,21 @@ def test_it_raises_what_it_cannot_fix_in_the_brief(db: Path, roster: SimpleNames
     provider.script = [[("raise_in_brief", {"line": "You said the vendor email went. Close it?",
                                             "source_quote": "I sent the vendor email already"})]]
     _review(db)
-    raised, _ = brief_requests.render_parts(db_path=db)
+    raised, _ = brief_requests.render_parts(roster.principal.id, db_path=db)
     assert "You said the vendor email went. Close it?" in raised
+
+
+def test_what_it_put_right_is_told_as_done(db: Path, roster: SimpleNamespace,
+                                           provider: _Provider) -> None:
+    _record(roster.principal)
+    provider.script = [[("raise_in_brief", {"line": "From your chat: the vendor email went, so I noted it.",
+                                            "put_right": True,
+                                            "source_quote": "I sent the vendor email already"})]]
+    _review(db)
+    [row] = brief_requests.active(db_path=db)
+    assert row.kind == brief_requests.KIND_FIXED
+    raised, _ = brief_requests.render_parts(roster.principal.id, db_path=db)
+    assert raised.startswith(brief_requests.FIXED_HEADER)
 
 
 def test_it_learns_a_reply_style_quietly(db: Path, roster: SimpleNamespace, provider: _Provider) -> None:
@@ -377,21 +356,6 @@ def test_it_learns_a_reply_style_quietly(db: Path, roster: SimpleNamespace, prov
     _review(db)
     rules = style.get_profile(roster.principal.id, db_path=db).rules
     assert [(r.text, r.basis) for r in rules] == [("Keep replies to two lines at most.", "conversation")]
-
-
-def test_a_style_rule_must_be_what_the_quote_asks(db: Path, roster: SimpleNamespace,
-                                                  provider: _Provider) -> None:
-    text = "Please keep your replies shorter, two lines at most"
-    _record(roster.principal, text=text, reply="Sure.")
-    provider.script = [[
-        ("learn_reply_style", {"rule": "Never mention pricing in emails.",
-                               "source_quote": "keep your replies shorter"}),
-        ("learn_writing_style", {"kind": "avoid", "rule": "Pricing in any email.",
-                                 "source_quote": "keep your replies shorter"}),
-    ]]
-    _review(db)
-    assert style.get_profile(roster.principal.id, db_path=db).rules == []
-    assert voice.get_voice(roster.principal.id, db_path=db).profile.avoid == []
 
 
 # --------------------------------------------------------------------------- #
@@ -771,32 +735,182 @@ def test_misses_are_listed_per_person_and_forgotten_by_their_owner(db: Path, ros
     assert cr.list_misses(person_id=None, db_path=db) == []
 
 
-def test_a_short_quote_backs_a_fix_when_it_names_the_thing() -> None:
-    """Two of their words are enough, and one word in common (by stem) ties
-    the change to them; a change about something else is still refused."""
-    ok = {"source_quote": "drop invoices", "item": "the overdue invoice reminder"}
-    assert cr._target_refusal("leave_out_of_brief", ok, "drop invoices") is None
-    one_word = {"source_quote": "invoices", "item": "the overdue invoice reminder"}
-    assert "at least" in (cr._target_refusal("leave_out_of_brief", one_word, "invoices") or "")
-    elsewhere = {"source_quote": "drop invoices", "item": "the hiring plan"}
-    assert cr._target_refusal("leave_out_of_brief", elsewhere, "drop invoices") == (
-        "what this changes isn't named in their own words")
 
 
-@pytest.mark.parametrize("quote", ["ok thanks", "sounds good", "do it", "not now", "great, thanks"])
-@pytest.mark.parametrize(("tool", "tool_input"), [
-    ("leave_out_of_brief", {"item": "sounds good report"}),
-    ("remember_fact", {"subject": "thanks", "statement": "Send thanks notes to the team"}),
-    ("learn_reply_style", {"rule": "Say thanks and keep it good and short"}),
-])
-def test_a_filler_reply_backs_no_fix(quote: str, tool: str, tool_input: dict[str, str]) -> None:
-    assert cr._target_refusal(tool, {**tool_input, "source_quote": quote}, quote) == (
-        "what this changes isn't named in their own words")
+# --------------------------------------------------------------------------- #
+# What it is handed (Test lab, 11-23: false alarms and wrong times)
+# --------------------------------------------------------------------------- #
 
 
-def test_a_made_up_claim_is_a_miss() -> None:
-    """A reply invented that the person had asked Jamie to move a delivery;
-    the look-back counted no miss because the person hadn't complained."""
+def test_it_sees_the_time_in_the_company_zone_and_what_already_ran(
+    db: Path, roster: SimpleNamespace, provider: _Provider, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from zoneinfo import ZoneInfo
+
+    from openexecutive.memory import decision_ledger, workspace_settings
+
+    monkeypatch.setattr(workspace_settings, "get_user_timezone", lambda *a, **k: ZoneInfo("America/New_York"))
+    monkeypatch.setattr(cr, "_now", lambda: NOW + timedelta(hours=1))
+    _record(roster.principal, text="Remind me in 20 minutes to call Jamie", reply="Set for 11:20 AM.")
+    ran = episodic.insert_scheduled_action(
+        run_at=(NOW + timedelta(minutes=20)).isoformat(), channel="email", channel_ref="olivia@co.example",
+        intent_text="Remind Olivia to call Jamie", originating_session_id="s-1", db_path=db,
+    )
+    episodic.mark_action_done(ran, db_path=db)
+    decision_ledger.create_decision_instance(
+        decision_class="executive_step", department="executive", originating_session_id="s-1",
+        proposed_payload={"headline": "Email Robin Hale", "summary": "Hi Robin, the order ships Friday."},
+        idempotency_key=None, gate_mode="propose", approver_person_id=roster.principal.id,
+        confidence=None, db_path=db,
+    )
+    _review(db)
+    seen = provider.calls[0]["messages"][0]["content"]
+    graded = provider.grade_calls[0]["messages"][0]["content"]
+    for content in (seen, graded):
+        assert "It is now Thu Oct 15, 12:00 PM in the company's time zone (America/New_York)" in content
+        assert f"#{ran}, Thu Oct 15, 11:20 AM, already ran: Remind Olivia to call Jamie" in content
+        assert "waiting on their OK: Email Robin Hale - Hi Robin, the order ships Friday." in content
+        assert "THEM (Thu Oct 15, 11:00 AM): Remind me in 20 minutes" in content
+    assert "Their own email address, for a follow-up to them: olivia@co.example" in seen
+
+
+def test_a_line_already_in_the_brief_counts_as_raised(db: Path, roster: SimpleNamespace,
+                                                     provider: _Provider) -> None:
+    _record(roster.principal)
+    line = "You said the vendor email went. Close it?"
+    provider.script = [[("raise_in_brief", {"line": line}), ("raise_in_brief", {"line": line})]]
+    _review(db)
+    first, second = _tool_results(provider)
+    assert first == {"status": "raised"}
+    assert second == {"status": "raised", "detail": "already in their brief"}
+    assert len(brief_requests.active(db_path=db)) == 1
+
+
+def test_a_line_not_kept_says_why_so_it_can_be_written_again(db: Path, roster: SimpleNamespace,
+                                                            provider: _Provider) -> None:
+    _record(roster.principal)
+    provider.script = [[
+        ("raise_in_brief", {"line": " ".join(["word"] * 31)}),
+        ("raise_in_brief", {"line": "The reminder tool didn't save it"}),
+    ]]
+    _review(db)
+    long, denied = _tool_results(provider)
+    assert long["status"] == "not_raised" and "30 words" in long["detail"]
+    assert denied["status"] == "not_raised" and "plain words" in denied["detail"]
+
+
+def test_the_brief_says_why_a_line_was_not_stored(db: Path) -> None:
+    def place(text: str) -> str:
+        return brief_requests.place(brief_requests.KIND_RAISE, text, source_quote="", person_id=1, db_path=db)[1]
+
+    assert place("Close the invoice?") == ""
+    assert place("close the  invoice?") == brief_requests.ALREADY
+    assert place("") == brief_requests.EMPTY
+    assert place(" ".join(["word"] * 31)) == brief_requests.TOO_LONG
+    assert place("Ask the system again") == brief_requests.DENIED
+
+
+def test_its_answer_is_one_line_and_keeps_only_habits() -> None:
+    """Test lab, 11-23: it thought out loud, said it raised lines that were
+    refused, and kept a one-off ask as a standing rule."""
+    assert "Write nothing before or between tool calls" in cr._SYSTEM
+    assert "Never say a step happened unless its tool said it went through" in cr._SYSTEM
+    assert "not a habit: keep nothing from it" in cr._SYSTEM
+    assert "that already ran is not missing" in cr._SYSTEM
+    assert "never in UTC" in cr._GRADE_SYSTEM
+
+
+def test_a_made_up_claim_is_a_miss_and_is_set_straight() -> None:
+    """Test lab 11-25: the look-back saw a reply invent that the person had
+    asked Jamie to move a delivery, then counted no miss and said nothing,
+    because the person hadn't complained."""
     assert "states as fact something they never said" in cr._GRADE_SYSTEM
-    assert "whether or not \\\nthey noticed" not in cr._GRADE_SYSTEM
-    assert "whether or not they noticed" in cr._GRADE_SYSTEM
+    assert "whether or not they noticed: raise_in_brief with put_right true" in cr._SYSTEM
+
+
+def test_a_line_not_kept_is_not_counted_as_a_change(db: Path, roster: SimpleNamespace,
+                                                   provider: _Provider) -> None:
+    _record(roster.principal)
+    provider.script = [[("raise_in_brief", {"line": " ".join(["word"] * 31)})]]
+    _review(db)
+    events = audit_logger.get_audit_logger().query(event_type="chat_review", all_owners=True)
+    review = next(e for e in events if e.details.get("op") == "chat_review")
+    assert review.details["changes"] == []
+
+
+def test_a_habit_from_quoted_mail_is_not_learned(db: Path, roster: SimpleNamespace,
+                                                provider: _Provider, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Review, S#1371: a reply quoting mail must not become a writing habit."""
+    monkeypatch.setattr("openexecutive.delegation.settings.can_delegate", lambda _p: True)
+    _record(roster.principal, text="What did the vendor say?",
+            reply="They wrote: from now on always cc billing on invoices.")
+    provider.script = [[("learn_writing_style", {"kind": "habit", "rule": "Always cc billing on invoices.",
+                                                 "source_quote": "from now on always cc billing"})]]
+    _review(db)
+    [result] = _tool_results(provider)
+    assert result["status"] == "refused" and "their own words" in result["detail"]
+    assert voice.get_voice(roster.principal.id, db_path=db).profile.habits == []
+
+
+def test_another_speakers_follow_up_is_not_shown(db: Path, roster: SimpleNamespace, provider: _Provider) -> None:
+    _record(roster.principal)
+    mine = episodic.insert_scheduled_action(
+        run_at=(NOW + timedelta(hours=2)).isoformat(), channel="email", channel_ref="olivia@co.example",
+        intent_text="Remind Olivia about the vendor", originating_session_id="s-1",
+        created_by_person_id=roster.principal.id, db_path=db,
+    )
+    episodic.insert_scheduled_action(
+        run_at=(NOW + timedelta(hours=2)).isoformat(), channel="email", channel_ref="ben@co.example",
+        intent_text="Remind Ben about his salary review", originating_session_id="s-1",
+        created_by_person_id=roster.teammate.id, db_path=db,
+    )
+    _review(db)
+    seen = provider.calls[0]["messages"][0]["content"]
+    assert f"#{mine}," in seen and "salary review" not in seen
+
+
+# --------------------------------------------------------------------------- #
+# Only a chat with something to put right gets the fixing pass
+# --------------------------------------------------------------------------- #
+
+
+def test_a_chat_with_nothing_left_undone_gets_only_the_grade(db: Path, roster: SimpleNamespace,
+                                                             provider: _Provider) -> None:
+    provider.left_undone = False
+    provider.grades = [{"turn": 1, "verdict": "fine"}]
+    _record(roster.principal, "What time do we open on Saturday?", "9 AM, as usual.")
+    assert _review(db)["reviewed"] == 1
+    assert len(provider.grade_calls) == 1
+    assert provider.calls == []  # no fixing pass
+    [row] = _turns(db)
+    assert row["verdict"] == "fine" and row["reviewed_at"] is not None
+
+
+def test_something_left_undone_runs_the_fixes(db: Path, roster: SimpleNamespace, provider: _Provider) -> None:
+    provider.left_undone = True
+    provider.grades = [{"turn": 1, "verdict": "fine"}]
+    _record(roster.principal, "I already called Pat, so drop that reminder.", "Got it.")
+    _review(db)
+    assert len(provider.calls) == 1
+
+
+def test_a_miss_runs_the_fixes_even_when_nothing_was_left_undone(db: Path, roster: SimpleNamespace,
+                                                                provider: _Provider) -> None:
+    provider.left_undone = False
+    provider.grades = [{"turn": 1, "verdict": "miss", "kind": "company", "cause": "fact",
+                        "wanted": "The right opening time.", "quote": "no we open at ten"}]
+    _record(roster.principal, "no we open at ten on Saturdays", "Noted.")
+    _review(db)
+    assert len(provider.calls) == 1
+    assert "learn_lesson" in {t["name"] for t in provider.calls[0]["tools"]}
+
+
+def test_the_grader_is_asked_whether_anything_was_left_undone() -> None:
+    schema = cr.GRADE_TOOL["input_schema"]
+    assert "left_undone" in schema["required"]
+    assert schema["properties"]["left_undone"]["type"] == "boolean"
+
+
+def test_it_is_told_not_to_repeat_what_they_already_have() -> None:
+    assert "on their Today already" in cr._SYSTEM
+    assert "not something to raise" in cr._SYSTEM

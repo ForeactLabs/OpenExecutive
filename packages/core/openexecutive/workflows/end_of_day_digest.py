@@ -615,7 +615,7 @@ class EndOfDayDigestWorkflow(Workflow):
             from openexecutive.briefing.brief_requests import render_parts
 
             try:
-                _raise, leave_out = await asyncio.to_thread(render_parts)
+                _raise, leave_out = await asyncio.to_thread(render_parts, today_route.principal_id())
             except Exception:
                 logger.exception("eod_digest: reading the leave-out list failed")
         found = await asyncio.to_thread(_research_found, since)

@@ -762,9 +762,10 @@ def render_briefing_context(
         parts.extend(["", owner_notes])
     leave_out_block = ""
     if brief_requests:
+        from openexecutive.api.routes.today import principal_id
         from openexecutive.briefing.brief_requests import render_parts
 
-        raise_block, leave_out_block = render_parts()
+        raise_block, leave_out_block = render_parts(principal_id())
         if raise_block:
             parts.extend(["", raise_block])
 

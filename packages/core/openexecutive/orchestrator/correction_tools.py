@@ -4,9 +4,9 @@ Before these existed a reply could only say "Done" to "remove it from the
 brief", "cancel that reminder" or "I sent it": nothing recorded it, so the
 brief kept the item and the follow-up still fired.
 
-- ``leave_out_of_brief`` keeps an item out of the principal's brief and the
-  /today header (``briefing.brief_requests``) for two weeks. The principal
-  only, on a surface that verified it is them, with their own words quoted.
+- ``leave_out_of_brief`` keeps an item out of the speaker's own brief and
+  /today header (``briefing.brief_requests``) for two weeks: anyone on the
+  team, on a surface that verified it is them, with their own words quoted.
 - ``list_followups`` / ``cancel_followup`` / ``move_followup``: the pending
   follow-ups the speaker scheduled, from a conversation of their own (or
   this one, when nobody else reads it). Being in a shared thread, or being
@@ -41,12 +41,12 @@ _LIST_MAX = 20
 LEAVE_OUT_OF_BRIEF_TOOL: dict[str, Any] = {
     "name": "leave_out_of_brief",
     "description": (
-        "Keep something out of the principal's morning brief and the Today "
-        "header for the next two weeks, when the principal asks ('remove it "
+        "Keep something out of the morning brief and the Today header of the "
+        "person you are talking to for the next two weeks, when they ask ('remove it "
         "from the brief', 'stop putting the Halcyon renewal in my brief'). "
         "item: what to leave out, in a few words a reader would recognise, "
-        "e.g. 'the Halcyon renewal'. source_quote: the principal's exact "
-        "words from this message asking for it. The principal only."
+        "e.g. 'the Halcyon renewal'. source_quote: their exact "
+        "words from this message asking for it."
     ),
     "input_schema": {
         "type": "object",
@@ -54,7 +54,7 @@ LEAVE_OUT_OF_BRIEF_TOOL: dict[str, Any] = {
             "item": {"type": "string", "description": "What to leave out, a few words."},
             "source_quote": {
                 "type": "string",
-                "description": "The principal's exact words from this message asking for it.",
+                "description": "Their exact words from this message asking for it.",
             },
         },
         "required": ["item", "source_quote"],
@@ -161,8 +161,8 @@ async def handle_leave_out_of_brief(tool_input: dict[str, Any]) -> str:
 
     tool = "leave_out_of_brief"
     person = _speaker()
-    if person is None or not getattr(person, "is_principal", False):
-        return _refused("only the principal can change their brief, and " + _NOT_VERIFIED)
+    if person is None:
+        return _refused(_NOT_VERIFIED)
     item = brief_requests.clean_text(str(tool_input.get("item") or ""))
     quote = str(tool_input.get("source_quote") or "").strip()
     if not item:

@@ -83,7 +83,7 @@ def test_the_principal_can_leave_an_item_out(db: Path, roster: SimpleNamespace) 
                 {"item": "Halcyon renewal", "source_quote": "take the Halcyon renewal out of my brief"},
                 _web(roster.principal))
     assert out["status"] == "left_out"
-    _, leave = brief_requests.render_parts(db_path=db)
+    _, leave = brief_requests.render_parts(roster.principal.id, db_path=db)
     assert leave.startswith(brief_requests.LEAVE_OUT_HEADER)
     assert "- Halcyon renewal" in leave
 
@@ -96,11 +96,14 @@ def test_leaving_out_needs_their_words(roster: SimpleNamespace) -> None:
     assert brief_requests.active() == []
 
 
-def test_a_teammate_cannot_change_the_brief(roster: SimpleNamespace) -> None:
+def test_a_teammate_leaves_an_item_out_of_their_own_brief(db: Path, roster: SimpleNamespace) -> None:
     out = _call(ct.handle_leave_out_of_brief,
                 {"item": "Halcyon renewal", "source_quote": "take the Halcyon renewal out of my brief"},
                 _slack(roster.teammate))
-    assert out["status"] == "refused"
+    assert out["status"] == "left_out"
+    assert "- Halcyon renewal" in brief_requests.render_parts(roster.teammate.id, db_path=db)[1]
+    # Their own brief alone: the owner's is untouched.
+    assert brief_requests.render_parts(roster.principal.id, db_path=db) == ("", "")
 
 
 def test_no_session_is_refused() -> None:
@@ -117,10 +120,10 @@ def test_brief_lines_expire_and_dedupe(db: Path) -> None:
     assert brief_requests.add(brief_requests.KIND_LEAVE_OUT, "Halcyon", source_quote="q",
                               person_id=1, now=now, db_path=db) is not None
     later = now + timedelta(days=brief_requests.RAISE_DAYS, minutes=1)
-    raised, leave = brief_requests.render_parts(now=later, principal_id=1, db_path=db)
+    raised, leave = brief_requests.render_parts(1, now=later, db_path=db)
     assert raised == "" and "Halcyon" in leave
     gone = now + timedelta(days=brief_requests.LEAVE_OUT_DAYS, minutes=1)
-    assert brief_requests.render_parts(now=gone, principal_id=1, db_path=db) == ("", "")
+    assert brief_requests.render_parts(1, now=gone, db_path=db) == ("", "")
 
 
 def test_brief_lines_reject_steering_text(db: Path) -> None:
@@ -130,14 +133,17 @@ def test_brief_lines_reject_steering_text(db: Path) -> None:
                                   person_id=1, db_path=db) is None, text
 
 
-def test_only_the_principals_lines_render(db: Path, roster: SimpleNamespace) -> None:
+def test_only_the_readers_own_lines_render(db: Path, roster: SimpleNamespace) -> None:
     brief_requests.add(brief_requests.KIND_LEAVE_OUT, "Halcyon renewal", source_quote="q",
                        person_id=roster.teammate.id, db_path=db)
-    assert brief_requests.render_parts(db_path=db) == ("", "")
+    assert brief_requests.render_parts(roster.principal.id, db_path=db) == ("", "")
     brief_requests.add(brief_requests.KIND_LEAVE_OUT, "Maple House lease", source_quote="q",
                        person_id=roster.principal.id, db_path=db)
-    leave = brief_requests.render_parts(db_path=db)[1]
+    leave = brief_requests.render_parts(roster.principal.id, db_path=db)[1]
     assert "Maple House" in leave and "Halcyon" not in leave
+    theirs = brief_requests.render_parts(roster.teammate.id, db_path=db)[1]
+    assert "Halcyon" in theirs and "Maple House" not in theirs
+    assert brief_requests.render_parts(None, db_path=db) == ("", "")
 
 
 def test_brief_lines_are_capped(db: Path) -> None:

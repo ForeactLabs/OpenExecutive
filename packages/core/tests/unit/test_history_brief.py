@@ -366,7 +366,7 @@ def test_the_digest_follows_a_leave_out_quietly_and_leads_with_the_day(
     monkeypatch.setattr(grounding, "ground_brief", _ground)
     monkeypatch.setattr(
         brief_requests, "render_parts",
-        lambda **_kw: ("", brief_requests.LEAVE_OUT_HEADER + "\n- the lender's silence"),
+        lambda *_a, **_kw: ("", brief_requests.LEAVE_OUT_HEADER + "\n- the lender's silence"),
     )
     asyncio.run(_digest(False))
     assert "the lender's silence" not in provider.calls[-1]["messages"][0]["content"]
