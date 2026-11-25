@@ -5215,8 +5215,8 @@ scheduler:
     created_at is left out (own_messages_since(after_turn_in=)). Paused or
     dropped, nothing runs: the setter gets one fixed line
     (runner._set_aside_line; a repeating one says it still repeats and how
-    to stop it; a line that can't reach them is retried like a failed run,
-    safe because nothing was sent), and the occurrence is cancelled with the reason and audited phase
+    to stop it; a line that can't reach them is logged, and what they asked
+    is still recorded, never asked again), and the occurrence is cancelled with the reason and audited phase
     paused or dropped, not delivered (_as_setter_said, _end_as_asked). Read
     from their chats, a drop never ends a repeating series: only this time
     goes. A failed read sends it as set. No marker is read from a run's

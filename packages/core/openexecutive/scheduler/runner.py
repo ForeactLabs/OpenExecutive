@@ -1575,9 +1575,9 @@ async def _as_setter_said(
     they are told in a line, and the occurrence is recorded as such. Read
     from their chats, a drop never ends a repeating series: only this time
     goes, and the line says how to stop it for good. A moved one waits for
-    its new time as it is (``reschedule_action``). When the line can't
-    reach them it is tried again like any failed run: nothing was sent, so
-    a retry only reads their chats and tells them again."""
+    its new time as it is (``reschedule_action``). What they asked is
+    recorded even when the line can't reach them (logged): asking again
+    could read their chats differently and send what they asked to hold."""
     assert action.id is not None
     try:
         notice = await deliver_to_person(person, _set_aside_line(action, outcome, when), label="Follow-up")
@@ -1586,8 +1586,6 @@ async def _as_setter_said(
         problem = str(exc)
     if problem:
         logger.warning("scheduler: action %s: couldn't tell its setter: %s", action.id, problem)
-        mark_action_failed_or_retry(action.id, f"couldn't tell its setter: {problem}"[:300])
-        return
     if outcome == "moved" and when is not None:
         from openexecutive.audit import log_event as audit_log
         from openexecutive.memory.episodic import reschedule_action

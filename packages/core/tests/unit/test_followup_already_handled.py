@@ -335,7 +335,7 @@ def test_a_teammates_note_to_someone_else_never_sees_their_chat(
     tell.assert_not_called()
 
 
-def test_a_line_that_cant_reach_them_is_tried_again(db: Path, roster: SimpleNamespace) -> None:
+def test_a_hold_is_kept_even_when_the_line_cant_reach_them(db: Path, roster: SimpleNamespace) -> None:
     me = roster.principal.id
     create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
     action_id = _followup("tg-1", ref="999", created_by=me)
@@ -344,9 +344,8 @@ def test_a_line_that_cant_reach_them_is_tried_again(db: Path, roster: SimpleName
     with patch.object(runner, "_setter_decision", new_callable=AsyncMock, return_value=("dropped", None)), \
             patch.object(runner, "deliver_to_person", new_callable=AsyncMock, side_effect=RuntimeError("down")):
         asyncio.run(runner._execute_action(action, gateway=None))
-    row = episodic.get_scheduled_action(action_id)
-    # Nothing was sent, so it comes back to tell them, rather than ending unheard.
-    assert row is not None and row.status == "pending" and "couldn't tell its setter" in row.last_error
+    # Never asked again: a second reading could send what they asked to hold.
+    assert episodic.get_scheduled_action(action_id).status == "cancelled"  # type: ignore[union-attr]
 
 
 def _decision_response(decision: str, **more: str) -> SimpleNamespace:
