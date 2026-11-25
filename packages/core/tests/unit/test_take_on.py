@@ -362,6 +362,19 @@ def test_a_step_that_went_to_a_card_follows_the_card(client: TestClient, monkeyp
     assert [f.key for f in take_on.finished(ME, datetime.now(UTC) - timedelta(hours=1))] == [o.key]
 
 
+@pytest.mark.parametrize("status", ["approved_unchanged", "approved_with_edit"])
+def test_an_approved_card_counts_as_done(client: TestClient, monkeypatch: pytest.MonkeyPatch, status: str) -> None:
+    from openexecutive.memory import decision_ledger
+
+    o = _offer()
+    take_on.put_made(ME, [o])
+    take_on.start(ME, o)
+    take_on.finish(ME, o.key, "card", decision_id=9)
+    monkeypatch.setattr(decision_ledger, "get_decision_instances", lambda ids: {9: SimpleNamespace(status=status)})
+    assert client.get("/take-on").json()["offers"] == []
+    assert [f.key for f in take_on.finished(ME, datetime.now(UTC) - timedelta(hours=1))] == [o.key]
+
+
 def test_a_skipped_card_takes_the_offer_away(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     from openexecutive.memory import decision_ledger
 

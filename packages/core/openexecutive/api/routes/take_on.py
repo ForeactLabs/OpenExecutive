@@ -127,7 +127,8 @@ def _out(o: take_on.Offer) -> OfferOut:
     )
 
 
-_CARD_OPEN = frozenset({"proposed", "executing", "approved_unchanged", "approved_with_edit"})
+_CARD_OPEN = frozenset({"proposed", "executing"})
+_CARD_DONE = frozenset({"executed", "approved_unchanged", "approved_with_edit"})
 
 
 def _settle_cards(me: Me, offers: list[take_on.Offer]) -> None:
@@ -147,7 +148,7 @@ def _settle_cards(me: Me, offers: list[take_on.Offer]) -> None:
         card = cards.get(int(o.decision_id or 0))
         if card is None:
             continue
-        if card.status == dl.STATUS_EXECUTED:
+        if card.status in _CARD_DONE:
             o.status, o.outcome = "done", "You approved it, and it's done."
             take_on.finish(me.email, o.key, "done", outcome=o.outcome, done=o.done, decision_id=o.decision_id)
         elif card.status == dl.STATUS_REJECTED:
