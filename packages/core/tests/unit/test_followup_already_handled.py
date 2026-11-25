@@ -392,3 +392,22 @@ def test_a_failed_read_sends_it_as_set(db: Path, roster: SimpleNamespace) -> Non
     assert action is not None
     with patch("openexecutive.providers.get_provider", side_effect=RuntimeError("no model")):
         assert asyncio.run(runner._setter_decision(action, roster.principal)) == ""
+
+
+def test_a_bare_marker_to_themself_still_tells_them(db: Path, roster: SimpleNamespace) -> None:
+    ben = roster.teammate.id
+    action_id = episodic.insert_scheduled_action(
+        run_at=_iso(timedelta(days=1)), channel="slack_dm", channel_ref="UBEN",
+        intent_text="Remind me to call the vendor.", originating_session_id="ben-1",
+        created_by_person_id=ben,
+    )
+    with episodic._get_conn(db) as conn:
+        conn.execute("UPDATE scheduled_actions SET created_at = ? WHERE id = ?",
+                     (_iso(-timedelta(days=1)), action_id))
+    _message(db, "ben-2", ben, "user", "Drop the vendor call reminder", -timedelta(hours=1), sender=ben)
+    with patch.object(runner, "_send_on_plan", new_callable=AsyncMock) as send:
+        send.return_value = SimpleNamespace(ok=True, detail="")
+        _fire(action_id, "DROPPED:")
+    assert send.call_args.args[2] == ("I dropped this follow-up as you asked: Remind me to call the vendor. "
+                                      "Ask me for it again any time.")
+    assert episodic.get_scheduled_action(action_id).status == "cancelled"  # type: ignore[union-attr]

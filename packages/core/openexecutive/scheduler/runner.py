@@ -1529,18 +1529,21 @@ async def _setter_decision(action: ScheduledAction, person: Person) -> str:
     return ""
 
 
+def _set_aside_line(action: ScheduledAction, outcome: str) -> str:
+    """The fixed line that tells a setter their follow-up was held or
+    dropped as they asked."""
+    what = " ".join(str(action.intent_text or "").split())[:200].rstrip(".!? ")
+    verb = "held" if outcome == "paused" else "dropped"
+    return f"I {verb} this follow-up as you asked: {what}. Ask me for it again any time."
+
+
 async def _as_setter_said(
     action: ScheduledAction, person: Person, outcome: str
 ) -> None:
     """A follow-up to someone else its setter asked since to hold or drop:
     nothing goes to that someone, the setter is told in a line, and the
     occurrence is recorded as such."""
-    what = " ".join(str(action.intent_text or "").split())[:200]
-    verb = "held" if outcome == "paused" else "dropped"
-    await _tell_setter(
-        action, person,
-        f"I {verb} this follow-up as you asked: {what}. Ask me for it again any time.",
-    )
+    await _tell_setter(action, person, _set_aside_line(action, outcome))
     _end_as_asked(action, outcome, person.full_name or "they")
 
 
@@ -1715,6 +1718,9 @@ async def _run_teammate_followup(
             )).strip()
             outcome, text = _followup_outcome(text) if since else ("", text)
             if to_self:
+                if not text and outcome:
+                    # A bare marker is a valid result: they still hear it.
+                    text = _set_aside_line(action, outcome)
                 if not text:
                     raise RuntimeError("the Executive wrote no message")
                 delivery = await _send_on_plan(creator, [action.channel], text, label="Follow-up")
