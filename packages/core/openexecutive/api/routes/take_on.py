@@ -120,7 +120,12 @@ def _me(request: Request) -> Me:
         if person is not None:
             principal = bool(person.is_principal)
             email = email or (person.email or "")
-    # No one to offer to (no email): no offers, and every key reads as gone.
+    if not email and person_id is not None:
+        # On People with no email (a local install's principal can be): the
+        # list is kept under their People id instead.
+        email = f"person:{person_id}"
+    # No one to offer to (no email, not on People): no offers, and every key
+    # reads as gone.
     return Me(email, person_id, principal)
 
 
@@ -287,7 +292,7 @@ def _answer_watch_suggestion(key: str, me: Me, *, taken: bool, reason: str = "")
                 watch_policy.record_outcome_for(item, watch_policy.OUTCOME_APPROVED)
             return
         why = mm.DECLINE_REASON_WRONG_SOURCE if reason == "already_done" else mm.DECLINE_REASON_NOT_RELEVANT
-        watch_policy.decline_suggestion(item, why, actor=me.email or "principal")
+        watch_policy.decline_suggestion(item, why, actor=me.email if "@" in me.email else "principal")
     except Exception:
         logger.warning("take_on: couldn't answer the watch suggestion", exc_info=True)
 

@@ -317,6 +317,21 @@ def test_hiding_a_step_already_under_way_leaves_it_running(
     assert states[o.key]["status"] == "card" and not states[o.key]["hidden_reason"]
 
 
+def test_a_principal_on_people_without_an_email_still_has_a_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.api import caller as api_caller
+    from openexecutive.api.routes import take_on as route
+    from openexecutive.people import store as people_store
+
+    monkeypatch.setattr(api_caller, "caller", lambda _r: SimpleNamespace(email=""))
+    monkeypatch.setattr(api_caller, "person_id_for", lambda _w: 3)
+    monkeypatch.setattr(people_store, "get_person", lambda _pid: SimpleNamespace(is_principal=True, email=None))
+    me = route._me(object())  # type: ignore[arg-type]
+    assert me.email and me.person_id == 3 and me.principal
+    o = _offer()
+    take_on.put_made(me.email, [o])
+    assert [x.key for x in take_on.offers_for(me.email, 3, principal=True)] == [o.key]
+
+
 def test_someone_not_on_people_gets_no_list_and_no_pass(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     from openexecutive.api.routes import take_on as route
     from openexecutive.briefing import take_on_maker
