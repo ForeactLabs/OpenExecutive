@@ -22,7 +22,6 @@ from openexecutive.memory.decision_ledger import (
     list_recent_resolved,
     mark_resolved,
     mark_reversed,
-    open_for_session,
     record_high_severity_miss,
     set_class_mode,
 )
@@ -56,14 +55,13 @@ def _create(db: Path, *, idem: str | None = None, confidence: float = 0.8, sessi
 # Basic CRUD
 # ---------------------------------------------------------------------------
 
-def test_open_for_session_lists_only_that_chats_unanswered_cards(db: Path) -> None:
+def test_cards_for_session_lists_only_that_chats_cards(db: Path) -> None:
     open_card = _create(db, idem="a")
     answered = _create(db, idem="b")
     mark_resolved(answered, STATUS_APPROVED_UNCHANGED, db_path=db)
     _create(db, idem="c", session="sess-2")
     later = _create(db, idem="d")
-    assert open_for_session("sess-1", db_path=db) == [open_card, later]
-    assert open_for_session("", db_path=db) == []
+    assert cards_for_session("", db_path=db) == {}
     assert cards_for_session("sess-1", db_path=db) == {
         open_card: "proposed", answered: STATUS_APPROVED_UNCHANGED, later: "proposed",
     }

@@ -225,7 +225,7 @@ def test_a_run_that_ran_late_doesnt_write_over_the_one_started_again(monkeypatch
     assert take_on.start(ME, second) and second.started_at != first.started_at
     monkeypatch.setattr(session_store, "load_messages", lambda _s: [
         {"role": "assistant", "content": "Sent it.", "actions": [{"summary": "Emailed Dana"}]}])
-    monkeypatch.setattr(decision_ledger, "open_for_session", lambda _s: [])
+    monkeypatch.setattr(decision_ledger, "cards_for_session", lambda _s: {})
     # The first run's end changes nothing: the second is still working.
     assert route._what_came_of_it(route.Me(ME, 1, True), first, "sess-1", True) == ""
     assert _list(now=later)[0].status == "working"
@@ -417,7 +417,7 @@ def test_two_readers_settling_one_approved_card_tell_its_source_once(monkeypatch
 
     monkeypatch.setattr(decision_ledger, "get_decision_instances",
                         lambda ids: {9: SimpleNamespace(status="approved_unchanged")})
-    monkeypatch.setattr(decision_ledger, "open_for_session", lambda _s: [])
+    monkeypatch.setattr(decision_ledger, "cards_for_session", lambda _s: {})
     told: list[str] = []
     monkeypatch.setattr(route, "_taken_up", lambda _me, o: told.append(o.key))
     o = _offer()
@@ -554,7 +554,7 @@ def test_do_it_runs_one_turn_as_the_caller_and_reads_what_it_did(
         {"role": "assistant", "content": "I sent Dana the proposal.",
          "actions": [{"summary": "Emailed Dana", "link": "/sent/1"}]},
     ])
-    monkeypatch.setattr(decision_ledger, "open_for_session", lambda _s: [])
+    monkeypatch.setattr(decision_ledger, "cards_for_session", lambda _s: {})
     seen["on_finished"](True)
     # Done, it leaves the list and shows in Done for you.
     assert client.get("/take-on").json()["offers"] == []
@@ -587,7 +587,7 @@ def test_a_run_that_only_asks_back_keeps_the_offer_with_the_question(
     monkeypatch.setattr(session_store, "load_messages", lambda _s: [
         {"role": "assistant", "content": "Dana is free Thursday at 10 and at 2.\n\nWhich time works, 10 or 2?"},
     ])
-    monkeypatch.setattr(decision_ledger, "open_for_session", lambda _s: [])
+    monkeypatch.setattr(decision_ledger, "cards_for_session", lambda _s: {})
     seen["on_finished"](True)
     (got,) = client.get("/take-on").json()["offers"]
     assert got["status"] == "asked" and got["outcome"] == "Which time works, 10 or 2?"
@@ -629,7 +629,7 @@ def test_a_turn_cut_off_after_it_acted_shows_what_it_did(
         {"role": "assistant", "content": "I set up the weekly check.",
          "actions": [{"summary": "Saved a workflow", "link": "/jobs/weekly"}]},
     ])
-    monkeypatch.setattr(decision_ledger, "open_for_session", lambda _s: [])
+    monkeypatch.setattr(decision_ledger, "cards_for_session", lambda _s: {})
     seen["on_finished"](False)
     assert client.get("/take-on").json()["offers"] == []
     [got] = take_on.finished(ME, datetime.now(UTC) - timedelta(hours=1))
@@ -651,7 +651,7 @@ def test_a_step_that_went_to_a_card_follows_the_card(client: TestClient, monkeyp
     monkeypatch.setattr(chat_route, "start_background_turn", fake_turn)
     client.post(f"/take-on/{o.key}/do")
     monkeypatch.setattr(session_store, "load_messages", lambda _s: [{"role": "assistant", "content": "It waits for you."}])
-    monkeypatch.setattr(decision_ledger, "open_for_session", lambda _s: [42])
+    monkeypatch.setattr(decision_ledger, "cards_for_session", lambda _s: {42: "proposed"})
     seen["on_finished"](True)
     statuses = {"s": decision_ledger.STATUS_PROPOSED}
     monkeypatch.setattr(decision_ledger, "get_decision_instances",
@@ -659,6 +659,32 @@ def test_a_step_that_went_to_a_card_follows_the_card(client: TestClient, monkeyp
     got = client.get("/take-on").json()["offers"][0]
     assert got["status"] == "card" and got["decision_id"] == 42
     statuses["s"] = decision_ledger.STATUS_EXECUTED
+    assert client.get("/take-on").json()["offers"] == []
+    assert [f.key for f in take_on.finished(ME, datetime.now(UTC) - timedelta(hours=1))] == [o.key]
+
+
+def test_a_card_approved_before_the_run_ends_is_done_not_asked(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.api.routes import chat as chat_route
+    from openexecutive.memory import decision_ledger, session_store
+
+    o = _offer()
+    take_on.put_made(ME, [o])
+    seen: dict[str, Any] = {}
+
+    async def fake_turn(_request: object, **kw: Any) -> str:
+        seen.update(kw)
+        return "sess-3"
+
+    monkeypatch.setattr(chat_route, "start_background_turn", fake_turn)
+    client.post(f"/take-on/{o.key}/do")
+    # Approved from Needs you while the run was still writing its reply.
+    monkeypatch.setattr(session_store, "load_messages", lambda _s: [{"role": "assistant", "content": "It waits for you."}])
+    monkeypatch.setattr(decision_ledger, "cards_for_session", lambda _s: {43: decision_ledger.STATUS_EXECUTED})
+    monkeypatch.setattr(decision_ledger, "get_decision_instances",
+                        lambda ids: {43: SimpleNamespace(status=decision_ledger.STATUS_EXECUTED)})
+    seen["on_finished"](True)
     assert client.get("/take-on").json()["offers"] == []
     assert [f.key for f in take_on.finished(ME, datetime.now(UTC) - timedelta(hours=1))] == [o.key]
 
@@ -1182,7 +1208,7 @@ def test_a_repeat_offer_shows_what_came_of_it_and_is_taken_up_only_when_done(
         return f"sess-r{len(turns)}"
 
     monkeypatch.setattr(chat_route, "start_background_turn", fake_turn)
-    monkeypatch.setattr(decision_ledger, "open_for_session", lambda _s: [])
+    monkeypatch.setattr(decision_ledger, "cards_for_session", lambda _s: {})
     assert client.post("/take-on/repeat:5/do").status_code == 202
     assert answered == []
     # It stopped: still there, with Try again.
@@ -1670,7 +1696,7 @@ def test_a_source_hears_its_offer_was_done_or_set_aside(
         return "sess-s1"
 
     monkeypatch.setattr(chat_route, "start_background_turn", fake_turn)
-    monkeypatch.setattr(decision_ledger, "open_for_session", lambda _s: [])
+    monkeypatch.setattr(decision_ledger, "cards_for_session", lambda _s: {})
     monkeypatch.setattr(session_store, "load_messages", lambda _s: [{"role": "assistant", "content": "Here's the plan."}])
     assert client.post("/take-on/setup:a1/do").status_code == 202
     assert setup_moves["taken"] == []

@@ -348,14 +348,18 @@ def _what_came_of_it(me: Me, offer: take_on.Offer, session_id: str, answered: bo
             if isinstance(chip, dict) and chip.get("summary"):
                 done.append((str(chip["summary"]), str(chip.get("link") or "")))
     try:
-        cards = dl.open_for_session(session_id)
+        cards = dl.cards_for_session(session_id)
     except Exception:
         logger.warning("take_on: couldn't read the run's cards", exc_info=True)
-        cards = []
+        cards = {}
     run = offer.started_at
     if cards:
+        # Every card the run put up, even one answered while the run was
+        # still finishing: the offer follows the first still open, else the
+        # last, and the next read settles it from there (``_settle_cards``).
+        follow = next((i for i, st in cards.items() if st in dl.OPEN_STATUSES), list(cards)[-1])
         status, wrote = "card", take_on.finish(me.email, key, "card", outcome=said, done=done,
-                                               decision_id=cards[0], from_run=run)
+                                               decision_id=follow, from_run=run)
     elif done:
         # What it did shows, even from a turn cut off at its deadline.
         status, wrote = "done", take_on.finish(me.email, key, "done", outcome=said, done=done, from_run=run)

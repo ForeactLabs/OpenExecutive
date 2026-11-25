@@ -275,12 +275,6 @@ def cards_for_session(session_id: str, db_path: Path | None = None) -> dict[int,
     return {int(r[0]): str(r[1]) for r in rows}
 
 
-def open_for_session(session_id: str, db_path: Path | None = None) -> list[int]:
-    """The ids of cards a chat put up that nobody has answered yet, oldest
-    first."""
-    return [i for i, status in cards_for_session(session_id, db_path).items() if status == STATUS_PROPOSED]
-
-
 def get_live_by_idem(
     idempotency_key: str,
     db_path: Path | None = None,
