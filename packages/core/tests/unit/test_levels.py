@@ -407,3 +407,17 @@ def test_a_clean_read_held_on_careful_is_not_called_unchecked(monkeypatch: pytes
     assert levels.decide(levels.mail_reason(pin), mode=outside_mode.ASK) == levels.CARD
     monkeypatch.setattr(levels, "turn_level", lambda: outside_mode.OUTSIDERS)
     assert levels.mail_reason(pin) == levels.MAIL_UNCHECKED
+
+
+def test_a_round_that_never_finished_leaves_its_mail_unchecked() -> None:
+    """A turn stopped mid-round: once the round ends, its mail read counts
+    as unchecked, never as read after the steps were asked."""
+    from openexecutive.delegation.settings import TurnDelegation
+
+    pin = TurnDelegation()
+    levels.mark_round(pin, reads_mail=True, script=False)
+    pin.read_mail, pin.mail_vetted = True, False
+    assert levels.mail_reason(pin) == levels.OWN_MAIL
+    levels.end_round(pin)
+    assert levels.mail_reason(pin) == levels.MAIL_UNCHECKED
+    levels.end_round(None)

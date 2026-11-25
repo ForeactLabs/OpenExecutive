@@ -1628,6 +1628,7 @@ class Executive:
                         full_response = ""
                     yield item
             finally:
+                levels.end_round(delegation_pin)
                 outside_content.end_turn(outside_turn)
 
         if debug_collector:
@@ -2075,6 +2076,7 @@ class Executive:
             # token can't be reset there; the turn still ends.
             with contextlib.suppress(ValueError):
                 _REFUSED.reset(refusing)
+            levels.end_round(delegation_pin)
             outside_content.end_turn(outside_turn)
 
         draft_ms = round((time.monotonic() - t0) * 1000)
@@ -4093,7 +4095,7 @@ class Executive:
                 )
                 if not ran_script:
                     outside_content.check_mail_reads_done(pinned_delegation)
-                pinned_delegation.round_reading = False
+                levels.end_round(pinned_delegation)
 
             current_messages.append({"role": "assistant", "content": response_content})
             # Cap here, at the single point every result reaches the model,

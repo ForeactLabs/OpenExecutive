@@ -241,6 +241,19 @@ def mark_round(pinned: Any, *, reads_mail: bool, script: bool) -> None:
         logger.debug("levels: couldn't mark the round", exc_info=True)
 
 
+def end_round(pinned: Any) -> None:
+    """The round is over, finished or not: its mail no longer counts as read
+    after its steps were asked (``mark_round``), so a read nobody checked is
+    unchecked. Called at the end of every round and when a turn ends, a
+    stopped or failed one included. Never raises."""
+    if pinned is None:
+        return
+    try:
+        pinned.round_reading = False
+    except Exception:
+        logger.debug("levels: couldn't end the round", exc_info=True)
+
+
 def mail_reason(pinned: Any = None, tool: str = "", tool_input: Any = None) -> str:
     """Why a step waits after someone's own mail was read this turn:
     ``MAIL_FLAGGED`` when the content check flagged some of what it read,
