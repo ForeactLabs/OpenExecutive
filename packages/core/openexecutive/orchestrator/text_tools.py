@@ -205,7 +205,10 @@ async def handle_send_text(tool_input: dict[str, Any]) -> str:
     if settled.status == texts.SENT:
         return json.dumps({"status": "sent", "message": f"Texted {who} from their phone."})
     if settled.status == texts.UNSURE:
-        return json.dumps({"status": "unsure", "message": texts.outcome_words(settled, who)})
+        return json.dumps({
+            "status": "unsure",
+            "message": texts.outcome_words(settled, who) + " Say exactly that; never send it again on your own.",
+        })
     return json.dumps({"error": f"Their browser couldn't send it: {settled.error or 'no reason given'}. Nothing went."})
 
 

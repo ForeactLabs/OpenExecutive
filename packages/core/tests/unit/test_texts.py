@@ -542,3 +542,31 @@ def test_reading_texts_is_reading_outside_words() -> None:
     assert outside_content.source_of("read_texts", {}) == outside_content.TEXTS
     assert outside_content.source_of("send_text", {"to": "5550001111", "text": "hi"}) is None
     assert "text" in outside_content._SOURCE_WORDS[outside_content.TEXTS]
+
+
+def test_a_send_pressed_without_an_answer_is_reported_unsure(client: TestClient, ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    send = tx.queue_send(owner, "Running late", to_number="5550003333")
+    assert client.get("/delegation/texts/next?wait=0", headers=OWNER).json()["send"]["id"] == send.id
+    out = client.post(
+        f"/delegation/texts/sends/{send.id}",
+        json={"status": "unsure", "error": "Google Messages didn't show the text as sent"}, headers=OWNER,
+    )
+    assert out.json()["status"] == tx.UNSURE
+    words = tx.outcome_words(tx.get_send(send.id), "Sam")
+    assert "Check your phone" in words and "Nothing went" not in words
+
+
+def test_the_turn_sees_every_new_text_in_a_burst(ids: dict[str, int], monkeypatch: pytest.MonkeyPatch) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item(f"r{i}", text=f"part {i}", at=NOW + timedelta(seconds=i - 60)) for i in range(12)])
+    prompts: list[str] = []
+
+    async def turn(person: Any, prompt: str, **_: Any) -> None:
+        prompts.append(prompt)
+
+    monkeypatch.setattr(texts_watch, "_turn", turn)
+    assert asyncio.run(texts_watch.look(owner)) is True
+    assert all(f"part {i}<" in prompts[0] for i in range(12))

@@ -135,15 +135,16 @@
         try {
           result = await chrome.runtime.sendMessage({ type: "text_send", send });
         } catch {
-          result = { ok: false, error: "The browser extension didn't answer." };
+          result = { ok: false, unsure: true, error: "The browser extension didn't answer" };
         }
         const ok = Boolean(result && result.ok);
+        const unsure = !ok && Boolean(result && result.unsure);
         await fetch(`${TEXTS}/sends/${send.id}`, {
           method: "POST",
           credentials: "same-origin",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            status: ok ? "sent" : "failed",
+            status: ok ? "sent" : unsure ? "unsure" : "failed",
             error: ok ? "" : String((result && result.error) || "No answer from the browser.").slice(0, 300),
             conversation: ok && typeof result.conversation === "string" ? result.conversation.slice(0, 300) : "",
           }),

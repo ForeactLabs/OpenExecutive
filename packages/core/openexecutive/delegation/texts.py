@@ -407,7 +407,8 @@ def outcome_words(send: Send, who: str) -> str:
     if send.status == SENT:
         return f'Texted {who}: "{send.text}"'
     if send.status == UNSURE:
-        return f'I don\'t know whether my text to {who} "{send.text}" went: Chrome never said. Check your phone.'
+        why = send.error.strip().rstrip(".") or "Chrome never said"
+        return f'I don\'t know whether my text to {who} "{send.text}" went: {why}. Check your phone.'
     reason = send.error.strip().rstrip(".") if send.error.strip() else "the browser didn't say why"
     return f'I couldn\'t text {who} "{send.text}": {reason}. Nothing went.'
 

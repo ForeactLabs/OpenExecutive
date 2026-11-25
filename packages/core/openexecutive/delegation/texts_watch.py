@@ -36,7 +36,7 @@ def first_name(person: Any) -> str:
     return name[0] if name else "them"
 
 
-def prompt_for(person: Any, items: list[tuple[Any, Any]]) -> str:
+def prompt_for(person: Any, items: list[tuple[Any, Any]], new_counts: dict[str, int] | None = None) -> str:
     """What the turn reads: each conversation with new texts, its recent
     texts, and what to do."""
     from openexecutive.delegation import texts
@@ -49,7 +49,8 @@ def prompt_for(person: Any, items: list[tuple[Any, Any]]) -> str:
         "",
     ]
     for conv, _newest in items:
-        earlier = texts.texts(conv.id, limit=8)
+        # Every new text, and a little before it.
+        earlier = texts.texts(conv.id, limit=min(60, max(8, (new_counts or {}).get(conv.id, 0) + 2)))
         lines.append(f'Conversation {_attr(conv.id)}{" (a group)" if conv.is_group else ""}:')
         lines.append(
             f'<untrusted_content source="text_message" with="{_attr(conv.who)}" number="{_attr(conv.number or "")}">'
@@ -134,7 +135,10 @@ async def look(person_id: int) -> bool:
             items.append((conv, t))
     if not items:
         return False
-    prompt = await asyncio.to_thread(prompt_for, person, items)
+    counts: dict[str, int] = {}
+    for t in new:
+        counts[t.conversation_id] = counts.get(t.conversation_id, 0) + 1
+    prompt = await asyncio.to_thread(prompt_for, person, items, counts)
     # A text from someone not on People (or a group) is outside words, like
     # mail from a stranger: the turn says so, and Approvals weighs it.
     known = await asyncio.gather(*(asyncio.to_thread(texts.known_person, conv) for conv, _ in items))

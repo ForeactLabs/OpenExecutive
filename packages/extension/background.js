@@ -337,9 +337,10 @@ async function sendOneText(send) {
   }
   try {
     const out = await chrome.tabs.sendMessage(tab.id, { type: "texts_send_here", conversation: key, number, text });
-    return out && typeof out === "object" ? out : { ok: false, error: "Google Messages didn't answer." };
+    return out && typeof out === "object" ? out : { ok: false, unsure: true, error: "Google Messages didn't answer" };
   } catch {
-    return { ok: false, error: "Google Messages didn't answer. Is it open and paired?" };
+    // Handed over, then no answer: it may have gone.
+    return { ok: false, unsure: true, error: "Google Messages stopped answering while sending" };
   }
 }
 

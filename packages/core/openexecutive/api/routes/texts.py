@@ -88,7 +88,7 @@ class NextOut(BaseModel):
 
 
 class SendResultIn(BaseModel):
-    status: Literal["sent", "failed"]
+    status: Literal["sent", "failed", "unsure"]
     error: str = Field(default="", max_length=300)
     # For a text to a new number: the conversation it went to.
     conversation: str = Field(default="", max_length=300)

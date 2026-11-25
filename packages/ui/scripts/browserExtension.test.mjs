@@ -427,3 +427,11 @@ test("texts: off forgets what was seen, so on again only counts unread texts", (
   const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
   assert.ok(bg.includes('await chrome.storage.local.remove("textsSeen");'));
 });
+
+test("texts: once Send is pressed a missing answer is unsure, and a new number picks only its Send-to choice", () => {
+  const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
+  assert.match(texts, /if \(!went\) return \{ ok: false, unsure: true/);
+  assert.ok(!texts.includes("mw-contact-row button"));
+  const content = readFileSync(new URL("../../extension/content.js", import.meta.url), "utf8");
+  assert.ok(content.includes('ok ? "sent" : unsure ? "unsure" : "failed"'));
+});

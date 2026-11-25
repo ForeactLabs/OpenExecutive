@@ -260,7 +260,8 @@
     setValue(input, number);
     // Google Messages offers "Send to <number>" once it reads a number.
     const pick = await waitFor(
-      () => first(document, ["[data-e2e-send-to-button]", "mw-contact-selector-button button", "mw-contact-row button"]),
+      // Only the "Send to <number>" choice: never a contact suggestion, which can be someone else.
+      () => first(document, ["[data-e2e-send-to-button]", "mw-contact-selector-button button"]),
       6000,
     );
     if (pick) pick.click();
@@ -286,6 +287,7 @@
     setValue(box, text);
     await pause(300);
     const button = first(document, SEND);
+    // From here on Send is pressed: a missing answer is unsure, never "Nothing went".
     if (button && !button.disabled) button.click();
     else pressEnter(box);
     const want = T.squeeze(text, 4000).slice(0, 60);
@@ -293,7 +295,8 @@
       const now = outgoingTexts();
       return now.length > before && now.slice(before).some((t) => t.includes(want)) ? true : null;
     }, 20000);
-    if (!went) return { ok: false, error: "Google Messages didn't show the text as sent." };
+    // Send was pressed: it may have gone, so never say it didn't.
+    if (!went) return { ok: false, unsure: true, error: "Google Messages didn't show the text as sent" };
     // A text Google Messages couldn't send shows a "Not sent" note on it.
     await pause(1500);
     // Only the text just sent: an older one that failed says nothing about it.
