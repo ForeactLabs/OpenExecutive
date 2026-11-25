@@ -187,6 +187,7 @@ async def _turn(person: Any, prompt: str, *, off_team: bool = False) -> None:
         caller_person_id=person.id,
         run_for_person_id=None if person.is_principal else person.id,
         sender_off_team=off_team,
+        answers_a_text=True,
     )
     executive = Executive(mcp_gateway=await ensure_active_gateway())
     # Their texts and what came of them are in their activity alone.

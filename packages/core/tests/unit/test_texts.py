@@ -868,6 +868,44 @@ def test_a_turn_on_a_strangers_texts_never_reads_the_others(ids: dict[str, int])
         current_session.reset(token)
 
 
+def test_a_turn_on_a_teammates_text_never_reads_the_others_either(ids: dict[str, int]) -> None:
+    # The number a text shows can be one its sender picked, so a text that
+    # seems to be from a teammate gets no more of the person's texts.
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("b", conv="bank", title="BANK", sender="BANK", text="Your code is 482913")])
+    token = current_session.set(Session(unattended=True, caller_person_id=owner, answers_a_text=True))
+    try:
+        out = json.loads(asyncio.run(text_tools.handle_read_texts({})))
+        assert out["conversations"] == []
+        (conv,) = tx.conversations(owner)
+        assert "482913" not in asyncio.run(text_tools.handle_read_texts({"conversation_id": conv.id}))
+    finally:
+        current_session.reset(token)
+
+
+def test_the_watchers_turn_is_marked_as_answering_a_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.orchestrator import executive as executive_mod
+
+    seen: list[Any] = []
+
+    class FakeExecutive:
+        def __init__(self, **_: Any) -> None:
+            pass
+
+        async def chat(self, *, session: Any, **_: Any) -> None:
+            seen.append(session)
+
+    async def gateway() -> None:
+        return None
+
+    monkeypatch.setattr(executive_mod, "Executive", FakeExecutive)
+    monkeypatch.setattr("openexecutive.orchestrator.mcp_gateway.ensure_active_gateway", gateway)
+    person = type("P", (), {"id": 7, "is_principal": True})()
+    asyncio.run(texts_watch._turn(person, "hi", off_team=False))
+    assert seen and seen[0].answers_a_text is True and seen[0].sender_off_team is False
+
+
 def test_a_new_numbers_echo_never_lands_in_another_numbers_conversation(ids: dict[str, int]) -> None:
     owner = ids["principal"]
     _on(owner)

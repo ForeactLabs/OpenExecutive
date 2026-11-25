@@ -12814,8 +12814,10 @@ delegation:
     route _OWN_DEVICE_TOOLS to acting_for, and only that person's tap
     relaxes the gate for it (carry_out own_ok); anyone else's Approve runs
     as nobody, so no phone sends and the card says nothing went. A turn
-    answering someone outside the team sees none of the person's other
-    texts (read_texts shows nothing there). Why: it goes as them,
+    answering a text, or someone outside the team, sees none of the
+    person's other texts (read_texts shows nothing there; Session
+    answers_a_text): a text's number can be one its sender picked, so
+    seeming to come from a teammate earns no more. Why: it goes as them,
     from their own phone, which they could text from themselves, so their
     OK gives them nothing they lack, and their texts stay off other lists.
     A send waits for the browser (long-poll
