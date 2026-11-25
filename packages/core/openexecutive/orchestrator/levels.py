@@ -556,13 +556,19 @@ def _requester(session: Any) -> Any:
 
 
 def _approver(requester: Any, reason: str, tool: str, tool_input: dict[str, Any]) -> int | None:
-    """Who taps Approve: the teammate who asked, on their own turn, for a
+    """Who taps Approve: for a step on someone's own device, them; the
+    teammate who asked, on their own turn, for a
     step that stays inside the team (their level is theirs, like the
     owner's); the owner for anything someone not in People asked, a tool
     only the owner may use, or a step that reaches outside the team. Never
     raises: an error is the owner."""
     from openexecutive.orchestrator import take_the_lead
 
+    # A step on someone's own device (a text from their phone) is theirs
+    # to approve, as on take_the_lead's cards (``card_of``).
+    acting = take_the_lead.own_device_for(tool, tool_input).get("acting_for")
+    if isinstance(acting, int) and not isinstance(acting, bool):
+        return acting
     try:
         if (
             reason not in (STRANGER, NOT_OWNER, READ_ONLY)

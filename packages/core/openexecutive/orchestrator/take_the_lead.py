@@ -2928,7 +2928,10 @@ _HOLD_KEY_TRIES = 50
 def card_of(tool: str, tool_input: dict[str, Any], hit: Hit, *, source: str) -> int | None:
     """Whose list a step held for ``hit`` goes on."""
     # A step on someone's own device (a text from their phone) is theirs
-    # alone: their private messages never show on anyone else's list.
+    # alone: their private messages never show on anyone else's list, and
+    # whatever held it (In training, Careful, a Waits rule), their tap is
+    # the OK. It goes as them, from their own phone, which they could text
+    # from themselves: approving it gives them nothing they don't have.
     acting = own_device_for(tool, tool_input).get("acting_for")
     if isinstance(acting, int) and not isinstance(acting, bool):
         return acting
@@ -3557,8 +3560,12 @@ async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bo
             grant_contact_egress() if by_principal else nullcontext(),
             # The tap approves this one call: a skill that runs others
             # (a workflow, research) keeps every check for them.
+            # A text from someone's phone goes only on their own tap: anyone
+            # else's Approve runs it through the gate again, which puts it
+            # back on their card.
             levels.approved(asker)
-            if (by_principal or own_ok) and payload.get("held") is True and tool not in levels.NOT_RELAXED_SKILLS
+            if (own_ok if tool in _OWN_DEVICE_TOOLS else (by_principal or own_ok))
+            and payload.get("held") is True and tool not in levels.NOT_RELAXED_SKILLS
             else nullcontext(),
         ):
             if payload.get("mcp"):

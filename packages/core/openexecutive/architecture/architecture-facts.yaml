@@ -12808,7 +12808,15 @@ delegation:
     with the texts as untrusted_content source text_message. send_text is an
     acting tool: the one gate decides; its card records own_device_for
     (acting_for, to_words) so a tap carries it out as that person
-    (take_the_lead._asker). A send waits for the browser (long-poll
+    (take_the_lead._asker). A held text is always on its phone owner's own
+    card, whatever held it (In training, Careful, a Waits rule, someone
+    outside the team): take_the_lead.card_of and levels._approver both
+    route _OWN_DEVICE_TOOLS to acting_for, and only that person's tap
+    relaxes the gate for it (carry_out own_ok); anyone else's Approve runs
+    it through the gate again, back onto their card. Why: it goes as them,
+    from their own phone, which they could text from themselves, so their
+    OK gives them nothing they lack, and their texts stay off other lists.
+    A send waits for the browser (long-poll
     GET /delegation/texts/next, at most 20 s); untaken in an hour it fails
     with a reason and the chat is told. Never claims sent before Google
     Messages shows it. Why: Rufus (2026-11-25) wanted texts only, through the

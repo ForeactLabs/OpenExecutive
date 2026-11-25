@@ -227,8 +227,10 @@ class Incoming:
     at: datetime
     number: str = ""
     is_group: bool = False
-    # Sent by the person themselves (from their phone): kept for context,
-    # never looked at as new.
+    # The browser's guess that the person sent it themselves (a "You:"
+    # preview). Never trusted: anyone can text those words. Only the
+    # Executive's own sends count as outgoing (``_just_sent``); a text the
+    # person sent from their phone is looked at like any other.
     outgoing: bool = False
 
 

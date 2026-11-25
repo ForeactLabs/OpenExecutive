@@ -673,3 +673,48 @@ def test_a_teammates_text_card_is_theirs_alone(ids: dict[str, int], as_turn_for:
     for kind in (ttl.TRAINING, "level", "someone_new"):
         hit = ttl.Hit(kind=kind, reason="x")
         assert ttl.card_of("send_text", {"conversation_id": conv.id, "text": "hi"}, hit, source="scheduled") == mate
+
+
+def test_a_teammates_text_held_by_levels_is_on_their_card(ids: dict[str, int], as_turn_for: Any) -> None:
+    from openexecutive.memory.decision_ledger import get_decision_instance
+    from openexecutive.orchestrator import levels
+
+    mate = ids["teammate"]
+    _on(mate)
+    tx.record(mate, [_item("m", conv="mate-conv")])
+    (conv,) = tx.conversations(mate)
+    as_turn_for(mate)
+    out = json.loads(levels.hold("send_text", {"conversation_id": conv.id, "text": "hi"}, mcp=False, reason=levels.STRANGER))
+    decision = get_decision_instance(int(out["decision_instance_id"]))
+    assert decision is not None and decision.approver_person_id == mate
+    assert json.loads(decision.proposed_payload_json)["acting_for"] == mate
+
+
+def test_only_the_phones_owner_tap_sends_their_text(
+    ids: dict[str, int], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contextlib import contextmanager
+
+    from openexecutive.orchestrator import levels
+
+    mate, owner = ids["teammate"], ids["principal"]
+    relaxed_for: list[Any] = []
+
+    @contextmanager
+    def approved(requester: Any = None) -> Iterator[None]:
+        relaxed_for.append(requester)
+        yield
+
+    async def send(_: dict[str, Any]) -> str:
+        return json.dumps({"status": "sent"})
+
+    monkeypatch.setattr(levels, "approved", approved)
+    from openexecutive.orchestrator import executive
+
+    monkeypatch.setitem(executive._ALL_SKILL_HANDLERS, "send_text", send)
+    payload = {"tool": "send_text", "input": {"conversation_id": "c", "text": "hi"}, "held": True,
+               "requested_by_person_id": mate, "acting_for": mate}
+    asyncio.run(ttl.carry_out({**payload, "tapped_by": owner}, by_principal=True))
+    assert relaxed_for == []
+    asyncio.run(ttl.carry_out({**payload, "tapped_by": mate}, by_principal=False))
+    assert relaxed_for == [mate]
