@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import re
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -1403,6 +1404,7 @@ _SINCE_MAX_MESSAGES = 30
 _SINCE_MAX_CHARS = 300
 _PAUSED = "PAUSED:"
 _DROPPED = "DROPPED:"
+_MARKER_RE = re.compile(r"[*_\s]*(PAUSED|DROPPED)\b[*_:.\s]*", re.I)
 
 
 def _followup_owner(action: ScheduledAction) -> Person | None:
@@ -1566,9 +1568,10 @@ def _followup_outcome(reply: object) -> tuple[str, str]:
     without the marker)``. Only read when they wrote since: the run never
     stands one down on its own judgement."""
     text = str(reply or "").strip()
-    for mark, outcome in ((_PAUSED, "paused"), (_DROPPED, "dropped")):
-        if text.upper().startswith(mark):
-            return outcome, text[len(mark):].strip()
+    # The marker as written, or bold, or without its colon.
+    m = _MARKER_RE.match(text)
+    if m:
+        return ("paused" if m.group(1).upper() == "PAUSED" else "dropped"), text[m.end():].strip()
     return "", text
 
 

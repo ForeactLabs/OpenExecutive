@@ -429,3 +429,16 @@ def test_a_held_reminder_to_the_owner_tells_them_whatever_the_run_wrote(
     tell.assert_called_once()
     assert tell.call_args.args[0].id == me and tell.call_args.args[1].startswith("I held this follow-up as you asked")
     assert episodic.get_scheduled_action(action_id).status == "cancelled"  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize(("reply", "expected"), [
+    ("PAUSED: held it", ("paused", "held it")),
+    ("PAUSED", ("paused", "")),
+    ("**PAUSED:** held it", ("paused", "held it")),
+    ("Paused.", ("paused", "")),
+    ("dropped: done", ("dropped", "done")),
+    ("Pausedness is not a marker", ("", "Pausedness is not a marker")),
+    ("Sent it. PAUSED later", ("", "Sent it. PAUSED later")),
+])
+def test_the_marker_is_read_however_it_is_written(reply: str, expected: tuple[str, str]) -> None:
+    assert runner._followup_outcome(reply) == expected
