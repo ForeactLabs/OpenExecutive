@@ -1244,6 +1244,8 @@ async def _execute_action(
     held_ids: list[int] = []
     owner = _followup_owner(action)
     since = _since_scheduled_block(action, owner)
+    # Addressed to someone else: the setter hears from the run in a line.
+    tell = owner if since and owner and not _own_ref(owner, action.channel, action.channel_ref) else None
     reply: object = ""
     try:
         from openexecutive.knowledge.retriever import retrieve
@@ -1286,6 +1288,8 @@ async def _execute_action(
             f"schedule_followup again unless the user's original intent "
             f"explicitly requested a chained follow-up."
         )
+        if tell is not None:
+            synthetic_message += _tell_setter_block(tell.full_name or "the person who set it")
 
         executive = Executive(mcp_gateway=gateway)
         from openexecutive.attunement.outcomes import tag_proactive
@@ -1299,6 +1303,14 @@ async def _execute_action(
                 retrieved_context=retrieved_context,
                 episodic_context=episodic_context,
             )
+            said = _followup_outcome(reply)[1]
+            if tell is not None and said:
+                # The run's own send already went: a failed notice is
+                # logged, never retried, or that send would go twice.
+                notice = await deliver_to_person(tell, said, label="Follow-up")
+                if not notice.ok:
+                    logger.warning("scheduler: action %d: couldn't tell the setter what it did: %s",
+                                   action.id, notice.detail)
 
     except Exception as exc:
         logger.exception("scheduler: action %d failed", action.id)
@@ -1398,10 +1410,9 @@ _DROPPED = "DROPPED:"
 
 
 def _followup_owner(action: ScheduledAction) -> Person | None:
-    """Who set ``action``, when it is an ad hoc follow-up back to them: the
-    person whose turn queued it, else the owner of the conversation it came
-    from (one with no owner is the principal's), and only when its address
-    is their own."""
+    """Who set ``action``, when it is an ad hoc follow-up: the person whose
+    turn queued it, else the owner of the conversation it came from (one
+    with no owner is the principal's), whoever it is addressed to."""
     from openexecutive.memory.episodic import _resolve_db_path
     from openexecutive.memory.session_store import get_session_owner
     from openexecutive.people.store import find_principal_person, get_person
@@ -1421,7 +1432,7 @@ def _followup_owner(action: ScheduledAction) -> Person | None:
     except Exception:
         logger.warning("scheduler: follow-up owner lookup failed", exc_info=True)
         return None
-    if person is None or person.archived or not _own_ref(person, action.channel, action.channel_ref):
+    if person is None or person.archived:
         return None
     return person
 
@@ -1461,6 +1472,19 @@ def _since_scheduled_block(action: ScheduledAction, person: Person | None) -> st
         f"If you held it or dropped it as they asked, start your final reply "
         f"with {_PAUSED} or {_DROPPED} (dropping also ends a repeating one); "
         f"otherwise don't.\n\n"
+    )
+
+
+def _tell_setter_block(name: str) -> str:
+    """For a follow-up to someone else whose setter wrote since: hold it if
+    they asked, and either way end with one line to them, which the runner
+    delivers to them, so a hold there is never silent."""
+    return (
+        f" If what {name} said since asks to hold it or drop it, "
+        f"send nothing to anyone else. Either way, end with one short "
+        f"line to {name} saying what you did (sent it, or held it as "
+        f"they asked and what to say to send it): that line is sent "
+        f"to them as written."
     )
 
 
@@ -1610,13 +1634,7 @@ async def _run_teammate_followup(
                 # They wrote since it was set: whatever the run did (sent it,
                 # or held it as they asked), they hear it from the run in a
                 # line, so a hold is never silent.
-                synthetic_message += (
-                    f" If what {name} said since asks to hold it or drop it, "
-                    f"send nothing to anyone else. Either way, end with one short "
-                    f"line to {name} saying what you did (sent it, or held it as "
-                    f"they asked and what to say to send it): that line is sent "
-                    f"to them as written."
-                )
+                synthetic_message += _tell_setter_block(name)
         executive = Executive(mcp_gateway=gateway)
         source, ref = _outreach_source(action)
         with tag_proactive(source, ref), track_holds() as held_ids:

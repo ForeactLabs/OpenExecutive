@@ -134,19 +134,31 @@ def test_a_followup_still_due_runs_as_before(db: Path, roster: SimpleNamespace) 
     assert episodic.get_scheduled_action(action_id).status == "done"  # type: ignore[union-attr]
 
 
-def test_no_chat_since_or_someone_elses_address_shows_nothing(
+def test_no_chat_since_shows_nothing(db: Path, roster: SimpleNamespace) -> None:
+    me = roster.principal.id
+    create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
+    action_id = _followup("tg-1", created_by=me)
+    with patch.object(runner, "deliver_to_person", new_callable=AsyncMock) as tell:
+        _, prompt = _fire(action_id, "Sent.")
+    assert "<since_scheduled>" not in prompt and "send nothing to anyone else" not in prompt
+    tell.assert_not_called()
+
+
+def test_a_note_to_someone_else_they_asked_to_hold_tells_them(
     db: Path, roster: SimpleNamespace
 ) -> None:
     me = roster.principal.id
     create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
-    action_id = _followup("tg-1", created_by=me)
-    _, prompt = _fire(action_id, "Sent.")
-    assert "<since_scheduled>" not in prompt
-    # Addressed to someone else: their chat is not quoted, whatever it says.
-    _message(db, "web-2", me, "user", "private words", -timedelta(hours=2), sender=me)
-    other = _followup("tg-1", ref="999", created_by=me)
-    _, prompt = _fire(other, "Sent.")
-    assert "private words" not in prompt
+    action_id = _followup("tg-1", ref="999", created_by=me)
+    _message(db, "web-2", me, "user", "Hold the note to Dana, terms changed", -timedelta(hours=2), sender=me)
+    with patch.object(runner, "deliver_to_person", new_callable=AsyncMock) as tell:
+        tell.return_value = SimpleNamespace(ok=True, detail="")
+        _, prompt = _fire(action_id, "PAUSED: Held the note to Dana as you asked; say 'send it' and it goes.")
+    assert "Hold the note to Dana" in prompt and "send nothing to anyone else" in prompt
+    tell.assert_called_once()
+    assert tell.call_args.args[0].id == me
+    assert tell.call_args.args[1] == "Held the note to Dana as you asked; say 'send it' and it goes."
+    assert episodic.get_scheduled_action(action_id).status == "cancelled"  # type: ignore[union-attr]
 
 
 def test_the_turn_shows_the_speakers_pending_followups(db: Path, roster: SimpleNamespace) -> None:
