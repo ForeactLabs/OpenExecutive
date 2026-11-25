@@ -1022,7 +1022,9 @@ def change(email: str, offer: Offer, title: str, preview: list[tuple[str, str]],
     Returns whether it was changed."""
     person, now = who(email), _now()
     changed: dict[str, Any] = {"title": line(title, TITLE_MAX), "preview": preview}
-    if kind in KINDS and kind != offer.kind:
+    # Always kept when given: ``offer`` may already carry an earlier change's
+    # kind, so comparing against it would drop that kind on a second change.
+    if kind in KINDS:
         changed["kind"] = kind
     with _connect(db_path) as conn:
         _ensure(conn, person, offer.key, offer.kind, now)

@@ -285,6 +285,17 @@ def test_or_tell_me_changes_the_offer_and_undo_puts_it_back() -> None:
     assert not back.changed and back.title == o.title
 
 
+def test_a_second_or_tell_me_keeps_the_kind_the_first_one_chose() -> None:
+    o = _offer()
+    take_on.put_made(ME, [o])
+    take_on.change(ME, o, "I can watch for Dana's reply", [("Watch", "Dana")], "make it a watch", kind="watch")
+    first = _list()[0]
+    assert first.kind == "watch"
+    take_on.change(ME, first, "I can check daily for Dana's reply", [("Watch", "Dana")], "check it daily",
+                   kind="watch")
+    assert _list()[0].kind == "watch"
+
+
 def test_an_offer_changed_to_match_another_still_shows() -> None:
     a = _offer()
     b = _offer("I can chase Priya for the March invoice", "followup")
