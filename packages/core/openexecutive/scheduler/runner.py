@@ -1531,11 +1531,15 @@ async def _setter_decision(action: ScheduledAction, person: Person) -> str:
     return ""
 
 
-def _set_aside_line(action: ScheduledAction, outcome: str) -> str:
+def _set_aside_line(action: ScheduledAction, outcome: str, *, repeats_on: bool = False) -> str:
     """The fixed line that tells a setter their follow-up was held or
-    dropped as they asked."""
+    dropped as they asked (``repeats_on``: this time only, its series goes
+    on)."""
     what = " ".join(str(action.intent_text or "").split())[:200].rstrip(".!? ")
     verb = "held" if outcome == "paused" else "dropped"
+    if repeats_on:
+        return (f"I {verb} this time's follow-up as you asked: {what}. It still repeats: "
+                f"ask me to stop it for good, or for this one again, any time.")
     return f"I {verb} this follow-up as you asked: {what}. Ask me for it again any time."
 
 
@@ -1544,9 +1548,12 @@ async def _as_setter_said(
 ) -> None:
     """A follow-up to someone else its setter asked since to hold or drop:
     nothing goes to that someone, the setter is told in a line, and the
-    occurrence is recorded as such."""
-    await _tell_setter(action, person, _set_aside_line(action, outcome))
-    _end_as_asked(action, outcome, person.full_name or "they")
+    occurrence is recorded as such. Read apart from the run, a drop here
+    never ends a repeating series: only this time goes, and the line says
+    how to stop it for good."""
+    repeats_on = bool((action.repeat or "").strip())
+    await _tell_setter(action, person, _set_aside_line(action, outcome, repeats_on=repeats_on))
+    _end_as_asked(action, outcome, person.full_name or "they", ends_repeat=False)
 
 
 async def _tell_setter(action: ScheduledAction, person: Person, text: str) -> None:
@@ -1575,7 +1582,9 @@ def _followup_outcome(reply: object) -> tuple[str, str]:
     return "", text
 
 
-def _end_as_asked(action: ScheduledAction, outcome: str, name: str) -> None:
+def _end_as_asked(
+    action: ScheduledAction, outcome: str, name: str, *, ends_repeat: bool | None = None
+) -> None:
     """Record a follow-up its setter asked to hold or drop as such, not as
     sent: this occurrence is cancelled with the reason (a dropped one ends
     its repeat too), and the audit says which. Their message from the run
@@ -1585,7 +1594,8 @@ def _end_as_asked(action: ScheduledAction, outcome: str, name: str) -> None:
 
     assert action.id is not None
     reason = f"{outcome} as {name} asked"
-    mark_action_cancelled(action.id, reason, ends_repeat=outcome == "dropped")
+    ends = outcome == "dropped" if ends_repeat is None else ends_repeat
+    mark_action_cancelled(action.id, reason, ends_repeat=ends)
     logger.info("scheduler: action %d %s", action.id, reason)
     audit_log(
         "scheduled_action",

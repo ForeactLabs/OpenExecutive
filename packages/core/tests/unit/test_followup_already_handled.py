@@ -442,3 +442,15 @@ def test_a_held_reminder_to_the_owner_tells_them_whatever_the_run_wrote(
 ])
 def test_the_marker_is_read_however_it_is_written(reply: str, expected: tuple[str, str]) -> None:
     assert runner._followup_outcome(reply) == expected
+
+
+def test_a_drop_read_apart_never_ends_a_repeating_series(db: Path, roster: SimpleNamespace) -> None:
+    me = roster.principal.id
+    create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
+    action_id = _followup("tg-1", ref="999", created_by=me)
+    _repeating(action_id)
+    _message(db, "web-2", me, "user", "Cancel the report review", -timedelta(hours=2), sender=me)
+    chat, _, tell = _fire_decided(action_id, "dropped")
+    chat.assert_not_called()
+    assert _status_and_next(action_id) == ("cancelled", 1)  # this time only
+    assert "It still repeats" in tell.call_args.args[1]
