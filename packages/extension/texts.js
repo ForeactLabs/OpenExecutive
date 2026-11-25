@@ -181,16 +181,23 @@
       const now = Date.now();
       const isPaired = paired();
       let items = [];
+      let seen = null;
       if (isPaired) {
         const stored = (await chrome.storage.local.get(SEEN_KEY))[SEEN_KEY];
         const out = T.changes(listRows(), stored && typeof stored === "object" ? stored : null, now);
         items = out.items;
-        await chrome.storage.local.set({ [SEEN_KEY]: out.seen });
+        seen = out.seen;
       }
       // Nothing new: still say it's here, once a minute.
-      if (!items.length && !force && now - lastReport < 60000) return;
+      if (!items.length && !force && now - lastReport < 60000) {
+        if (seen) await chrome.storage.local.set({ [SEEN_KEY]: seen });
+        return;
+      }
       lastReport = now;
-      await chrome.runtime.sendMessage({ type: "texts_seen", paired: isPaired, items }).catch(() => undefined);
+      const answer = await chrome.runtime.sendMessage({ type: "texts_seen", paired: isPaired, items }).catch(() => null);
+      // Only what the site took counts as seen: with no Open Executive tab
+      // to take them (or a failed one), the same texts go again next time.
+      if (seen && ((answer && answer.ok === true) || !items.length)) await chrome.storage.local.set({ [SEEN_KEY]: seen });
     } finally {
       reporting = false;
     }

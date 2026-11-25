@@ -458,6 +458,16 @@ test("texts: once Send is pressed a missing answer is unsure, and a new number p
   assert.ok(content.includes('ok ? "sent" : unsure ? "unsure" : "failed"'));
 });
 
+test("texts: new texts count as seen only once the site took them", () => {
+  const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
+  const report = texts.slice(texts.indexOf("async function report"), texts.indexOf("let timer = null"));
+  const send = report.indexOf('type: "texts_seen"');
+  const save = report.lastIndexOf("chrome.storage.local.set({ [SEEN_KEY]: seen })");
+  assert.ok(send > 0 && save > send);
+  assert.ok(report.includes("(answer && answer.ok === true) || !items.length"));
+  assert.ok(!report.includes("[SEEN_KEY]: out.seen"));
+});
+
 test("texts: a Google Messages page that never answered fails the send, never unsure", () => {
   const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
   assert.ok(bg.includes('if (!ready) return { ok: false, error: "Google Messages didn\'t load. Nothing went." };'));
