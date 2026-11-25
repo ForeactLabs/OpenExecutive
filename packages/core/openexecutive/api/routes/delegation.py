@@ -886,9 +886,7 @@ async def update_delegation(request: Request, body: DelegationUpdate) -> Delegat
     person = _caller(request)
     person_id = _person_id(person)
     if body.enabled:
-        status = await gmail_status(person.email)
-        if status != "connected":
-            raise _refuse(409, _BLOCKING_CODES.get(status, "gmail_error"), STATUS_MESSAGES[status])
+        await _can_turn_on(person, inbox=False)
     before = is_enabled(person_id)
     if not body.enabled:
         # The inbox watcher needs Act as me; off here, it starts from scratch
@@ -917,6 +915,23 @@ async def update_delegation(request: Request, body: DelegationUpdate) -> Delegat
             {"person_id": person_id, "enabled": body.enabled},
         )
     return await _state(person)
+
+
+async def _can_turn_on(person: Person, *, inbox: bool) -> None:
+    """Refuse turning As you (or, with ``inbox``, Draft replies to my inbox)
+    on when it couldn't work: their own mailbox isn't connected, or As you
+    is off."""
+    if inbox and not is_enabled(_person_id(person)):
+        raise _refuse(409, "act_as_me_off", "Turn As you on first.")
+    status = await gmail_status(person.email)
+    if status != "connected":
+        raise _refuse(409, _BLOCKING_CODES.get(status, "gmail_error"), STATUS_MESSAGES[status])
+
+
+async def check_can_turn_on(request: Request, *, inbox: bool) -> None:
+    """``_can_turn_on`` for the caller, so a chat asking to turn either on
+    hears why it can't before any card is left for their tap."""
+    await _can_turn_on(_caller(request), inbox=inbox)
 
 
 def _set_inbox(person_id: int, enabled: bool) -> None:
@@ -953,11 +968,7 @@ async def update_delegation_inbox(request: Request, body: InboxUpdate) -> Delega
         # on its own anyway: handle_it.signing_ok).
         if caller_refusal(api_caller.caller(request), normalize_email(person.email or "")) == NOT_YOURS:
             raise _refuse(403, "not_yours", "Only you can turn on replies to your inbox.")
-        if not is_enabled(person_id):
-            raise _refuse(409, "act_as_me_off", "Turn As you on first.")
-        status = await gmail_status(person.email)
-        if status != "connected":
-            raise _refuse(409, _BLOCKING_CODES.get(status, "gmail_error"), STATUS_MESSAGES[status])
+        await _can_turn_on(person, inbox=True)
     if body.mailbox_drafts is not None:
         _set_mailbox_drafts(person_id, body.mailbox_drafts)
     if body.enabled is not None:
