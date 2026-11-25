@@ -219,9 +219,16 @@
   let reporting = false;
   let lastReport = 0;
 
+  let again = false;
+
   async function report(force) {
-    if (reporting) return;
+    // A change while a report is out goes right after it, not at the next tick.
+    if (reporting) {
+      again = true;
+      return;
+    }
     reporting = true;
+    again = false;
     try {
       // Off: read nothing at all, and forget what was seen, so turning it
       // back on is a first look again (only unread texts count as new).
@@ -251,6 +258,7 @@
       if (seen && ((answer && answer.ok === true) || !items.length)) await chrome.storage.local.set({ [SEEN_KEY]: seen });
     } finally {
       reporting = false;
+      if (again) soon();
     }
   }
 

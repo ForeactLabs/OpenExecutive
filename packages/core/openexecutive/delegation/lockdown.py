@@ -177,8 +177,9 @@ MAIL_TOUCHED_WITHHELD_TOOLS: frozenset[str] = frozenset({
     # A text from their own phone reaches whoever it is to, strangers
     # included: the mail read is a reason levels weighs for it.
     "send_text",
-    # Their texts hold codes and private words: a turn the mail drives
-    # (asking for "the code you just got") never reads them.
+    # Their texts hold codes and private words: while the mail lock holds
+    # (mail_lock_holds, by the level), a turn the mail drives ("the code you
+    # just got") doesn't read them.
     "read_texts",
     # Fetches of an outside address: a URL can carry the mail anywhere.
     "load_mcp_server",
