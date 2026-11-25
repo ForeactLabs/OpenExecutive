@@ -13,8 +13,8 @@ from openexecutive.alerts import approvals, lifecycle, store
 from openexecutive.alerts.models import (
     ARTIFACT_SOURCE,
     NEEDS_FYI,
-    PERSONAL_SOURCES,
     Alert,
+    is_one_persons,
     is_private_alert,
     visible_alert,
 )
@@ -359,8 +359,8 @@ def _audit_approval(
             **extra,
         },
         private=is_private_alert(alert),
-        # A personal card's words are its person's alone (PERSONAL_SOURCES).
-        private_to_person=alert.routed_to_person_id if alert.source in PERSONAL_SOURCES else None,
+        # A personal card's words are its person's alone (is_one_persons).
+        private_to_person=alert.routed_to_person_id if is_one_persons(alert) else None,
     )
 
 

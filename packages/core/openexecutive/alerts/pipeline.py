@@ -17,6 +17,7 @@ from openexecutive.alerts.models import (
     AlertEvent,
     AlertSeverity,
     TriageDecision,
+    is_one_persons,
 )
 
 if TYPE_CHECKING:
@@ -211,7 +212,7 @@ async def _triage(event: AlertEvent, path: Path) -> TriageDecision:
         # Never anyone's drafted documents or personal cards: they are their
         # owners' alone (``models.visible_alert``).
         for a in store.recent_alerts(limit=20, db_path=path, exclude_source="artifact")
-        if a.source not in PERSONAL_SOURCES
+        if not is_one_persons(a)
     ]
     try:
         initiatives = get_active_initiatives()

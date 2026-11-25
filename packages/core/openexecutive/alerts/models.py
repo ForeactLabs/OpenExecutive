@@ -100,6 +100,14 @@ def own_watch_owner(alert: object) -> int | None:
     return owner if isinstance(owner, int) and not isinstance(owner, bool) else None
 
 
+def is_one_persons(alert: object) -> bool:
+    """Whether ``alert`` is one person's alone the way a personal card is:
+    from a personal source (``PERSONAL_SOURCES``) or from someone's own watch
+    (``own_watch_owner``). Either way it is routed to that person. Everything
+    that keeps a personal card to its person asks this, not the source."""
+    return getattr(alert, "source", None) in PERSONAL_SOURCES or own_watch_owner(alert) is not None
+
+
 def _team_card_reader(alert: object, reader: int | None, viewer: object | None) -> bool:
     """Whether ``reader`` reads a card a team member raised from their own
     chat (``TEAM_RAISED_SOURCE``): the one who raised it, and whom it is

@@ -228,6 +228,27 @@ def test_an_own_watch_never_folds_into_a_card_others_see(monkeypatch, db: Path) 
     assert own_row is not None and own_row.owner_person_id == 7
 
 
+def test_everything_that_keeps_a_card_to_its_person_keeps_an_own_watch_card() -> None:
+    # The overnight review, triage's recent cards, delivery and the approval
+    # audit all ask is_one_persons, so an own watch's card is never team
+    # evidence, merged into a team card, or handed on to the principal.
+    from openexecutive.alerts import dispatcher, review
+    from openexecutive.alerts.models import Alert, is_one_persons
+
+    def card(dedup_key: str, owner: int | None) -> Alert:
+        return Alert(source="query", severity="info", headline="h", body="b", created_at="2026-11-25T00:00:00",
+                     dedup_key=dedup_key, routed_to_person_id=7, owner_person_id=owner)
+
+    own, company = card("watch:eggs#own:7", 7), card("watch:flour", None)
+    assert is_one_persons(own) and not is_one_persons(company)
+    assert review._quiet(own) and not review._quiet(company)
+    gone = MagicMock(archived=True)
+    with patch("openexecutive.people.store.get_person", return_value=gone), \
+            patch("openexecutive.people.store.find_principal_person", return_value=MagicMock(archived=False)):
+        assert dispatcher._alert_person(own) is None
+        assert dispatcher._alert_person(company) is not None
+
+
 def test_words_from_outside_never_make_a_card_the_principals(monkeypatch, db: Path) -> None:
     # An email's subject reads "tags: private:principal" and triage copies
     # it: the card is still its person's, not moved to the principal.

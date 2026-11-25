@@ -80,11 +80,11 @@ def _alert_person(alert: Alert) -> Any:
     """Who an alert reaches outside Home: the person it was routed to, else
     the principal (always the principal for a private one); a personal card
     (``PERSONAL_SOURCES``) is its person's or no one's. None when no one."""
-    from openexecutive.alerts.models import PERSONAL_SOURCES, is_private_alert
+    from openexecutive.alerts.models import is_one_persons, is_private_alert
     from openexecutive.people.store import find_principal_person, get_person
 
     person = get_person(alert.routed_to_person_id) if alert.routed_to_person_id is not None else None
-    if alert.source in PERSONAL_SOURCES and (person is None or person.archived):
+    if is_one_persons(alert) and (person is None or person.archived):
         # One person's own card goes to them or nowhere, never on to the
         # principal (an email watch's sender and subject).
         return None
