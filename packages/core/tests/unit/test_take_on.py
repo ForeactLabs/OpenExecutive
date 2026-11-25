@@ -512,6 +512,23 @@ def test_hide_asks_why_and_an_unknown_key_is_gone(client: TestClient) -> None:
     assert client.post("/take-on/../etc/do").status_code == 404
 
 
+@pytest.mark.parametrize(("reason", "told"), [("later", []), ("not_useful", [5])])
+def test_later_on_a_repeat_ask_keeps_it_and_a_turn_down_retires_it(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, reason: str, told: list[int],
+) -> None:
+    from openexecutive.api.routes import take_on as route
+    from openexecutive.workflows import repeat_asks
+
+    offer = take_on.Offer(key="repeat:5", origin="repeat", kind="workflow", title="I can do the Monday numbers",
+                          source="Your chats")
+    monkeypatch.setattr(take_on, "_repeat", lambda _pid: [offer])
+    monkeypatch.setattr(route, "_me", lambda _r: route.Me(ME, 1, True))
+    answered: list[int] = []
+    monkeypatch.setattr(repeat_asks, "answer_offer", lambda oid, _pid, accept: answered.append(oid) or True)
+    assert client.post("/take-on/repeat:5/hide", json={"reason": reason}).status_code == 204
+    assert answered == told
+
+
 def test_hide_on_a_card_already_off_the_list_just_takes_it_away(client: TestClient) -> None:
     # Put off with Later on one screen, then Hide pressed on another that
     # still showed it: no error, and the newer reason sticks.

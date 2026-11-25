@@ -404,12 +404,15 @@ def hide(key: str, body: HideIn, request: Request) -> None:
     # Hidden here, or already hidden on another screen and now with a newer
     # reason: the places an offer came from hear it too, so it isn't
     # offered there.
+    # Later only holds it here for a week: the place it came from keeps it.
+    if body.reason == "later":
+        return
     try:
         if key.startswith("repeat:") and me.person_id is not None:
             from openexecutive.workflows import repeat_asks
 
             repeat_asks.answer_offer(int(key.removeprefix("repeat:")), me.person_id, accept=False)
-        elif body.reason != "later":
+        else:
             _tell_source(key, taken=False)
     except HTTPException:
         pass
