@@ -205,7 +205,27 @@ def test_a_card_from_someones_own_watch_reaches_only_them(monkeypatch, db: Path)
     ])
     assert sent == [[AlertChannel.SLACK_DM]]
     row = alert_store.get_alert(alert_id, db_path=db)  # type: ignore[arg-type]
-    assert row is not None and row.owner_person_id == 7 and row.dedup_key == "watch:eggs"
+    assert row is not None and row.owner_person_id == 7 and row.dedup_key == "watch:eggs#own:7"
+
+
+def test_an_own_watch_never_folds_into_a_card_others_see(monkeypatch, db: Path) -> None:
+    # A company watch "eggs" left an open card, then was deleted; Morgan sets
+    # up "eggs" for themselves. Their finding is a new card of theirs, not
+    # new words on the card the whole team sees.
+    company = AlertEvent(source="query", external_id="q0", subject="s", body="company", dedup_hint="watch:eggs")
+    _, company_id = _run_pipeline(monkeypatch, db, company, channels=[AlertChannel.WEB])
+    before = alert_store.get_alert(company_id, db_path=db)  # type: ignore[arg-type]
+    own = AlertEvent(
+        source="query", external_id="q1", subject="s", body="mine", routed_to_person_id=7,
+        dedup_hint="watch:eggs", own_watch_of=7,
+    )
+    _, own_id = _run_pipeline(monkeypatch, db, own, channels=[AlertChannel.WEB])
+    assert own_id is not None and own_id != company_id
+    company_row = alert_store.get_alert(company_id, db_path=db)  # type: ignore[arg-type]
+    own_row = alert_store.get_alert(own_id, db_path=db)
+    assert company_row is not None and before is not None and company_row.owner_person_id is None
+    assert company_row.occurrence_count == before.occurrence_count
+    assert own_row is not None and own_row.owner_person_id == 7
 
 
 def test_words_from_outside_never_make_a_card_the_principals(monkeypatch, db: Path) -> None:

@@ -346,6 +346,11 @@ async def evaluate_and_dispatch(
             sorted(t for t in topic_tags if t.startswith("department:"))
         )
         dedup_key = f"raised_by:{(event.from_ or event.raised_by).lower()}:{for_whom}:{dedup_key}"
+    if event.own_watch_of is not None:
+        # Someone's own watch never folds into a card others can see (a
+        # company watch that once had the same slug), nor theirs into one of
+        # another person's: the owner is part of the key.
+        dedup_key = f"{dedup_key}#own:{event.own_watch_of}"
     if event.private:
         topic_tags, routed_to, dedup_key, effective_channels = _make_private(
             topic_tags, dedup_key
