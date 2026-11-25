@@ -2489,10 +2489,13 @@ class Executive:
         # web chat.
         mcp_client = read_only_turn(current_session.get())
         mcp_client_withheld = READ_ONLY_WITHHELD_TOOLS if mcp_client else frozenset()
-        # A shared web chat someone other than its owner has written into
-        # since the owner last did (`Session.others_spoke_last`): nothing
-        # that sends to people or changes contacts (`SHARED_CHAT_WITHHELD_TOOLS`,
-        # and the gateway's mail writes through `shared_chat_withholds`).
+        # A chat space that lets in people not on People (a Google Chat
+        # space) whose last line wasn't the speaker's
+        # (`Session.others_spoke_last`): its sends to people and contact
+        # changes are noticed as `levels.SHARED` (`SHARED_CHAT_WITHHELD_TOOLS`,
+        # and the gateway's mail writes through `shared_chat_withholds`). A
+        # shared web chat is only the team's, so it never sets it: whoever
+        # speaks there asks at the company's level.
         others_spoke = (
             getattr(current_session.get(), "shared_chat", False) is True
             and getattr(current_session.get(), "others_spoke_last", False) is True

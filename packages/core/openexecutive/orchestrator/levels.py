@@ -93,9 +93,8 @@ SEND_SITE = "send_site"
 # give it instructions, outside text or mail the check couldn't check (on
 # Balanced a clean outside read never marks the turn, so OUTSIDE_READ there
 # is only one too big to check), a turn answering mail from a contact, someone unproven or a forward
-# (PRIVATE: its words are not a team member asking), a shared chat or call
-# someone else spoke in (whose turn it is stays as it was; a later change),
-# someone new, a share outside the company,
+# (PRIVATE: its words are not a team member asking), a chat space someone
+# not on People may have written in (SHARED), someone new, a share outside the company,
 # and work nobody is watching (which take_the_lead.gate then checks against the seven
 # topics). Every other reason a feature notices runs on Balanced and waits
 # on Careful.
@@ -116,7 +115,7 @@ _WHY: dict[str, str] = {
     MAIL_UNCHECKED: "it read mail it couldn't check for planted instructions first",
     MAIL_SHARED: "it posts to everyone or changes People right after reading your own mail",
     PRIVATE: "it came from mail that's private to you",
-    SHARED: "someone else wrote in this shared chat",
+    SHARED: "someone who may not be on your team wrote in this chat",
     READ_ONLY: "it was asked from a page in another app or a run queued for someone else",
     NOT_OWNER: "it changes how your Executive is set up",
     UNATTENDED: "it came up while nobody was chatting",
