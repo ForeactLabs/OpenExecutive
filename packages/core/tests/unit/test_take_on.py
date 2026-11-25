@@ -498,6 +498,32 @@ def test_a_watch_taken_up_leaves_the_suggestions_as_a_yes(monkeypatch: pytest.Mo
                           source="News I watch")
     route._taken_up(route.Me(ME, 1, True), offer)
     assert gone == [5] and outcomes == [watch_policy.OUTCOME_APPROVED]
+    # Changed by Or tell me into an email: the email went, no watch was made,
+    # so the suggestion stays.
+    offer.kind = "email"
+    route._taken_up(route.Me(ME, 1, True), offer)
+    assert gone == [5] and outcomes == [watch_policy.OUTCOME_APPROVED]
+
+
+def test_a_repeat_ask_changed_into_a_one_off_stays_unanswered(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.api.routes import take_on as route
+    from openexecutive.workflows import repeat_asks
+
+    answered: list[int] = []
+    monkeypatch.setattr(repeat_asks, "answer_offer", lambda oid, _pid, accept: answered.append(oid))
+    offer = take_on.Offer(key="repeat:5", origin="repeat", kind="doc", title="I can do the summary once",
+                          source="Your chats")
+    route._taken_up(route.Me(ME, 1, True), offer)
+    assert answered == []
+
+
+def test_the_pass_stays_off_while_the_executive_is_paused(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.scheduler import pause
+
+    monkeypatch.setattr(pause, "is_paused", lambda: True)
+    assert take_on.Hooks().background_on() is False
+    monkeypatch.setattr(pause, "is_paused", lambda: False)
+    assert take_on.Hooks().background_on() is True
 
 
 async def test_a_finished_run_settles_off_the_event_loop(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

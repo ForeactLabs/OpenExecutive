@@ -176,13 +176,20 @@ def _no_apps(principal: bool) -> tuple[list[str], list[str]]:
     return [], []
 
 
+def _not_paused() -> bool:
+    from openexecutive.scheduler.pause import is_paused
+
+    return not is_paused()
+
+
 @dataclass
 class Hooks:
     """What a deployment may widen for the daily pass
     (``briefing.take_on_maker``). The defaults read only what every install
     has.
 
-    - ``background_on``: whether background model calls may run now;
+    - ``background_on``: whether background model calls may run now (by
+      default, unless the Executive is paused);
     - ``background_model``: the model for them (None: the fast model);
     - ``watching_on``: whether the watch list is being checked, so a watch
       already on it runs on its own;
@@ -193,7 +200,7 @@ class Hooks:
     - ``apps``: (connected business app names, what their checks found
       lately) for the main person or a teammate."""
 
-    background_on: Callable[[], bool] = lambda: True
+    background_on: Callable[[], bool] = _not_paused
     background_model: Callable[[], str | None] = lambda: None
     watching_on: Callable[[], bool] = lambda: True
     teammate_signals: Callable[[Any, datetime, datetime], Any] | None = None
