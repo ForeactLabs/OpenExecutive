@@ -115,7 +115,7 @@
         }
         if (!res.ok) {
           // Not here (texts off for the install), signed out, or not theirs.
-          if (res.status === 404 || res.status === 403) await chrome.storage.local.set({ textsOn: false });
+          if (res.status === 404 || res.status === 403) await textsState(false);
           await pause(res.status === 401 || res.status === 403 || res.status === 404 ? 60000 : backoff);
           backoff = Math.min(backoff * 2, 30000);
           continue;
@@ -123,8 +123,7 @@
         backoff = 1000;
         const body = await res.json().catch(() => ({}));
         const on = body.enabled === true;
-        const { textsOn } = await chrome.storage.local.get("textsOn");
-        if (textsOn !== on) await chrome.storage.local.set({ textsOn: on });
+        await textsState(on);
         if (!on) {
           await pause(60000);
           continue;
@@ -155,6 +154,16 @@
     }
   }
   void textsLoop();
+
+  // Whether Texts is on for the person signed in on this site. The
+  // background keeps one answer per site: on while any site says on.
+  async function textsState(on) {
+    try {
+      await chrome.runtime.sendMessage({ type: "texts_state", on: on === true });
+    } catch {
+      // The background is starting: the next answer tells it.
+    }
+  }
 
   // What Google Messages shows, from the background: told to the site as
   // the person signed in here.

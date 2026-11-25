@@ -329,12 +329,26 @@ def _just_sent(conn: sqlite3.Connection, person_id: int, conversation_id: str, t
     # new number still on its way: a reply an hour later in the same words is
     # someone's reply.
     rows = conn.execute(
-        f"SELECT text FROM {TEXT_SENDS_TABLE} WHERE person_id=? AND status<>? AND created_at >= ? "
-        "AND (conversation_id=? OR (conversation_id IS NULL AND status IN (?, ?)))",
+        f"SELECT text, conversation_id, to_number FROM {TEXT_SENDS_TABLE} WHERE person_id=? AND status<>? "
+        "AND created_at >= ? AND (conversation_id=? OR (conversation_id IS NULL AND status IN (?, ?)))",
         (person_id, FAILED, _iso(now - _ECHO_WITHIN), conversation_id, PENDING, HANDED),
     ).fetchall()
     bare = _LEADING_WHO.sub("", text, count=1)
-    return any(_same_words(r["text"], text) or _same_words(r["text"], bare) for r in rows)
+    same = [r for r in rows if _same_words(r["text"], text) or _same_words(r["text"], bare)]
+    if any(r["conversation_id"] == conversation_id for r in same):
+        return True
+    # A send to a new number comes back only in the conversation it opened:
+    # one with that number, or one with nothing in it yet.
+    if not same:
+        return False
+    conv = conn.execute(
+        f"SELECT title, number FROM {TEXT_CONVERSATIONS_TABLE} WHERE id=?", (conversation_id,),
+    ).fetchone()
+    shown = digits((conv["number"] or conv["title"]) if conv is not None else "")
+    if any(len(shown) >= 7 and digits(r["to_number"] or "") == shown for r in same):
+        return True
+    earlier = conn.execute(f"SELECT 1 FROM {TEXTS_TABLE} WHERE conversation_id=? LIMIT 1", (conversation_id,)).fetchone()
+    return earlier is None
 
 
 def _upsert_conversation(conn: sqlite3.Connection, person_id: int, item: Incoming, now: datetime) -> str:

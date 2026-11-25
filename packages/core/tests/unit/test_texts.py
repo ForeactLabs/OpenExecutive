@@ -529,6 +529,21 @@ def test_a_text_from_someone_not_on_people_is_outside_words(ids: dict[str, int],
     assert off == [True, False]
 
 
+def test_a_text_to_a_new_number_is_matched_only_where_it_could_have_gone(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("a", text="See you then")])
+    tx.queue_send(owner, "Running 5 min late", to_number="+1 555 000 6666")
+    # Someone else, in a conversation that was already there, in the same words.
+    tx.record(owner, [_item("b", text="Running 5 min late")])
+    dana = next(c for c in tx.conversations(owner) if c.key == "dana")
+    assert [t.outgoing for t in tx.texts(dana.id)] == [False, False]
+    # The conversation the send opened, shown by its number.
+    tx.record(owner, [_item("c", conv="88", title="(555) 000-6666", sender="", text="You: Running 5 min late")])
+    new = next(c for c in tx.conversations(owner) if c.key == "88")
+    assert [t.outgoing for t in tx.texts(new.id)] == [True]
+
+
 def test_a_send_is_settled_once(ids: dict[str, int]) -> None:
     owner = ids["principal"]
     _on(owner)

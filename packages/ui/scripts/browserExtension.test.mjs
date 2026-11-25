@@ -174,6 +174,7 @@ test("an Open Executive page opens in the tab they are working in, never the ext
 
 function fakeBrowser() {
   const store = {};
+  const local = {};
   const wins = new Map([[1, { id: 1, state: "normal", left: 0, top: 0, width: 1000, height: 800, focused: true, tabs: [{ id: 11, active: true, windowId: 1 }] }]]);
   const removed = [];
   let next = 2;
@@ -188,7 +189,10 @@ function fakeBrowser() {
         get: async (keys) => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).map((k) => [k, store[k]])),
         set: async (vals) => void Object.assign(store, vals),
       },
-      local: { get: async () => ({}), set: async () => {} },
+      local: {
+        get: async (keys) => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).map((k) => [k, local[k]])),
+        set: async (vals) => void Object.assign(local, vals),
+      },
       onChanged: any,
     },
     windows: {
@@ -232,8 +236,22 @@ function fakeBrowser() {
     for (const fn of removed) fn(id);
     for (let i = 0; i < 20; i++) await tick();
   };
-  return { bg: sandbox, wins, store, close };
+  return { bg: sandbox, wins, store, local, close };
 }
+
+test("texts: one site on and another off keeps Texts on, and a disconnected site's answer is dropped", async () => {
+  const { bg, local } = fakeBrowser();
+  const both = ["https://a.example.com", "https://b.example.com"];
+  await bg.setTextsOn("https://a.example.com", true, both);
+  await bg.setTextsOn("https://b.example.com", false, both);
+  await bg.setTextsOn("https://a.example.com", true, both);
+  await bg.setTextsOn("https://b.example.com", false, both);
+  assert.equal(local.textsOn, true);
+  // Only b is connected now: a's old "on" goes, and so does Texts.
+  await bg.setTextsOn("https://b.example.com", false, ["https://b.example.com"]);
+  assert.equal(local.textsOn, false);
+  assert.deepEqual({ ...local.textsOnBy }, { "https://b.example.com": false });
+});
 
 test("two pages asked for at once open one window beside the chat, and closing it puts theirs back", async () => {
   const { bg, wins, store, close } = fakeBrowser();
@@ -438,6 +456,11 @@ test("texts: once Send is pressed a missing answer is unsure, and a new number p
   assert.ok(!texts.includes("mw-contact-row button"));
   const content = readFileSync(new URL("../../extension/content.js", import.meta.url), "utf8");
   assert.ok(content.includes('ok ? "sent" : unsure ? "unsure" : "failed"'));
+});
+
+test("texts: a Google Messages page that never answered fails the send, never unsure", () => {
+  const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
+  assert.ok(bg.includes('if (!ready) return { ok: false, error: "Google Messages didn\'t load. Nothing went." };'));
 });
 
 test("texts: a new number is sent to only through its own Send-to choice, never Enter", () => {

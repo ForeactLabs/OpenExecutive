@@ -290,6 +290,25 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 // What Google Messages shows, passed on through a connected Open Executive tab.
+// Whether Texts is on, per connected site (``textsOnBy``), and overall
+// (``textsOn``: on while any of them is on). Two sites, one on and one off,
+// never turn it on and off in turn. One change at a time.
+let textsStateQueue = Promise.resolve();
+function setTextsOn(origin, on, origins) {
+  const run = textsStateQueue.then(async () => {
+    const { textsOnBy, textsOn } = await chrome.storage.local.get(["textsOnBy", "textsOn"]);
+    const by = textsOnBy && typeof textsOnBy === "object" ? { ...textsOnBy } : {};
+    by[origin] = on;
+    for (const known of Object.keys(by)) {
+      if (!origins.includes(known)) delete by[known];
+    }
+    const any = Object.values(by).some((v) => v === true);
+    await chrome.storage.local.set(any === textsOn ? { textsOnBy: by } : { textsOnBy: by, textsOn: any });
+  });
+  textsStateQueue = run.catch(() => undefined);
+  return run;
+}
+
 async function passOnTexts(body) {
   const origins = await connectedOrigins();
   const tabs = (await chrome.tabs.query({})).filter((t) => OE.onConnected(t.url, origins));
@@ -326,15 +345,18 @@ async function sendOneText(send) {
   await chrome.tabs.update(tab.id, { url });
   await waitLoaded(tab.id);
   // The page script starts after the page loads: ask until it answers.
-  for (let i = 0; i < 20; i++) {
+  let ready = false;
+  for (let i = 0; i < 20 && !ready; i++) {
     try {
       const ping = await chrome.tabs.sendMessage(tab.id, { type: "texts_ping" });
-      if (ping && ping.ok) break;
+      ready = Boolean(ping && ping.ok);
     } catch {
       // Not there yet.
     }
-    await new Promise((ok) => setTimeout(ok, 500));
+    if (!ready) await new Promise((ok) => setTimeout(ok, 500));
   }
+  // Nothing was handed over, so nothing can have gone.
+  if (!ready) return { ok: false, error: "Google Messages didn't load. Nothing went." };
   try {
     const out = await chrome.tabs.sendMessage(tab.id, { type: "texts_send_here", conversation: key, number, text });
     return out && typeof out === "object" ? out : { ok: false, unsure: true, error: "Google Messages didn't answer" };
@@ -894,6 +916,17 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
         return { ok: false, error: `The browser couldn't do that (${String(e && e.message ? e.message : e).slice(0, 120)}).` };
       }
     })().then(reply);
+    return true;
+  }
+  if (msg.type === "texts_state") {
+    // Each connected Open Executive site says whether Texts is on there.
+    (async () => {
+      const origins = await connectedOrigins();
+      const url = sender.url || (sender.tab && sender.tab.url);
+      if (!sender.tab || !OE.onConnected(url, origins)) return { ok: false };
+      await setTextsOn(OE.originOf(url), msg.on === true, origins);
+      return { ok: true };
+    })().then(reply, () => reply({ ok: false }));
     return true;
   }
   if (msg.type === "texts_seen") {
