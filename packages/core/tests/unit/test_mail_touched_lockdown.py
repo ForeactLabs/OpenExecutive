@@ -1415,3 +1415,30 @@ def test_a_post_to_everyone_after_a_clean_read_waits_on_balanced(
         assert lockdown.outside_reach_reason(tool, tool_input) is None
     finally:
         current_session.reset(token)
+
+
+def test_a_flagged_outside_read_still_holds_a_step_in_the_mail_reading_round(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A handler's check keeps the reason that waits: a step asked with this
+    round's mail read would run on Balanced, but an earlier flagged page
+    still makes it wait, as in the chat loop."""
+    from openexecutive.orchestrator import content_scan, levels, outside_content, outside_mode
+
+    _level(monkeypatch, outside_mode.OUTSIDERS, content_scan.CLEAN)
+    session = Session()
+    session.turn_delegation = TurnDelegation(  # type: ignore[attr-defined]
+        enabled=True, offered=True, touched_mail=True, read_mail=True, mail_vetted=False,
+        round_reading=True, unvetted_before_round=False, session_id=session.session_id,
+    )
+    call = {"name": "fetch__fetch_url", "arguments": {"url": "https://x.example/"}}
+    token = current_session.set(session)
+    try:
+        assert lockdown.outside_reach_reason("call_tool", call) is None
+        monkeypatch.setattr(outside_content, "read_outside", lambda: True)
+        monkeypatch.setattr(outside_content, "outside_withholds", lambda *_a, **_k: True)
+        monkeypatch.setattr(outside_content, "answers_off_team_mail", lambda: False)
+        monkeypatch.setattr(levels, "outside_reason", lambda: levels.OUTSIDE)
+        assert lockdown.outside_reach_reason("call_tool", call) == levels.OUTSIDE
+    finally:
+        current_session.reset(token)

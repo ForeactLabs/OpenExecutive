@@ -541,14 +541,18 @@ def outside_reach_reason(name: str, tool_input: Any = None) -> str | None:
         reason = levels.mail_reason(tool=name, tool_input=tool_input) if mail_turn_withholds(name, tool_input) else None
     except Exception:
         reason = levels.MAIL_UNCHECKED
-    if reason is None:
-        # The same holds, with contact writes and gateway writes added, once the
-        # turn has read anything from outside the team (outside_content).
-        try:
-            if outside_content.read_outside() and outside_content.outside_withholds(name, tool_input):
-                reason = levels.STRANGER if outside_content.answers_off_team_mail() else levels.outside_reason()
-        except Exception:
-            reason = levels.OUTSIDE
+    # The same holds, with contact writes and gateway writes added, once the
+    # turn has read anything from outside the team (outside_content). Both
+    # are looked at, and the one that waits on more levels is kept
+    # (levels.stronger), as in the chat loop.
+    outside: str | None = None
+    try:
+        if outside_content.read_outside() and outside_content.outside_withholds(name, tool_input):
+            outside = levels.STRANGER if outside_content.answers_off_team_mail() else levels.outside_reason()
+    except Exception:
+        outside = levels.OUTSIDE
+    if outside is not None:
+        reason = levels.stronger(reason, outside)
     # A reason only noticed: the level decides whether it waits.
     if reason is None or levels.decide(reason) == levels.RUN:
         return None
