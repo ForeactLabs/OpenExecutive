@@ -512,7 +512,7 @@ def test_a_moved_followup_never_reads_the_same_hold_again(db: Path, roster: Simp
     row = episodic.get_scheduled_action(action_id)
     assert row is not None and row.status == "pending" and row.read_since is not None
     # When it comes due, "until tomorrow" was already acted on: nothing to read.
-    assert runner._since_lines(row, roster.principal) == ""
+    assert runner._since_lines(row, roster.principal, for_decision=True) == ""
 
 
 def test_a_followup_moved_in_chat_never_reads_the_ask_that_moved_it(db: Path, roster: SimpleNamespace) -> None:
@@ -528,9 +528,9 @@ def test_a_followup_moved_in_chat_never_reads_the_ask_that_moved_it(db: Path, ro
              -timedelta(hours=3) + timedelta(seconds=20), sender=me)
     _message(db, "web-9", me, "assistant", "Moved to Friday.", -timedelta(hours=3) + timedelta(seconds=21))
     row = episodic.get_scheduled_action(action_id)
-    assert row is not None and runner._since_lines(row, roster.principal) == ""
+    assert row is not None and runner._since_lines(row, roster.principal, for_decision=True) == ""
     _message(db, "web-9", me, "user", "Actually drop the Bob one", -timedelta(hours=1), sender=me)
-    assert "Actually drop the Bob one" in runner._since_lines(row, roster.principal)
+    assert "Actually drop the Bob one" in runner._since_lines(row, roster.principal, for_decision=True)
 
 
 def test_nobody_is_told_of_a_move_that_didnt_happen(db: Path, roster: SimpleNamespace) -> None:
@@ -580,3 +580,21 @@ def test_a_turn_that_saved_no_reply_leaves_nothing_out(db: Path, roster: SimpleN
     _message(db, "tg-1", me, "user", "Actually hold that reminder", -timedelta(days=1) + timedelta(minutes=2),
              sender=me)
     assert "Actually hold that reminder" in runner._since_lines(action, roster.principal)
+
+
+def test_a_moved_followup_still_carries_a_change_asked_before_the_move(
+    db: Path, roster: SimpleNamespace
+) -> None:
+    me = roster.principal.id
+    create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
+    action_id = _followup("tg-1", created_by=me)
+    _message(db, "web-2", me, "user", "Make that reminder mention the contract too", -timedelta(hours=5), sender=me)
+    with episodic._get_conn(db) as conn:  # then moved in chat
+        conn.execute("UPDATE scheduled_actions SET read_since = ? WHERE id = ?",
+                     (_iso(-timedelta(hours=3)), action_id))
+    row = episodic.get_scheduled_action(action_id)
+    assert row is not None
+    assert runner._since_lines(row, roster.principal, for_decision=True) == ""
+    # The run that writes it still sees the change of wording.
+    _, prompt = _fire(action_id, "Sent.")
+    assert "mention the contract too" in prompt

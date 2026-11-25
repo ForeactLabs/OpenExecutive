@@ -5218,11 +5218,13 @@ scheduler:
     minutes after created_at are left out (own_messages_since(after_turn_in=));
     with no such reply nothing is. The decision answers paused, dropped or
     moved only for a message clearly about this follow-up.
-    A repeat's next occurrence and a moved one (here or by move_followup)
-    count words only from when
+    For whether it goes, a repeat's next occurrence and a moved one (here
+    or by move_followup) count words only from when
     they were queued or moved (scheduled_actions.read_since; a move in chat
     also leaves out its own turn's message, read_since_turn_in), so a word
-    already acted on ("hold it until tomorrow") is never read again. Paused or
+    already acted on ("hold it until tomorrow") is never read again. The run that
+    writes it still sees everything since created_at, so a change of
+    wording asked before a move still shows. Paused or
     dropped, nothing runs: the setter gets one fixed line
     (runner._set_aside_line; a repeating one says it still repeats and how
     to stop it; a line that can't reach them is logged, and what they asked

@@ -1424,23 +1424,31 @@ def _followup_owner(action: ScheduledAction) -> Person | None:
     return person
 
 
-def _since_lines(action: ScheduledAction, person: Person | None) -> str:
+def _since_lines(action: ScheduledAction, person: Person | None, *, for_decision: bool = False) -> str:
     """What ``person`` wrote in chat since ``action`` was set, one line each,
-    oldest first; "" when nothing."""
+    oldest first; "" when nothing. ``for_decision``: for whether it goes,
+    only what they wrote since it was last moved or queued (``read_since``),
+    so an ask already acted on is never read again; the run that writes it
+    sees everything since it was set, so a change of wording asked before a
+    move still shows."""
     from openexecutive.memory.episodic import _resolve_db_path
     from openexecutive.memory.session_store import own_messages_since
 
     if person is None or person.id is None:
         return ""
     try:
-        # From the turn that set it, without that turn's own message; or,
-        # for a repeat's next occurrence or a moved one, from then on (a move
-        # in chat leaves out that turn's own message too).
+        # From the turn that set it, without that turn's own messages (a
+        # repeat's next occurrence was set by no turn); for the decision, from
+        # its last move or queueing (a move in chat leaves out its turn too).
+        queued = bool(action.read_since) and action.read_since == action.created_at
+        if for_decision and action.read_since:
+            since, turn = action.read_since, action.read_since_turn_in
+        else:
+            since, turn = action.created_at, (None if queued else action.originating_session_id)
         rows = own_messages_since(
-            person.id, action.read_since or action.created_at,
+            person.id, since,
             limit=_SINCE_MAX_MESSAGES, max_chars=_SINCE_MAX_CHARS,
-            db_path=_resolve_db_path(None),
-            after_turn_in=action.read_since_turn_in if action.read_since else action.originating_session_id,
+            db_path=_resolve_db_path(None), after_turn_in=turn,
         )
     except Exception:
         logger.warning("scheduler: couldn't read chat since action %s", action.id, exc_info=True)
@@ -1507,7 +1515,7 @@ async def _setter_decision(action: ScheduledAction, person: Person) -> tuple[str
     writes nothing, so a hold never rests on the wording of a run's reply,
     and their chat never reaches a run that writes to someone else. Never
     raises: a failed read sends it as set."""
-    lines = _since_lines(action, person)
+    lines = _since_lines(action, person, for_decision=True)
     if not lines:
         return "", None
     try:
