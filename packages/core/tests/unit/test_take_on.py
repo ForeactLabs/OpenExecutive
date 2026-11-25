@@ -1087,6 +1087,17 @@ def test_gather_reads_an_empty_company_without_raising(monkeypatch: pytest.Monke
     assert not maker.has_material(inputs)
 
 
+def test_a_long_read_is_cut_before_what_is_already_offered_or_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    busy = ["INBOUND\n" + "\n".join(f"- mail {i}: " + "x" * 200 for i in range(200))]
+    monkeypatch.setattr(maker, "_live", lambda *_a: (busy, False, [], []))
+    monkeypatch.setattr(maker, "_goals", lambda: [])
+    monkeypatch.setattr(maker, "_already", lambda *_a: ["- on the list now (Email): send Dana the proposal"])
+    monkeypatch.setattr(maker, "on_its_own", lambda _p: SimpleNamespace(lines=lambda: ["running workflow: weekly pipeline"]))
+    text = maker.gather(ME, None, principal=True).text
+    assert len(text) <= maker._INPUT_MAX
+    assert "send Dana the proposal" in text and "running workflow: weekly pipeline" in text
+
+
 def test_a_message_step_is_never_a_note_to_the_person_themself(monkeypatch: pytest.MonkeyPatch) -> None:
     # 11-25: Reese was offered "I can send Reese Cole a note", and Do it
     # ended in "I didn't send it: the note was addressed to you".

@@ -489,6 +489,13 @@ def gather(email: str, person_id: int | None, *, principal: bool, now: datetime 
     parts = [f"COMPANY: {_company_line() or 'unknown'}"]
     if person is not None:
         parts.append(f"PERSON: {take_on.line(person.full_name, 80)}" + (f", {take_on.line(person.role, 80)}" if person.role else ""))
+    # What is on the list or already runs comes before the reads, so a long
+    # read is what gets cut, never what keeps an offer from repeating one.
+    if already := _already(email, listed):
+        parts.append("ALREADY\n" + "\n".join(already))
+    if doing := own.lines():
+        parts.append("ON ITS OWN (you already do these for them without being asked)\n"
+                     + "\n".join(f"- {d}" for d in doing))
     parts += live
     if chats := _chats(person, now):
         parts.append("YOUR RECENT CHATS (what you asked lately, and what was said back last)\n" + "\n".join(chats))
@@ -502,11 +509,6 @@ def gather(email: str, person_id: int | None, *, principal: bool, now: datetime 
         parts.append("WHAT THE APP CHECKS FOUND (last 7 days)\n" + "\n".join(found))
     if team:
         parts.append("TEAM\n" + "\n".join(f"- {n}" + (f" <{e}>" if e else "") for n, e in team))
-    if already := _already(email, listed):
-        parts.append("ALREADY\n" + "\n".join(already))
-    if doing := own.lines():
-        parts.append("ON ITS OWN (you already do these for them without being asked)\n"
-                     + "\n".join(f"- {d}" for d in doing))
     return Inputs(
         _cut("\n\n".join(parts), _INPUT_MAX), calendar=calendar, apps=apps, team=team,
         listed=[kind for kind, _ in listed], own=own, senders=senders,
