@@ -681,6 +681,11 @@ def test_a_watch_taken_up_leaves_the_suggestions_as_a_yes(monkeypatch: pytest.Mo
     offer.kind = "email"
     route._taken_up(route.Me(ME, 1, True), offer)
     assert gone == [5] and outcomes == [watch_policy.OUTCOME_APPROVED]
+    # Changed by Or tell me to watch somewhere else: the one suggested
+    # wasn't watched, so it stays too.
+    offer.kind, offer.changed, offer.title = "watch", True, "I can watch Adyen's changelog"
+    route._taken_up(route.Me(ME, 1, True), offer)
+    assert gone == [5] and outcomes == [watch_policy.OUTCOME_APPROVED]
 
 
 def test_a_repeat_ask_changed_into_a_one_off_stays_unanswered(monkeypatch: pytest.MonkeyPatch) -> None:

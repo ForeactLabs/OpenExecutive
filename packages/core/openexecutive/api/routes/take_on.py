@@ -267,7 +267,8 @@ _settling: set[asyncio.Task[None]] = set()
 def _taken_up(me: Me, offer: take_on.Offer) -> None:
     # A repeat ask or watch suggestion is answered only when the run did what
     # it offered: one changed by Or tell me into another kind of step (an
-    # email instead of a watch) leaves it where it was.
+    # email instead of a watch) leaves it where it was, and so does a watch
+    # pointed somewhere else, since nobody watched the one suggested.
     if offer.origin == "repeat" and offer.kind == "workflow" and me.person_id is not None:
         from openexecutive.workflows import repeat_asks
 
@@ -275,7 +276,7 @@ def _taken_up(me: Me, offer: take_on.Offer) -> None:
             repeat_asks.answer_offer(int(offer.key.removeprefix("repeat:")), me.person_id, accept=True)
         except Exception:
             logger.warning("take_on: couldn't retire the repeat-ask offer", exc_info=True)
-    if offer.origin == "watch" and offer.kind == "watch":
+    if offer.origin == "watch" and offer.kind == "watch" and not offer.changed:
         # The run made the watch: the suggestion it came from goes, so the
         # Watch list can't make it a second time.
         _answer_watch_suggestion(offer.key, me, taken=True)
