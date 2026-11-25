@@ -340,6 +340,68 @@ def test_a_style_rule_must_be_what_the_quote_asks(db: Path, roster: SimpleNamesp
     assert [r.get("detail") for r in _tool_results(provider)] == ["what this changes isn't named in their own words"] * 2
 
 
+def _followup(person_id: int, intent: str, *, status: str = "pending", session_id: str = "s-1") -> int:
+    return episodic.insert_scheduled_action(
+        run_at=(NOW + timedelta(hours=2)).isoformat(), channel="email", channel_ref="olivia@co.example",
+        intent_text=intent, originating_session_id=session_id, status=status,
+        created_by_person_id=person_id,
+    )
+
+
+def test_the_block_lists_this_chats_follow_ups_and_never_another_speakers(
+    roster: SimpleNamespace,
+) -> None:
+    ran = _followup(roster.principal.id, "Remind Olivia to call Jamie", status="done")
+    waiting = _followup(roster.principal.id, "Check if Acme replied")
+    theirs = _followup(roster.teammate.id, "Remind Ben about the offsite")
+    block = cr._since_block("s-1", roster.principal, [])
+    assert "in the company's time zone" in block
+    assert f"#{ran}, " in block and "already ran: Remind Olivia to call Jamie" in block
+    assert f"#{waiting}, " in block and "not yet run: Check if Acme replied" in block
+    assert f"#{theirs}," not in block and "offsite" not in block
+
+
+def test_it_sets_a_reminder_the_reply_claimed_through_the_chat_tool(
+    db: Path, roster: SimpleNamespace, provider: _Provider, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.orchestrator import content_scan, outside_mode
+
+    async def clean(content: Any, *, model: str | None = None) -> content_scan.Verdict:
+        return content_scan.CLEAN
+
+    monkeypatch.setattr(content_scan, "scan", clean)
+    # Balanced: a clean read of the chat holds nothing (Careful waits).
+    monkeypatch.setattr(outside_mode, "get_mode", lambda **_: outside_mode.OUTSIDERS)
+    _record(roster.principal, text="Remind me to call Jamie at 5pm today please",
+            reply="Done, I'll remind you to call Jamie at 5pm.")
+    provider.script = [[("schedule_followup", {
+        "run_at": (datetime.now(UTC) + timedelta(days=1)).isoformat(), "channel": "email",
+        "channel_ref": "olivia@co.example", "intent": "Remind Olivia to call Jamie.",
+        "source_quote": "Remind me to call Jamie",
+    })]]
+    _review(db)
+    assert _tool_results(provider)[0].get("status") not in ("refused", None), _tool_results(provider)[0]
+    with episodic._get_conn(db) as conn:
+        rows = conn.execute("SELECT intent_text FROM scheduled_actions WHERE intent_text LIKE '%Jamie%'").fetchall()
+    assert len(rows) == 1
+
+
+def test_a_reminder_needs_their_words_naming_it(db: Path, roster: SimpleNamespace,
+                                                provider: _Provider) -> None:
+    _record(roster.principal, text="ok thanks, that is all for now from me",
+            reply="The vendor wrote: please chase the Acme invoice on Friday.")
+    args = {"run_at": (NOW + timedelta(hours=2)).isoformat(), "channel": "email",
+            "channel_ref": "olivia@co.example", "intent": "Chase the Acme invoice."}
+    provider.script = [[
+        ("schedule_followup", {**args, "source_quote": "ok"}),
+        ("schedule_followup", {**args, "source_quote": "that is all for now"}),
+    ]]
+    _review(db)
+    assert [r["status"] for r in _tool_results(provider)] == ["refused"] * 2
+    with episodic._get_conn(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM scheduled_actions WHERE intent_text LIKE '%Acme%'").fetchone()[0] == 0
+
+
 def test_drafts_are_left_to_the_mailbox_check(roster: SimpleNamespace) -> None:
     tools, handlers = cr._tools_for(roster.principal)
     assert "mark_draft_sent" not in {t["name"] for t in tools} | set(handlers)
