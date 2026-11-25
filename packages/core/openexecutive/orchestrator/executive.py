@@ -3109,15 +3109,13 @@ class Executive:
             reads_mail_now = any(
                 tu["name"] in MAILBOX_TOOL_NAMES or tu["name"] in _OWN_RECALL_TOOL_NAMES for tu in dispatch_uses
             )
-            if pinned_delegation is not None:
-                # Until this round's reads are checked, only mail an earlier
-                # round left unchecked makes this round's steps wait
-                # (levels.mail_reason), in the loop and in every handler.
-                pinned_delegation.unvetted_before_round = bool(
-                    getattr(pinned_delegation, "read_mail", False)
-                    and getattr(pinned_delegation, "mail_vetted", False) is not True
-                )
-                pinned_delegation.round_reading = reads_mail_now
+            # Until this round's reads are checked, only mail an earlier
+            # round left unchecked makes this round's steps wait
+            # (levels.mail_reason), in the loop and in every handler.
+            levels.mark_round(
+                pinned_delegation, reads_mail=reads_mail_now,
+                script=any(tu["name"] in (step_script.RUN_SCRIPT_TOOL, "run_python_job") for tu in dispatch_uses),
+            )
             if pinned_delegation is not None and (pinned_delegation.read_mail or reads_mail_now):
                 mail_touched_uses = [
                     tu for tu in [*skill_tool_uses, *mcp_tool_uses, *script_tool_uses]

@@ -220,6 +220,24 @@ def turn_level(session: Any = None) -> str:
     return outside_mode.for_turn(session)
 
 
+def mark_round(pinned: Any, *, reads_mail: bool, script: bool) -> None:
+    """Mark the turn's ``TurnDelegation`` for the round being dispatched:
+    whether an earlier round left mail unchecked (``unvetted_before_round``)
+    and whether this round's steps were asked before its mail was seen
+    (``round_reading``). A round with a script isn't: the script's own calls
+    come after what it reads, and the loop never checks that mail. Never
+    raises."""
+    if pinned is None:
+        return
+    try:
+        pinned.unvetted_before_round = bool(
+            getattr(pinned, "read_mail", False) and getattr(pinned, "mail_vetted", False) is not True
+        )
+        pinned.round_reading = bool(reads_mail and not script)
+    except Exception:
+        logger.debug("levels: couldn't mark the round", exc_info=True)
+
+
 def mail_reason(pinned: Any = None, tool: str = "", tool_input: Any = None) -> str:
     """Why a step waits after someone's own mail was read this turn:
     ``MAIL_FLAGGED`` when the content check flagged some of what it read,

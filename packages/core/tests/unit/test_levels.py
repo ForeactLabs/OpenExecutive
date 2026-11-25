@@ -375,3 +375,21 @@ def test_mail_an_earlier_round_left_unchecked_waits_on_balanced_even_beside_a_ne
     assert shared == levels.MAIL_SHARED
     assert levels.decide(shared, mode=outside_mode.OUTSIDERS) == levels.CARD
     assert levels.decide(shared, mode=outside_mode.TRUST) == levels.RUN
+
+
+def test_a_round_with_a_script_is_not_asked_before_its_mail_was_seen() -> None:
+    """A step asked with this round's mail read runs on Balanced, but a
+    script's own calls come after what it reads: that round's mail counts as
+    unchecked, as it would with the script alone."""
+    from openexecutive.delegation.settings import TurnDelegation
+
+    pin = TurnDelegation()
+    levels.mark_round(pin, reads_mail=True, script=False)
+    pin.read_mail, pin.mail_vetted = True, False
+    assert levels.mail_reason(pin) == levels.OWN_MAIL
+    pin = TurnDelegation()
+    levels.mark_round(pin, reads_mail=True, script=True)
+    pin.read_mail, pin.mail_vetted = True, False
+    assert levels.mail_reason(pin) == levels.MAIL_UNCHECKED
+    assert levels.decide(levels.mail_reason(pin), mode=outside_mode.OUTSIDERS) == levels.CARD
+    levels.mark_round(None, reads_mail=True, script=False)
