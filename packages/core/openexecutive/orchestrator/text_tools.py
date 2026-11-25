@@ -147,12 +147,16 @@ async def handle_read_texts(tool_input: dict[str, Any]) -> str:
     if actor is None:
         return json.dumps({"conversations": [], "note": "Nobody's texts are read on this turn."})
     session = current_session.get()
-    if getattr(session, "sender_off_team", False) is True or getattr(session, "answers_a_text", False) is True:
-        # A turn answering someone outside the team (a contact's mail), or
-        # answering any text, never sees the person's other texts: codes from
-        # their bank are in them, and a text can show a teammate's number
-        # its sender picked. What it answers is in its prompt.
-        return json.dumps({"conversations": [], "note": "Their other texts aren't shown on a turn answering a text or someone outside the team."})
+    if (
+        getattr(session, "sender_off_team", False) is True
+        or getattr(session, "answers_a_text", False) is True
+        or getattr(session, "reply_card_work", None) is not None
+    ):
+        # A turn answering someone else's words (a contact's mail, an inbox
+        # reply card's email, any text) never sees the person's texts: codes
+        # from their bank are in them, and a text can show a teammate's
+        # number its sender picked. What it answers is in its prompt.
+        return json.dumps({"conversations": [], "note": "Their texts aren't shown on a turn answering someone's text or email."})
     settings = await asyncio.to_thread(texts.get_settings, actor)
     if not settings.active:
         return json.dumps({"conversations": [], "note": _OFF_NOTE})

@@ -905,14 +905,19 @@ def test_a_turn_on_a_teammates_text_never_reads_the_others_either(ids: dict[str,
     owner = ids["principal"]
     _on(owner)
     tx.record(owner, [_item("b", conv="bank", title="BANK", sender="BANK", text="Your code is 482913")])
-    token = current_session.set(Session(unattended=True, caller_person_id=owner, answers_a_text=True))
-    try:
-        out = json.loads(asyncio.run(text_tools.handle_read_texts({})))
-        assert out["conversations"] == []
-        (conv,) = tx.conversations(owner)
-        assert "482913" not in asyncio.run(text_tools.handle_read_texts({"conversation_id": conv.id}))
-    finally:
-        current_session.reset(token)
+    for session in (
+        Session(unattended=True, caller_person_id=owner, answers_a_text=True),
+        # The inbox's reply-card work answers an email, maybe a stranger's.
+        Session(unattended=True, caller_person_id=owner, reply_card_work=7),
+    ):
+        token = current_session.set(session)
+        try:
+            out = json.loads(asyncio.run(text_tools.handle_read_texts({})))
+            assert out["conversations"] == []
+            (conv,) = tx.conversations(owner)
+            assert "482913" not in asyncio.run(text_tools.handle_read_texts({"conversation_id": conv.id}))
+        finally:
+            current_session.reset(token)
 
 
 def test_the_watchers_turn_is_marked_as_answering_a_text(monkeypatch: pytest.MonkeyPatch) -> None:
