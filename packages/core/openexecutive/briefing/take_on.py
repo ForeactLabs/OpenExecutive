@@ -817,7 +817,8 @@ def start(email: str, offer: Offer, *, db_path: Path | None = None) -> bool:
         _ensure(conn, person, offer.key, offer.kind, now)
         cur = conn.execute(
             f"UPDATE {STATE_TABLE} SET status = 'working', started_at = ?, finished_at = NULL, "  # noqa: S608
-            "outcome = '', done = '[]', session_id = NULL, decision_id = NULL, offer = ? "
+            "outcome = '', done = '[]', session_id = NULL, decision_id = NULL, offer = ?, "
+            "hidden_reason = '', hidden_at = NULL "
             "WHERE person = ? AND key = ? AND (status NOT IN ('working', 'card', 'done') "
             "OR (status = 'working' AND started_at < ?))",
             (now.isoformat(), _snapshot(offer), person, offer.key, stale),

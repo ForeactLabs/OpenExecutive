@@ -116,6 +116,21 @@ def test_hide_already_done_keeps_it_away_and_later_brings_it_back_in_a_week() ->
     assert _list(now=back + timedelta(days=take_on.KEEP_DAYS, hours=1)) == []
 
 
+def test_one_back_from_later_and_done_is_not_offered_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    o = _offer()
+    take_on.put_made(ME, [o])
+    take_on.hide(ME, _list()[0], "later")
+    back = datetime.now(UTC) + timedelta(days=take_on.LATER_DAYS, hours=1)
+    monkeypatch.setattr(take_on, "_now", lambda: back)
+    (again,) = _list(now=back)
+    assert take_on.start(ME, again)
+    take_on.finish(ME, again.key, "done", outcome="Sent it.")
+    # What it did counts as done and is kept, so the same step isn't offered
+    # again in other words.
+    assert take_on.about(o.title, o.preview) in take_on.about_already(ME)
+    assert [f.key for f in take_on.finished(ME, back - timedelta(hours=1))] == [o.key]
+
+
 def test_not_useful_twice_on_one_kind_stops_that_kind() -> None:
     offers = [_apart(i) for i in range(3)]
     take_on.put_made(ME, offers)
