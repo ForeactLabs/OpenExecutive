@@ -228,9 +228,9 @@ class Incoming:
     number: str = ""
     is_group: bool = False
     # The browser's guess that the person sent it themselves (a "You:"
-    # preview). Never trusted: anyone can text those words. Only the
-    # Executive's own sends count as outgoing (``_echo_of``); a text the
-    # person sent from their phone is looked at like any other.
+    # preview). Never trusted for who said it: anyone can text those words,
+    # so only the Executive's own sends count as outgoing (``_echo_of``). It
+    # only skips the turn on that text (kept as already looked at).
     outgoing: bool = False
 
 
@@ -312,9 +312,13 @@ def record(person_id: int, items: list[Incoming], *, db_path: Path | None = None
             cur = conn.execute(
                 f"INSERT OR IGNORE INTO {TEXTS_TABLE} "
                 "(person_id, conversation_id, ref, sender, text, outgoing, at, handled) VALUES (?,?,?,?,?,?,?,?)",
-                (person_id, conversation_id, ref, sender, words, int(outgoing), _iso(min(item.at, now)), int(outgoing)),
+                # The page's "You:" hint never makes a text theirs, but it
+                # skips the turn on it: the worst a stranger typing "You:"
+                # gets is no reply on its own (it is still kept and read).
+                (person_id, conversation_id, ref, sender, words, int(outgoing), _iso(min(item.at, now)),
+                 int(outgoing or item.outgoing)),
             )
-            if cur.rowcount and cur.lastrowid is not None and not outgoing:
+            if cur.rowcount and cur.lastrowid is not None and not outgoing and not item.outgoing:
                 fresh.append(int(cur.lastrowid))
         conn.execute(
             f"DELETE FROM {TEXTS_TABLE} WHERE person_id=? AND id NOT IN "
@@ -366,6 +370,9 @@ def _echo_of(conn: sqlite3.Connection, person_id: int, conversation_id: str, tex
     for r in same:
         if len(shown) >= 7 and digits(r["to_number"] or "") == shown:
             return int(r["id"])
+    if len(shown) >= 7:
+        # A number that isn't the one it went to: someone else's conversation.
+        return None
     earlier = conn.execute(f"SELECT 1 FROM {TEXTS_TABLE} WHERE conversation_id=? LIMIT 1", (conversation_id,)).fetchone()
     return int(same[0]["id"]) if earlier is None else None
 
