@@ -1020,6 +1020,18 @@ def test_a_put_right_line_must_name_the_change(db: Path, roster: SimpleNamespace
     assert brief_requests.active(db_path=db) == []
 
 
+def test_a_put_right_line_cannot_ride_on_one_shared_word(db: Path, roster: SimpleNamespace,
+                                                        provider: _Provider) -> None:
+    loop_id = open_loop(owner_person_id=roster.principal.id, description="Send the vendor email",
+                        due_at=NOW + timedelta(days=1))
+    _record(roster.principal)
+    provider.script = [[("close_open_loop", {"loop_id": loop_id, "source_quote": "I sent the vendor email already"})],
+                       [("raise_in_brief", {"line": "Correction: the vendor already approved the Acme wire.",
+                                            "put_right": True, "source_quote": "that one out please"})]]
+    _review(db)
+    assert _tool_results(provider, 2)[0]["status"] == "not_raised"
+
+
 def test_a_line_not_kept_is_not_counted_as_a_change(db: Path, roster: SimpleNamespace,
                                                    provider: _Provider) -> None:
     _record(roster.principal)

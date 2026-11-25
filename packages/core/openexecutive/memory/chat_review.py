@@ -1893,6 +1893,20 @@ def _target_text(name: str, tool_input: dict[str, Any]) -> str:
     return str(tool_input.get("intent") or "")
 
 
+# A put-right line may add this many words of its own to what the change
+# said ("From your chat", "it hadn't saved"); more, and it needs a quote.
+_PUT_RIGHT_NEW_WORDS = 3
+
+
+def _tells(line: str, made: str) -> bool:
+    """Whether ``line`` is about the changes in ``made``: it names one and
+    adds at most ``_PUT_RIGHT_NEW_WORDS`` words of its own."""
+    from openexecutive.memory.lessons import _stems
+
+    said, told = _stems(made), _stems(line)
+    return bool(told & said) and len(told - said) <= _PUT_RIGHT_NEW_WORDS
+
+
 def _not_named(target: str, words: str) -> str | None:
     """Why ``words`` don't name ``target``, or None: one word in common, by
     rough stem, so "summarized" names "summarize"."""
@@ -1968,7 +1982,7 @@ async def _apply(
         # A line rests on their own words and is about them, or (put right)
         # names a change this pass made: never only what a reply or mail said.
         line_text = str(tool_input.get("line") or "")
-        tells_a_change = kind == brief_requests.KIND_FIXED and bool(made) and _not_named(line_text, made) is None
+        tells_a_change = kind == brief_requests.KIND_FIXED and bool(made) and _tells(line_text, made)
         unbacked = None if tells_a_change else (
             _not_their_words(quote, words) or _not_named(line_text, quote)
         )
