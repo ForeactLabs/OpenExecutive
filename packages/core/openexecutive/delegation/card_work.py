@@ -820,6 +820,7 @@ async def _after(person: Any, card_id: int, *, gmail: Any) -> None:
         card_payload,
     )
     from openexecutive.memory.decision_ledger import STATUS_PROPOSED, get_decision_instance
+    from openexecutive.orchestrator import take_the_lead
 
     try:
         card = get_decision_instance(card_id)
@@ -831,11 +832,6 @@ async def _after(person: Any, card_id: int, *, gmail: Any) -> None:
         if card_id in _NEXT:
             return  # a new run is about to start on it
         payload = card_payload(card)
-        if payload.get(WORK_KEY) == DONE and payload.get("relation") not in handle_it.KNOWN_RELATIONS:
-            # What the work made from their data goes on its own only to
-            # people they know; for anyone else it waits for them to look.
-            _hand_back(card, "work_stranger")
-            return
         if payload.get(WORK_KEY) == DONE and last_state(payload) == STUCK:
             # It couldn't finish (it left next steps to tap): what it put on
             # the reply is part of it, so it waits for them.
@@ -846,12 +842,19 @@ async def _after(person: Any, card_id: int, *, gmail: Any) -> None:
             # holding reply waits with it rather than going on its own.
             _hand_back(card, "work_theirs")
             return
-        held = handle_it.content_hold(
-            str(payload.get("subject") or ""), str(payload.get("they_wrote") or ""),
-            *newer_words(payload),
-            str(payload.get("draft_subject") or ""), str(payload.get("draft_body") or ""),
+        # What the work made from their data, for someone they don't know,
+        # waits below Hands-off as the someone-new topic.
+        stranger = payload.get(WORK_KEY) == DONE and payload.get("relation") not in handle_it.KNOWN_RELATIONS
+        held = take_the_lead.as_you(
+            person.id,
+            texts=(
+                str(payload.get("subject") or ""), str(payload.get("they_wrote") or ""),
+                *newer_words(payload),
+                str(payload.get("draft_subject") or ""), str(payload.get("draft_body") or ""),
+            ),
             sent_texts=(str(payload.get("draft_body") or ""),),
-            recipients=tuple(a for a in payload.get("draft_to") or [] if isinstance(a, str)),
+            recipients=[a for a in payload.get("draft_to") or [] if isinstance(a, str)],
+            noticed=["work_stranger" if stranger else ""],
         )
         if held:
             _hand_back(card, held)

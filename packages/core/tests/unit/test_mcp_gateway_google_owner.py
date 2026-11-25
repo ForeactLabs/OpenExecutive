@@ -342,3 +342,15 @@ def test_a_tapped_move_needs_drive_s_own_parents_line() -> None:
     with patch.object(gw_module, "get_settings", return_value=SimpleNamespace(exec_email_address=EXEC_ADDR)):
         assert asyncio.run(gateway.tapped_drive_change("d1", move_to="f1234567890")) == "Couldn't read which folder it is in now."
     assert not _ran(session_call, "update_drive_file")
+
+
+@pytest.mark.usefixtures("_company")
+def test_an_untapped_change_that_waits_is_not_done() -> None:
+    gateway, _ = _gateway({"d1": TEAM_OWNED})
+
+    async def held(tool_input: dict) -> str:
+        return json.dumps({"status": "waiting_for_approval", "decision_id": 7})
+
+    gateway.call_tool = held  # type: ignore[method-assign]
+    error = asyncio.run(gateway.tapped_drive_change("d1", name="x.pdf", tapped=False))
+    assert error is not None and "approval" in error

@@ -115,19 +115,20 @@ def test_approvals_decides_what_goes_as_you(
 
 
 def test_in_training_everything_as_you_waits_on_any_level(ids: dict[str, int], monkeypatch: pytest.MonkeyPatch) -> None:
-    from openexecutive.delegation import training
 
     pid = ids["principal"]
     _handling(pid)
     _level(monkeypatch, "trust")
-    training.set_(pid, {training.TRAINING: True}, updated_by="t")
+    from openexecutive.orchestrator import take_the_lead as _ttl
+    _ttl.set_(_ttl.SCOPE_EXECUTIVE, training=True, updated_by="t")
     section = _you(pid)
     rows = _rows(section)
     for row_id in ("replies", "follow_ups", "invites", "actions"):
         assert rows[row_id].outcome == "waits" and rows[row_id].setting == may_do.SETTING_ACT_AS_ME
         assert "In training" in rows[row_id].why
     assert section.goes == 0 and section.footer == ""
-    training.set_(pid, {training.TRAINING: False}, updated_by="t")
+    from openexecutive.orchestrator import take_the_lead as _ttl
+    _ttl.set_(_ttl.SCOPE_EXECUTIVE, training=False, updated_by="t")
     assert _rows(_you(pid))["replies"].outcome == "goes"
 
 

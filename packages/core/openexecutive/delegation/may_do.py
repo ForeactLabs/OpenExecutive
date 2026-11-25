@@ -11,9 +11,9 @@ gates don't do:
 - **As you** (the caller's own, ``can_delegate``): Write drafts as me
   (``settings.is_enabled``), Draft replies to my inbox (``inbox.get_watch``,
   which is also what lets replies go on their own, ``handle_it.get``),
-  their own In training (``training.in_training``: everything waits until
-  they allow each person) and
-  the Approvals level (``handle_it.approvals_hold``), and the cards it
+  In training (the company's one switch, ``training.in_training``:
+  everything waits until they allow each person) and
+  the Approvals level (``take_the_lead.as_you``), and the cards it
   suggests from their mail
   (``action_cards.on_its_own_refusal``). The checks in ``handle_it.refusal``
   and ``follow_up_refusal`` are the source of each row.
@@ -250,8 +250,9 @@ _LEVEL_WORDS: dict[str, str] = {"ask": "Careful", "outsiders": "Balanced", "trus
 
 
 def _in_training(person_id: int) -> bool:
-    """Whether ``person_id``'s own In training is on (``delegation.training``).
-    Unreadable is off, as the gate reads it."""
+    """Whether In training is on for what goes as ``person_id``: the
+    company's one switch (``delegation.training``). Unreadable is off, as
+    the gate reads it."""
     from openexecutive.delegation import training
 
     try:

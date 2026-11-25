@@ -89,12 +89,15 @@ def test_off_by_default() -> None:
 
 
 def test_it_follows_the_inbox_watcher_and_approvals_decide(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    assert handle_it.get(owner.id).enabled is True and handle_it.approvals_hold() is False
+    from openexecutive.orchestrator import take_the_lead
+
+    assert handle_it.get(owner.id).enabled is True
+    assert take_the_lead.as_you(owner.id, recipients=[DANA]) is None
     inbox.set_watch(owner.id, False, updated_by="t")
     assert handle_it.get(owner.id).enabled is False
     inbox.set_watch(owner.id, True, updated_by="t")
     _careful(monkeypatch)
-    assert handle_it.approvals_hold() is True  # Careful holds it
+    assert take_the_lead.as_you(owner.id, recipients=[DANA]) == "level"  # Careful holds it
 
 
 def test_a_table_from_before_keeps_the_switch(tmp_path: Path) -> None:
@@ -118,51 +121,6 @@ def test_a_table_from_before_keeps_the_switch(tmp_path: Path) -> None:
     # watcher in that file, nothing goes on its own.
     assert not handle_it.get(1, db_path=db).enabled
     assert not handle_it.get(4, db_path=db).enabled
-
-
-def test_someone_who_never_turned_it_on_starts_in_training(tmp_path: Path) -> None:
-    """Handle it for me was off until the person turned it on. Now that
-    Approvals decides, anyone whose switch was off is put in training, so
-    nothing goes out as them until they allow it; turning training off
-    afterwards sticks."""
-    from openexecutive.delegation import training
-    from openexecutive.delegation.schema import ensure_schema
-
-    db = tmp_path / "old.db"
-    conn = sqlite3.connect(str(db))
-    conn.execute(
-        "CREATE TABLE delegation_handle_it (person_id INTEGER PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0, "
-        "levels TEXT NOT NULL DEFAULT '{}', updated_at TEXT, updated_by TEXT)"
-    )
-    conn.execute("INSERT INTO delegation_handle_it VALUES (1, 1, '{}', '', 't')")  # had turned it on
-    conn.execute("INSERT INTO delegation_handle_it VALUES (4, 0, '{}', '', 't')")  # never did
-    conn.commit()
-    conn.close()
-    # Person 6 had the inbox watcher on and never touched Handle it for me.
-    # Everything above is a file from before the upgrade, so the marker that
-    # says it ran is taken away again.
-    inbox.set_watch(6, True, updated_by="t", db_path=db)
-    conn = sqlite3.connect(str(db))
-    conn.execute("DELETE FROM delegation_upgrades")
-    conn.execute("DELETE FROM delegation_training")
-    conn.commit()
-    ensure_schema(conn)
-    conn.close()
-    assert not training.get(1, db_path=db).training
-    assert training.get(4, db_path=db).training
-    assert training.get(6, db_path=db).training
-    # Turning it off sticks, and someone who sets Act as me up after the
-    # upgrade gets the new default: Approvals decides.
-    training.set_(4, {"training": False}, updated_by="t", db_path=db)
-    inbox.set_watch(9, True, updated_by="t", db_path=db)
-    conn = sqlite3.connect(str(db))
-    ensure_schema(conn)
-    conn.close()
-    assert not training.get(4, db_path=db).training
-    assert not training.get(9, db_path=db).training
-
-
-# ── sending on its own ────────────────────────────────────────────────────────
 
 
 def test_a_reply_sent_on_its_own_says_an_ai_wrote_it(
@@ -420,6 +378,26 @@ def test_turning_it_off_before_the_send_leaves_the_card(
     with pytest.raises(SendRefused) as err:
         asyncio.run(send_on_its_own(fresh, gmail=mailbox, now=NOW))
     assert err.value.code == "handle_it_off" and mailbox.sent == []
+
+
+def test_a_waits_rule_added_since_the_card_holds_the_send(
+    owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openexecutive.orchestrator import outside_mode
+    from openexecutive.orchestrator import take_the_lead as ttl
+
+    _careful(monkeypatch)
+    mailbox, _ = _scan_one(owner)
+    card = _only_card(owner)
+    with sqlite3.connect(_inbox_tests.episodic.DB_PATH) as conn:
+        conn.execute("UPDATE decision_instances SET gate_mode = 'auto_execute' WHERE id = ?", (card.id,))
+    monkeypatch.setattr(outside_mode, "get_mode", lambda **_: outside_mode.TRUST)
+    fresh = ledger.get_decision_instance(card.id)
+    word = next(w for w in str(inbox.card_payload(fresh).get("draft_body") or "").split() if len(w) > 4 and w.isalpha())
+    ttl.add_rule(ttl.SCOPE_COMPANY, "words", word, created_by="t")
+    with pytest.raises(SendRefused) as err:
+        asyncio.run(send_on_its_own(fresh, gmail=mailbox, now=NOW))
+    assert err.value.code == "rule" and mailbox.sent == []
 
 
 def test_a_card_made_to_ask_is_never_sent_on_its_own(
@@ -733,9 +711,10 @@ def test_the_check_runs_only_when_a_reply_would_go(
 
 
 def _in_training(owner: Any) -> None:
-    from openexecutive.delegation import training
 
-    training.set_(owner.id, {training.TRAINING: True}, updated_by="test")
+    from openexecutive.orchestrator import take_the_lead as _ttl
+
+    _ttl.set_(_ttl.SCOPE_EXECUTIVE, training=True, updated_by="t")
 
 
 @pytest.mark.parametrize("level", ["balanced", "hands_off"])
@@ -794,13 +773,14 @@ def test_someone_with_no_address_on_file_is_never_allowed_by_omission(owner: Any
     """A card reaching an allowed person and someone with no email on file
     (``action_cards._addresses`` gives "" for them) still waits in training."""
     from openexecutive.delegation import training
+    from openexecutive.orchestrator import take_the_lead
 
     _on(owner)
     _in_training(owner)
     training.allow_person(owner.id, DANA, "Dana Park", decision_id=None)
-    assert handle_it.training_hold(owner.id, [DANA]) is None
-    assert handle_it.training_hold(owner.id, [DANA, ""]) == "training"
-    assert handle_it.training_hold(owner.id, [""]) == "training"
+    assert take_the_lead.as_you(owner.id, recipients=[DANA]) is None
+    assert take_the_lead.as_you(owner.id, recipients=[DANA, ""]) == "training"
+    assert take_the_lead.as_you(owner.id, recipients=[""]) == "training"
 
 
 def test_a_card_reaching_several_people_is_allowed_whole_or_not_at_all(
@@ -821,14 +801,28 @@ def test_a_card_reaching_several_people_is_allowed_whole_or_not_at_all(
     assert training.room_for_all(owner.id, [])
 
 
-def test_an_unreadable_training_setting_holds(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unreadable_allowances_hold_in_training(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     from openexecutive.delegation import training
+    from openexecutive.orchestrator import take_the_lead
+
+    _in_training(owner)
+    training.allow_person(owner.id, DANA, "Dana Park", decision_id=None)
 
     def broken(*a: Any, **k: Any) -> Any:
         raise sqlite3.OperationalError("database is locked")
 
-    monkeypatch.setattr(training, "_connect", broken)
-    assert handle_it.training_hold(owner.id, [DANA]) == "training"
+    monkeypatch.setattr(training, "allowed_person", broken)
+    assert take_the_lead.as_you(owner.id, recipients=[DANA]) is not None
+
+
+def test_an_unreadable_in_training_switch_holds(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.orchestrator import take_the_lead
+
+    def broken(*a: Any, **k: Any) -> Any:
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(take_the_lead, "get", lambda *a, strict=False, **k: broken() if strict else None)
+    assert take_the_lead.as_you(owner.id, recipients=[DANA]) == take_the_lead.TRAINING
 
 
 def test_careful_holds_an_allowed_person_too(owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:

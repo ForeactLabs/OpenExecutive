@@ -13,7 +13,7 @@ from openexecutive.delegation import answers, card_work, inbox, replies
 from openexecutive.delegation.reply_send import SendRefused
 from openexecutive.delegation.settings import DelegationOverride, pin_turn_delegation
 from openexecutive.memory import decision_ledger as ledger
-from openexecutive.orchestrator import reply_card_tools
+from openexecutive.orchestrator import reply_card_tools, take_the_lead
 from openexecutive.orchestrator.session import Session
 
 from . import test_delegation_card_drafts as _card_tests
@@ -267,12 +267,11 @@ def test_after_the_work_a_reply_that_may_go_on_its_own_is_checked_again(
     monkeypatch.setattr(inbox, "_send_on_its_own", fake_send)
     monkeypatch.setattr(inbox, "_hand_back", lambda c, reason: held.append(reason))
     monkeypatch.setattr(ledger, "get_decision_instance", _with_gate(ledger.get_decision_instance))
-    from openexecutive.delegation import handle_it
 
-    monkeypatch.setattr(handle_it, "content_hold", lambda *a, **k: None)
+    monkeypatch.setattr(take_the_lead, "as_you", _balanced_as_you)
     asyncio.run(card_work.finished(owner, card.id, gmail=mailbox))
     assert sent == [card.id]
-    monkeypatch.setattr(handle_it, "content_hold", lambda *a, **k: "amount")
+    monkeypatch.setattr(take_the_lead, "as_you", lambda *a, **k: "amount")
     asyncio.run(card_work.finished(owner, card.id, gmail=mailbox))
     assert held == ["amount"] and sent == [card.id]
 
@@ -351,7 +350,6 @@ def test_files_wait_for_the_reply_and_go_back_if_it_isnt_changed(
 def test_what_the_work_made_for_someone_not_in_people_waits(
     db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from openexecutive.delegation import handle_it
     from openexecutive.memory.decision_ledger import update_open_payload
 
     mailbox, card = _card(owner)
@@ -365,7 +363,7 @@ def test_what_the_work_made_for_someone_not_in_people_waits(
     monkeypatch.setattr(inbox, "_send_on_its_own", fake_send)
     monkeypatch.setattr(inbox, "_hand_back", lambda c, reason: held.append(reason))
     monkeypatch.setattr(ledger, "get_decision_instance", _with_gate(ledger.get_decision_instance))
-    monkeypatch.setattr(handle_it, "content_hold", lambda *a, **k: None)
+    monkeypatch.setattr(take_the_lead, "as_you", _balanced_as_you)
     fresh = _fresh(card)
     for relation, expected in (("stranger", ["work_stranger"]), ("contact", ["work_stranger"])):
         payload = {**inbox.card_payload(fresh), "relation": relation}
@@ -375,6 +373,12 @@ def test_what_the_work_made_for_someone_not_in_people_waits(
         if relation == "stranger":
             assert held == expected and sent == []
     assert held == ["work_stranger"] and sent == [card.id]
+
+
+def _balanced_as_you(_person_id: int, *, noticed: Any = (), **_k: Any) -> str | None:
+    """The one gate on Balanced with nothing in the words: the first reason
+    the feature noticed waits (``take_the_lead.as_you``)."""
+    return next((n for n in noticed if n), None)
 
 
 def _with_gate(real: Any) -> Any:
@@ -389,14 +393,13 @@ def _with_gate(real: Any) -> Any:
 def test_a_note_alone_waits_for_the_person(
     db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from openexecutive.delegation import handle_it
 
     mailbox, card = _card(owner)
     _apply(card, owner, mailbox, note="Signing the form is yours to do.")
     held: list[str | None] = []
     monkeypatch.setattr(inbox, "_hand_back", lambda c, reason: held.append(reason))
     monkeypatch.setattr(ledger, "get_decision_instance", _with_gate(ledger.get_decision_instance))
-    monkeypatch.setattr(handle_it, "content_hold", lambda *a, **k: None)
+    monkeypatch.setattr(take_the_lead, "as_you", _balanced_as_you)
     asyncio.run(card_work.finished(owner, card.id, gmail=mailbox))
     assert held == ["work_theirs"]
 
@@ -790,14 +793,13 @@ def test_a_joined_thread_reads_only_what_came_after(
 def test_a_stuck_turn_with_a_partial_reply_never_goes_on_its_own(
     db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from openexecutive.delegation import handle_it
 
     mailbox, card = _card(owner)
     held: list[str | None] = []
     sent: list[int] = []
     monkeypatch.setattr(inbox, "_hand_back", lambda c, reason: held.append(reason))
     monkeypatch.setattr(ledger, "get_decision_instance", _with_gate(ledger.get_decision_instance))
-    monkeypatch.setattr(handle_it, "content_hold", lambda *a, **k: None)
+    monkeypatch.setattr(take_the_lead, "as_you", _balanced_as_you)
 
     async def send(*_a: Any, **_k: Any) -> None:
         sent.append(card.id)
@@ -965,7 +967,6 @@ def test_words_on_a_working_card_that_would_go_on_its_own_take_it_back(
 def test_a_joined_email_is_checked_before_the_reply_goes_on_its_own(
     db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from openexecutive.delegation import handle_it
     from openexecutive.memory.decision_ledger import update_open_payload
 
     mailbox, card = _card(owner)
@@ -976,12 +977,12 @@ def test_a_joined_email_is_checked_before_the_reply_goes_on_its_own(
     })
     seen: list[str] = []
 
-    def hold(*texts: str, **_k: Any) -> str | None:
+    def hold(_person_id: int, *, texts: Any = (), **_k: Any) -> str | None:
         seen.extend(texts)
         return "sensitive" if any("bank details" in t for t in texts) else None
 
     held: list[str | None] = []
-    monkeypatch.setattr(handle_it, "content_hold", hold)
+    monkeypatch.setattr(take_the_lead, "as_you", hold)
     monkeypatch.setattr(inbox, "_hand_back", lambda c, reason: held.append(reason))
     monkeypatch.setattr(ledger, "get_decision_instance", _with_gate(ledger.get_decision_instance))
     asyncio.run(card_work.finished(owner, card.id, gmail=mailbox))
@@ -991,7 +992,6 @@ def test_a_joined_email_is_checked_before_the_reply_goes_on_its_own(
 def test_a_joined_email_stops_a_settling_reply_going_on_its_own(
     db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from openexecutive.delegation import handle_it
 
     mailbox, card = _card(owner)
     held: list[str | None] = []
@@ -1003,7 +1003,7 @@ def test_a_joined_email_stops_a_settling_reply_going_on_its_own(
 
     monkeypatch.setattr(inbox, "_hand_back", lambda c, reason: held.append(reason))
     monkeypatch.setattr(inbox, "_send_on_its_own", send)
-    monkeypatch.setattr(handle_it, "content_hold", lambda *a, **k: None)
+    monkeypatch.setattr(take_the_lead, "as_you", _balanced_as_you)
     monkeypatch.setattr(ledger, "get_decision_instance", _with_gate(ledger.get_decision_instance))
     monkeypatch.setattr(card_work, "start", lambda _p, card_id, **_k: started.append(card_id) or True)
 
@@ -1328,7 +1328,6 @@ def test_a_join_that_fails_after_it_lands_warns_on_the_card(
 def test_stop_during_a_hand_back_save_keeps_the_reply_for_them(
     db: Path, owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from openexecutive.delegation import handle_it
 
     mailbox, card = _card(owner)
     held: list[str | None] = []
@@ -1339,7 +1338,7 @@ def test_stop_during_a_hand_back_save_keeps_the_reply_for_them(
 
     monkeypatch.setattr(inbox, "_hand_back", lambda c, reason: held.append(reason))
     monkeypatch.setattr(inbox, "_send_on_its_own", send)
-    monkeypatch.setattr(handle_it, "content_hold", lambda *a, **k: None)
+    monkeypatch.setattr(take_the_lead, "as_you", _balanced_as_you)
     monkeypatch.setattr(ledger, "get_decision_instance", _with_gate(ledger.get_decision_instance))
     card_work._RUNNING.add(card.id)
     try:

@@ -3,26 +3,25 @@
 import Link from "next/link";
 import { useState } from "react";
 
-import { useReachSave } from "@/components/settings/ReachCard";
 import SettingsCard from "@/components/settings/SettingsCard";
 import { LearnedSection } from "@/components/settings/TrainingCard";
 import Switch from "@/components/Switch";
 import {
   removeLeadLearned,
   setTakeTheLead,
-  setTraining,
   type DelegationSettings,
   type TakeTheLead,
 } from "@/lib/api";
 import { APPROVALS_HREF } from "@/lib/reach";
 
-// Delegate → Approvals, check 3, In training: the last check, both switches
-// side by side. As you (PUT /delegation/training {training}): nothing goes
-// out as you on its own, on any level, until you tick "Send to them on its
-// own next time" on a card. As me (PUT /take-the-lead {training}): everything
-// it would do comes to you as a card first, until you tick "Do this on its
-// own next time". Under each, what you allowed so far, with Remove. The As
-// you and As me tabs show only the state and link here (TrainingLine).
+// Delegate → Approvals, check 3, In training: one switch, the company's
+// (PUT /take-the-lead {training}), for everything: what it sends as you and
+// what it does in its own name. On, each comes to you as a card first, until
+// you tick "on its own next time" on one. Under it, what was allowed so far,
+// with Remove: the people it may send to as you, and the kinds of step it may
+// take in its own name. Someone who can't change company settings sees where
+// it stands. The As you and As me tabs show only the state and link here
+// (TrainingLine).
 export default function TrainingStep({
   delegation,
   onDelegation,
@@ -36,17 +35,47 @@ export default function TrainingStep({
   leadState: "loading" | "hidden" | "ready" | "error";
   setLead: (next: TakeTheLead) => void;
 }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const training = delegation?.training ?? null;
   if (!training && leadState !== "ready") return null;
+  const ready = leadState === "ready" && lead !== null;
+  const on = ready ? lead.training : Boolean(training?.training);
+  const toggle = async (next: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      setLead(await setTakeTheLead({ training: next }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save the setting.");
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <SettingsCard
       step={3}
       title="In training"
       description="On: everything becomes a card first, whatever the level and rules say."
     >
-      <div className="grid gap-4 sm:grid-cols-2 sm:items-start">
+      {ready ? (
+        <SideSwitch
+          id="training-label"
+          text="Hold everything until you allow it"
+          checked={on}
+          busy={busy}
+          onChange={(next) => void toggle(next)}
+        />
+      ) : (
+        <p className="text-[15px] text-fg">
+          <span className="font-semibold">{on ? "On" : "Off"}.</span>{" "}
+          <span className="text-fg-muted">An admin changes it.</span>
+        </p>
+      )}
+      {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
+      <div className="mt-4 grid gap-4 sm:grid-cols-2 sm:items-start">
         {training && delegation && <AsYouSide settings={delegation} onSettings={onDelegation} />}
-        {leadState === "ready" && lead && <AsMeSide lead={lead} setLead={setLead} />}
+        {ready && <AsMeSide lead={lead} setLead={setLead} />}
       </div>
     </SettingsCard>
   );
@@ -54,14 +83,12 @@ export default function TrainingStep({
 
 function SideSwitch({
   id,
-  tag,
   text,
   checked,
   busy,
   onChange,
 }: {
   id: string;
-  tag: string;
   text: string;
   checked: boolean;
   busy: boolean;
@@ -69,7 +96,6 @@ function SideSwitch({
 }) {
   return (
     <div className="flex min-h-touch items-center gap-3 rounded-xl border border-line px-4 py-3">
-      <span className="flex-none rounded-full bg-accent/10 px-2 py-0.5 text-xs font-semibold text-accent">{tag}</span>
       <span id={id} className="min-w-0 flex-1 text-[15px] text-fg">
         {text}
       </span>
@@ -85,27 +111,17 @@ function AsYouSide({
   settings: DelegationSettings;
   onSettings: (next: DelegationSettings) => void;
 }) {
-  const { busy, error, save } = useReachSave(onSettings);
   const training = settings.training;
   if (!training) return null;
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <SideSwitch
-        id="as-you-training-label"
-        tag="As you"
-        text="Hold everything it sends as you"
-        checked={Boolean(training.training)}
-        busy={busy}
-        onChange={(next) => void save(() => setTraining({ training: next }))}
-      />
       <LearnedSection
         training={training}
         onSettings={onSettings}
         setting="training"
-        title="Goes on its own"
+        title="Sends as you on its own to"
         empty="Nobody yet. Tick “on its own next time” when you send one."
       />
-      {error && <p className="text-sm text-red-500">{error}</p>}
     </div>
   );
 }
@@ -129,17 +145,9 @@ function AsMeSide({ lead, setLead }: { lead: TakeTheLead; setLead: (next: TakeTh
   const learned = lead.learned.filter((item) => item.feature !== "act_as_me");
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <SideSwitch
-        id="as-me-training-label"
-        tag="As me"
-        text="Hold everything it does in its own name"
-        checked={lead.training}
-        busy={busy}
-        onChange={(next) => void run(() => setTakeTheLead({ training: next }))}
-      />
       {(lead.training || learned.length > 0) && (
         <div className="border-t border-line pt-5">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">Goes on its own</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">Does on its own</h3>
           {learned.length === 0 ? (
             <p className="mt-3 text-sm text-fg-muted">Nothing yet. Tick “Do this on its own next time” when you approve one.</p>
           ) : (

@@ -566,9 +566,8 @@ def test_removing_a_goes_rule_in_the_turn_asks_for_the_tap_it_needs(roster: dict
 
 def test_in_training_on_is_now_and_off_waits() -> None:
     action = app_control.CATALOG.actions["change_setting"]
-    for setting in ("as_you_training", "as_me_training"):
-        assert not action.needs_tap(setting, "on")
-        assert action.needs_tap(setting, "off")
+    assert not action.needs_tap("as_me_training", "on")
+    assert action.needs_tap("as_me_training", "off")
 
 
 def test_turning_on_as_me_training_from_chat(roster: dict[str, Any]) -> None:
@@ -577,7 +576,7 @@ def test_turning_on_as_me_training_from_chat(roster: dict[str, Any]) -> None:
     session = _web(roster["owner"], "s-t")
     out = _run(app_control.handle_do_in_app,
                {"action": "change_setting", "id": "as_me_training", "value": "on"}, session)
-    assert out == {"status": "done", "did": "Turned In training for As me on"}, out
+    assert out == {"status": "done", "did": "Turned In training on"}, out
     assert take_the_lead.get(take_the_lead.SCOPE_EXECUTIVE).training
     out = _run(app_control.handle_do_in_app,
                {"action": "change_setting", "id": "as_me_training", "value": "off"}, session)

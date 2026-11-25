@@ -2160,9 +2160,10 @@ export interface TrainingLearned {
 }
 
 // In training and Learn from my edits (delegation/training.py). `training`:
-// nothing goes out as you on its own, on any Approvals level, until you tick
-// "Send to them on its own next time" on a card; `drafts`: a draft you change
-// before sending is kept as how you write to that person.
+// the company's one In training switch, read only here (it changes on
+// Approvals, PUT /take-the-lead): nothing goes out as you on its own until you
+// tick "Send to them on its own next time" on a card; `drafts`: a draft you
+// change before sending is kept as how you write to that person.
 export interface Training {
   training: boolean;
   drafts: boolean;
@@ -2714,7 +2715,7 @@ export async function removeTrainingLearned(id: number): Promise<DelegationSetti
 }
 
 // In training, or Learn from my edits, on or off.
-export async function setTraining(update: { training?: boolean; drafts?: boolean }): Promise<DelegationSettings> {
+export async function setTraining(update: { drafts?: boolean }): Promise<DelegationSettings> {
   const res = await fetch(`${API_BASE}/delegation/training`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
