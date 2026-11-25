@@ -1252,8 +1252,14 @@ def list_recent_signals(
     resolved = _resolve_db_path(db_path)
     if not resolved.exists():
         return []
+    from openexecutive.monitoring import mailbox
+
     clauses: list[str] = ["source_kind != ?"]
     params: list[Any] = [SOURCE_KIND_MAILBOX]
+    own = [i.id for i in list_watchlist(every_watch=True, db_path=db_path) if i.id is not None and mailbox.set_by(i) is not None]
+    if own:
+        clauses.append(f"watchlist_id NOT IN ({', '.join('?' * len(own))})")
+        params.extend(own)
     if since is not None:
         clauses.append("captured_at >= ?")
         params.append(since.isoformat())
@@ -1269,12 +1275,7 @@ def list_recent_signals(
             f"ORDER BY captured_at DESC LIMIT ?",
             params,
         ).fetchall()
-    from openexecutive.monitoring import mailbox
-
-    signals = [_row_to_signal_dict(row) for row in rows]
-    watches = {int(s["watchlist_id"]) for s in signals if s.get("watchlist_id") is not None}
-    own = {i for i in watches if (item := get_watchlist_item(i, db_path=db_path)) is not None and mailbox.set_by(item) is not None}
-    return [s for s in signals if s.get("watchlist_id") not in own]
+    return [_row_to_signal_dict(row) for row in rows]
 
 
 def last_told_by_watch(db_path: Path | None = None) -> dict[int, dict[str, Any]]:
