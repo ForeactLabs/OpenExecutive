@@ -179,3 +179,42 @@ def test_a_teammates_followup_that_looks_handled_is_still_sent(db: Path, roster:
     assert send.call_args.args[2] == "Looks sorted: the vendor answered."
     assert "The vendor answered, all sorted" in prompt
     assert episodic.get_scheduled_action(action_id).status == "done"  # type: ignore[union-attr]
+
+
+def test_a_teammates_held_note_to_someone_else_tells_them_it_was_held(
+    db: Path, roster: SimpleNamespace
+) -> None:
+    ben = roster.teammate.id
+    action_id = episodic.insert_scheduled_action(
+        run_at=_iso(timedelta(days=1)), channel="slack_dm", channel_ref="UVENDOR",
+        intent_text="Email the vendor to confirm the order.", originating_session_id="ben-1",
+        created_by_person_id=ben,
+    )
+    with episodic._get_conn(db) as conn:
+        conn.execute("UPDATE scheduled_actions SET created_at = ? WHERE id = ?",
+                     (_iso(-timedelta(days=1)), action_id))
+    _message(db, "ben-2", ben, "user", "Hold the vendor email for now", -timedelta(hours=1), sender=ben)
+    line = "Held the vendor email as you asked. Say 'send it' and it goes."
+    with patch.object(runner, "deliver_to_person", new_callable=AsyncMock) as tell:
+        tell.return_value = SimpleNamespace(ok=True, detail="")
+        _, prompt = _fire(action_id, line)
+    assert "Hold the vendor email for now" in prompt
+    assert "send nothing to anyone else" in prompt and "end with one short line to Ben" in prompt
+    tell.assert_called_once()
+    assert tell.call_args.args[0].id == ben and tell.call_args.args[1] == line
+    assert episodic.get_scheduled_action(action_id).status == "done"  # type: ignore[union-attr]
+
+
+def test_a_teammates_note_to_someone_else_with_no_chat_since_sends_no_notice(
+    db: Path, roster: SimpleNamespace
+) -> None:
+    ben = roster.teammate.id
+    action_id = episodic.insert_scheduled_action(
+        run_at=_iso(timedelta(days=1)), channel="slack_dm", channel_ref="UVENDOR",
+        intent_text="Email the vendor to confirm the order.", originating_session_id="ben-1",
+        created_by_person_id=ben,
+    )
+    with patch.object(runner, "deliver_to_person", new_callable=AsyncMock) as tell:
+        _, prompt = _fire(action_id, "Sent the vendor the confirmation.")
+    assert "send nothing to anyone else" not in prompt
+    tell.assert_not_called()
