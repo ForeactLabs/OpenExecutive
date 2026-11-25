@@ -215,8 +215,8 @@ def test_who_a_conversation_is_with(ids: dict[str, int]) -> None:
     ])
     by_title = {c.title: c for c in tx.conversations(owner)}
     assert tx.known_person(by_title["(555) 201-3344"]).full_name == "Mike Chen"
-    # A name comes from the contacts on their own phone: it names them.
-    assert tx.known_person(by_title["Ben Teammate"]).full_name == "Ben Teammate"
+    # A name can be one the sender chose (an SMS sender ID): never trusted.
+    assert tx.known_person(by_title["Ben Teammate"]) is None
     assert tx.known_person(by_title["Family"]) is None
     assert tx.known_person(by_title["Sam Stranger"]) is None
 
@@ -239,14 +239,28 @@ def test_a_text_to_someone_unknown_is_someone_new_and_the_card_names_them(
     assert ttl.where("send_text", {"conversation_id": conv.id, "text": "hi"}) == "A text from your phone"
 
 
-def test_a_text_to_a_teammate_by_name_is_not_someone_new(ids: dict[str, int], as_turn_for: Any) -> None:
+def test_a_conversation_named_like_a_teammate_with_no_number_is_nobody_known(
+    ids: dict[str, int], as_turn_for: Any,
+) -> None:
     owner = ids["principal"]
     _on(owner)
-    tx.record(owner, [_item("a", conv="ben", title="Ben Teammate")])
+    tx.record(owner, [_item("a", conv="ben", title="Ben Teammate", sender="Ben Teammate")])
     (conv,) = tx.conversations(owner)
     as_turn_for(owner)
-    addresses, names = ttl._targets("send_text", {"conversation_id": conv.id, "text": "hi"})
-    assert addresses == ["ben@co.example"] and names == ["Ben Teammate"]
+    assert text_tools.reached_person({"conversation_id": conv.id, "text": "hi"}) is None
+    assert ttl.summarize("send_text", {"conversation_id": conv.id, "text": "hi"}).startswith("Text Ben Teammate")
+
+
+def test_the_executives_words_come_back_once_then_the_same_words_are_a_reply(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("a", text="Lunch Friday?")])
+    (conv,) = tx.conversations(owner)
+    tx.queue_send(owner, "Sounds good", conversation_id=conv.id)
+    assert tx.record(owner, [_item("b", text="You: Sounds good")]) == []
+    fresh = tx.record(owner, [_item("c", text="Sounds good")])
+    assert len(fresh) == 1
+    assert [t.outgoing for t in tx.texts(conv.id)][-2:] == [True, False]
 
 
 # --- the routes ------------------------------------------------------------
@@ -523,10 +537,10 @@ def test_a_text_from_someone_not_on_people_is_outside_words(ids: dict[str, int],
     monkeypatch.setattr(texts_watch, "_turn", turn)
     assert asyncio.run(texts_watch.look(owner)) is True
     assert off == [True]
-    # A teammate's texts, by their name in the phone's contacts, are the team's words.
+    # A name alone can be a sender ID anyone picks: still outside words.
     tx.record(owner, [_item("y", conv="c10", title="Ben Teammate", sender="Ben Teammate", text="Lunch?")])
     assert asyncio.run(texts_watch.look(owner)) is True
-    assert off == [True, False]
+    assert off == [True, True]
 
 
 def test_a_text_to_a_new_number_is_matched_only_where_it_could_have_gone(ids: dict[str, int]) -> None:
@@ -622,6 +636,7 @@ def test_its_own_text_coming_back_in_another_language_is_never_a_new_text(ids: d
     assert tx.record(owner, [_item("b", text="Friday  works")]) == []
     assert tx.texts(conv.id)[-1].outgoing is True
     # Hindi: "आप: Friday works", with a "You:" the browser didn't know.
+    tx.queue_send(owner, "Friday works", conversation_id=conv.id)
     assert tx.record(owner, [_item("b2", text="आप: Friday works")]) == []
     tx.settle_send(owner, send.id, status=tx.SENT)
     assert tx.record(owner, [_item("c", text="Friday works?")]) != []  # someone else's words
@@ -718,3 +733,47 @@ def test_only_the_phones_owner_tap_sends_their_text(
     assert relaxed_for == []
     asyncio.run(ttl.carry_out({**payload, "tapped_by": mate}, by_principal=False))
     assert relaxed_for == [mate]
+
+
+def test_a_turn_that_failed_after_texting_back_never_answers_twice(
+    ids: dict[str, int], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("a", text="Still on for 3?")])
+    (conv,) = tx.conversations(owner)
+
+    async def turn(person: Any, prompt: str, **_: Any) -> None:
+        tx.queue_send(owner, "Yes, see you at 3", conversation_id=conv.id)
+        raise RuntimeError("model busy")
+
+    monkeypatch.setattr(texts_watch, "_turn", turn)
+    with pytest.raises(RuntimeError):
+        asyncio.run(texts_watch.look(owner))
+    assert tx.unhandled(owner) == []
+    # The next look's prompt shows the reply on its way.
+    tx.record(owner, [_item("b", text="Great")])
+    prompts: list[str] = []
+
+    async def seen(person: Any, prompt: str, **_: Any) -> None:
+        prompts.append(prompt)
+
+    monkeypatch.setattr(texts_watch, "_turn", seen)
+    assert asyncio.run(texts_watch.look(owner)) is True
+    assert "Already on its way from" in prompts[0] and "Yes, see you at 3" in prompts[0]
+
+
+def test_a_turn_that_failed_before_texting_leaves_the_texts_new(
+    ids: dict[str, int], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("a", text="Still on for 3?")])
+
+    async def turn(person: Any, prompt: str, **_: Any) -> None:
+        raise RuntimeError("model busy")
+
+    monkeypatch.setattr(texts_watch, "_turn", turn)
+    with pytest.raises(RuntimeError):
+        asyncio.run(texts_watch.look(owner))
+    assert len(tx.unhandled(owner)) == 1

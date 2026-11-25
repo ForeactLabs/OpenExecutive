@@ -107,7 +107,10 @@ _DDL: tuple[str, ...] = (
     "  created_at TEXT NOT NULL,"
     "  done_at TEXT,"
     # The chat that was told "on its way": how it went is said there.
-    "  tell_session TEXT"
+    "  tell_session TEXT,"
+    # Its words came back once in the list (``texts._echo_of``): the same
+    # words again are someone's reply.
+    "  echoed INTEGER NOT NULL DEFAULT 0"
     ")",
     # The owner's "Let team members use Act as me": one row, absent means off.
     f"CREATE TABLE IF NOT EXISTS {TEAM_TABLE} ("

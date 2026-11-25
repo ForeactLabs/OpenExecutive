@@ -229,7 +229,7 @@ class Incoming:
     is_group: bool = False
     # The browser's guess that the person sent it themselves (a "You:"
     # preview). Never trusted: anyone can text those words. Only the
-    # Executive's own sends count as outgoing (``_just_sent``); a text the
+    # Executive's own sends count as outgoing (``_echo_of``); a text the
     # person sent from their phone is looked at like any other.
     outgoing: bool = False
 
@@ -293,7 +293,10 @@ def record(person_id: int, items: list[Incoming], *, db_path: Path | None = None
             # Which way a text went: only a text the Executive itself just sent
             # is theirs. The page's "You: …" is words anyone can type, so it
             # never makes a text theirs (the turn is told what it may mean).
-            outgoing = _just_sent(conn, person_id, conversation_id, item.text, now)
+            echo = _echo_of(conn, person_id, conversation_id, item.text, now)
+            outgoing = echo is not None
+            if echo is not None:
+                conn.execute(f"UPDATE {TEXT_SENDS_TABLE} SET echoed=1 WHERE id=?", (echo,))
             cur = conn.execute(
                 f"INSERT OR IGNORE INTO {TEXTS_TABLE} "
                 "(person_id, conversation_id, ref, sender, text, outgoing, at, handled) VALUES (?,?,?,?,?,?,?,?)",
@@ -322,35 +325,40 @@ def _same_words(a: str, b: str) -> bool:
     return " ".join((a or "").split()).casefold() == " ".join((b or "").split()).casefold()
 
 
-def _just_sent(conn: sqlite3.Connection, person_id: int, conversation_id: str, text: str, now: datetime) -> bool:
-    """Whether these words are a text the Executive sent in this conversation
-    (or to a new number) in the last few minutes, settled or still going."""
+def _echo_of(conn: sqlite3.Connection, person_id: int, conversation_id: str, text: str, now: datetime) -> int | None:
+    """The send these words are the echo of: a text the Executive sent in
+    this conversation (or to a new number) in the last few minutes, settled
+    or still going, whose words haven't come back yet. Each send comes back
+    once: the same words again are someone's reply. None when they aren't."""
     if not (text or "").strip():
-        return False
+        return None
     # Only a send of the last few minutes, in this conversation, or one to a
     # new number still on its way: a reply an hour later in the same words is
     # someone's reply.
     rows = conn.execute(
-        f"SELECT text, conversation_id, to_number FROM {TEXT_SENDS_TABLE} WHERE person_id=? AND status<>? "
-        "AND created_at >= ? AND (conversation_id=? OR (conversation_id IS NULL AND status IN (?, ?)))",
+        f"SELECT id, text, conversation_id, to_number FROM {TEXT_SENDS_TABLE} WHERE person_id=? AND status<>? "
+        "AND echoed=0 AND created_at >= ? AND (conversation_id=? OR (conversation_id IS NULL AND status IN (?, ?))) "
+        "ORDER BY id",
         (person_id, FAILED, _iso(now - _ECHO_WITHIN), conversation_id, PENDING, HANDED),
     ).fetchall()
     bare = _LEADING_WHO.sub("", text, count=1)
     same = [r for r in rows if _same_words(r["text"], text) or _same_words(r["text"], bare)]
-    if any(r["conversation_id"] == conversation_id for r in same):
-        return True
+    for r in same:
+        if r["conversation_id"] == conversation_id:
+            return int(r["id"])
     # A send to a new number comes back only in the conversation it opened:
     # one with that number, or one with nothing in it yet.
     if not same:
-        return False
+        return None
     conv = conn.execute(
         f"SELECT title, number FROM {TEXT_CONVERSATIONS_TABLE} WHERE id=?", (conversation_id,),
     ).fetchone()
     shown = digits((conv["number"] or conv["title"]) if conv is not None else "")
-    if any(len(shown) >= 7 and digits(r["to_number"] or "") == shown for r in same):
-        return True
+    for r in same:
+        if len(shown) >= 7 and digits(r["to_number"] or "") == shown:
+            return int(r["id"])
     earlier = conn.execute(f"SELECT 1 FROM {TEXTS_TABLE} WHERE conversation_id=? LIMIT 1", (conversation_id,)).fetchone()
-    return earlier is None
+    return int(same[0]["id"]) if earlier is None else None
 
 
 def _upsert_conversation(conn: sqlite3.Connection, person_id: int, item: Incoming, now: datetime) -> str:
@@ -644,6 +652,24 @@ def settle_send(
     return settled
 
 
+def last_send_id(person_id: int, *, db_path: Path | None = None) -> int:
+    """The id of the person's latest send (0 for none): to tell whether a
+    turn texted anyone."""
+    with _connect(db_path) as conn:
+        row = conn.execute(f"SELECT MAX(id) AS m FROM {TEXT_SENDS_TABLE} WHERE person_id=?", (person_id,)).fetchone()
+    return int(row["m"] or 0)
+
+
+def on_its_way(conversation_id: str, *, db_path: Path | None = None) -> list[str]:
+    """The words of sends in this conversation the browser hasn't sent yet."""
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            f"SELECT text FROM {TEXT_SENDS_TABLE} WHERE conversation_id=? AND status IN (?, ?) ORDER BY id",
+            (conversation_id, PENDING, HANDED),
+        ).fetchall()
+    return [str(r["text"]) for r in rows]
+
+
 def get_send(send_id: int, *, db_path: Path | None = None) -> Send | None:
     with _connect(db_path) as conn:
         row = conn.execute(f"SELECT * FROM {TEXT_SENDS_TABLE} WHERE id=?", (send_id,)).fetchone()
@@ -717,10 +743,10 @@ def looks_like_number(text: str) -> bool:
 
 def known_person(conv: Conversation) -> Any | None:
     """The person on People (contacts included) this conversation is with,
-    or None (a group, someone not on People). By phone number; else by the
-    name Google Messages shows, which comes from the contacts on the person's
-    own phone, when exactly one person on People has that full name. A group,
-    whose members can name it, is never a person. Never raises."""
+    or None (a group, someone not on People). By phone number only: the name
+    Google Messages shows can be one the sender chose (an SMS sender ID, an
+    RCS business name), so a conversation with no number is nobody known.
+    A group is never a person. Never raises."""
     if conv.is_group:
         return None
     try:
@@ -737,9 +763,4 @@ def known_person(conv: Conversation) -> Any | None:
                 value = getattr(detail, "value", None) if not isinstance(detail, dict) else detail.get("value")
                 if kind in ("phone", "mobile") and digits(str(value or "")) == want:
                     return p
-    name = " ".join((conv.title or "").split()).casefold()
-    if name and not looks_like_number(conv.title):
-        named = [p for p in people if " ".join((getattr(p, "full_name", "") or "").split()).casefold() == name]
-        if len(named) == 1:
-            return named[0]
     return None
