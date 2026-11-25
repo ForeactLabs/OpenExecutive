@@ -1150,11 +1150,6 @@ _tapped_drive: contextvars.ContextVar[dict[str, Any] | None] = contextvars.Conte
 )
 
 
-# What ``tapped_drive_change`` returns when a change run on its own was put
-# on its own approval card instead of being made.
-DRIVE_CHANGE_WAITS = "Not done yet: it waits for your approval on its own card."
-
-
 @contextlib.contextmanager
 def tapped_drive_call(tool_input: dict[str, Any]) -> Iterator[None]:
     """Run this exact ``tool_input`` as a rename or move the person tapped
@@ -4509,7 +4504,7 @@ class MCPGateway:
                 return str(parsed["error"])[:300]
             # Run on its own, the change can wait on its own card instead.
             if isinstance(parsed, dict) and parsed.get("status") == "waiting_for_approval":
-                return DRIVE_CHANGE_WAITS
+                return "Not done yet: it waits for your approval on its own card."
         if not head or head.lower().startswith(("error", "tool error")):
             return (head or "Drive didn't answer.")[:300]
         return None

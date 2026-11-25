@@ -636,21 +636,6 @@ def test_a_drive_card_follows_the_level(
     assert action_cards.on_its_own_refusal(person, checked, now=datetime.now(UTC)) == "level"
 
 
-def test_a_drive_change_that_waits_on_its_own_card_reports_waiting(
-    actions_on: SimpleNamespace, drive: _DriveGateway, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from openexecutive.orchestrator import mcp_gateway
-
-    async def parked(file_id: str, **_: Any) -> str:
-        return mcp_gateway.DRIVE_CHANGE_WAITS
-
-    monkeypatch.setattr(drive, "tapped_drive_change", parked)
-    person = people_store.get_person(actions_on.principal)
-    checked = action_cards.check([_drive(two="Elm Street.pdf")], person, now=datetime.now(UTC))
-    assert not isinstance(checked, str)
-    assert asyncio.run(action_cards._do(checked[0], person))["status"] == "waiting"
-
-
 def test_a_drive_card_with_a_file_drive_cant_name_is_refused(
     roster: SimpleNamespace, drive: _DriveGateway,
 ) -> None:

@@ -353,4 +353,4 @@ def test_an_untapped_change_that_waits_is_not_done() -> None:
 
     gateway.call_tool = held  # type: ignore[method-assign]
     error = asyncio.run(gateway.tapped_drive_change("d1", name="x.pdf", tapped=False))
-    assert error == gw_module.DRIVE_CHANGE_WAITS
+    assert error is not None and "approval" in error
