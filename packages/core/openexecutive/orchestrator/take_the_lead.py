@@ -4414,7 +4414,12 @@ def as_you(
         if mode == outside_mode.ASK:
             return "level"
         reasons = [n for n in noticed if n]
-        if get(SCOPE_EXECUTIVE, db_path=db_path, strict=True).training:
+        try:
+            training_on = get(SCOPE_EXECUTIVE, db_path=db_path, strict=True).training
+        except Exception:
+            logger.warning("take_the_lead: couldn't read In training — holding as in training", exc_info=True)
+            return TRAINING
+        if training_on:
             addresses = list(recipients)
             if not addresses or len([a for a in addresses if a]) != len(addresses) or as_you_training.all_allowed(
                 person_id, [a for a in addresses if a], db_path=db_path,

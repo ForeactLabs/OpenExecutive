@@ -821,8 +821,8 @@ def test_an_unreadable_in_training_switch_holds(owner: Any, monkeypatch: pytest.
     def broken(*a: Any, **k: Any) -> Any:
         raise sqlite3.OperationalError("database is locked")
 
-    monkeypatch.setattr(take_the_lead, "_connect", broken)
-    assert take_the_lead.as_you(owner.id, recipients=[DANA]) is not None
+    monkeypatch.setattr(take_the_lead, "get", lambda *a, strict=False, **k: broken() if strict else None)
+    assert take_the_lead.as_you(owner.id, recipients=[DANA]) == take_the_lead.TRAINING
 
 
 def test_careful_holds_an_allowed_person_too(owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
