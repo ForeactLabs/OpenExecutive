@@ -155,10 +155,10 @@ async def look(person_id: int) -> bool:
     for conv, t in items:
         mine = [x.id for x in new if x.conversation_id == conv.id]
         prompt = await asyncio.to_thread(prompt_for, person, [(conv, t)], counts)
-        # A text from anyone not on the team (a contact, a stranger, a group)
-        # is outside words, like mail: the turn says so, and Approvals weighs it.
-        known = await asyncio.to_thread(texts.known_person, conv)
-        off_team = known is None or getattr(known, "kind", "") != "team"
+        # Every text is outside words, even one showing a teammate's number:
+        # a text's number can be one its sender picked, and nothing checks it
+        # the way mail's sender is checked. The turn says so; Approvals weighs it.
+        off_team = True
         before = await asyncio.to_thread(texts.last_send_id, person_id)
         try:
             await _turn(person, prompt, off_team=off_team)

@@ -12805,7 +12805,9 @@ delegation:
     install. Tables delegation_text_settings, delegation_text_conversations,
     delegation_texts, delegation_text_sends; 30 days, 5000 a person; off
     forgets them. New incoming texts wake one unattended turn for that person
-    with the texts as untrusted_content source text_message. send_text is an
+    with the texts as untrusted_content source text_message, as a sender off
+    the team (Session.sender_off_team, every text: its number can be one the
+    sender picked, so a teammate's number earns nothing). send_text is an
     acting tool: the one gate decides; its card records own_device_for
     (acting_for, to_words) so a tap carries it out as that person
     (take_the_lead._asker). A held text is always on its phone owner's own
