@@ -5199,27 +5199,26 @@ scheduler:
     messages since created_at (session_store.own_messages_since: role user,
     sent by them or in their own conversation from before senders were
     recorded; newest 30, 300 chars each) in <since_scheduled> tags, and is
-    told that what they said last wins: asked since to hold, change or drop
-    it, the run does that and its one message to them says so, and never
-    sends to someone else what they asked to hold; when it only looks done,
-    it still sends its one message and says so. A run told to hold or drop
-    it sends nothing and answers only PAUSED: or DROPPED: (the setter then
-    gets the fixed runner._set_aside_line, whatever the run wrote)
-    (runner._followup_outcome, read only when they wrote since: the
-    marker in capitals at the start of the reply, or as its last word); the runner
-    then cancels that occurrence with the reason (runner._end_as_asked;
-    DROPPED also ends a repeating one, PAUSED lets the next occurrence come)
-    and audits phase paused or dropped, not delivered. The runner never
-    cancels the row on the run's own judgement (a reminder someone asked
-    for was dropped as "already handled"). The teammate path
-    (_run_teammate_followup) applies the same block and sends what it wrote
-    (without the marker). A row to someone else, on either path, never
-    shows the setter's chat to the run that writes to that someone:
-    runner._setter_decision (the routing model, no tools, writes nothing)
-    reads it and answers send, paused or dropped; paused or dropped,
-    nothing runs, the setter gets one fixed line saying so (_tell_setter,
-    logged on failure, never retried) and the occurrence is cancelled
-    with the reason (_as_setter_said); a failed read sends it as set. Only the person's own words are quoted, never replies, so
+    told that what they said last wins: asked since to change it, the run
+    sends it changed; when it only looks done, it still sends its one
+    message and says so. Whether it goes at all is settled before any run,
+    for every follow-up whoever it is addressed to: runner._setter_decision
+    (the routing model, one forced tool, writes nothing) reads what the
+    setter wrote since and answers send, paused or dropped. Paused or
+    dropped, nothing runs: the setter gets one fixed line
+    (runner._set_aside_line; a repeating one says it still repeats and how
+    to stop it), sent by _tell_setter (logged on failure, never retried),
+    and the occurrence is cancelled with the reason and audited phase
+    paused or dropped, not delivered (_as_setter_said, _end_as_asked). Read
+    from their chats, a drop never ends a repeating series: only this time
+    goes. A failed read sends it as set. No marker is read from a run's
+    reply (11-25: a marker read from free text cancelled real messages such
+    as "Your ads are PAUSED.", and missed a hold written after other words).
+    The runner never cancels the row on the run's own judgement (a reminder
+    someone asked for was dropped as "already handled"). The teammate path
+    (_run_teammate_followup) applies the same decision and block and sends
+    what it wrote. A row to someone else, on either path, never shows the
+    setter's chat to the run that writes to that someone. Only the person's own words are quoted, never replies, so
     mail a reply quoted cannot reach an unattended run this way. In chat:
     every turn by a verified speaker carries <pending_followups> in the user
     turn (correction_tools.pending_followups_block, list_followups' ownership
