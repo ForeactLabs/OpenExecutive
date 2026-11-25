@@ -310,17 +310,24 @@ function setTextsOn(origin, on, origins) {
 }
 
 async function passOnTexts(body) {
+  // Only to sites where Texts is on, and to each of them: one tab per site.
   const origins = await connectedOrigins();
-  const tabs = (await chrome.tabs.query({})).filter((t) => OE.onConnected(t.url, origins));
+  const { textsOnBy } = await chrome.storage.local.get("textsOnBy");
+  const on = new Set(origins.filter((o) => textsOnBy && textsOnBy[o] === true));
+  const tabs = (await chrome.tabs.query({})).filter((t) => OE.onConnected(t.url, origins) && on.has(OE.originOf(t.url)));
+  const took = new Set();
   for (const tab of tabs) {
+    const origin = OE.originOf(tab.url);
+    if (took.has(origin)) continue;
     try {
       const out = await chrome.tabs.sendMessage(tab.id, { type: "texts_post", body });
-      if (out && out.ok) return out;
+      if (out && out.ok) took.add(origin);
     } catch {
-      // That tab's script isn't there yet: try the next.
+      // That tab's script isn't there yet: try the site's next tab.
     }
   }
-  return { ok: false };
+  // Every site with Texts on took them, or they go again next time.
+  return { ok: on.size > 0 && took.size === on.size };
 }
 
 // Send one text in Google Messages: open its conversation (or a new one) in

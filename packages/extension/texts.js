@@ -91,13 +91,17 @@
       const row = T.fromRow(raw);
       if (!row || !row.snippet) continue;
       const print = T.hash(`${row.outgoing ? "1" : "0"}:${row.snippet}`);
-      const before = first ? null : next[row.key];
-      next[row.key] = print;
-      if (before === print) continue;
+      // What was seen is "<fingerprint>.<count of changes>": the count tells
+      // the same words again later ("ok") from the same report sent again.
+      const [beforePrint, beforeCount] = String((first ? "" : next[row.key]) || "").split(".");
+      if (beforePrint === print) continue;
+      const count = (parseInt(beforeCount, 10) || 0) + 1;
+      next[row.key] = `${print}.${count}`;
       if (first && (!row.unread || row.outgoing)) continue;
       items.push({
-        // The time too: the same words again later ("ok") are a new text.
-        ref: `${row.key}:${print}:${Number(now).toString(36)}`,
+        // The same change, reported again (an answer that never came back),
+        // is the same ref, so it is kept once.
+        ref: `${row.key}:${print}:${count}`,
         conversation: row.key,
         title: row.title,
         sender: row.group ? "" : row.title,

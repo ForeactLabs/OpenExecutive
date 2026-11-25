@@ -433,6 +433,23 @@ test("texts: one send at a time, and only into the conversation it is for", () =
   assert.ok(texts.includes("T.keyOf(location.href) !== String(msg.conversation)"));
 });
 
+test("texts: the same change reported again keeps its ref", () => {
+  const T = textsHelpers();
+  const rows = (snippet) => [{ key: "1", title: "Sam Lee", snippet, unread: true }];
+  const a = T.changes(rows("ok"), null, 1000);
+  const b1 = T.changes(rows("Running late"), a.seen, 2000);
+  // Its answer never came back, so seen wasn't saved: the retry is the same text.
+  const b2 = T.changes(rows("Running late"), a.seen, 17000);
+  assert.equal(b1.items[0].ref, b2.items[0].ref);
+});
+
+test("texts: texts go only to sites with Texts on, and to each of them", () => {
+  const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
+  const pass = bg.slice(bg.indexOf("async function passOnTexts"), bg.indexOf("let textQueue"));
+  assert.ok(pass.includes("textsOnBy[o] === true"));
+  assert.ok(pass.includes("took.size === on.size"));
+});
+
 test("texts: the same words again later are a new text", () => {
   const T = textsHelpers();
   const rows = (snippet) => [{ key: "1", title: "Sam Lee", snippet, unread: true }];
