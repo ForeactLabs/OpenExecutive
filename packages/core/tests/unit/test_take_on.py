@@ -636,6 +636,26 @@ def test_the_pass_stays_off_while_the_executive_is_paused(monkeypatch: pytest.Mo
     assert take_on.Hooks().background_on() is True
 
 
+async def test_do_it_cancelled_before_the_run_starts_can_start_again(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.api.routes import chat as chat_route
+    from openexecutive.api.routes import take_on as route
+
+    o = _offer()
+    take_on.put_made(ME, [o])
+
+    async def cancelled(_request: object, **_kw: Any) -> str:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(chat_route, "start_background_turn", cancelled)
+    with pytest.raises(asyncio.CancelledError):
+        await route.do_it(o.key, object())  # type: ignore[arg-type]
+    (got,) = _list()
+    assert got.status == "failed"
+    assert take_on.start(ME, got)
+
+
 async def test_a_finished_run_settles_off_the_event_loop(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     from openexecutive.api.routes import chat as chat_route
     from openexecutive.api.routes import take_on as route

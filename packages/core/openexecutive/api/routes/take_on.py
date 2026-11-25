@@ -394,6 +394,12 @@ async def do_it(key: str, request: Request) -> OfferOut:
     except HTTPException as exc:
         await asyncio.to_thread(take_on.finish, me.email, key, "failed", outcome=str(exc.detail))
         raise
+    except asyncio.CancelledError:
+        # The request went away before the run started: Do it can start it
+        # again at once. Written here, not in a thread, as the task is
+        # being cancelled.
+        take_on.finish(me.email, key, "failed", outcome="It couldn't be started.")
+        raise
     except Exception:
         logger.exception("take_on: couldn't start %s", key)
         await asyncio.to_thread(take_on.finish, me.email, key, "failed", outcome="It couldn't be started.")
