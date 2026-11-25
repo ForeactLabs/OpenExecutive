@@ -377,6 +377,13 @@ async def test_a_teammates_watch_tells_them_and_the_principals_tells_the_princip
     assert out["ok"] is True
     item = ms.get_watchlist_item_by_slug(out["slug"])
     assert item is not None and item.route_to_person_id == 12
+    # A null person names no one: still theirs.
+    out = json.loads(await wt.handle_add_watchlist_entry(
+        {"slug": "news-hd", "signal_type": "query", "target": "Harry & David", "for_person_id": None}
+    ))
+    assert out["ok"] is True
+    item = ms.get_watchlist_item_by_slug(out["slug"])
+    assert item is not None and item.route_to_person_id == 12
 
     monkeypatch.setattr(wt, "_teammate_asking", lambda: None)
     out = json.loads(await wt.handle_add_watchlist_entry({"slug": "news-acme", "signal_type": "query", "target": "Acme"}))

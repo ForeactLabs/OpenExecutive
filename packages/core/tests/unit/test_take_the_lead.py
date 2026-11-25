@@ -1034,6 +1034,27 @@ def test_recent_activity_names_what_it_did_without_quoting(owner: Any) -> None:
     assert [r.summary for r in rows] == ["Message Dana"]
 
 
+def test_a_teammates_step_reaches_only_them(owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Emails a teammate asked for read on the owner's Home header and brief.
+    Their step is theirs alone; the owner's stays the team's."""
+    from openexecutive.api.routes import today
+
+    sam = _teammate()
+    monkeypatch.setattr(ttl, "asked_by_now", lambda: sam)
+    ttl.record(scope=ttl.SCOPE_EXECUTIVE, source="chat", tool="message_person",
+               summary="Message Pat", status="done")
+    monkeypatch.setattr(ttl, "asked_by_now", lambda: owner.id)
+    ttl.record(scope=ttl.SCOPE_EXECUTIVE, source="chat", tool="message_person",
+               summary="Message Dana", status="done")
+
+    def steps(viewer: int | None) -> list[str]:
+        return [i.summary for i in today._build_activity(50, viewer=viewer).items if i.kind == "took_the_lead"]
+
+    assert steps(owner.id) == ["Message Dana"]
+    assert steps(None) == ["Message Dana"]
+    assert sorted(steps(sam)) == ["Message Dana", "Message Pat"]
+
+
 def test_ask_first_lives_in_the_decision_ledger() -> None:
     ttl.set_(ttl.SCOPE_EXECUTIVE, ask_first={"money": False}, updated_by="t")
     assert ledger.get_class_mode("take_the_lead_action:money") == "auto_execute"

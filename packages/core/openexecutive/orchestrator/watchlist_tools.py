@@ -544,8 +544,10 @@ def _teammate_asking() -> Any:
 
 def _default_person(for_ids: dict[str, int | None]) -> int | None:
     """Who a new watch tells: the person the call named, else the teammate
-    who asked for it (what it finds is theirs), else the principal (None)."""
-    if "route_to_person_id" in for_ids:
+    who asked for it (what it finds is theirs), else the principal (None).
+    A null person names no one, so it is the asker's too (a teammate's
+    watch sent with null used to tell the owner)."""
+    if for_ids.get("route_to_person_id") is not None:
         return for_ids["route_to_person_id"]
     teammate = _teammate_asking()
     return getattr(teammate, "id", None) if teammate is not None else None
