@@ -161,8 +161,12 @@
     if (reporting) return;
     reporting = true;
     try {
-      // Off: read nothing at all.
-      if ((await chrome.storage.local.get("textsOn")).textsOn !== true) return;
+      // Off: read nothing at all, and forget what was seen, so turning it
+      // back on is a first look again (only unread texts count as new).
+      if ((await chrome.storage.local.get("textsOn")).textsOn !== true) {
+        await chrome.storage.local.remove(SEEN_KEY);
+        return;
+      }
       const now = Date.now();
       const isPaired = paired();
       let items = [];

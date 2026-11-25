@@ -420,3 +420,10 @@ test("texts: the same words again later are a new text", () => {
   assert.equal(c.items.length, 1);
   assert.notEqual(c.items[0].ref, a.items[0].ref);
 });
+
+test("texts: off forgets what was seen, so on again only counts unread texts", () => {
+  const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
+  assert.ok(texts.includes("await chrome.storage.local.remove(SEEN_KEY);"));
+  const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
+  assert.ok(bg.includes('await chrome.storage.local.remove("textsSeen");'));
+});

@@ -255,7 +255,9 @@ async function keepTexts() {
   const { textsOn } = await chrome.storage.local.get("textsOn");
   const { textsTabId } = await chrome.storage.session.get("textsTabId");
   if (textsOn !== true) {
-    // Off: close the tab it opened, never one of theirs.
+    // Off: forget what Google Messages showed, so on again is a first look.
+    await chrome.storage.local.remove("textsSeen");
+    // Close the tab it opened, never one of theirs.
     if (typeof textsTabId === "number") {
       await chrome.tabs.remove(textsTabId).catch(() => undefined);
       await chrome.storage.session.set({ textsTabId: null });
