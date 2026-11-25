@@ -2391,6 +2391,41 @@ export async function getDelegation(signal?: AbortSignal): Promise<DelegationSet
 }
 
 // ---------------------------------------------------------------------------
+// Delegate → As you → Texts (/delegation/texts): the caller's own texts,
+// read and sent through Google Messages in their browser.
+// ---------------------------------------------------------------------------
+
+export type Texts = {
+  /** False while texts are turned off here: the setting isn't shown. */
+  available: boolean;
+  enabled: boolean;
+  /** Google Messages is paired with their phone, as their browser last said. */
+  paired: boolean;
+  seen_at: string | null;
+  /** Their browser is asking for texts to send now (Chrome is open). */
+  connected: boolean;
+  conversations: number;
+};
+
+// null when this viewer can't have it (403) or the backend predates it (404).
+export async function getTexts(signal?: AbortSignal): Promise<Texts | null> {
+  const res = await fetch(`${API_BASE}/delegation/texts`, { signal, cache: "no-store" });
+  if (res.status === 403 || res.status === 404) return null;
+  if (!res.ok) throw await delegationError(res, "Couldn't load Texts.");
+  return res.json();
+}
+
+export async function updateTexts(enabled: boolean): Promise<Texts> {
+  const res = await fetch(`${API_BASE}/delegation/texts`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!res.ok) throw await delegationError(res, "Couldn't save Texts.");
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
 // Settings → Notifications: the caller's own quiet hours, digest or instant,
 // and urgent things through (/notifications/settings).
 // ---------------------------------------------------------------------------

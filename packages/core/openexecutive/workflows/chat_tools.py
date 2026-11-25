@@ -84,6 +84,8 @@ ACCESS: dict[str, tuple[str, str]] = {
     "send_slack_dm": (USE, "Slack direct message"),
     "send_discord_dm": (USE, "Discord direct message"),
     "send_telegram_message": (USE, "Telegram message"),
+    "read_texts": (CHAT_ONLY, "reads the person's own texts; never a workflow's"),
+    "send_text": (CHAT_ONLY, "texts from the person's own phone; never a workflow's"),
     "send_department_message": (USE, "post to a department room"),
     "send_company_broadcast": (USE, "post company-wide"),
     "schedule_followup": (USE, "queue a follow-up message"),

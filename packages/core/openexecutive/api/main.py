@@ -430,6 +430,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "cancelled %d orphaned talent/onboarding reminder(s) on startup", _swept
             )
 
+    # Texts: drop what is past keeping, or all of it while the install has
+    # texts off (delegation.texts.tidy).
+    from openexecutive.delegation import texts as _texts
+    try:
+        await asyncio.to_thread(_texts.tidy)
+    except Exception:
+        logging.getLogger("openexecutive").exception("texts tidy failed")
+
     # One-shot: cut each chat app's saved stream into conversations by the
     # same quiet-gap rule new messages follow (memory.conversations).
     from openexecutive.memory.conversations import split_existing_streams
@@ -998,6 +1006,11 @@ def create_app() -> FastAPI:
     from openexecutive.api.routes import browser as browser_route
 
     app.include_router(browser_route.router, tags=["browser"])
+    # The person's own texts, through Google Messages in their browser
+    # (delegation.texts).
+    from openexecutive.api.routes import texts as texts_route
+
+    app.include_router(texts_route.router, tags=["delegation"])
     app.include_router(google_chat_router, tags=["google-chat"])
     app.include_router(telegram_router, tags=["telegram"])
     app.include_router(slack_events_router, tags=["slack"])

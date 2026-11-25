@@ -2269,6 +2269,9 @@ READ_ONLY_WITHHELD_TOOLS: frozenset[str] = PRIVATE_TURN_WITHHELD_TOOLS | UNATTEN
     "leave_out_of_brief",
     "message_person",
     "propose_form_values",
+    # The person's own texts: private to them, and texts as them.
+    "read_texts",
+    "send_text",
     "remove_watchlist_entry",
     "send_discord_dm",
     "send_slack_dm",
@@ -2374,6 +2377,10 @@ SHARED_CHAT_WITHHELD_TOOLS: frozenset[str] = frozenset({
     "create_calendar_event",
     "create_instant_meeting",
     "message_person",
+    # One person's texts are theirs alone: not read or sent where others
+    # read the chat.
+    "read_texts",
+    "send_text",
     "resolve_roster_request",
     "run_workflow",
     "save_workflow",
