@@ -534,3 +534,11 @@ def test_a_send_the_browser_took_but_never_answered_is_told_as_unsure(ids: dict[
     late = tx.get_send(send.id)
     assert late.status == tx.UNSURE
     assert "Check your phone" in tx.outcome_words(late, "Sam")
+
+
+def test_reading_texts_is_reading_outside_words() -> None:
+    from openexecutive.orchestrator import outside_content
+
+    assert outside_content.source_of("read_texts", {}) == outside_content.TEXTS
+    assert outside_content.source_of("send_text", {"to": "5550001111", "text": "hi"}) is None
+    assert "text" in outside_content._SOURCE_WORDS[outside_content.TEXTS]
