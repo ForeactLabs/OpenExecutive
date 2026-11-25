@@ -380,6 +380,26 @@ def test_turning_it_off_before_the_send_leaves_the_card(
     assert err.value.code == "handle_it_off" and mailbox.sent == []
 
 
+def test_a_waits_rule_added_since_the_card_holds_the_send(
+    owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openexecutive.orchestrator import outside_mode
+    from openexecutive.orchestrator import take_the_lead as ttl
+
+    _careful(monkeypatch)
+    mailbox, _ = _scan_one(owner)
+    card = _only_card(owner)
+    with sqlite3.connect(_inbox_tests.episodic.DB_PATH) as conn:
+        conn.execute("UPDATE decision_instances SET gate_mode = 'auto_execute' WHERE id = ?", (card.id,))
+    monkeypatch.setattr(outside_mode, "get_mode", lambda **_: outside_mode.TRUST)
+    fresh = ledger.get_decision_instance(card.id)
+    word = next(w for w in str(inbox.card_payload(fresh).get("draft_body") or "").split() if len(w) > 4 and w.isalpha())
+    ttl.add_rule(ttl.SCOPE_COMPANY, "words", word, created_by="t")
+    with pytest.raises(SendRefused) as err:
+        asyncio.run(send_on_its_own(fresh, gmail=mailbox, now=NOW))
+    assert err.value.code == "rule" and mailbox.sent == []
+
+
 def test_a_card_made_to_ask_is_never_sent_on_its_own(
     owner: Any, models: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:

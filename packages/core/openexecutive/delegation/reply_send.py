@@ -304,6 +304,11 @@ async def _send_checked(
         relation = str(payload.get("handled_as") or "stranger")
         held = take_the_lead.as_you(
             person.id, recipients=_going(payload),
+            texts=(
+                str(payload.get("subject") or ""), str(payload.get("they_wrote") or ""),
+                str(payload.get("draft_subject") or ""), str(payload.get("draft_body") or ""),
+            ),
+            sent_texts=(str(payload.get("draft_body") or ""),),
             noticed=["stranger" if handle_it.kind_for(relation) != handle_it.KIND_REPLY_KNOWN else ""],
         )
         if held:
