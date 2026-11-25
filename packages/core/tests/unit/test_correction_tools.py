@@ -222,7 +222,11 @@ def test_cancel_and_move_their_own(roster: SimpleNamespace) -> None:
     out = _call(ct.handle_move_followup, {"action_id": two, "run_at": when.isoformat()},
                 _web(roster.principal))
     assert out["status"] == "moved"
-    assert episodic.get_scheduled_action(two).run_at == when.isoformat()  # type: ignore[union-attr]
+    moved = episodic.get_scheduled_action(two)
+    assert moved is not None and moved.run_at == when.isoformat()
+    # What they said to move it is spent: when it comes due, only later
+    # words count (scheduler.runner._since_lines), so it is never moved again.
+    assert moved.read_since is not None and moved.read_since > moved.created_at
 
 
 def test_a_move_with_no_offset_is_on_the_companys_clock(

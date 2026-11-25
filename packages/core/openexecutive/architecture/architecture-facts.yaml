@@ -5213,7 +5213,8 @@ scheduler:
     is never read as said since: a turn saves its message when it ends,
     after the row, so the originating conversation's first message within
     15 minutes after created_at is left out (own_messages_since(after_turn_in=)).
-    A repeat's next occurrence and a moved one count words only from when
+    A repeat's next occurrence and a moved one (here or by move_followup)
+    count words only from when
     they were queued or moved (scheduled_actions.read_since), so a word
     already acted on ("hold it until tomorrow") is never read again. Paused or
     dropped, nothing runs: the setter gets one fixed line
