@@ -719,9 +719,13 @@ RAISE_IN_BRIEF_TOOL: dict[str, Any] = {
     },
 }
 
-# The changes to the person's follow-ups and open loops: each needs their
-# own words asking for it, naming the thing changed (the owner's call, 11-25).
-_CHANGES_FROM_THEIR_WORDS = frozenset({"close_open_loop", "cancel_followup", "move_followup", "schedule_followup"})
+# The changes to the person's follow-ups, open loops, facts and brief: each
+# needs their own words asking for it, naming the thing changed (the owner's
+# call, 11-25).
+_CHANGES_FROM_THEIR_WORDS = frozenset({
+    "close_open_loop", "cancel_followup", "move_followup", "schedule_followup",
+    "remember_fact", "leave_out_of_brief",
+})
 
 
 def _with_quote(tool: dict[str, Any]) -> dict[str, Any]:
@@ -1722,6 +1726,14 @@ async def _run_loop(
             for number, why in _no_lesson_lines(text, misses):
                 notes.setdefault(number, why)
 
+    past_cap = [0]
+
+    def _enough() -> str | None:
+        if _changes(done) < MAX_CHANGES:
+            return None
+        past_cap[0] += 1
+        return "" if past_cap[0] > 1 else None
+
     async def _run(use: dict[str, Any]) -> Any:
         name = str(use["name"])
         tool_input = dict(use["input"] or {})
@@ -1731,7 +1743,10 @@ async def _run_loop(
             return await handlers[name](tool_input)
         if name == "remember_fact" and _fact_key(tool_input) and _fact_key(tool_input) in facts_saved:
             return json.dumps({"status": "noop", "detail": "a fact under this subject was already saved in this review; a different fact needs its own subject"})
-        if len(done) >= MAX_CHANGES:
+        # A line telling what was put right still goes once the pass has made
+        # its changes, so the passes that changed most still say so.
+        tells = name == "raise_in_brief" and tool_input.get("put_right") is True
+        if _changes(done) >= MAX_CHANGES and not tells:
             return json.dumps({"status": "noop", "detail": f"this review already made {MAX_CHANGES} changes"})
         followup = (" ".join(str(tool_input.get("intent") or "").casefold().split()),
                     str(tool_input.get("run_at") or "").strip())
@@ -1774,12 +1789,18 @@ async def _run_loop(
             get_provider(model), model=model, max_tokens=_MAX_TOKENS, system=_SYSTEM,
             tools=tools, messages=messages, run_call=_run, actor="chat_review", max_rounds=MAX_ITERATIONS,
             on_response=_read,
-            # It ends once it has made MAX_CHANGES, as before.
-            enough=lambda: "" if len(done) >= MAX_CHANGES else None,
+            # It ends once it has made MAX_CHANGES, after one more round to
+            # tell the person what it put right.
+            enough=_enough,
         )
     finally:
         outside_content.end_turn(turn)
     return done
+
+
+def _changes(done: list[str]) -> int:
+    """The changes made, not counting brief lines (which only tell)."""
+    return sum(1 for name in done if name != "raise_in_brief")
 
 
 _LEARN_TOOLS = frozenset({"learn_lesson", "learn_reply_style", "learn_writing_style"})
@@ -1896,6 +1917,10 @@ def _target_text(name: str, tool_input: dict[str, Any]) -> str:
             return action.intent_text if action is not None else ""
     except (TypeError, ValueError):
         return ""
+    if name == "remember_fact":
+        return f"{tool_input.get('subject') or ''} {tool_input.get('statement') or ''}"
+    if name == "leave_out_of_brief":
+        return str(tool_input.get("item") or "")
     return str(tool_input.get("intent") or "")
 
 

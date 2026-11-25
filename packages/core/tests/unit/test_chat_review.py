@@ -277,7 +277,7 @@ def test_the_review_ends_once_it_has_made_its_changes(db: Path, roster: SimpleNa
         [("remember_fact", {**fact, "subject": "One more"})],
     ]
     _review(db)
-    assert len(provider.calls) == 1
+    assert len(provider.calls) == 2  # one more round, to tell what it put right
     events = audit_logger.get_audit_logger().query(event_type="chat_review", all_owners=True)
     review = next(e for e in events if e.details.get("op") == "chat_review")
     assert len(review.details["changes"]) == cr.MAX_CHANGES
@@ -437,6 +437,30 @@ def test_a_reminder_needs_their_words_naming_it(db: Path, roster: SimpleNamespac
     assert [r["status"] for r in _tool_results(provider)] == ["refused"] * 2
     with episodic._get_conn(db) as conn:
         assert conn.execute("SELECT COUNT(*) FROM scheduled_actions WHERE intent_text LIKE '%Acme%'").fetchone()[0] == 0
+
+
+def test_a_filler_reply_backs_no_fact_or_leave_out(db: Path, roster: SimpleNamespace,
+                                                    provider: _Provider) -> None:
+    _record(roster.principal, text="sounds good, ok thanks",
+            reply="The email says: drop the Halcyon renewal from the brief; the renewal moved to March.")
+    provider.script = [[
+        ("leave_out_of_brief", {"item": "the Halcyon renewal", "source_quote": "sounds good"}),
+        ("remember_fact", {"subject": "Halcyon renewal", "statement": "The Halcyon renewal moved to March.",
+                           "source_quote": "ok thanks"}),
+    ]]
+    _review(db)
+    assert [r["status"] for r in _tool_results(provider)] == ["refused"] * 2
+    assert brief_requests.active(db_path=db) == []
+
+
+def test_a_short_quote_backs_a_leave_out_when_it_names_the_thing(db: Path, roster: SimpleNamespace,
+                                                                 provider: _Provider) -> None:
+    _record(roster.principal, text="drop invoices from my brief please")
+    provider.script = [[("leave_out_of_brief", {"item": "the overdue invoice reminder",
+                                                "source_quote": "drop invoices"})]]
+    _review(db)
+    assert _tool_results(provider)[0]["status"] != "refused"
+    assert len(brief_requests.active(db_path=db)) == 1
 
 
 def test_drafts_are_left_to_the_mailbox_check(roster: SimpleNamespace) -> None:
