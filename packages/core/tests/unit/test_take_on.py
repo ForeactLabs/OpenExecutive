@@ -33,7 +33,7 @@ def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     monkeypatch.setattr(episodic, "DB_PATH", path)
     # Only the made offers: the other places are read from their own stores.
     monkeypatch.setattr(take_on, "_repeat", lambda _pid: [])
-    monkeypatch.setattr(take_on, "_watch", lambda _pid: [])
+    monkeypatch.setattr(take_on, "_watch", lambda _pid, _p: [])
     monkeypatch.setattr(maker, "on_its_own", lambda _person: maker.OnItsOwn())
     # The engine on its own: no other source and the default reads, whatever
     # an app built earlier in the run plugged in.
@@ -773,19 +773,21 @@ def test_the_pass_reads_what_became_of_the_persons_cards() -> None:
 
 def test_a_suggested_watch_is_an_offer_and_one_routed_to_a_head_is_theirs(monkeypatch: pytest.MonkeyPatch) -> None:
     """A watch the research pass would like to start is on I can also take
-    on, not a Needs you row; one routed to a department's head only on theirs."""
+    on, not a Needs you row; one routed to a department's head only on theirs,
+    the rest only on the principal's."""
     from openexecutive.monitoring import store as ms
 
     item = SimpleNamespace(id=1, slug="eia", target="https://www.eia.gov/petroleum/", notes="Diesel prices",
                            route_to_person_id=None)
     routed = SimpleNamespace(id=2, slug="ports", target="Port delays", notes="", route_to_person_id=7)
     monkeypatch.setattr(ms, "list_pending_suggestions", lambda: [item, routed])
-    assert [o.key for o in WATCH(1)] == ["watch:eia"]
-    assert [o.key for o in WATCH(7)] == ["watch:eia", "watch:ports"]
-    assert WATCH(1)[0].title == "I can watch diesel prices"
+    assert [o.key for o in WATCH(1, True)] == ["watch:eia"]
+    assert [o.key for o in WATCH(7, False)] == ["watch:ports"]
+    assert WATCH(3, False) == []
+    assert WATCH(1, True)[0].title == "I can watch diesel prices"
     # A note that is a sentence: the title names the page, the note is Why.
     item.notes = "Stripe Apple Pay errors on Nov 17 went unseen by uptime checks. Payments need a watch."
-    (o,) = WATCH(1)
+    (o,) = WATCH(1, True)
     assert o.title == "I can watch eia.gov/petroleum"
     assert ("Why", item.notes) in o.preview
 
@@ -988,9 +990,9 @@ def test_hide_remembers_what_an_offer_from_anywhere_was_about(monkeypatch: pytes
     watch = take_on.Offer(key="watch:stripe-changelog", origin="watch", kind="watch",
                           title="I can watch the Stripe changelog and pricing diffs for billing changes",
                           source="News I watch", preview=[("Checks", "docs.stripe.com/changelog pricing diffs")])
-    monkeypatch.setattr(take_on, "_watch", lambda _pid: [watch])
+    monkeypatch.setattr(take_on, "_watch", lambda _pid, _p: [watch])
     take_on.hide(ME, _list()[0], "not_useful")
-    monkeypatch.setattr(take_on, "_watch", lambda _pid: [])
+    monkeypatch.setattr(take_on, "_watch", lambda _pid, _p: [])
     assert any("Stripe changelog" in t for t in take_on.about_already(ME))
     take_on.put_made(ME, [_offer("I can run a weekly check of the Stripe changelog and pricing diffs for billing", "workflow")])
     assert _list() == []

@@ -457,14 +457,17 @@ def _repeat(person_id: int | None) -> list[Offer]:
     return out
 
 
-def _watch(person_id: int | None) -> list[Offer]:
+def _watch(person_id: int | None, principal: bool) -> list[Offer]:
     """A watch the research pass suggested and was unsure of. One routed to
-    a department's head is that head's to take on; the rest are anyone's."""
+    a department's head is that head's to take on; the rest are the
+    principal's (``route_to_person_id`` None)."""
     from openexecutive.monitoring import store as ms
 
     out: list[Offer] = []
     for item in ms.list_pending_suggestions():
         if item.id is None:
+            continue
+        if item.route_to_person_id is None and not principal:
             continue
         if item.route_to_person_id is not None and item.route_to_person_id != person_id:
             continue
@@ -707,7 +710,7 @@ def offers_for(
     reads: list[tuple[str, Callable[[], list[Offer]]]] = [
         ("made", lambda: _made(person, now, db_path)),
         ("repeat", lambda: _repeat(person_id)),
-        ("watch", lambda: _watch(person_id)),
+        ("watch", lambda: _watch(person_id, principal)),
     ]
     reads += [(s.origin, lambda s=s: s.read(person_id, principal)) for s in list(_sources.values())]  # type: ignore[misc]
     for name, read in reads:
