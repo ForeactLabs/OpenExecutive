@@ -298,11 +298,20 @@
       // Only ever type into the conversation this text is for.
       return { ok: false, error: "Google Messages showed a different conversation." };
     }
+    // The conversation it is in now: the one it was sent to, or the one a
+    // new number opened. The person may be using this tab too.
+    const key = T.keyOf(location.href);
     const box = await waitFor(() => first(document, COMPOSE), 15000);
     if (!box) return { ok: false, error: "Google Messages didn't show the box to type in." };
+    if (T.keyOf(location.href) !== key) return { ok: false, error: "Google Messages moved to another conversation. Nothing went." };
     const before = outgoingTexts().length;
     setValue(box, text);
     await pause(300);
+    // Right before Send: still the same conversation, and still its box.
+    if (!key || T.keyOf(location.href) !== key || !box.isConnected) {
+      if (box.isConnected) setValue(box, "");
+      return { ok: false, error: "Google Messages moved to another conversation. Nothing went." };
+    }
     const button = first(document, SEND);
     // From here on Send is pressed: a missing answer is unsure, never "Nothing went".
     if (button && !button.disabled) button.click();
