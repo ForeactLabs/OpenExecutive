@@ -44,6 +44,21 @@ def test_a_built_in_tool_asked_for_through_the_gateway_is_its_own_call() -> None
         assert _own_tool_call({"id": "t2", "name": "call_tool", "input": {"name": name, "arguments": args}}, handlers) is None
 
 
+def test_run_script_asked_for_through_the_gateway_is_its_own_call() -> None:
+    # Held as a gateway call, its Approve card replayed it to the gateway,
+    # which refused it ("has not been discovered"): the lab's approved card
+    # then did nothing.
+    from openexecutive.orchestrator.executive import _own_tool_call, _own_tool_names
+
+    names = _own_tool_names({"create_alert": object()}, scripts=True)
+    tu = {"id": "t1", "name": "call_tool", "input": {"name": "run_script", "arguments": {"script": "print(1)"}}}
+    assert _own_tool_call(tu, names) == {"id": "t1", "name": "run_script", "input": {"script": "print(1)"}}
+    listed = {"id": "t2", "name": "call_tool", "input": {"name": "list_saved_tools", "arguments": {}}}
+    assert _own_tool_call(listed, names) == {"id": "t2", "name": "list_saved_tools", "input": {}}
+    # Without the script tools on the turn, it stays a gateway call.
+    assert _own_tool_call(tu, _own_tool_names({"create_alert": object()}, scripts=False)) is None
+
+
 def test_a_contacts_mail_turn_cannot_fetch_other_attachments() -> None:
     # The poller reads this mail's own attachments into the turn; the tool
     # takes any message id, so it stays off the turn.

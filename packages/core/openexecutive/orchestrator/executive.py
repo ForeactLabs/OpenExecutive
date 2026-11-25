@@ -266,6 +266,17 @@ def _with_refusal(collected: str, refused_chars: int) -> str:
 _OWN_RECALL_TOOL_NAMES: frozenset[str] = HISTORY_TOOL_NAMES | CHAT_SEARCH_TOOL_NAMES
 
 
+def _own_tool_names(handlers: Any, *, scripts: bool) -> set[str]:
+    """The turn's own built-in tools a ``call_tool`` may name: its handlers,
+    and the script tools when the turn offers them. run_script asked for
+    through the gateway is still run_script: held as a gateway call, its
+    Approve card would replay it to a gateway that has no such tool."""
+    names = set(handlers)
+    if scripts:
+        names |= {step_script.RUN_SCRIPT_TOOL, step_script.LIST_SAVED_TOOLS_TOOL}
+    return names
+
+
 def _own_tool_call(tu: dict[str, Any], handlers: Any) -> dict[str, Any] | None:
     """A ``call_tool`` that names one of the turn's own built-in tools, as
     that tool's call (same id), or None. Only a plain name the gateway can't
@@ -2998,6 +3009,7 @@ class Executive:
             if cut_id is not None:
                 tool_uses = [tu for tu in tool_uses if tu["id"] != cut_id]
                 cut_results.append({"type": "tool_result", "tool_use_id": cut_id, "content": CUT_OFF_RESULT})
+            own_names = _own_tool_names(turn_handlers, scripts=bool(self._script_tools))
             for i, tu in enumerate(tool_uses):
                 if tu["name"] == turn_progress.SHOW_PROGRESS:
                     result, progress_event, shown_progress = turn_progress.apply(
@@ -3022,7 +3034,9 @@ class Executive:
                     # A built-in tool asked for through the gateway
                     # (call_tool name="create_alert") is that tool's own call,
                     # checked by its own name: the gateway doesn't have it.
-                    own = _own_tool_call(tu, turn_handlers)
+                    # The script tools too (run_script): held as a gateway
+                    # call, its card would replay to a gateway that refuses it.
+                    own = _own_tool_call(tu, own_names)
                     if own is not None:
                         tool_uses[i] = own
             # A repeat of a call whose result came back in parts is answered

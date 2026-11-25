@@ -31,6 +31,14 @@ def test_today_header_prompt_says_what_changed_without_repeating_needs_you() -> 
         assert "2–4" not in prompt
 
 
+def test_today_header_prompt_names_no_meeting_the_lines_dont_show() -> None:
+    """Test lab 11-25: Move today said "before your next meeting" with no
+    meeting on the calendar."""
+    for prompt in (BRIEFING_NARRATIVE_SYSTEM, BRIEFING_NARRATIVE_SOLO_SYSTEM):
+        assert "minding their next meeting" not in prompt
+        assert "never 'before your next meeting'" in prompt
+
+
 def test_today_header_prompt_enforces_plain_language() -> None:
     lowered = BRIEFING_NARRATIVE_SYSTEM.lower()
     assert "plain words" in lowered
