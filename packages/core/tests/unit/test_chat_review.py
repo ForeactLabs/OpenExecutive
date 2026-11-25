@@ -1046,6 +1046,25 @@ def test_a_put_right_line_follows_a_change_this_pass(db: Path, roster: SimpleNam
     assert _tool_results(provider, 2)[0]["status"] == "raised"
 
 
+def test_a_put_right_line_never_tells_a_change_that_did_not_go_through(
+    db: Path, roster: SimpleNamespace, provider: _Provider,
+) -> None:
+    text = "remind me to call Jamie at 3:20 please"
+    _record(roster.principal, text=text, reply="Done, I'll remind you at 3:20.")
+    line = {"line": "From your chat: I set the 3:20 PM reminder to call Jamie", "put_right": True,
+            "source_quote": "remind me to call Jamie at 3:20"}
+    provider.script = [[("schedule_followup", {
+        "run_at": (datetime.now(UTC) + timedelta(days=1)).isoformat(), "channel": "email",
+        "channel_ref": "nobody", "intent": "Remind them to call Jamie.",
+        "source_quote": "remind me to call Jamie",
+    })], [("raise_in_brief", line)]]
+    _review(db)
+    assert not cr._went_through(json.dumps(_tool_results(provider)[0])), _tool_results(provider)[0]
+    assert _tool_results(provider, 2)[0] == {
+        "status": "not_raised", "detail": "this names a change that didn't go through in this review"}
+    assert brief_requests.active(db_path=db) == []
+
+
 def test_a_put_right_line_must_name_the_change(db: Path, roster: SimpleNamespace,
                                               provider: _Provider) -> None:
     loop_id = open_loop(owner_person_id=roster.principal.id, description="Send the vendor email",

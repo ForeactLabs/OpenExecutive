@@ -1727,6 +1727,9 @@ async def _run_loop(
     # The words of each change that went through, so a put-right line can
     # name what was actually done.
     made: list[str] = []
+    # And of each that was refused or failed, so a put-right line never
+    # tells one of those as done.
+    not_made: list[str] = []
 
     def _read(response: Any, _round: int) -> None:
         if notes is not None:
@@ -1765,7 +1768,10 @@ async def _run_loop(
             return json.dumps({"status": "noop", "detail": "this follow-up was already set in this review"})
         target = _target_text(name, tool_input) if name in _CHANGES_FROM_THEIR_WORDS else ""
         out = await _apply(name, tool_input, person, session, words, handlers,
-                           turns=turns, db_path=db_path, made=" ".join(made))
+                           turns=turns, db_path=db_path, made=" ".join(made),
+                           not_made=" ".join(not_made))
+        if name in _CHANGES_FROM_THEIR_WORDS and not _went_through(out):
+            not_made.append(target)
         if _went_through(out):
             done.append(name)
             if name != "raise_in_brief":
@@ -1994,9 +2000,12 @@ async def _apply(
     turns: list[sqlite3.Row] | None = None,
     db_path: Path | None = None,
     made: str = "",
+    not_made: str = "",
 ) -> str:
     """Make one change. ``made``: the words of the changes that already went
-    through in this pass, which a line saying what was put right names."""
+    through in this pass, which a line saying what was put right names;
+    ``not_made``: those of the changes refused or failed, which it never
+    tells as done."""
     quote = str(tool_input.get("source_quote") or "")
     if name == "learn_lesson":
         from openexecutive.memory import lessons
@@ -2044,6 +2053,9 @@ async def _apply(
         unbacked = None if tells_a_change else (
             _not_their_words(quote, words) or _not_named(line_text, quote)
         )
+        if not unbacked and kind == brief_requests.KIND_FIXED and not tells_a_change \
+                and not_made.strip() and not _not_named(line_text, not_made):
+            unbacked = "this names a change that didn't go through in this review"
         if unbacked:
             return json.dumps({"status": "not_raised", "detail": unbacked})
         row, why = await asyncio.to_thread(
