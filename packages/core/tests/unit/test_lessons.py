@@ -304,6 +304,7 @@ class _Provider:
     def __init__(self, script: list[list[tuple[str, dict[str, Any]]]], grades: list[dict[str, Any]]) -> None:
         self.script, self.grades = list(script), grades
         self.calls: list[dict[str, Any]] = []
+        self.final = "nothing"
 
     async def messages_create(self, **kw: Any) -> Any:
         if (kw.get("tool_choice") or {}).get("name") == cr.GRADE_TOOL["name"]:
@@ -312,7 +313,7 @@ class _Provider:
         self.calls.append(kw)
         uses = self.script.pop(0) if self.script else []
         content = [SimpleNamespace(type="tool_use", id=f"tu{i}", name=n, input=a) for i, (n, a) in enumerate(uses)]
-        return SimpleNamespace(content=content or [SimpleNamespace(type="text", text="nothing")])
+        return SimpleNamespace(content=content or [SimpleNamespace(type="text", text=self.final)])
 
 
 def _web(person_id: int) -> Session:
@@ -354,7 +355,7 @@ def test_the_review_keeps_a_lesson_from_a_miss_in_their_own_words(db: Path, rost
     fake = _review(db, roster, [[
         ("learn_lesson", {"turn": 1, "lesson": "The board deck means the Q4 board workflow.",
                           "source_quote": "the board deck is the Q4 board workflow"}),
-        ("learn_lesson", {"turn": 2, "lesson": "Always want the runway number in the deck.",
+        ("learn_lesson", {"turn": 1, "lesson": "Always want the runway number in the deck.",
                           "source_quote": "always want the runway number in it"}),
         ("learn_lesson", {"turn": 1, "lesson": "Send the deck to the board.",
                           "source_quote": "update the board deck with the runway number"}),
@@ -366,16 +367,18 @@ def test_the_review_keeps_a_lesson_from_a_miss_in_their_own_words(db: Path, rost
     assert "[1] YOU: (MISS)" in fake.calls[0]["messages"][0]["content"]
     kept, not_a_miss, about_sending, unrelated = _results(fake)
     assert kept == {"status": "kept", "lesson": "The board deck means the Q4 board workflow."}
-    assert not_a_miss["status"] == "refused" and "MISS" in not_a_miss["detail"]
+    # Their own words from any turn of the chat back a lesson from a miss.
+    assert not_a_miss == {"status": "kept", "lesson": "Always want the runway number in the deck."}
     # A lesson may be about sending: it authorizes nothing.
     assert about_sending == {"status": "kept", "lesson": "Send the deck to the board."}
     assert unrelated["status"] == "refused" and "isn't about" in unrelated["detail"]
     rows = lessons.list_lessons(person_id=None)
-    assert sorted(r["text"] for r in rows) == ["Send the deck to the board.",
+    assert sorted(r["text"] for r in rows) == ["Always want the runway number in the deck.",
+                                               "Send the deck to the board.",
                                                "The board deck means the Q4 board workflow."]
     # The review's audit row says what was refused and why, never their words.
     review = next(d for d in audits if d.get("op") == "chat_review")
-    assert [r["tool"] for r in review["refused"]] == ["learn_lesson", "learn_lesson"]
+    assert [r["tool"] for r in review["refused"]] == ["learn_lesson"]
     assert "Lunch" not in json.dumps(review)
     assert all(r["person_id"] == roster.principal.id and r["session_id"] == "s-1" for r in rows)
     assert all(r["turn_row_id"] is not None for r in rows)
@@ -402,3 +405,75 @@ def test_grading_a_later_turn_counts_for_the_lessons_it_saw(db: Path, roster: Si
     asyncio.run(cr.run_scheduled("s-1", NOW + timedelta(hours=1), db_path=db))
     kept = lessons.get_lesson(lesson["id"])
     assert kept is not None and kept["shown"] == 1 and kept["fine_after"] == 1 and kept["miss_after"] == 0
+
+
+# --------------------------------------------------------------------------- #
+# Why no lesson was kept
+# --------------------------------------------------------------------------- #
+
+
+def _notes(db: Path) -> list[str | None]:
+    return [m["lesson_note"] for m in reversed(cr.list_misses(person_id=None, db_path=db))]
+
+
+def _review_saying(db: Path, roster: SimpleNamespace, final: str, script: list[list[tuple[str, dict[str, Any]]]],
+                   grades: list[dict[str, Any]], monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+    from datetime import timedelta
+
+    fake = _Provider(script, grades)
+    fake.final = final
+    monkeypatch.setattr(providers, "get_provider", lambda _model: fake)
+    cr.record_turn(ASK, "I'll get that ready for you.", session=_web(roster.principal.id),
+                   person_id=roster.principal.id, calls=[], now=NOW)
+    cr.record_turn(AGAIN, "Understood.", session=_web(roster.principal.id),
+                   person_id=roster.principal.id, calls=[], now=NOW + timedelta(minutes=1))
+    asyncio.run(cr.run_scheduled("s-1", NOW + timedelta(hours=1), db_path=db))
+
+
+def test_a_miss_with_no_lesson_records_why(db: Path, roster: SimpleNamespace,
+                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    _review_saying(db, roster, "nothing\nno lesson [1]: a tool failed, nothing to learn\n"
+                   "no lesson [2]: not a miss", [], MISS, monkeypatch)
+    # Only the miss gets a note; a line for a turn that wasn't one is ignored.
+    assert _notes(db) == ["a tool failed, nothing to learn"]
+    with episodic._get_conn(db) as conn:
+        fine = conn.execute("SELECT lesson_note FROM chat_review_turns WHERE verdict = 'fine'").fetchone()
+    assert fine["lesson_note"] is None
+
+
+def test_a_miss_the_review_says_nothing_about_is_marked_so(db: Path, roster: SimpleNamespace,
+                                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    _review_saying(db, roster, "nothing", [], MISS, monkeypatch)
+    assert _notes(db) == [cr.NO_REASON]
+
+
+def test_a_kept_lesson_leaves_no_note(db: Path, roster: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
+    _review_saying(db, roster, "nothing", [[
+        ("learn_lesson", {"turn": 1, "lesson": "Lunch is at noon on Fridays.",
+                          "source_quote": "update the board deck with the runway number"}),
+        ("learn_lesson", {"turn": 1, "lesson": "The board deck means the Q4 board workflow.",
+                          "source_quote": "the board deck is the Q4 board workflow"}),
+    ]], MISS, monkeypatch)
+    assert _notes(db) == [None]
+
+
+def test_a_refused_lesson_records_the_refusal(db: Path, roster: SimpleNamespace,
+                                             monkeypatch: pytest.MonkeyPatch) -> None:
+    _review_saying(db, roster, "nothing", [[
+        ("learn_lesson", {"turn": 1, "lesson": "Lunch is at noon on Fridays.",
+                          "source_quote": "update the board deck with the runway number"}),
+    ]], MISS, monkeypatch)
+    [note] = _notes(db)
+    assert note is not None and note.startswith("not kept: ") and "isn't about" in note
+
+
+def test_a_review_that_doesnt_finish_says_so(db: Path, roster: SimpleNamespace,
+                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    """A miss the review never reached isn't marked as one it chose to skip."""
+    async def _boom(*_a: Any, **_k: Any) -> list[str]:
+        raise TimeoutError
+
+    monkeypatch.setattr(cr, "_run_loop", _boom)
+    _review_saying(db, roster, "nothing", [], MISS, monkeypatch)
+    assert _notes(db) == [cr.NOT_FINISHED]

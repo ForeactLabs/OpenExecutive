@@ -132,6 +132,7 @@ def render_header_context(
     standing_facts: str = "",
     raise_lines: list[str] | None = None,
     raise_older: list[str] | None = None,
+    fixed_lines: list[str] | None = None,
     leave_out_block: str = "",
     reader: Reader | None = None,
     dismissed: list[Dismissed] | None = None,
@@ -245,6 +246,8 @@ def render_header_context(
         moved.add(f"From a chat, something I said I'd do and couldn't (ask if they want it done): {_one_line(line, 200)}")
     for line in raise_older or []:
         still_open.append(f"from an earlier chat, I said I'd do and couldn't: {_one_line(line, 200)}")
+    for line in fixed_lines or []:
+        moved.add(f"From a chat, something I put right (already done, nothing to ask): {_one_line(line, 200)}")
 
     done = [
         a for a in activity

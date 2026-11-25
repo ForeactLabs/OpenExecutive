@@ -430,6 +430,9 @@ class MorningBriefWorkflow(Workflow):
                 reflection_flags=reflection_flags, teammate_changes=teammate_changes,
                 owner_notes=owner_notes.text, getting_started=first_week.text,
                 now_label=now_label, reader=reader,
+                # The principal's own brief lines go only on the delivery to
+                # them alone, never a brief someone else started.
+                requests_of=today_route.principal_id() if private_ok else None,
             )
             # standalone=True → the enumerated DM brief (no cards beside it),
             # not the /today header synthesis.

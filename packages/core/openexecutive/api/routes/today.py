@@ -2492,7 +2492,8 @@ def _narrative_context(
     resolved = _narrative_reader(scope, viewer) if reader is _LOOKUP else reader
     if viewer_desc is None:
         return _header_context(today_data, viewer, mode, scope, resolved, sources_out)  # type: ignore[arg-type]
-    if _nothing_needs_attention(today_data, mode):
+    # A line their chat raised or put right is told even on a quiet board.
+    if _nothing_needs_attention(today_data, mode) and not _has_brief_lines(viewer):
         return narrative_cache.QUIET_CONTEXT, None
     activity = _narrative_activity(viewer, viewer_desc)
     context = render_briefing_context(
@@ -2500,10 +2501,26 @@ def _narrative_context(
         today_data=today_data,
         activity=activity,
         mode=mode,
-        brief_requests=False,
+        # Their own brief lines: what they asked of it in a chat.
+        requests_of=getattr(viewer, "id", None),
         reader=resolved,  # type: ignore[arg-type]
     )
     return context, activity
+
+
+def _has_brief_lines(viewer: PersonBriefItem | None) -> bool:
+    """Whether ``viewer`` has a raise or put-right line waiting in their own
+    brief (``brief_requests``). Never raises."""
+    pid = getattr(viewer, "id", None)
+    if not isinstance(pid, int):
+        return False
+    try:
+        from openexecutive.briefing import brief_requests
+
+        return bool(brief_requests.render_parts(pid)[0])
+    except Exception:
+        logger.warning("today: couldn't read a person's brief lines", exc_info=True)
+        return False
 
 
 def _header_context(
@@ -2539,12 +2556,13 @@ def _header_context(
     # the day it was saved, an open item after that.
     raise_lines: list[str] = []
     raise_older: list[str] = []
+    fixed_lines: list[str] = []
     leave_out = ""
     dismissed: list[Any] = []
     if own:
         from openexecutive.briefing import right_now
 
-        raise_lines, raise_older, leave_out = brief_requests.raise_split(tz)
+        raise_lines, raise_older, fixed_lines, leave_out = brief_requests.raise_split(tz, principal_id())
         # What they cleared from Right now today stays out of the next one.
         dismissed = right_now.dismissed(narrative_cache.DEFAULT_SCOPE, narrative_cache.local_today())
     # A person's own header reads their private decisions too; the whole
@@ -2568,6 +2586,7 @@ def _header_context(
             standing_facts=standing_facts,
             raise_lines=raise_lines,
             raise_older=raise_older,
+            fixed_lines=fixed_lines,
             leave_out_block=leave_out,
             reader=reader,
             dismissed=dismissed,

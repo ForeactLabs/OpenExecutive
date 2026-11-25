@@ -83,7 +83,7 @@ def test_the_principal_can_leave_an_item_out(db: Path, roster: SimpleNamespace) 
                 {"item": "Halcyon renewal", "source_quote": "take the Halcyon renewal out of my brief"},
                 _web(roster.principal))
     assert out["status"] == "left_out"
-    _, leave = brief_requests.render_parts(db_path=db)
+    _, leave = brief_requests.render_parts(roster.principal.id, db_path=db)
     assert leave.startswith(brief_requests.LEAVE_OUT_HEADER)
     assert "- Halcyon renewal" in leave
 
@@ -96,11 +96,14 @@ def test_leaving_out_needs_their_words(roster: SimpleNamespace) -> None:
     assert brief_requests.active() == []
 
 
-def test_a_teammate_cannot_change_the_brief(roster: SimpleNamespace) -> None:
+def test_a_teammate_leaves_an_item_out_of_their_own_brief(db: Path, roster: SimpleNamespace) -> None:
     out = _call(ct.handle_leave_out_of_brief,
                 {"item": "Halcyon renewal", "source_quote": "take the Halcyon renewal out of my brief"},
                 _slack(roster.teammate))
-    assert out["status"] == "refused"
+    assert out["status"] == "left_out"
+    assert "- Halcyon renewal" in brief_requests.render_parts(roster.teammate.id, db_path=db)[1]
+    # Their own brief alone: the owner's is untouched.
+    assert brief_requests.render_parts(roster.principal.id, db_path=db) == ("", "")
 
 
 def test_no_session_is_refused() -> None:
@@ -117,10 +120,20 @@ def test_brief_lines_expire_and_dedupe(db: Path) -> None:
     assert brief_requests.add(brief_requests.KIND_LEAVE_OUT, "Halcyon", source_quote="q",
                               person_id=1, now=now, db_path=db) is not None
     later = now + timedelta(days=brief_requests.RAISE_DAYS, minutes=1)
-    raised, leave = brief_requests.render_parts(now=later, principal_id=1, db_path=db)
+    raised, leave = brief_requests.render_parts(1, now=later, db_path=db)
     assert raised == "" and "Halcyon" in leave
     gone = now + timedelta(days=brief_requests.LEAVE_OUT_DAYS, minutes=1)
-    assert brief_requests.render_parts(now=gone, principal_id=1, db_path=db) == ("", "")
+    assert brief_requests.render_parts(1, now=gone, db_path=db) == ("", "")
+
+
+def test_a_put_right_line_is_told_once(db: Path) -> None:
+    now = datetime(2026, 10, 15, 18, tzinfo=UTC)
+    assert brief_requests.add(brief_requests.KIND_FIXED, "I set the 3:20 PM reminder to call Jamie.",
+                              source_quote="q", person_id=1, now=now, db_path=db) is not None
+    next_morning = now + timedelta(hours=14)
+    assert "Jamie" in brief_requests.render_parts(1, now=next_morning, db_path=db)[0]
+    day_after = now + timedelta(days=brief_requests.FIXED_DAYS, minutes=1)
+    assert brief_requests.render_parts(1, now=day_after, db_path=db) == ("", "")
 
 
 def test_brief_lines_reject_steering_text(db: Path) -> None:
@@ -130,14 +143,17 @@ def test_brief_lines_reject_steering_text(db: Path) -> None:
                                   person_id=1, db_path=db) is None, text
 
 
-def test_only_the_principals_lines_render(db: Path, roster: SimpleNamespace) -> None:
+def test_only_the_readers_own_lines_render(db: Path, roster: SimpleNamespace) -> None:
     brief_requests.add(brief_requests.KIND_LEAVE_OUT, "Halcyon renewal", source_quote="q",
                        person_id=roster.teammate.id, db_path=db)
-    assert brief_requests.render_parts(db_path=db) == ("", "")
+    assert brief_requests.render_parts(roster.principal.id, db_path=db) == ("", "")
     brief_requests.add(brief_requests.KIND_LEAVE_OUT, "Maple House lease", source_quote="q",
                        person_id=roster.principal.id, db_path=db)
-    leave = brief_requests.render_parts(db_path=db)[1]
+    leave = brief_requests.render_parts(roster.principal.id, db_path=db)[1]
     assert "Maple House" in leave and "Halcyon" not in leave
+    theirs = brief_requests.render_parts(roster.teammate.id, db_path=db)[1]
+    assert "Halcyon" in theirs and "Maple House" not in theirs
+    assert brief_requests.render_parts(None, db_path=db) == ("", "")
 
 
 def test_brief_lines_are_capped(db: Path) -> None:
@@ -146,6 +162,9 @@ def test_brief_lines_are_capped(db: Path) -> None:
                                   person_id=1, db_path=db)
     assert brief_requests.add(brief_requests.KIND_LEAVE_OUT, "one more", source_quote="q",
                               person_id=1, db_path=db) is None
+    # One person's full list never fills another's, and the same words are theirs to add.
+    assert brief_requests.add(brief_requests.KIND_LEAVE_OUT, "item 0", source_quote="q",
+                              person_id=2, db_path=db) is not None
 
 
 def test_the_brief_context_carries_the_lines(db: Path, roster: SimpleNamespace) -> None:
@@ -156,11 +175,12 @@ def test_the_brief_context_carries_the_lines(db: Path, roster: SimpleNamespace) 
                        person_id=pid, db_path=db)
     brief_requests.add(brief_requests.KIND_RAISE, "You said the invoice was paid. Close it?",
                        source_quote="q", person_id=pid, db_path=db)
-    text = render_briefing_context(period_label="p", today_data={}, activity=[], standing_facts="")
+    text = render_briefing_context(period_label="p", today_data={}, activity=[], standing_facts="",
+                                   requests_of=pid)
     assert brief_requests.RAISE_HEADER in text and "Close it?" in text
     assert text.rstrip().endswith("- Halcyon renewal")
     teammate = render_briefing_context(period_label="p", today_data={}, activity=[], standing_facts="",
-                                       brief_requests=False)
+                                       requests_of=roster.teammate.id)
     assert "Halcyon" not in teammate and "Close it?" not in teammate
 
 
@@ -170,7 +190,8 @@ def test_a_raise_line_alone_is_not_a_quiet_day(db: Path, roster: SimpleNamespace
     quiet = render_briefing_context(period_label="p", today_data={}, activity=[], standing_facts="")
     brief_requests.add(brief_requests.KIND_RAISE, "You said the invoice was paid. Close it?",
                        source_quote="q", person_id=roster.principal.id, db_path=db)
-    raised = render_briefing_context(period_label="p", today_data={}, activity=[], standing_facts="")
+    raised = render_briefing_context(period_label="p", today_data={}, activity=[], standing_facts="",
+                                     requests_of=roster.principal.id)
     assert "Close it?" in raised and raised != quiet
 
 
@@ -288,3 +309,61 @@ def test_mark_draft_sent_settles_the_latest(db: Path, roster: SimpleNamespace) -
 def test_mark_draft_sent_with_nothing_waiting(roster: SimpleNamespace) -> None:
     out = _call(ct.handle_mark_draft_sent, {}, _web(roster.principal), said="I sent it")
     assert out["status"] == "noop"
+
+
+def test_a_teammates_today_header_follows_their_own_leave_out(
+    db: Path, roster: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.api.routes import today as today_route
+
+    brief_requests.add(brief_requests.KIND_LEAVE_OUT, "Halcyon renewal", source_quote="q",
+                       person_id=roster.teammate.id, db_path=db)
+    brief_requests.add(brief_requests.KIND_LEAVE_OUT, "Maple House lease", source_quote="q",
+                       person_id=roster.principal.id, db_path=db)
+    monkeypatch.setattr(today_route, "_with_due_soon", lambda data, *_a: data)
+    monkeypatch.setattr(today_route, "_nothing_needs_attention", lambda *_a: False)
+    monkeypatch.setattr(today_route, "_narrative_activity", lambda *_a: [])
+    viewer = SimpleNamespace(id=roster.teammate.id)
+    # Something new for them today, so Right now is written at all.
+    data = {"proposals": [{"alert_id": 1, "headline": "Vendor quote", "created_at": datetime.now(UTC).isoformat()}]}
+    context, _ = today_route._narrative_context(
+        data, viewer, {"name": "Ben", "role": ""}, "team", f"person:{roster.teammate.id}", reader=None,  # type: ignore[arg-type]
+    )
+    assert context.rstrip().endswith("- Halcyon renewal")
+    assert "Maple House" not in context
+
+
+def test_a_teammates_raised_line_shows_on_a_quiet_board(
+    db: Path, roster: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.api.routes import today as today_route
+    from openexecutive.briefing import narrative_cache
+
+    monkeypatch.setattr(today_route, "_with_due_soon", lambda data, *_a: data)
+    monkeypatch.setattr(today_route, "_narrative_activity", lambda *_a: [])
+    other = people_store.upsert_person(full_name="Ana Teammate", email="ana@co.example")
+
+    def context(person_id: int = roster.teammate.id) -> str:
+        return today_route._narrative_context(
+            {}, SimpleNamespace(id=person_id), {"name": "Ben", "role": ""}, "team",  # type: ignore[arg-type]
+            f"person:{person_id}", reader=None,
+        )[0]
+
+    assert context() == narrative_cache.QUIET_CONTEXT
+    brief_requests.add(brief_requests.KIND_FIXED, "I set the reminder to call Jamie.", source_quote="q",
+                       person_id=roster.teammate.id, db_path=db)
+    assert "I set the reminder to call Jamie." in context()
+    # Another teammate's header holds none of Ben's lines.
+    assert context(other) == narrative_cache.QUIET_CONTEXT
+
+
+def test_the_owners_right_now_tells_what_was_put_right(
+    db: Path, roster: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.api.routes import today as today_route
+
+    monkeypatch.setattr(today_route, "principal_id", lambda: roster.principal.id)
+    brief_requests.add(brief_requests.KIND_FIXED, "I set the reminder to call Jamie.", source_quote="q",
+                       person_id=roster.principal.id, db_path=db)
+    context, _ = today_route._header_context({}, None, "team", "principal", None)
+    assert "something I put right (already done, nothing to ask): I set the reminder to call Jamie." in context

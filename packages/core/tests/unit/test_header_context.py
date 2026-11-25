@@ -420,7 +420,6 @@ def test_raise_split_puts_todays_lines_apart_from_older_ones(
     from openexecutive.briefing import brief_requests
 
     db = tmp_path / "br.db"
-    monkeypatch.setattr(brief_requests, "_principal_id", lambda: 7)
     now = datetime(2026, 10, 20, 15, 0, tzinfo=UTC)
     rows = [
         brief_requests.BriefRequest(1, brief_requests.KIND_RAISE, "Book the venue", 7,
@@ -431,12 +430,40 @@ def test_raise_split_puts_todays_lines_apart_from_older_ones(
                                     now.isoformat(), now.isoformat()),
         brief_requests.BriefRequest(4, brief_requests.KIND_LEAVE_OUT, "golf", 7,
                                     now.isoformat(), now.isoformat()),
+        brief_requests.BriefRequest(5, brief_requests.KIND_FIXED, "Moved the Acme follow-up", 7,
+                                    now.isoformat(), now.isoformat()),
+        brief_requests.BriefRequest(6, brief_requests.KIND_FIXED, "Closed the old task", 7,
+                                    (now - timedelta(days=1)).isoformat(), now.isoformat()),
     ]
     monkeypatch.setattr(brief_requests, "active", lambda **_kw: rows)
-    fresh, older, leave = brief_requests.raise_split(UTC, now=now, db_path=db)
+    fresh, older, fixed, leave = brief_requests.raise_split(UTC, 7, now=now, db_path=db)
     assert fresh == ["Book the venue"]
     assert older == ["Send the deck"]
+    # What was put right is news on its day only, never an open item.
+    assert fixed == ["Moved the Acme follow-up"]
     assert leave.endswith("- golf")
+
+
+def test_what_the_look_back_put_right_is_told_never_asked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review (S#1325): a fixed line under "couldn't; ask if they want it
+    done" would ask about something already done."""
+    from openexecutive.briefing import brief_requests
+
+    now = datetime(2026, 10, 20, 15, 0, tzinfo=UTC)
+    rows = [
+        brief_requests.BriefRequest(1, brief_requests.KIND_FIXED, "From your chat: I moved the Acme follow-up to Friday", 7,
+                                    now.isoformat(), now.isoformat()),
+    ]
+    monkeypatch.setattr(brief_requests, "active", lambda **_kw: rows)
+    raise_block, _leave = brief_requests.render_parts(7, now=now, db_path=tmp_path / "br.db")
+    assert raise_block.startswith(brief_requests.FIXED_HEADER)
+    assert brief_requests.RAISE_HEADER not in raise_block
+    ctx = _render(fixed_lines=["Moved the Acme follow-up"])
+    text = ctx.text  # type: ignore[attr-defined]
+    assert "something I put right (already done, nothing to ask): Moved the Acme follow-up" in text
+    assert "couldn't" not in text
 
 
 def test_needs_you_tags_and_point_citations() -> None:
@@ -488,7 +515,11 @@ def test_inbox_lines_and_cards_raised_today_carry_what_they_are_about() -> None:
 def test_a_point_on_home_says_which_email_it_is(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from openexecutive.api.routes import today as today_route
     from openexecutive.briefing import narrative as briefing_narrative
-    from tests.unit.test_today_route import _make_client, _seed_live_action_alert, _setup_isolated_db
+    from tests.unit.test_today_route import (
+        _make_client,
+        _seed_live_action_alert,
+        _setup_isolated_db,
+    )
 
     db = tmp_path / "rn-source.db"
     _setup_isolated_db(db, monkeypatch)

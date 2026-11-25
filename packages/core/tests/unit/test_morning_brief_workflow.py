@@ -607,3 +607,31 @@ async def test_eod_digest_is_written_to_its_reader(
         assert not sent.startswith("THE READER")
         assert "Pat Owner (pat@x.com) asked to renew" in sent
         assert "- Pat Owner emailed the Executive about the Acme lease." in artifact
+
+
+@pytest.mark.asyncio
+async def test_brief_lines_only_on_the_delivery_to_the_principal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The principal's raise, fixed and leave-out lines come
+    from their own chats, so a brief someone else starts never carries them."""
+    from openexecutive.workflows.morning_brief import PRINCIPAL_DELIVERY
+
+    _capture(monkeypatch)
+    _stub_aggregators(monkeypatch)
+    real = briefing_narrative.render_briefing_context
+    asked: list[object] = []
+
+    def _render(**kw: object) -> str:
+        asked.append(kw.get("requests_of"))
+        return real(**kw)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(briefing_narrative, "render_briefing_context", _render)
+    monkeypatch.setattr(today_route, "principal_id", lambda: 7)
+    _ = [e async for e in MorningBriefWorkflow().run(MorningBriefInput(), MagicMock())]
+    token = PRINCIPAL_DELIVERY.set(True)
+    try:
+        _ = [e async for e in MorningBriefWorkflow().run(MorningBriefInput(), MagicMock())]
+    finally:
+        PRINCIPAL_DELIVERY.reset(token)
+    assert asked == [None, 7]
