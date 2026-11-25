@@ -106,6 +106,20 @@ def test_mail_from_a_stranger_is_never_hands_off(monkeypatch: pytest.MonkeyPatch
     assert outside_mode.for_turn(Session(sender_off_team=True)) == outside_mode.ASK
 
 
+@pytest.mark.parametrize("channel", ["", "google_chat"])
+def test_a_shared_chat_someone_else_may_have_written_last_is_never_hands_off(
+    monkeypatch: pytest.MonkeyPatch, channel: str,
+) -> None:
+    # A web chat whose latest line is from someone no longer in it, or whose
+    # people or history couldn't be read, is like a Google Chat space.
+    _use(monkeypatch, outside_mode.TRUST)
+    session = Session(origin_channel=channel, shared_chat=True, others_spoke_last=True)
+    assert outside_mode.for_turn(session) == outside_mode.OUTSIDERS
+    # A teammate wrote last: the company's level.
+    session.others_spoke_last = False
+    assert outside_mode.for_turn(session) == outside_mode.TRUST
+
+
 def test_a_failing_check_asks(monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(**_: Any) -> str:
         raise RuntimeError("db gone")

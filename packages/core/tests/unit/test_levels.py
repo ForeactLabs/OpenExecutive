@@ -79,14 +79,16 @@ def test_hands_off_is_not_for_anyone_outside_people(monkeypatch: pytest.MonkeyPa
 
 def test_the_level_belongs_to_whoever_asks(monkeypatch: pytest.MonkeyPatch) -> None:
     """A teammate's turn runs at their level like the owner's, and a shared
-    chat someone else wrote in follows that person's level too."""
+    chat a teammate wrote in follows that person's level too."""
     owner = people_store.upsert_person(full_name="Olivia Owner", is_principal=True, email=OWNER)
     mate = people_store.upsert_person(full_name="Ben Teammate", email="ben@co.example")
     people_registry.invalidate()
     monkeypatch.setattr(outside_mode, "get_mode", lambda **_: outside_mode.TRUST)
     assert outside_mode.for_turn(Session(from_web_chat=True, caller_person_id=mate)) == outside_mode.TRUST
     assert outside_mode.for_turn(Session(session_id="email:t", caller_person_id=owner)) == outside_mode.TRUST
-    assert outside_mode.for_turn(Session(shared_chat=True, others_spoke_last=True)) == outside_mode.TRUST
+    assert outside_mode.for_turn(Session(shared_chat=True)) == outside_mode.TRUST
+    # Someone not in People may have written last: never Hands-off.
+    assert outside_mode.for_turn(Session(shared_chat=True, others_spoke_last=True)) == outside_mode.OUTSIDERS
 
 
 def test_a_shared_chat_follows_the_level(monkeypatch: pytest.MonkeyPatch) -> None:
