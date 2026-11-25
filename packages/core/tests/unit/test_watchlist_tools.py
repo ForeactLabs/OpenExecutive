@@ -417,6 +417,16 @@ async def test_a_watch_someone_sets_for_themselves_is_theirs_alone(
     moved = item.model_copy(update={"route_to_person_id": 7})
     assert mailbox.shown_to(moved, 7) and mailbox.shown_to(moved, None)
 
+    # The principal's own, from their own chat: theirs by name, not by
+    # whoever is principal when it is read.
+    monkeypatch.setattr(wt, "_teammate_asking", lambda: None)
+    monkeypatch.setattr(wt, "_principal_asked", lambda: True)
+    monkeypatch.setattr("openexecutive.people.store.find_principal_person", lambda: SimpleNamespace(id=1))
+    mine = json.loads(await wt.handle_add_watchlist_entry({"slug": "rent", "signal_type": "query", "target": "office rent"}))
+    item = ms.get_watchlist_item_by_slug(mine["slug"])
+    assert item is not None and item.route_to_person_id == 1 and mailbox.set_by(item) == 1
+    assert mailbox.shown_to(item, 1) and not mailbox.shown_to(item, 7)
+
     # A watch the Executive set up with no one asking is the company's.
     monkeypatch.setattr(wt, "_teammate_asking", lambda: None)
     monkeypatch.setattr(wt, "_principal_asked", lambda: False)

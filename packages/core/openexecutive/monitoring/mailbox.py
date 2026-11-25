@@ -292,15 +292,7 @@ def set_by(item: WatchlistItem) -> int | None:
     # the company's like any watch set that way.
     if item.goal_id is not None:
         return None
-    routed = item.route_to_person_id
-    if routed == raw:
-        return raw
-    if routed is None:
-        from openexecutive.people import registry as people_registry
-
-        principal = people_registry.get_principal()
-        return raw if principal is not None and principal.id == raw else None
-    return None
+    return raw if item.route_to_person_id == raw else None
 
 
 def shown_to(item: WatchlistItem, person_id: int | None) -> bool:
