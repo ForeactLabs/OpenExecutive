@@ -491,10 +491,21 @@ def outcome_words(send: Send, who: str) -> str:
     return f'I couldn\'t text {who} "{send.text}": {reason}. Nothing went.'
 
 
+# ``tell_later`` for a turn no chat shows (texts_watch, an approved card):
+# a text that didn't go is told on a card of the person's own instead.
+TELL_ON_CARD = "card"
+TEXTS_SOURCE = "texts"
+
+
 def _tell(send: Send, *, db_path: Path | None = None) -> None:
-    """Say how a send went in the chat that was told it was on its way.
+    """Say how a send went in the chat that was told it was on its way, or,
+    for a turn no chat shows, on a card of their own when it didn't go.
     Never raises."""
     if not send.tell_session or send.status not in SETTLED:
+        return
+    if send.tell_session == TELL_ON_CARD:
+        if send.status != SENT:
+            _tell_on_card(send, db_path=db_path)
         return
     try:
         from openexecutive.memory import episodic
@@ -505,6 +516,27 @@ def _tell(send: Send, *, db_path: Path | None = None) -> None:
         update_session_timestamp(send.tell_session, db_path=path)
     except Exception:
         logging.getLogger(__name__).exception("texts: couldn't say how send %s went", send.id)
+
+
+def _tell_on_card(send: Send, *, db_path: Path | None = None) -> None:
+    """A card for the person alone: a text it said was on its way didn't go
+    (or may not have). Never raises."""
+    try:
+        from openexecutive.alerts.store import insert_alert
+
+        words = outcome_words(send, send_who(send, db_path=db_path))
+        insert_alert(
+            source=TEXTS_SOURCE,
+            external_id=f"text_send:{send.id}",
+            severity="medium",
+            headline=words[:160],
+            body=words,
+            dedup_key=f"text_send:{send.id}",
+            routed_to_person_id=send.person_id,
+            db_path=db_path,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception("texts: couldn't put how send %s went on a card", send.id)
 
 
 def queue_send(

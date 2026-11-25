@@ -188,7 +188,7 @@ def test_only_links_scripts_workflows_posts_lasting_text_and_card_answers_are_wi
         "send_department_message", "send_company_broadcast", "create_alert",
         "archive_person", "set_department_head", "resolve_roster_request",
         "schedule_followup", "create_goal", "update_department_goal",
-        "record_decision_outcome", "answer_card", "send_text",
+        "record_decision_outcome", "answer_card", "send_text", "read_texts",
     } == lockdown.MAIL_TOUCHED_WITHHELD_TOOLS
     for tool in ("message_person", "send_slack_dm", "create_calendar_event",
                  "remember_fact", "remind_me", "update_company_profile",

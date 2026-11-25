@@ -127,10 +127,6 @@ MAIL_TOUCHED_ALLOWED_TOOLS: frozenset[str] = frozenset({
     "cancel_calendar_event",
     # A reminder to the speaker alone, as fixed text with no links.
     "remind_me",
-    # Reading their own texts carries nothing anywhere. A text (send_text) is
-    # not here: it can reach anyone, so a turn that read mail or outside
-    # words passes that reason to levels.
-    "read_texts",
     # Cards and drafts a person approves before anything happens.
     "propose_actions",
     # The inbox's work turn hands its result back to the reply card it
@@ -181,6 +177,9 @@ MAIL_TOUCHED_WITHHELD_TOOLS: frozenset[str] = frozenset({
     # A text from their own phone reaches whoever it is to, strangers
     # included: the mail read is a reason levels weighs for it.
     "send_text",
+    # Their texts hold codes and private words: a turn the mail drives
+    # (asking for "the code you just got") never reads them.
+    "read_texts",
     # Fetches of an outside address: a URL can carry the mail anywhere.
     "load_mcp_server",
     "add_watchlist_entry",

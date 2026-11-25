@@ -191,17 +191,25 @@ async def handle_send_text(tool_input: dict[str, Any]) -> str:
     settled = await _settled(send.id) if texts.connected(actor) else send
     who = conv.who if conv is not None else to
     if settled is None or settled.status not in texts.SETTLED:
-        # The chat hears how it went once the browser says.
-        session_id = getattr(current_session.get(), "session_id", None)
+        # The chat hears how it went once the browser says. A turn no chat
+        # shows (new texts, an approved card): a card says if it didn't go.
+        session = current_session.get()
+        session_id = getattr(session, "session_id", None)
+        if getattr(session, "unattended", False) is True:
+            session_id = texts.TELL_ON_CARD
         if isinstance(session_id, str) and session_id:
             await asyncio.to_thread(texts.tell_later, send.id, session_id)
         texts.expire_later()
         away = "" if texts.connected(actor) else " Chrome isn't open on their computer right now; it goes when it is, within the hour."
+        later = (
+            "that they'll get a card if it doesn't go" if session_id == texts.TELL_ON_CARD
+            else "that you'll say here how it went"
+        )
         return json.dumps({
             "status": "on_its_way",
             "message": (
                 f"Handed to their browser to text {who}; it hasn't confirmed it yet.{away} Say it is on its way, "
-                "never that it was sent, and that you'll say here how it went."
+                f"never that it was sent, and {later}."
             ),
         })
     if settled.status == texts.SENT:

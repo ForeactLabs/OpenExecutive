@@ -12819,7 +12819,10 @@ delegation:
     A send waits for the browser (long-poll
     GET /delegation/texts/next, at most 20 s); untaken in an hour it fails
     with a reason and the chat is told. Never claims sent before Google
-    Messages shows it. Why: Rufus (2026-11-25) wanted texts only, through the
+    Messages shows it. A turn no chat shows (new texts, an approved card)
+    tells a text that didn't go on a card of the person's own (source texts,
+    a personal source). A turn that read mail never reads texts
+    (read_texts is mail-touched withheld). Why: Rufus (2026-11-25) wanted texts only, through the
     extension, not a phone app reading notifications.
   later_phases: |
     Each is its own change behind its own switch, off by default: more

@@ -477,7 +477,8 @@ def test_a_turn_that_read_mail_or_outside_words_weighs_a_text() -> None:
     from openexecutive.orchestrator import outside_content
 
     assert lockdown.mail_touched_withholds("send_text", {"to": "5552013344", "text": "hi"})
-    assert not lockdown.mail_touched_withholds("read_texts", {})
+    # A turn the mail drives never reads their texts (codes, private words).
+    assert lockdown.mail_touched_withholds("read_texts", {})
     assert outside_content.outside_withholds("send_text", {"to": "5552013344", "text": "hi"})
 
 
@@ -795,3 +796,21 @@ def test_a_turn_that_failed_before_texting_leaves_the_texts_new(
     with pytest.raises(RuntimeError):
         asyncio.run(texts_watch.look(owner))
     assert len(tx.unhandled(owner)) == 1
+
+
+def test_a_text_that_didnt_go_from_a_turn_no_chat_shows_is_their_card(ids: dict[str, int]) -> None:
+    from openexecutive.alerts.store import list_alerts
+
+    owner = ids["principal"]
+    _on(owner)
+    send = tx.queue_send(owner, "On my way", to_number="5550007777")
+    tx.tell_later(send.id, tx.TELL_ON_CARD)
+    tx.take_send(owner)
+    tx.settle_send(owner, send.id, status=tx.FAILED, error="no signal")
+    cards = [a for a in list_alerts() if a.source == tx.TEXTS_SOURCE]
+    assert len(cards) == 1 and cards[0].routed_to_person_id == owner
+    ok = tx.queue_send(owner, "Thanks", to_number="5550007777")
+    tx.tell_later(ok.id, tx.TELL_ON_CARD)
+    tx.take_send(owner)
+    tx.settle_send(owner, ok.id, status=tx.SENT, conversation_key="k7")
+    assert len([a for a in list_alerts() if a.source == tx.TEXTS_SOURCE]) == 1
