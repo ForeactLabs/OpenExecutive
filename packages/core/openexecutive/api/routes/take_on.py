@@ -180,14 +180,18 @@ def _offers(me: Me) -> list[take_on.Offer]:
     return [o for o in offers if o.status not in ("skipped", "done")]
 
 
-def _read_list(me: Me) -> tuple[list[take_on.Offer], list[str]] | None:
-    """The list and what already runs on its own (blocking reads)."""
+def _read_list(me: Me) -> tuple[list[take_on.Offer], list[str], bool, bool] | None:
+    """The list, what already runs on its own, whether it is short of Home's
+    few, and whether a pass may be due (all blocking reads)."""
     from openexecutive.briefing import take_on_maker
 
     if not take_on.who(me.email):
         return None
     offers = _offers(me)
-    return offers, take_on_maker.on_its_own(take_on_maker.person_for(me.person_id, me.principal)).lines()
+    own = take_on_maker.on_its_own(take_on_maker.person_for(me.person_id, me.principal)).lines()
+    # Fewer than Home's few left to offer: top the list up.
+    short = sum(1 for o in offers if not o.status) < HOME_MAX
+    return offers, own, short, take_on_maker.soon(me.email, short=short)
 
 
 @router.get("/take-on", response_model=OffersOut)
@@ -196,12 +200,12 @@ async def get_offers(request: Request) -> OffersOut:
     read = await asyncio.to_thread(_read_list, me)
     if read is None:
         return OffersOut(offers=[])
-    offers, own = read
+    offers, own, short, may_be_due = read
     from openexecutive.briefing import take_on_maker
 
-    # Fewer than Home's few left to offer: top the list up.
-    short = sum(1 for o in offers if not o.status) < HOME_MAX
-    started = take_on_maker.schedule(me.email, me.person_id, principal=me.principal, short=short)
+    started = take_on_maker.schedule(
+        me.email, me.person_id, principal=me.principal, short=short, may_be_due=may_be_due,
+    )
     return OffersOut(
         offers=[_out(o) for o in offers], making=started or take_on_maker.making(me.email), on_its_own=own,
     )
@@ -227,6 +231,9 @@ def _tell_source(key: str, taken: bool) -> None:
         tell(key)
     except Exception:
         logger.warning("take_on: couldn't tell %s's source", key, exc_info=True)
+
+
+_settling: set[asyncio.Task[None]] = set()
 
 
 def _taken_up(me: Me, offer: take_on.Offer) -> None:
@@ -295,11 +302,23 @@ async def do_it(key: str, request: Request) -> OfferOut:
         raise HTTPException(status_code=409, detail="I'm already on it.")
     run: dict[str, str] = {}
 
-    def _finished(answered: bool) -> None:
+    def _settle(answered: bool) -> None:
         # The place it came from hears it was taken up once it was: a run
         # that failed keeps it, with Try again.
         if _what_came_of_it(me, key, run.get("session_id", ""), answered) in ("done", "card"):
             _taken_up(me, offer)
+
+    def _finished(answered: bool) -> None:
+        # Called on the event loop as the turn ends: the reads and writes
+        # run in a thread.
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            _settle(answered)
+            return
+        task = loop.create_task(asyncio.to_thread(_settle, answered))
+        _settling.add(task)
+        task.add_done_callback(_settling.discard)
 
     from openexecutive.api.routes.chat import start_background_turn
 

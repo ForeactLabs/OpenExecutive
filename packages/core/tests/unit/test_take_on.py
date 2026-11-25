@@ -408,6 +408,28 @@ def test_a_watch_taken_up_leaves_the_suggestions(monkeypatch: pytest.MonkeyPatch
     assert gone == [5]
 
 
+async def test_a_finished_run_settles_off_the_event_loop(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.api.routes import chat as chat_route
+    from openexecutive.api.routes import take_on as route
+    from openexecutive.memory import session_store
+
+    o = _offer()
+    take_on.put_made(ME, [o])
+    seen: dict[str, Any] = {}
+
+    async def fake_turn(_request: object, **kw: Any) -> str:
+        seen.update(kw)
+        return "sess-3"
+
+    monkeypatch.setattr(chat_route, "start_background_turn", fake_turn)
+    client.post(f"/take-on/{o.key}/do")
+    monkeypatch.setattr(session_store, "load_messages", lambda _s: [{"role": "assistant", "content": "Sent it."}])
+    seen["on_finished"](True)
+    assert route._settling
+    await asyncio.gather(*list(route._settling))
+    assert [f.key for f in take_on.finished(ME, datetime.now(UTC) - timedelta(hours=1))] == [o.key]
+
+
 def test_a_skipped_card_takes_the_offer_away(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     from openexecutive.memory import decision_ledger
 

@@ -709,7 +709,7 @@ async def run_pass(email: str, inputs: Inputs) -> int:
         return 0
     _in_flight.add(person)
     try:
-        take_on.record_pass(person, inputs.hash)
+        await asyncio.to_thread(take_on.record_pass, person, inputs.hash)
         model = take_on.hooks.background_model() or get_fast_model()
         response = await get_provider(model).messages_create(
             model=model,
@@ -721,13 +721,14 @@ async def run_pass(email: str, inputs: Inputs) -> int:
         raw = "".join(getattr(b, "text", "") for b in response.content if getattr(b, "type", "") == "text")
         items = _parse(raw)
         dropped: dict[str, int] = {}
-        offers = mixed(check(items, inputs, take_on.turned_down_kinds(person), dropped), inputs.listed, dropped)
+        turned_down = await asyncio.to_thread(take_on.turned_down_kinds, person)
+        offers = mixed(check(items, inputs, turned_down, dropped), inputs.listed, dropped)
         logger.info(
             "take_on_maker: pass wrote %d, kept %d, left out %s%s",
             len(items) if isinstance(items, list) else 0, len(offers), dropped or "none",
             " (the reply was cut off)" if getattr(response, "stop_reason", "") == "max_tokens" else "",
         )
-        return take_on.put_made(person, offers)
+        return await asyncio.to_thread(take_on.put_made, person, offers)
     except Exception:
         logger.warning("take_on_maker: the pass failed", exc_info=True)
         return 0
@@ -735,8 +736,10 @@ async def run_pass(email: str, inputs: Inputs) -> int:
         _in_flight.discard(person)
 
 
-def _soon(email: str, now: datetime | None = None, *, short: bool = False) -> bool:
-    """The cheap part of ``due``: background work on, and no pass lately."""
+def soon(email: str, now: datetime | None = None, *, short: bool = False) -> bool:
+    """The cheap part of ``due``: background work on, and no pass lately.
+    Reads the store, so a request calls it off the event loop and hands
+    the answer to ``schedule``."""
     if not take_on.hooks.background_on():
         return False
     at = now or datetime.now(UTC)
@@ -759,7 +762,7 @@ async def _gather_and_run(email: str, person_id: int | None, principal: bool, sh
         inputs = await asyncio.to_thread(gather, email, person_id, principal=principal)
     finally:
         _reading.discard(person)
-    if not due(email, inputs, short=short):
+    if not await asyncio.to_thread(due, email, inputs, short=short):
         _checked[person] = datetime.now(UTC)
         return 0
     _checked.pop(person, None)
@@ -773,12 +776,17 @@ def making(email: str) -> bool:
     return bool(person) and (person in _reading or person in _in_flight)
 
 
-def schedule(email: str, person_id: int | None, *, principal: bool, short: bool = False) -> bool:
+def schedule(
+    email: str, person_id: int | None, *, principal: bool, short: bool = False, may_be_due: bool | None = None,
+) -> bool:
     """Start a pass in the background when one may be due (``short``: the
-    list has fewer than Home's few to offer, so top it up): the reading and
-    the call both happen off the request. Never raises."""
+    list has fewer than Home's few to offer, so top it up; ``may_be_due``:
+    ``soon``, already read off the loop). The reading and the call both
+    happen off the request. Never raises."""
     try:
-        if take_on.who(email) in _in_flight or not _soon(email, short=short):
+        if may_be_due is None:
+            may_be_due = soon(email, short=short)
+        if take_on.who(email) in _in_flight or not may_be_due:
             return False
         task = asyncio.get_running_loop().create_task(_gather_and_run(email, person_id, principal, short))
     except Exception:
@@ -789,4 +797,4 @@ def schedule(email: str, person_id: int | None, *, principal: bool, short: bool 
     return True
 
 
-__all__ = ["Inputs", "OnItsOwn", "check", "due", "gather", "has_material", "making", "mixed", "on_its_own", "run_pass", "schedule"]
+__all__ = ["Inputs", "OnItsOwn", "check", "due", "gather", "has_material", "making", "mixed", "on_its_own", "run_pass", "schedule", "soon"]
