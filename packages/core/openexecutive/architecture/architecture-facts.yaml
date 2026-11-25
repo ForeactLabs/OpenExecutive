@@ -12797,6 +12797,22 @@ delegation:
     company — in the blank-slot sweep (clients.slots._wipe_per_client_tables) and
     cli.fixture_loader.reset_all_state. A reply card is a decision_instances
     row (see trust_ledger).
+  texts: |
+    Texts (delegation.texts, texts_watch, orchestrator.text_tools,
+    api/routes/texts.py): the person's own texts through Google Messages for
+    web in their browser, Android only. Off until the person turns on Texts on
+    the Delegate page; OE_TEXTS_OFF=1 or OE_BROWSER_OFF=1 turns it off for the
+    install. Tables delegation_text_settings, delegation_text_conversations,
+    delegation_texts, delegation_text_sends; 30 days, 5000 a person; off
+    forgets them. New incoming texts wake one unattended turn for that person
+    with the texts as untrusted_content source text_message. send_text is an
+    acting tool: the one gate decides; its card records own_device_for
+    (acting_for, to_words) so a tap carries it out as that person
+    (take_the_lead._asker). A send waits for the browser (long-poll
+    GET /delegation/texts/next, at most 20 s); untaken in an hour it fails
+    with a reason and the chat is told. Never claims sent before Google
+    Messages shows it. Why: Rufus (2026-11-25) wanted texts only, through the
+    extension, not a phone app reading notifications.
   later_phases: |
     Each is its own change behind its own switch, off by default: more
     kinds under Handle it for me (meetings, handing to a teammate,
@@ -12868,6 +12884,13 @@ browser:
     In the extension's own window, Approvals in
     the step (extensions.workflow_hold), and extensions.workflow_wait when
     not connected; browser.relay resumes the run when the extension asks.
+  texts: |
+    texts.js runs on messages.google.com only: reports changed conversations
+    and pairing (texts_seen, via the background to an Open Executive tab that
+    posts /delegation/texts/seen), and types, sends and confirms a text it is
+    handed (texts_send_here). The background keeps Google Messages pinned in
+    the extension's own window while Texts is on; a send is ignored while the
+    Stop bar holds steps.
   customizing: |
     packages/extension/build.mjs stamps name, icons and version and zips it
     for an operator's own store listing. site-rules.js holds the sending

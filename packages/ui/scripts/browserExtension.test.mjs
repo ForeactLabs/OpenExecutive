@@ -338,3 +338,68 @@ test("every step answers in time, even one stuck in Chrome, so the tab goes on a
   assert.ok(snap.includes("requestAnimationFrame(() => setTimeout(answer, 30))"));
   assert.ok(snap.includes("setTimeout(answer, 300)"));
 });
+
+// ---- Texts: the script on Google Messages (packages/extension/texts.js) ----
+
+function textsHelpers() {
+  const box = {};
+  box.globalThis = box;
+  box.window = box;
+  box.top = box;
+  vm.createContext(box);
+  vm.runInContext(readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8"), box);
+  return box.OE_TEXTS;
+}
+
+test("texts: the first look only counts unread texts from others, later looks count what changed", () => {
+  const T = textsHelpers();
+  const rows = [
+    { key: "1", title: "Sam Lee", snippet: "Running late", unread: true },
+    { key: "2", title: "+1 (555) 010-2000", snippet: "Old news", unread: false },
+    { key: "3", title: "Ana", snippet: "You: see you there", unread: true },
+  ];
+  const first = T.changes(rows, null, 0);
+  assert.deepEqual([...first.items.map((i) => i.conversation)], ["1"]);
+  assert.equal(first.items[0].sender, "Sam Lee");
+  assert.equal(first.items[0].outgoing, false);
+  // Nothing changed: nothing new.
+  assert.equal(T.changes(rows, first.seen, 1).items.length, 0);
+  // A new text in a read conversation, and their own reply, both count once.
+  const later = T.changes(
+    [
+      { key: "2", title: "+1 (555) 010-2000", snippet: "Are you in?", unread: false },
+      { key: "3", title: "Ana", snippet: "You: on my way", unread: false },
+    ],
+    first.seen,
+    2,
+  );
+  const [fromNumber, mine] = later.items;
+  assert.equal(fromNumber.number, "+1 (555) 010-2000");
+  assert.equal(fromNumber.text, "Are you in?");
+  assert.equal(mine.outgoing, true);
+  assert.equal(mine.text, "on my way");
+  assert.equal(mine.sender, "");
+});
+
+test("texts: a group's sender is left blank, and the new-conversation link is not a conversation", () => {
+  const T = textsHelpers();
+  const out = T.changes([{ key: "g", title: "Sam, Ana", snippet: "Pizza?", unread: true }, { key: "new", title: "x", snippet: "y", unread: true }], null, 0);
+  assert.equal(out.items.length, 1);
+  assert.equal(out.items[0].is_group, true);
+  assert.equal(out.items[0].sender, "");
+  assert.equal(T.keyOf("https://messages.google.com/web/conversations/new"), "");
+  assert.equal(T.keyOf("https://messages.google.com/web/conversations/abc%3D1?x=1"), "abc=1");
+});
+
+test("texts: the script runs on Google Messages only and ships in the build", () => {
+  const manifest = JSON.parse(readFileSync(new URL("../../extension/manifest.json", import.meta.url), "utf8"));
+  const entry = manifest.content_scripts.find((c) => c.js.includes("texts.js"));
+  assert.deepEqual(entry.matches, ["https://messages.google.com/*"]);
+  assert.ok(manifest.description.length <= 132);
+  const build = readFileSync(new URL("../../extension/build.mjs", import.meta.url), "utf8");
+  assert.match(build, /"texts\.js"/);
+  // The background takes texts only from Google Messages, and a send only from a connected Open Executive tab.
+  const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
+  const seen = bg.slice(bg.indexOf('msg.type === "texts_seen"'));
+  assert.ok(seen.slice(0, 400).includes("onMessages"));
+});
