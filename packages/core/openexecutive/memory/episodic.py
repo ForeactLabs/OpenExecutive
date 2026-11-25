@@ -107,6 +107,15 @@ class ScheduledAction(BaseModel):
     # occurrence finishes the next is queued (``_queue_next``), until it is
     # cancelled. None runs once.
     repeat: str | None = None
+    # When its setter's words start to count for it (scheduler.runner's
+    # since-read): set when a repeat queues its next occurrence and when a
+    # follow-up is moved as they asked, so words already acted on are not
+    # read again. None: from created_at, the turn that set it.
+    read_since: str | None = None
+    # The conversation whose turn set read_since (a move in chat): that
+    # turn's own message, saved when it ends, is not a later word. None
+    # when no turn set it (a repeat's next occurrence, the runner's move).
+    read_since_turn_in: str | None = None
 
 
 class OutboundContext(BaseModel):
@@ -360,6 +369,9 @@ def initialize_db(db_path: Path | None = None) -> None:
             ("private_to_person_id", "INTEGER"),
             # ScheduledAction.repeat.
             ("repeat", "TEXT"),
+            # ScheduledAction.read_since / read_since_turn_in.
+            ("read_since", "TEXT"),
+            ("read_since_turn_in", "TEXT"),
         ):
             if col not in _sa_existing:
                 try:
@@ -1757,7 +1769,7 @@ def claim_due_actions(
 
 
 def reschedule_action(
-    action_id: int, new_run_at: datetime, db_path: Path | None = None
+    action_id: int, new_run_at: datetime, db_path: Path | None = None, *, read_since: datetime | None = None,
 ) -> bool:
     """Set a new run_at and return the action to 'pending'.
 
@@ -1770,13 +1782,20 @@ def reschedule_action(
     `max_attempts` before the action ever dispatched, causing permanent failure
     on the first real dispatch attempt.  `MAX(0, attempts-1)` is safe even if
     `attempts` is somehow already 0.
+
+    ``read_since``: a follow-up moved as its setter asked counts their words
+    from then on (``ScheduledAction.read_since``).
     """
+    stamp = read_since.isoformat() if read_since else None
     with _get_conn(_resolve_db_path(db_path)) as conn:
         cursor = conn.execute(
             "UPDATE scheduled_actions "
-            "SET status = 'pending', run_at = ?, attempts = MAX(0, attempts - 1) "
+            "SET status = 'pending', run_at = ?, attempts = MAX(0, attempts - 1), "
+            # A deferral (no read_since) keeps a chat move's turn marker.
+            "read_since = COALESCE(?, read_since), "
+            "read_since_turn_in = CASE WHEN ? IS NULL THEN read_since_turn_in ELSE NULL END "
             "WHERE id = ? AND status = 'running'",
-            (new_run_at.isoformat(), action_id),
+            (new_run_at.isoformat(), stamp, stamp, action_id),
         )
         return cursor.rowcount > 0
 
@@ -1807,6 +1826,7 @@ def _queue_next(conn: sqlite3.Connection, action_id: int) -> int | None:
     from openexecutive.departments.cadence import _parse_cadence_spec
     from openexecutive.memory import workspace_settings
 
+    now = datetime.now(UTC).isoformat()
     run_at = _parse_cadence_spec(spec, datetime.now(UTC), workspace_settings.get_user_timezone())
     if run_at is None:
         logger.warning("episodic: repeating follow-up %s has a cadence that can't be read: %r", action_id, spec)
@@ -1815,11 +1835,11 @@ def _queue_next(conn: sqlite3.Connection, action_id: int) -> int | None:
         "INSERT INTO scheduled_actions "
         "(created_at, run_at, channel, channel_ref, intent_text, originating_session_id, "
         "department, kind, assigned_to_person_id, scope_key, required_scope, status, "
-        "created_by_person_id, repeat) "
+        "created_by_person_id, repeat, read_since) "
         "SELECT ?, ?, channel, channel_ref, intent_text, originating_session_id, department, kind, "
         "assigned_to_person_id, scope_key, required_scope, 'pending', created_by_person_id, "
-        "repeat FROM scheduled_actions WHERE id = ?",
-        (datetime.now(UTC).isoformat(), run_at.isoformat(), action_id),
+        "repeat, ? FROM scheduled_actions WHERE id = ?",
+        (now, run_at.isoformat(), now, action_id),
     )
     return int(cursor.lastrowid or 0) or None
 

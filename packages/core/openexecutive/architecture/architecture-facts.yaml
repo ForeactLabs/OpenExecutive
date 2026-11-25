@@ -5195,15 +5195,49 @@ scheduler:
     At fire time (runner._since_scheduled_block): an ad hoc row back to the
     person who set it (runner._followup_owner: created_by_person_id, else
     the originating session's owner, the principal when it has none; only
-    when the address is their own, runner._own_ref) gets their own chat
+    a row back to them, runner._own_ref) gets their own chat
     messages since created_at (session_store.own_messages_since: role user,
     sent by them or in their own conversation from before senders were
-    recorded; newest 30, 300 chars each) in <since_scheduled> tags, and is
-    asked to answer ALREADY_HANDLED: <why> and send nothing when that shows
-    it is done. The runner then marks the row cancelled (last_error
-    'skipped: already handled (...)') and audits phase skipped. The
-    teammate path (_run_teammate_followup) applies the same block and skips
-    its own send. Only the person's own words are quoted, never replies, so
+    recorded; newest 30, 300 chars each; each stamped in company time, as
+    "now" and a moved time are, so "tomorrow" reads from the day it was
+    written there) in <since_scheduled> tags, and is
+    told that what they said last wins: asked since to change it, the run
+    sends it changed; when it only looks done, it still sends its one
+    message and says so. Whether it goes at all is settled before any run,
+    for every follow-up whoever it is addressed to: runner._setter_decision
+    (the routing model, one forced tool, writes nothing) reads what the
+    setter wrote since and answers send, paused (a hold with no time, or
+    until something happens), dropped, or moved with a new time (a hold until a date or
+    time). Moved, nothing runs: the row waits for its new time
+    (episodic.reschedule_action) and the setter gets a line saying when; a
+    time that has passed or is past the horizon sends it as set. The message that set the follow-up
+    is never read as said since: a turn saves its message when it ends,
+    after the row, with any it folded in and then its reply, so the
+    originating conversation's messages before its first reply within 15
+    minutes after created_at are left out (own_messages_since(after_turn_in=));
+    with no such reply nothing is. The decision answers paused, dropped or
+    moved only for a message clearly about this follow-up.
+    For whether it goes, a repeat's next occurrence and a moved one (here
+    or by move_followup) count words only from when
+    they were queued or moved (scheduled_actions.read_since; a move in chat
+    also leaves out its own turn's message, read_since_turn_in), so a word
+    already acted on ("hold it until tomorrow") is never read again. The run that
+    writes it still sees everything since created_at, so a change of
+    wording asked before a move still shows. Paused or
+    dropped, nothing runs: the setter gets one fixed line
+    (runner._set_aside_line; a repeating one says it still repeats and how
+    to stop it; a line that can't reach them is logged, and what they asked
+    is still recorded, never asked again), and the occurrence is cancelled with the reason and audited phase
+    paused or dropped, not delivered (_as_setter_said, _end_as_asked). Read
+    from their chats, a drop never ends a repeating series: only this time
+    goes. A failed read sends it as set. No marker is read from a run's
+    reply (11-25: a marker read from free text cancelled real messages such
+    as "Your ads are PAUSED.", and missed a hold written after other words).
+    The runner never cancels the row on the run's own judgement (a reminder
+    someone asked for was dropped as "already handled"). The teammate path
+    (_run_teammate_followup) applies the same decision and block and sends
+    what it wrote. A row to someone else, on either path, never shows the
+    setter's chat to the run that writes to that someone. Only the person's own words are quoted, never replies, so
     mail a reply quoted cannot reach an unattended run this way. In chat:
     every turn by a verified speaker carries <pending_followups> in the user
     turn (correction_tools.pending_followups_block, list_followups' ownership
