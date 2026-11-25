@@ -249,6 +249,24 @@ def test_a_run_stopped_by_a_restart_can_be_hidden_and_changed(
     assert _list(now=later)[0].title == "I can chase Priya on Friday"
 
 
+def test_a_new_pass_drops_what_nothing_reads_any_more(monkeypatch: pytest.MonkeyPatch) -> None:
+    old, hidden, running = _offer(), _offer("I can chase Priya for the March invoice", "followup"), \
+        _offer("I can book the hiring review", "meeting")
+    take_on.put_made(ME, [old, hidden, running])
+    take_on.hide(ME, hidden, "not_useful")
+    take_on.start(ME, running)
+    take_on.finish(ME, running.key, "card", decision_id=4)
+    later = datetime.now(UTC) + timedelta(days=take_on.LEARN_DAYS + 1)
+    monkeypatch.setattr(take_on, "_now", lambda: later)
+    fresh = _offer("I can draft the board update", "doc")
+    take_on.put_made(ME, [fresh])
+    with take_on._connect(None) as conn:
+        offers = {r["key"] for r in conn.execute(f"SELECT key FROM {take_on.OFFERS_TABLE}")}
+        states = {r["key"] for r in conn.execute(f"SELECT key FROM {take_on.STATE_TABLE}")}
+    # The one still on a card stays with its offer; the rest are gone.
+    assert offers == {fresh.key, running.key} and states == {running.key}
+
+
 def test_or_tell_me_changes_the_offer_and_undo_puts_it_back() -> None:
     o = _offer()
     take_on.put_made(ME, [o])

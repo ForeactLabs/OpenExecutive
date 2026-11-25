@@ -354,6 +354,7 @@ def put_made(email: str, offers: list[Offer], *, db_path: Path | None = None) ->
     now = _now().isoformat()
     added = 0
     with _connect(db_path) as conn:
+        _prune(conn, person, _now())
         for offer in offers:
             cur = conn.execute(
                 f"INSERT OR IGNORE INTO {OFFERS_TABLE} "  # noqa: S608 — constant table name
@@ -363,6 +364,23 @@ def put_made(email: str, offers: list[Offer], *, db_path: Path | None = None) ->
             )
             added += cur.rowcount
     return added
+
+
+def _prune(conn: sqlite3.Connection, person: str, now: datetime) -> None:
+    """Drop what nothing reads any more: offers and their rows untouched for
+    ``LEARN_DAYS``, the longest any read looks back. A step still running or
+    on a card stays until it ends."""
+    since = (now - timedelta(days=LEARN_DAYS)).isoformat()
+    conn.execute(
+        f"DELETE FROM {STATE_TABLE} WHERE person = ? AND status NOT IN ('working', 'card') "  # noqa: S608
+        "AND MAX(first_seen, COALESCE(started_at, ''), COALESCE(finished_at, ''), COALESCE(hidden_at, '')) < ?",
+        (person, since),
+    )
+    conn.execute(
+        f"DELETE FROM {OFFERS_TABLE} WHERE person = ? AND created_at < ? "  # noqa: S608
+        f"AND key NOT IN (SELECT key FROM {STATE_TABLE} WHERE person = ?)",
+        (person, since, person),
+    )
 
 
 def _made(person: str, now: datetime, db_path: Path | None) -> list[Offer]:
