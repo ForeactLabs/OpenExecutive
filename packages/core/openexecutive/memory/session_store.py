@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -599,6 +599,11 @@ def get_session_owner(session_id: str, db_path: Path = DB_PATH) -> tuple[bool, i
     return True, (int(owner) if owner is not None else None)
 
 
+# How long a turn can run past something it did before it saves its
+# message (own_messages_since's after_turn_in).
+_TURN_MINUTES = 15
+
+
 def own_messages_since(
     person_id: int,
     since: str,
@@ -617,17 +622,21 @@ def own_messages_since(
 
     ``after_turn_in``: the conversation whose turn ``since`` fell in. A turn
     saves its message when it ends, after anything it did, so that
-    conversation's first message after ``since`` is the one that turn
-    answered, not a later word, and is left out."""
+    conversation's first message within a few minutes after ``since`` is
+    the one that turn answered, not a later word, and is left out."""
     if not db_path.exists():
         return []
     with _get_conn(db_path) as conn:
         turn_id = -1
         if after_turn_in:
+            try:
+                turn_end = (datetime.fromisoformat(since) + timedelta(minutes=_TURN_MINUTES)).isoformat()
+            except ValueError:
+                turn_end = since
             first = conn.execute(
                 "SELECT id FROM chat_messages WHERE session_id = ? AND role = 'user' "
-                "AND created_at > ? ORDER BY created_at, id LIMIT 1",
-                (after_turn_in, since),
+                "AND created_at > ? AND created_at <= ? ORDER BY created_at, id LIMIT 1",
+                (after_turn_in, since, turn_end),
             ).fetchone()
             turn_id = int(first["id"]) if first else -1
         rows = conn.execute(

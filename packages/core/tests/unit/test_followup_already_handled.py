@@ -481,3 +481,31 @@ def test_an_owners_run_is_done_whatever_its_reply_says(
         _fire(action_id, reply)
     tell.assert_not_called()
     assert _status_and_next(action_id) == ("done", 1)
+
+
+def test_a_repeats_next_occurrence_reads_the_first_word_after_it(db: Path, roster: SimpleNamespace) -> None:
+    me = roster.principal.id
+    create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
+    first = _followup("tg-1", created_by=me)
+    _repeating(first)
+    [action] = [a for a in episodic.claim_due_actions(datetime.now(UTC) + timedelta(days=2)) if a.id == first]
+    assert action.id is not None
+    episodic.mark_action_done(action.id)  # queues tomorrow's, set by no turn
+    [nxt] = [a for a in episodic.list_scheduled_actions() if a.id != first and a.status == "pending"]
+    assert nxt.read_since is not None
+    # The first thing they wrote in that chat since, a minute later, counts.
+    _message(db, "tg-1", me, "user", "Skip tomorrow's reminder", timedelta(minutes=1), sender=me)
+    assert "Skip tomorrow's reminder" in runner._since_lines(nxt, roster.principal)
+
+
+def test_a_moved_followup_never_reads_the_same_hold_again(db: Path, roster: SimpleNamespace) -> None:
+    me = roster.principal.id
+    create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
+    action_id = _followup("tg-1", created_by=me)
+    _message(db, "web-2", me, "user", "Hold it until tomorrow", -timedelta(hours=2), sender=me)
+    tomorrow = (datetime.now(UTC) + timedelta(days=1)).replace(microsecond=0)
+    _fire_decided(action_id, "moved", when=tomorrow)
+    row = episodic.get_scheduled_action(action_id)
+    assert row is not None and row.status == "pending" and row.read_since is not None
+    # When it comes due, "until tomorrow" was already acted on: nothing to read.
+    assert runner._since_lines(row, roster.principal) == ""
