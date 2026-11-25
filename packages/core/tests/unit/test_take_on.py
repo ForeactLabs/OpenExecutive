@@ -256,6 +256,11 @@ def test_a_new_pass_drops_what_nothing_reads_any_more(monkeypatch: pytest.Monkey
     take_on.hide(ME, hidden, "not_useful")
     take_on.start(ME, running)
     take_on.finish(ME, running.key, "card", decision_id=4)
+    skipped = _offer("I can send Marco the hiring plan")
+    take_on.put_made(ME, [skipped])
+    take_on.start(ME, skipped)
+    take_on.finish(ME, skipped.key, "card", decision_id=5)
+    take_on.hide(ME, skipped, "skipped", from_card=5)
     later = datetime.now(UTC) + timedelta(days=take_on.LEARN_DAYS + 1)
     monkeypatch.setattr(take_on, "_now", lambda: later)
     fresh = _offer("I can draft the board update", "doc")
@@ -263,7 +268,7 @@ def test_a_new_pass_drops_what_nothing_reads_any_more(monkeypatch: pytest.Monkey
     with take_on._connect(None) as conn:
         offers = {r["key"] for r in conn.execute(f"SELECT key FROM {take_on.OFFERS_TABLE}")}
         states = {r["key"] for r in conn.execute(f"SELECT key FROM {take_on.STATE_TABLE}")}
-    # The one still on a card stays with its offer; the rest are gone.
+    # The one still on a card stays with its offer; the rest, skipped too, are gone.
     assert offers == {fresh.key, running.key} and states == {running.key}
 
 

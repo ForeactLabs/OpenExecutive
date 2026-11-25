@@ -369,10 +369,11 @@ def put_made(email: str, offers: list[Offer], *, db_path: Path | None = None) ->
 def _prune(conn: sqlite3.Connection, person: str, now: datetime) -> None:
     """Drop what nothing reads any more: offers and their rows untouched for
     ``LEARN_DAYS``, the longest any read looks back. A step still running or
-    on a card stays until it ends."""
+    on a card stays until it ends (a card they skipped has ended)."""
     since = (now - timedelta(days=LEARN_DAYS)).isoformat()
     conn.execute(
-        f"DELETE FROM {STATE_TABLE} WHERE person = ? AND status NOT IN ('working', 'card') "  # noqa: S608
+        f"DELETE FROM {STATE_TABLE} WHERE person = ? "  # noqa: S608
+        "AND NOT (status IN ('working', 'card') AND hidden_reason = '') "
         "AND MAX(first_seen, COALESCE(started_at, ''), COALESCE(finished_at, ''), COALESCE(hidden_at, '')) < ?",
         (person, since),
     )
