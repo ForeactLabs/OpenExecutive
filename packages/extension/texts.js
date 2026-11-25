@@ -44,7 +44,8 @@
   };
 
   // The person's own last text starts with this in the list.
-  // The server also knows its own sends by their words, whatever the language.
+  // A hint only (the first look skips these): the server decides which texts
+// were sent from here, by its own sends, whatever the language.
   const YOU = /^(You|Vous|Tú|Tu|Du|Jij|Je|U|Você|Ty|Ви|Вы|Ти|Sen|Siz|Anda|Kamu|Bạn|Eu|Io|Jeg|Jag|Minä|Sinä|자신|나|あなた|自分|我|你)\s*[:：]\s*/i;
 
   /**
@@ -54,9 +55,10 @@
   T.fromRow = function (row) {
     if (!row || typeof row.key !== "string" || !row.key || row.key === "new") return null;
     const title = T.squeeze(row.title, 200);
-    let snippet = T.squeeze(row.snippet, 4000);
+    // Kept as shown: anyone can start a text with "You:", so the words
+    // only hint that it is theirs (the server knows its own sends).
+    const snippet = T.squeeze(row.snippet, 4000);
     const outgoing = YOU.test(snippet);
-    if (outgoing) snippet = snippet.replace(YOU, "");
     return {
       key: row.key.slice(0, 300),
       title,
@@ -91,7 +93,7 @@
         ref: `${row.key}:${print}:${Number(now).toString(36)}`,
         conversation: row.key,
         title: row.title,
-        sender: row.outgoing || row.group ? "" : row.title,
+        sender: row.group ? "" : row.title,
         text: row.snippet,
         at: new Date(now).toISOString(),
         number: T.looksLikeNumber(row.title) ? row.title.slice(0, 40) : "",

@@ -287,10 +287,10 @@ def record(person_id: int, items: list[Incoming], *, db_path: Path | None = None
             if item.at < cutoff:
                 continue
             conversation_id = _upsert_conversation(conn, person_id, item, now)
-            # Which way a text went comes from the page's words ("You: …"), in
-            # the page's language. A text the Executive itself just sent is
-            # theirs whatever the language says, so it never answers itself.
-            outgoing = item.outgoing or _just_sent(conn, person_id, conversation_id, item.text, now)
+            # Which way a text went: only a text the Executive itself just sent
+            # is theirs. The page's "You: …" is words anyone can type, so it
+            # never makes a text theirs (the turn is told what it may mean).
+            outgoing = _just_sent(conn, person_id, conversation_id, item.text, now)
             cur = conn.execute(
                 f"INSERT OR IGNORE INTO {TEXTS_TABLE} "
                 "(person_id, conversation_id, ref, sender, text, outgoing, at, handled) VALUES (?,?,?,?,?,?,?,?)",

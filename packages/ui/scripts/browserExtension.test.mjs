@@ -376,9 +376,10 @@ test("texts: the first look only counts unread texts from others, later looks co
   const [fromNumber, mine] = later.items;
   assert.equal(fromNumber.number, "+1 (555) 010-2000");
   assert.equal(fromNumber.text, "Are you in?");
+  // Only a hint: the words stay as shown, and who it is with stays named.
   assert.equal(mine.outgoing, true);
-  assert.equal(mine.text, "on my way");
-  assert.equal(mine.sender, "");
+  assert.equal(mine.text, "You: on my way");
+  assert.equal(mine.sender, "Ana");
 });
 
 test("texts: a group's sender is left blank, and the new-conversation link is not a conversation", () => {
