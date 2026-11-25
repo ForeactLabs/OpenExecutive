@@ -79,11 +79,15 @@ SCRIPT = "apps_script"
 # (``browser.tools``), where it can send a message.
 SEND_SITE = "send_site"
 # What Balanced waits for when a feature notices it: words that tried to
-# give it instructions, someone new, a share outside the company, and work
-# nobody is watching (which take_the_lead.gate then checks against the seven
+# give it instructions, outside text or mail the check couldn't check (on
+# Balanced a clean outside read never marks the turn, so OUTSIDE_READ there
+# is only one too big to check), someone new, a share outside the company,
+# and work nobody is watching (which take_the_lead.gate then checks against the seven
 # topics). Every other reason a feature notices runs on Balanced and waits
 # on Careful.
-BALANCED_WAITS: frozenset[str] = frozenset({OUTSIDE, MAIL_FLAGGED, MAIL_UNCHECKED, NEW_PERSON, FILE_PLACE, UNATTENDED})
+BALANCED_WAITS: frozenset[str] = frozenset({
+    OUTSIDE, OUTSIDE_READ, MAIL_FLAGGED, MAIL_UNCHECKED, NEW_PERSON, FILE_PLACE, UNATTENDED,
+})
 REASONS: frozenset[str] = frozenset({
     OUTSIDE, OUTSIDE_READ, OWN_MAIL, MAIL_FLAGGED, MAIL_UNCHECKED, PRIVATE, SHARED, READ_ONLY, NOT_OWNER, UNATTENDED, STRANGER,
     NEW_PERSON, FILE_PLACE, URL_FETCH, SCRIPT, SEND_SITE,

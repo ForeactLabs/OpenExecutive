@@ -350,3 +350,9 @@ def test_a_card_someone_else_approves_says_whose(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(speaker_mod, "speaker", lambda session=None: SimpleNamespace(id=owner))
     message = json.loads(levels.waiting_result(card, "it's new"))["message"]
     assert "for them (in this chat" in message and "waiting for their tap" in message
+
+
+def test_balanced_waits_after_outside_text_too_big_to_check() -> None:
+    """On Balanced a clean outside read never marks the turn, so a marked
+    turn with no flag read something too big to check: it waits."""
+    assert levels.decide(levels.OUTSIDE_READ, mode=outside_mode.OUTSIDERS) == levels.CARD
