@@ -541,10 +541,16 @@ def test_settings(roster: dict[str, Any], client: TestClient) -> None:
     assert out == {"status": "done", "did": "Set How messages arrive (instant or digest) to digest"}, out
     out = _run(app_control.handle_do_in_app, {"action": "change_setting", "id": "act_as_me", "value": "off"}, session)
     assert out["status"] == "done", out
-    # Turning As you on is no topic: it runs on Balanced, and the route's own
-    # checks answer (here, no mailbox connected).
-    out = _run(app_control.handle_do_in_app, {"action": "change_setting", "id": "act_as_me", "value": "on"}, session)
-    assert "mailbox isn't connected" in out["error"], out
+    # Turning As you (or its inbox replies) on lets it write as them: from
+    # chat that's a card for their own tap, as raising Approvals is.
+    for setting in ("act_as_me", "inbox_drafts"):
+        out = _run(app_control.handle_do_in_app, {"action": "change_setting", "id": setting, "value": "on"}, session)
+        assert out.get("status") == "waiting_for_approval", out
+    # Their tap is the request, and the route's own checks answer (here, no
+    # mailbox connected).
+    held = _run(app_control.handle_do_in_app, {"action": "change_setting", "id": "act_as_me", "value": "on"}, session)
+    res = client.post(f"/decisions/{held['decision_id']}/approve", json={}, headers=OWNER)
+    assert "mailbox isn't connected" in res.text, res.text
 
 
 def test_every_card_names_what_it_changes() -> None:
