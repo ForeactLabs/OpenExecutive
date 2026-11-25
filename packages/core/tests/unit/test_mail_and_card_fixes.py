@@ -57,6 +57,10 @@ def test_run_script_asked_for_through_the_gateway_is_its_own_call() -> None:
     assert _own_tool_call(listed, names) == {"id": "t2", "name": "list_saved_tools", "input": {}}
     # Without the script tools on the turn, it stays a gateway call.
     assert _own_tool_call(tu, _own_tool_names({"create_alert": object()}, scripts=False)) is None
+    # A replay withholds run_script: its call_tool stays the faked gateway call.
+    replay = _own_tool_names({"create_alert": object()}, scripts=True, withheld={"run_script"})
+    assert _own_tool_call(tu, replay) is None
+    assert _own_tool_call(listed, replay) is None
 
 
 def test_a_contacts_mail_turn_cannot_fetch_other_attachments() -> None:
