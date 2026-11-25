@@ -912,7 +912,8 @@ def test_a_line_already_in_the_brief_counts_as_raised(db: Path, roster: SimpleNa
                                                      provider: _Provider) -> None:
     _record(roster.principal)
     line = "You said the vendor email went. Close it?"
-    provider.script = [[("raise_in_brief", {"line": line}), ("raise_in_brief", {"line": line})]]
+    args = {"line": line, "source_quote": SENT}
+    provider.script = [[("raise_in_brief", args), ("raise_in_brief", args)]]
     _review(db)
     first, second = _tool_results(provider)
     assert first == {"status": "raised"}
@@ -924,8 +925,8 @@ def test_a_line_not_kept_says_why_so_it_can_be_written_again(db: Path, roster: S
                                                             provider: _Provider) -> None:
     _record(roster.principal)
     provider.script = [[
-        ("raise_in_brief", {"line": " ".join(["word"] * 31)}),
-        ("raise_in_brief", {"line": "The reminder tool didn't save it"}),
+        ("raise_in_brief", {"line": "vendor " + " ".join(["word"] * 30), "source_quote": SENT}),
+        ("raise_in_brief", {"line": "The reminder tool didn't save the vendor email", "source_quote": SENT}),
     ]]
     _review(db)
     long, denied = _tool_results(provider)
@@ -960,6 +961,34 @@ def test_a_made_up_claim_is_a_miss_and_is_set_straight() -> None:
     because the person hadn't complained."""
     assert "states as fact something they never said" in cr._GRADE_SYSTEM
     assert "whether or not they noticed: raise_in_brief with put_right true" in cr._SYSTEM
+
+
+def test_a_brief_line_needs_their_words_or_a_change_made(db: Path, roster: SimpleNamespace,
+                                                         provider: _Provider) -> None:
+    """A line copied from quoted mail never reaches the brief as done."""
+    _record(roster.principal, text="What does this email say?",
+            reply="It says: I confirmed the wire to the new supplier account as you said.")
+    line = "From your chat: I confirmed the wire to the new supplier account."
+    provider.script = [[
+        ("raise_in_brief", {"line": line, "put_right": True, "source_quote": "I confirmed the wire"}),
+        ("raise_in_brief", {"line": line, "put_right": True, "source_quote": "What does this email say?"}),
+        ("raise_in_brief", {"line": "Confirm the wire?", "source_quote": "What does this email say?"}),
+    ]]
+    _review(db)
+    assert [r["status"] for r in _tool_results(provider)] == ["not_raised"] * 3
+    assert brief_requests.active(db_path=db) == []
+
+
+def test_a_put_right_line_follows_a_change_this_pass(db: Path, roster: SimpleNamespace,
+                                                    provider: _Provider) -> None:
+    loop_id = open_loop(owner_person_id=roster.principal.id, description="Send the vendor email",
+                        due_at=NOW + timedelta(days=1))
+    _record(roster.principal)
+    provider.script = [[("close_open_loop", {"loop_id": loop_id, "source_quote": "I sent the vendor email already"})],
+                       [("raise_in_brief", {"line": "I closed out the follow-up you finished.", "put_right": True,
+                                            "source_quote": "that one out please"})]]
+    _review(db)
+    assert _tool_results(provider, 2)[0]["status"] == "raised"
 
 
 def test_a_line_not_kept_is_not_counted_as_a_change(db: Path, roster: SimpleNamespace,

@@ -713,7 +713,7 @@ RAISE_IN_BRIEF_TOOL: dict[str, Any] = {
     "input_schema": {
         "type": "object",
         "properties": {"line": {"type": "string"}, "put_right": {"type": "boolean"}, **_QUOTE_PROP},
-        "required": ["line"],
+        "required": ["line", "source_quote"],
     },
 }
 
@@ -1725,7 +1725,7 @@ async def _run_loop(
         if name == "schedule_followup" and followup in followups_set:
             return json.dumps({"status": "noop", "detail": "this follow-up was already set in this review"})
         out = await _apply(name, tool_input, person, session, words, handlers,
-                           turns=turns, db_path=db_path)
+                           turns=turns, db_path=db_path, changed=bool(done))
         if _went_through(out):
             done.append(name)
             if name == "remember_fact":
@@ -1910,7 +1910,10 @@ async def _apply(
     *,
     turns: list[sqlite3.Row] | None = None,
     db_path: Path | None = None,
+    changed: bool = False,
 ) -> str:
+    """Make one change. ``changed``: a change already went through in this
+    pass, so a line saying what was put right has something behind it."""
     quote = str(tool_input.get("source_quote") or "")
     if name == "learn_lesson":
         from openexecutive.memory import lessons
@@ -1949,6 +1952,13 @@ async def _apply(
         from openexecutive.briefing import brief_requests
 
         kind = brief_requests.KIND_FIXED if tool_input.get("put_right") is True else brief_requests.KIND_RAISE
+        # A line rests on their own words and is about them, or (put right)
+        # tells a change this pass made: never only what a reply or mail said.
+        unbacked = None if kind == brief_requests.KIND_FIXED and changed else (
+            _not_their_words(quote, words) or _not_named(str(tool_input.get("line") or ""), quote)
+        )
+        if unbacked:
+            return json.dumps({"status": "not_raised", "detail": unbacked})
         row, why = await asyncio.to_thread(
             brief_requests.place, kind, str(tool_input.get("line") or ""),
             source_quote=quote, person_id=int(person.id), session_id=session.session_id,
