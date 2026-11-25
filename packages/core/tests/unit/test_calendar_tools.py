@@ -774,6 +774,7 @@ def test_post_meeting_followup_scheduled_for_reachable_attendee() -> None:
     assert fu.channel == "discord_dm"
     assert fu.channel_ref == "123456789"
     assert fu.kind == "ad_hoc"
+    assert fu.title is not None and fu.title.startswith("Ask Alice for a recap of ")
     # The recap ask must actually request decisions + action items.
     low = fu.intent_text.lower()
     assert "recap" in low

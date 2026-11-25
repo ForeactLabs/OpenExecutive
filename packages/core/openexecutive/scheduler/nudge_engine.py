@@ -177,7 +177,11 @@ def _select_stalled_workflow_candidates(
             NudgeCandidate(
                 scope_key=f"{SCOPE_PREFIX_STALLED}:{run_id}",
                 intent_text=intent,
-                title=quoted_title("Ask for a decision on ", str(title)) or "",
+                title=(
+                    quoted_title("Ask for a decision on ", str(title))
+                    if (row.get("title") or row.get("workflow_name"))
+                    else "Ask for a decision on a paused workflow"
+                ) or "",
                 source="stalled",
                 urgency_seconds=(awaiting_until - now).total_seconds(),
                 cooldown=cooldown,

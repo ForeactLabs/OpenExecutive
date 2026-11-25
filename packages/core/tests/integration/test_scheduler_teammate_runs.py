@@ -82,6 +82,7 @@ def _due(channel_ref: str, creator: int | None, *, session_id: str | None = "s-1
         channel="telegram",
         channel_ref=channel_ref,
         intent_text="remind me about board prep and include the CEO's decisions",
+        title="Remind me about board prep",
         originating_session_id=session_id,
         created_by_person_id=creator,
     )
@@ -236,3 +237,5 @@ def test_an_approved_copy_of_a_teammates_row_stays_theirs(
     assert out == "finished"
     copy = [a for a in list_scheduled_actions() if a.id != held]
     assert [a.created_by_person_id for a in copy] == [sam]
+    # The copy keeps the short title Home shows.
+    assert [a.title for a in copy] == ["Remind me about board prep"]
