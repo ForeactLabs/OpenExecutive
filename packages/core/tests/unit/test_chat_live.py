@@ -271,7 +271,8 @@ def test_history_in_a_shared_chat_names_each_speaker() -> None:
         {"role": "user", "content": "[Alex]: first"},
         {"role": "assistant", "content": "reply", "id": 9},
         {"role": "user", "content": "[Riya]: second"},
-        {"role": "user", "content": "unknown"},
+        # Someone no longer in the chat is never read as the owner.
+        {"role": "user", "content": f"[{chat_route.FORMER_MEMBER}]: unknown"},
         {"role": "user", "content": "[Alex]: before sharing"},
     ]
 

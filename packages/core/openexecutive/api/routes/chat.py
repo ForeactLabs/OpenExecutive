@@ -860,10 +860,36 @@ def _named_history(
         sender = row.get("sender_person_id")
         if sender is None:
             sender = owner_id
-        if row.get("role") == "user" and isinstance(msg.get("content"), str) and sender in names:
-            msg["content"] = f"[{names[sender]}]: {_unlabelled(msg['content'])}"
+        if row.get("role") == "user" and isinstance(msg.get("content"), str):
+            if sender in names:
+                msg["content"] = f"[{names[sender]}]: {_unlabelled(msg['content'])}"
+            elif sender is not None:
+                # Someone who wrote here and is no longer in it (archived, or
+                # no longer on the team): never read as the owner's words.
+                msg["content"] = f"[{FORMER_MEMBER}]: {_unlabelled(msg['content'])}"
         out.append(msg)
     return out
+
+
+FORMER_MEMBER = "Someone no longer in this chat"
+
+
+def _former_member_spoke_last(
+    history: list[dict[str, Any]], names: dict[int, str], owner_id: int | None
+) -> bool:
+    """Whether the latest person's line before this turn is from someone no
+    longer in the chat (``chat_people`` leaves out an archived person, or one
+    no longer on the team): their words have no level of their own now, so the
+    turn counts as one someone not on the team wrote in
+    (``Session.others_spoke_last``)."""
+    for row in reversed(history):
+        if row.get("role") != "user":
+            continue
+        sender = row.get("sender_person_id")
+        if sender is None:
+            sender = owner_id
+        return sender is not None and sender not in names
+    return False
 
 
 # A message that starts like a label ("[Alex]: …") would read as someone
@@ -1371,6 +1397,8 @@ async def _run_chat_turn(
                 load_messages, session.session_id, with_senders=True
             )
             session.conversation_history = _named_history(history, names, owner_id)
+            if _former_member_spoke_last(history, names, owner_id):
+                session.others_spoke_last = True
         except Exception:
             logger.exception("chat.shared_history_failed session_id=%s", session.session_id)
         speaker_name = names.get(caller_person_id, "") if caller_person_id is not None else ""
