@@ -1581,9 +1581,30 @@ async def _as_setter_said(
     from their chats, a drop never ends a repeating series: only this time
     goes, and the line says how to stop it for good. A moved one waits for
     its new time as it is (``reschedule_action``). What they asked is
-    recorded even when the line can't reach them (logged): asking again
-    could read their chats differently and send what they asked to hold."""
+    recorded first, so they are told only of what happened, and stands
+    even when the line can't reach them (logged): asking again could read
+    their chats differently and send what they asked to hold."""
     assert action.id is not None
+    if outcome == "moved" and when is not None:
+        from openexecutive.audit import log_event as audit_log
+        from openexecutive.memory.episodic import reschedule_action
+
+        recorded = reschedule_action(action.id, when, read_since=datetime.now(UTC))
+        if recorded:
+            audit_log(
+                "scheduled_action",
+                f"Scheduled action {action.id} moved to {when.isoformat()} as {person.full_name or 'they'} asked",
+                session_id=action.originating_session_id,
+                actor="scheduler",
+                details={"phase": "moved", "action_id": action.id, "run_at": when.isoformat(),
+                         "created_by_person_id": action.created_by_person_id},
+            )
+    else:
+        recorded = _end_as_asked(action, outcome, person.full_name or "they")
+    if not recorded:
+        # No longer this run's (cancelled meanwhile): nothing to tell.
+        logger.warning("scheduler: action %s changed before it could be %s", action.id, outcome)
+        return
     try:
         notice = await deliver_to_person(person, _set_aside_line(action, outcome, when), label="Follow-up")
         problem = "" if notice.ok else str(notice.detail)
@@ -1591,35 +1612,21 @@ async def _as_setter_said(
         problem = str(exc)
     if problem:
         logger.warning("scheduler: action %s: couldn't tell its setter: %s", action.id, problem)
-    if outcome == "moved" and when is not None:
-        from openexecutive.audit import log_event as audit_log
-        from openexecutive.memory.episodic import reschedule_action
-
-        reschedule_action(action.id, when, read_since=datetime.now(UTC))
-        audit_log(
-            "scheduled_action",
-            f"Scheduled action {action.id} moved to {when.isoformat()} as {person.full_name or 'they'} asked",
-            session_id=action.originating_session_id,
-            actor="scheduler",
-            details={"phase": "moved", "action_id": action.id, "run_at": when.isoformat(),
-                     "created_by_person_id": action.created_by_person_id},
-        )
-        return
-    _end_as_asked(action, outcome, person.full_name or "they")
-
 
 def _end_as_asked(
     action: ScheduledAction, outcome: str, name: str
-) -> None:
+) -> bool:
     """Record a follow-up its setter asked to hold or drop as such, not as
     sent: this occurrence is cancelled with the reason (a repeating one's
-    next occurrence still comes), and the audit says which."""
+    next occurrence still comes), and the audit says which. False when the
+    row was no longer open to cancel."""
     from openexecutive.audit import log_event as audit_log
     from openexecutive.memory.episodic import mark_action_cancelled
 
     assert action.id is not None
     reason = f"{outcome} as {name} asked"
-    mark_action_cancelled(action.id, reason)
+    if not mark_action_cancelled(action.id, reason):
+        return False
     logger.info("scheduler: action %d %s", action.id, reason)
     audit_log(
         "scheduled_action",
@@ -1629,6 +1636,7 @@ def _end_as_asked(
         details={"phase": outcome, "action_id": action.id, "channel": action.channel,
                  "created_by_person_id": action.created_by_person_id},
     )
+    return True
 
 
 async def _run_teammate_followup(

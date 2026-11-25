@@ -526,3 +526,15 @@ def test_a_followup_moved_in_chat_never_reads_the_ask_that_moved_it(db: Path, ro
     assert row is not None and runner._since_lines(row, roster.principal) == ""
     _message(db, "web-9", me, "user", "Actually drop the Bob one", -timedelta(hours=1), sender=me)
     assert "Actually drop the Bob one" in runner._since_lines(row, roster.principal)
+
+
+def test_nobody_is_told_of_a_move_that_didnt_happen(db: Path, roster: SimpleNamespace) -> None:
+    me = roster.principal.id
+    create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
+    action_id = _followup("tg-1", created_by=me)
+    friday = (datetime.now(UTC) + timedelta(days=3)).replace(microsecond=0)
+    # The row left this run meanwhile (cancelled, or its claim reset).
+    with patch("openexecutive.memory.episodic.reschedule_action", return_value=False):
+        chat, _, tell = _fire_decided(action_id, "moved", when=friday)
+    chat.assert_not_called()
+    tell.assert_not_called()
