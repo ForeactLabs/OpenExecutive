@@ -736,6 +736,27 @@ def test_or_tell_me_rewrites_and_checks_it(client: TestClient, monkeypatch: pyte
     assert not client.post(f"/take-on/{o.key}/undo").json()["changed"]
 
 
+def test_or_tell_me_started_elsewhere_while_rewriting_leaves_the_step_as_it_was(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.api.routes import take_on as route
+    from openexecutive.briefing import take_on_maker
+
+    o = _offer()
+    take_on.put_made(ME, [o])
+    monkeypatch.setattr(take_on_maker, "gather", lambda *a, **k: _inputs())
+
+    async def rewrite_while_do_it_starts(_offer: object, _said: str) -> Any:
+        take_on.start(ME, o)  # Do it, pressed on another screen meanwhile
+        return {"kind": "email", "title": "I can send Dana the proposal next week",
+                "preview": [{"label": "To", "value": "dana@client.example"}]}
+
+    monkeypatch.setattr(route, "_rewrite", rewrite_while_do_it_starts)
+    assert client.post(f"/take-on/{o.key}/say", json={"text": "make it next week"}).status_code == 409
+    (got,) = client.get("/take-on").json()["offers"]
+    assert got["status"] == "working" and got["title"] == o.title and not got["changed"]
+
+
 def test_or_tell_me_is_never_a_repeat_of_the_offer_it_changes(
     client: TestClient, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -447,22 +447,24 @@ async def say(key: str, body: SayIn, request: Request) -> OfferOut:
 
     me = await asyncio.to_thread(_me, request)
     offer = await asyncio.to_thread(_find, me, key)
-    if offer.status in ("working", "card", "done"):
-        raise HTTPException(status_code=409, detail="I've already started on this one.")
-    said = take_on.line(body.text, 600)
-    try:
-        item = await _rewrite(offer, said)
-    except Exception:
-        logger.warning("take_on: the rewrite failed", exc_info=True)
-        raise HTTPException(status_code=502, detail="I couldn't change it just now. Try again.") from None
-    inputs = await asyncio.to_thread(take_on_maker.gather, me.email, me.person_id, principal=me.principal)
-    inputs.text += "\n\n" + take_on.ask_text(offer) + "\n" + said
-    checked = take_on_maker.check([item], inputs, set(), changing=offer)
-    if not checked:
-        raise HTTPException(status_code=422, detail="I couldn't turn that into one step. Try saying it another way.")
-    new = checked[0]
-    await asyncio.to_thread(take_on.change, me.email, offer, new.title, new.preview, said, kind=new.kind)
-    return _out(await asyncio.to_thread(_find, me, key))
+    if offer.status not in ("working", "card", "done"):
+        said = take_on.line(body.text, 600)
+        try:
+            item = await _rewrite(offer, said)
+        except Exception:
+            logger.warning("take_on: the rewrite failed", exc_info=True)
+            raise HTTPException(status_code=502, detail="I couldn't change it just now. Try again.") from None
+        inputs = await asyncio.to_thread(take_on_maker.gather, me.email, me.person_id, principal=me.principal)
+        inputs.text += "\n\n" + take_on.ask_text(offer) + "\n" + said
+        checked = take_on_maker.check([item], inputs, set(), changing=offer)
+        if not checked:
+            raise HTTPException(status_code=422, detail="I couldn't turn that into one step. Try saying it another way.")
+        new = checked[0]
+        if await asyncio.to_thread(take_on.change, me.email, offer, new.title, new.preview, said, kind=new.kind):
+            return _out(await asyncio.to_thread(_find, me, key))
+    # Started already, here or on another screen while it was being
+    # rewritten: the step runs as it was.
+    raise HTTPException(status_code=409, detail="I've already started on this one.")
 
 
 @router.post("/take-on/{key}/undo", response_model=OfferOut)

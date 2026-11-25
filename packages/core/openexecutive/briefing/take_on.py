@@ -947,19 +947,22 @@ def hide(email: str, offer: Offer | str, reason: HideReason, *, db_path: Path | 
 
 
 def change(email: str, offer: Offer, title: str, preview: list[tuple[str, str]], said: str,
-           *, kind: str | None = None, db_path: Path | None = None) -> None:
+           *, kind: str | None = None, db_path: Path | None = None) -> bool:
     """Or tell me: keep the offer as they changed it (and, when they asked
-    for another kind of step, that kind)."""
+    for another kind of step, that kind). Not once Do it has started it.
+    Returns whether it was changed."""
     person, now = who(email), _now()
     changed: dict[str, Any] = {"title": line(title, TITLE_MAX), "preview": preview}
     if kind in KINDS and kind != offer.kind:
         changed["kind"] = kind
     with _connect(db_path) as conn:
         _ensure(conn, person, offer.key, offer.kind, now)
-        conn.execute(
-            f"UPDATE {STATE_TABLE} SET changed = ?, said = ? WHERE person = ? AND key = ?",  # noqa: S608
+        cur = conn.execute(
+            f"UPDATE {STATE_TABLE} SET changed = ?, said = ? WHERE person = ? AND key = ? "  # noqa: S608
+            "AND status NOT IN ('working', 'card', 'done')",
             (json.dumps(changed), line(said, 400), person, offer.key),
         )
+        return cur.rowcount > 0
 
 
 def undo_change(email: str, key: str, *, db_path: Path | None = None) -> None:
