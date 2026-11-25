@@ -330,6 +330,49 @@ def _inputs(text: str = "INBOUND\n- Dana <dana@client.example> sent the proposal
     return maker.Inputs(text, calendar=calendar, apps=apps or [], team=[("Sam Lee", "sam@co.example")])
 
 
+def test_a_message_goes_to_the_person_its_title_names() -> None:
+    """Test lab 11-25: "I can ask Casey to set up the sticky notes" had To:
+    Riley Park, so Do it messaged Riley. A title that names someone other
+    than its To is never offered."""
+    dropped: dict[str, int] = {}
+    items = [
+        {"kind": "message", "title": "I can ask Casey to set up the regulars' sticky notes", "source": "x",
+         "preview": [{"label": "To", "value": "Sam Lee"}]},
+        {"kind": "message", "title": "I can ask Sam to pass the sticky notes to Casey", "source": "x",
+         "preview": [{"label": "To", "value": "Sam Lee"}]},
+        {"kind": "message", "title": "Ask Casey for the invoice", "source": "x",
+         "preview": [{"label": "To", "value": "Sam Lee"}]},
+        {"kind": "message", "title": "I can ask Casey Jones to send the invoice", "source": "x",
+         "preview": [{"label": "To", "value": "Sam Lee"}]},
+        {"kind": "message", "title": "I can ask Sam to remind Casey about the Friday invoice", "source": "x",
+         "preview": [{"label": "To", "value": "Sam Lee"}]},
+        {"kind": "message", "title": "I can ask Sam to tell Dana about the delay", "source": "x",
+         "preview": [{"label": "To", "value": "Sam Lee"}]},
+        {"kind": "message", "title": "I can get Sam's sign-off on the budget", "source": "x",
+         "preview": [{"label": "To", "value": "Sam Lee"}]},
+        {"kind": "message", "title": "I can let Finance know the PO is in", "source": "x",
+         "preview": [{"label": "To", "value": "Sam Lee"}]},
+        {"kind": "message", "title": "Get Q3 numbers from Sam", "source": "x",
+         "preview": [{"label": "To", "value": "Sam Lee"}]},
+    ]
+    kept = maker.check(items, _inputs(), set(), dropped)
+    assert [o.title for o in kept] == [
+        "I can ask Sam to pass the sticky notes to Casey",
+        "I can ask Sam to remind Casey about the Friday invoice",
+        "I can ask Sam to tell Dana about the delay",
+        "I can get Sam's sign-off on the budget",
+        "I can let Finance know the PO is in",
+        "Get Q3 numbers from Sam",
+    ]
+    assert dropped == {"title names someone other than its To": 3}
+    # A To written as the teammate's address goes to them.
+    by_address = [{"kind": "message", "title": "I can ask Sam to send the deck", "source": "x",
+                   "preview": [{"label": "To", "value": "slee@co.example"}]}]
+    inputs = maker.Inputs("INBOUND\n- x\n\nTEAM\n- Sam Lee <slee@co.example>", calendar=False, apps=[],
+                          team=[("Sam Lee", "slee@co.example")])
+    assert [o.title for o in maker.check(by_address, inputs, set())] == ["I can ask Sam to send the deck"]
+
+
 def test_check_keeps_only_steps_that_can_be_done() -> None:
     items = [
         {"kind": "email", "title": "I can send Dana the proposal", "source": "Your inbox",

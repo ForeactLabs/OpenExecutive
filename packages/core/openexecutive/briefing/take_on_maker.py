@@ -110,7 +110,8 @@ SYSTEM = (
     "watch on anything under ALREADY's watching lines. Offer the steps around them instead.\n"
     '- "meeting" only if a CALENDAR section is present (REST OF TODAY\'S CALENDAR). "app" only for an app under CONNECTED APPS, '
     'and name it in the preview with the label "App". "message" only to someone under TEAM, '
-    'named in the preview with the label "To".\n'
+    'named in the preview with the label "To", and the title names that same person: someone not under '
+    'TEAM gets no message (ask a teammate to pass it on, naming that teammate).\n'
     "- Email addresses only as written in the data.\n\n"
     "Reply with a JSON array, best first, at most 4 items, of objects with these keys:\n"
     '- "kind": one of the kinds above\n'
@@ -602,6 +603,11 @@ def check(
             if not to or not _names_any(to, team):
                 drop("message not to a teammate")
                 continue
+            if _asks_someone_else(title, to, team):
+                # "I can ask Casey…" sent to Riley (Test lab 11-25): Do it
+                # does what the preview says, so the title must say it too.
+                drop("title names someone other than its To")
+                continue
         key = take_on.made_key(title)
         what = take_on.about(title, preview)
         if key in keys or take_on.close_to(what, kept):
@@ -629,6 +635,37 @@ def _addressed_to(to: str, people: list[tuple[str, str]]) -> bool:
     their address, or their whole name."""
     to = to.casefold()
     return any((e and e in to) or (len(n) > 3 and n in to) for n, e in people)
+
+
+# "ask Casey", "remind Logan", "let Pat know": who a message title says it
+# goes to.
+_ASKED_RE = re.compile(
+    r"\b(?i:ask|asking|tell|telling|remind|reminding|message|ping|nudge|let|get)\s+"
+    r"([A-Z][\w-]*)(?:\s+[A-Z][\w-]*)?(?:'s)?(?:\s+(to|for|about|if|whether|that|know)\b)?"
+)
+_NOT_NAMES = frozenset({"me", "you", "them", "the", "everyone", "your", "our", "us", "him", "her"})
+
+
+def _asks_someone_else(title: str, to: str, team: list[tuple[str, str]]) -> bool:
+    """Whether a message's ``title`` says it goes to someone its ``To``
+    (casefolded) doesn't name: "I can ask Casey to…" with To: Riley Park.
+    A word counts as a person when it is a teammate's name, or when an ask
+    follows it ("ask Casey to", "ask Casey for"); "let Finance know" or "get
+    Q3 numbers" name no one."""
+    names = {part for n, _ in team for part in n.split()}
+    # The To may be a teammate's address: their name counts as the To too.
+    to_names = {part for n, e in team if _names_any(to, [(n, e)]) for part in n.split()}
+    for name, ask in _ASKED_RE.findall(title):
+        word = name.casefold()
+        if word in _NOT_NAMES:
+            continue
+        # The first person asked is who the message is for; later asks
+        # ("ask Sam to remind Casey") are what that person passes on.
+        if word in to_names or re.search(rf"\b{re.escape(word)}\b", to):
+            return False
+        if word in names or (ask and ask != "know"):
+            return True
+    return False
 
 
 def _names_any(text: str, people: list[tuple[str, str]]) -> bool:

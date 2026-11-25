@@ -9,7 +9,7 @@ import logging
 import re
 import time
 import uuid
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Collection
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
@@ -264,6 +264,18 @@ def _with_refusal(collected: str, refused_chars: int) -> str:
 # The tools that read the speaker's own notes or earlier chats: private rows,
 # withheld from the process log, and checked like a mail read.
 _OWN_RECALL_TOOL_NAMES: frozenset[str] = HISTORY_TOOL_NAMES | CHAT_SEARCH_TOOL_NAMES
+
+
+def _own_tool_names(handlers: Any, *, scripts: bool, withheld: Collection[str] = ()) -> set[str]:
+    """The turn's own built-in tools a ``call_tool`` may name: its handlers,
+    and the script tools when the turn offers them (``scripts``: never on a
+    replay, which withholds them). run_script asked for
+    through the gateway is still run_script: held as a gateway call, its
+    Approve card would replay it to a gateway that has no such tool."""
+    names = set(handlers)
+    if scripts and step_script.RUN_SCRIPT_TOOL not in withheld:
+        names |= {step_script.RUN_SCRIPT_TOOL, step_script.LIST_SAVED_TOOLS_TOOL}
+    return names
 
 
 def _own_tool_call(tu: dict[str, Any], handlers: Any) -> dict[str, Any] | None:
@@ -2998,6 +3010,9 @@ class Executive:
             if cut_id is not None:
                 tool_uses = [tu for tu in tool_uses if tu["id"] != cut_id]
                 cut_results.append({"type": "tool_result", "tool_use_id": cut_id, "content": CUT_OFF_RESULT})
+            # Only when this turn offers the script tools: a replay withholds
+            # them, and its call_tool stays the faked gateway call it was.
+            own_names = _own_tool_names(turn_handlers, scripts=bool(self._script_tools), withheld=withheld_tools)
             for i, tu in enumerate(tool_uses):
                 if tu["name"] == turn_progress.SHOW_PROGRESS:
                     result, progress_event, shown_progress = turn_progress.apply(
@@ -3022,7 +3037,9 @@ class Executive:
                     # A built-in tool asked for through the gateway
                     # (call_tool name="create_alert") is that tool's own call,
                     # checked by its own name: the gateway doesn't have it.
-                    own = _own_tool_call(tu, turn_handlers)
+                    # The script tools too (run_script): held as a gateway
+                    # call, its card would replay to a gateway that refuses it.
+                    own = _own_tool_call(tu, own_names)
                     if own is not None:
                         tool_uses[i] = own
             # A repeat of a call whose result came back in parts is answered
