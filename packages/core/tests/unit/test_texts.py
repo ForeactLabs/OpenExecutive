@@ -405,6 +405,23 @@ def test_a_text_goes_through_their_browser(ids: dict[str, int], as_turn_for: Any
     assert out["status"] == "sent"
 
 
+def test_texts_turned_off_while_a_send_waits_says_nothing_went(
+    ids: dict[str, int], as_turn_for: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    as_turn_for(owner)
+    tx._asked[owner] = 1e18  # Chrome is open
+
+    async def turned_off(send_id: int) -> Any:
+        tx.save_settings(owner, enabled=False)  # forgets every send
+        return tx.get_send(send_id)
+
+    monkeypatch.setattr(text_tools, "_settled", turned_off)
+    out = json.loads(asyncio.run(text_tools.handle_send_text({"to": "555 201 3344", "text": "Ok"})))
+    assert out["error"].startswith("Nothing went")
+
+
 def test_a_text_the_browser_hasnt_confirmed_is_never_called_sent(
     ids: dict[str, int], as_turn_for: Any,
 ) -> None:

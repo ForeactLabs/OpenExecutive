@@ -201,7 +201,10 @@ async def handle_send_text(tool_input: dict[str, Any]) -> str:
     texts.wake(actor)
     settled = await _settled(send.id) if texts.connected(actor) else send
     who = conv.who if conv is not None else to
-    if settled is None or settled.status not in texts.SETTLED:
+    if settled is None:
+        # Gone while it waited: Texts was turned off, which forgets every send.
+        return json.dumps({"error": f"Nothing went: Texts was turned off before it was sent. {_OFF_NOTE}"})
+    if settled.status not in texts.SETTLED:
         # The chat hears how it went once the browser says. A turn no chat
         # shows (new texts, an approved card): a card says if it didn't go.
         session = current_session.get()
