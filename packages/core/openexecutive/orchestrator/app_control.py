@@ -26,8 +26,8 @@ everything but a Waits rule. A step that waits becomes a card in the chat
 speaker can see and answer, with the action spelled out. Their tap runs it
 with their own request to ``/decisions/{id}/approve``, so a route that needs
 a signed sign-in gets one, and the route checks them again then; a route
-that wants that signed request (turning on something that sends as them,
-letting more go) leaves the card too. A card In training held allows that
+that wants that signed request (raising the level, a Goes rule, removing a
+Waits rule, leaving In training) leaves the card too. A card In training held allows that
 action from then on when it is approved. A card left a day goes stale.
 
 **Adding to it.** ``register_kind`` / ``register_action`` / ``register_screen``
@@ -505,8 +505,8 @@ async def handle_do_in_app(tool_input: dict[str, Any]) -> str:
         return _error(str(exc))
     except HTTPException as exc:
         if exc.status_code == 409 and "caller_signing_required" in str(exc.detail):
-            # The route wants the person's own signed request (turning on
-            # something that sends as them, changing Your rules), which a
+            # The route wants the person's own signed request (raising the
+            # level, loosening Your rules, leaving In training), which a
             # chat turn never is: their tap on a card is that request.
             return _card_result(person.id, session, action, item_id, value, title or "", details)
         _audit("app_action_refused", f"{action.name} refused", {**details, "status": exc.status_code})
