@@ -200,6 +200,10 @@ def _settle_cards(me: Me, offers: list[take_on.Offer]) -> None:
 
 
 def _offers(me: Me) -> list[take_on.Offer]:
+    # Someone signed in who isn't on People has no list of their own, here
+    # as on ``GET /take-on``, so a source is never read for no one.
+    if me.person_id is None:
+        return []
     offers = take_on.offers_for(me.email, me.person_id, principal=me.principal)
     _settle_cards(me, offers)
     # A finished step leaves the list: Done for you shows it (today.py).

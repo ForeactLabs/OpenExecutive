@@ -465,6 +465,13 @@ def test_someone_not_on_people_gets_no_list_and_no_pass(client: TestClient, monk
     monkeypatch.setattr(take_on_maker, "schedule", lambda email, *a, **k: passes.append(email) or True)
     assert client.get("/take-on").json()["offers"] == []
     assert passes == []
+    # Nor can they start one a source would offer someone else.
+    read: list[Any] = []
+    monkeypatch.setattr(take_on, "_sources", {"extra": take_on.Source(
+        origin="extra", read=lambda pid, _p: read.append(pid) or [take_on.Offer(
+            key="extra:1", origin="extra", kind="email", title="I can send it", source="Extra")])})
+    assert client.post("/take-on/extra:1/do").status_code == 404
+    assert read == []
 
 
 def test_an_unsigned_principal_reads_their_own_list(monkeypatch: pytest.MonkeyPatch) -> None:
