@@ -35,6 +35,10 @@ def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     monkeypatch.setattr(take_on, "_repeat", lambda _pid: [])
     monkeypatch.setattr(take_on, "_watch", lambda _pid: [])
     monkeypatch.setattr(maker, "on_its_own", lambda _person: maker.OnItsOwn())
+    # The engine on its own: no other source and the default reads, whatever
+    # an app built earlier in the run plugged in.
+    monkeypatch.setattr(take_on, "_sources", {})
+    monkeypatch.setattr(take_on, "hooks", take_on.Hooks())
     yield path
 
 
@@ -1080,3 +1084,16 @@ def test_a_teammates_pass_reads_their_own_world_only_when_one_is_given(monkeypat
                         lambda person, _since, _now: LiveSignals(inbox=(f'[09:00] from Dana: "{person.full_name}, the quote"',)))
     lines, calendar, _senders, _people = maker._live(teammate, False, datetime.now(UTC))
     assert "Reese, the quote" in "\n".join(lines) and calendar is False
+
+
+def test_a_done_link_is_one_of_the_apps_pages_or_https_only() -> None:
+    o = _offer()
+    take_on.put_made(ME, [o])
+    take_on.start(ME, o)
+    links = ["/artifacts/abc", "https://docs.example/d/1", "//evil.example/x", "/\\evil.example/x",
+             "/\tx", "javascript:alert(1)", "http://plain.example"]
+    take_on.finish(ME, o.key, "done", done=[(f"Step {i}", u) for i, u in enumerate(links)])
+    got = take_on.finished(ME, datetime.now(UTC) - timedelta(hours=1))[0].done
+    assert got == [("Step 0", "/artifacts/abc"), ("Step 1", "https://docs.example/d/1"),
+                   ("Step 2", ""), ("Step 3", "")]
+    assert [take_on._link(u) for u in links[4:]] == ["", "", ""]

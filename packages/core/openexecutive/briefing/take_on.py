@@ -50,6 +50,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta, tzinfo
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from openexecutive.config import background_turn_limit
 from openexecutive.utils import db
@@ -621,9 +622,16 @@ def on_list(email: str, *, db_path: Path | None = None) -> list[tuple[str, str]]
 
 
 def _link(url: Any) -> str:
-    """A link the card may open: one of the app's own pages, or https."""
+    """A link the card may open: one of the app's own pages, or https. A
+    backslash or a control character is never in one: a browser reads
+    ``/\\host`` as another site."""
     text = str(url or "").strip()
-    return text if (text.startswith("/") and not text.startswith("//")) or text.startswith("https://") else ""
+    if not text or "\\" in text or any(not c.isprintable() or c.isspace() for c in text):
+        return ""
+    parts = urlsplit(text)
+    if text.startswith("/") and not parts.scheme and not parts.netloc and not text.startswith("//"):
+        return text
+    return text if parts.scheme == "https" and parts.netloc else ""
 
 
 def _done_list(raw: str | None) -> list[tuple[str, str]]:

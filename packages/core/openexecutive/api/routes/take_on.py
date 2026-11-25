@@ -18,6 +18,7 @@ caller's own.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any, Literal
@@ -338,7 +339,7 @@ async def say(key: str, body: SayIn, request: Request) -> OfferOut:
     except Exception:
         logger.warning("take_on: the rewrite failed", exc_info=True)
         raise HTTPException(status_code=502, detail="I couldn't change it just now. Try again.") from None
-    inputs = take_on_maker.gather(me.email, me.person_id, principal=me.principal)
+    inputs = await asyncio.to_thread(take_on_maker.gather, me.email, me.person_id, principal=me.principal)
     inputs.text += "\n\n" + take_on.ask_text(offer) + "\n" + said
     checked = take_on_maker.check([item], inputs, set(), changing=offer)
     if not checked:
