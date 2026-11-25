@@ -263,6 +263,18 @@ def get_decision_instances(
     return out
 
 
+def cards_for_session(session_id: str, db_path: Path | None = None) -> dict[int, str]:
+    """Each card a chat put up, oldest first, with its status."""
+    if not session_id:
+        return {}
+    with _get_conn(db_path or _db_path()) as conn:
+        rows = conn.execute(
+            "SELECT id, status FROM decision_instances WHERE originating_session_id = ? ORDER BY id",
+            (session_id,),
+        ).fetchall()
+    return {int(r[0]): str(r[1]) for r in rows}
+
+
 def get_live_by_idem(
     idempotency_key: str,
     db_path: Path | None = None,
@@ -599,6 +611,23 @@ def list_for_approver_since(
             "AND approver_person_id = ? AND (created_at >= ? OR resolved_at >= ?) "
             "ORDER BY created_at DESC LIMIT ?",
             (*decision_classes, approver_person_id, since, since, limit),
+        ).fetchall()
+    return [DecisionInstance(**dict(r)) for r in rows]
+
+
+def list_for_person_since(
+    person_id: int, since: str, *, limit: int = 50, db_path: Path | None = None,
+) -> list[DecisionInstance]:
+    """Steps that waited on ``person_id`` (approver) or that they answered
+    (resolver), made or settled at or after ``since``, newest first."""
+    path = db_path or _db_path()
+    if not path.exists():
+        return []
+    with _get_conn(path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM decision_instances WHERE (approver_person_id = ? OR resolver_person_id = ?)"
+            " AND (created_at >= ? OR resolved_at >= ?) ORDER BY created_at DESC LIMIT ?",
+            (person_id, person_id, since, since, limit),
         ).fetchall()
     return [DecisionInstance(**dict(r)) for r in rows]
 

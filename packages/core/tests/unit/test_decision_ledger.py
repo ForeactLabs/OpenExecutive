@@ -13,6 +13,7 @@ from openexecutive.memory.decision_ledger import (
     STATUS_REJECTED,
     STATUS_REVERSED,
     aggregate_reliability,
+    cards_for_session,
     create_decision_instance,
     get_class_mode,
     get_decision_instance,
@@ -34,11 +35,11 @@ def db(tmp_path: Path) -> Path:
     return db_path
 
 
-def _create(db: Path, *, idem: str | None = None, confidence: float = 0.8) -> int:
+def _create(db: Path, *, idem: str | None = None, confidence: float = 0.8, session: str = "sess-1") -> int:
     return create_decision_instance(
         decision_class="meeting_scheduling",
         department="operations",
-        originating_session_id="sess-1",
+        originating_session_id=session,
         proposed_payload={"title": "Sync", "start": "2025-06-01T10:00:00+00:00",
                           "end": "2025-06-01T11:00:00+00:00",
                           "attendee_emails": ["alice@example.com"]},
@@ -53,6 +54,17 @@ def _create(db: Path, *, idem: str | None = None, confidence: float = 0.8) -> in
 # ---------------------------------------------------------------------------
 # Basic CRUD
 # ---------------------------------------------------------------------------
+
+def test_cards_for_session_lists_only_that_chats_cards(db: Path) -> None:
+    open_card = _create(db, idem="a")
+    answered = _create(db, idem="b")
+    mark_resolved(answered, STATUS_APPROVED_UNCHANGED, db_path=db)
+    _create(db, idem="c", session="sess-2")
+    later = _create(db, idem="d")
+    assert cards_for_session("", db_path=db) == {}
+    assert cards_for_session("sess-1", db_path=db) == {
+        open_card: "proposed", answered: STATUS_APPROVED_UNCHANGED, later: "proposed",
+    }
 
 def test_create_and_get(db: Path) -> None:
     iid = _create(db)

@@ -1057,7 +1057,7 @@ class TodayResponse(BaseModel):
     # up lists (``GET /alerts/tidied``). Home shows one row while any is.
     tidied_today: int = 0
     tidied_week: int = 0
-    # What waits on the reader on other pages (``_waiting_elsewhere``):
+    # What waits on the reader on other pages (a connection to reconnect):
     # Needs you shows one row each and the day isn't quiet while any wait.
     waiting_elsewhere: list[WaitingElsewhereItem] = Field(default_factory=list)
 
@@ -1092,6 +1092,10 @@ class ActivityItem(BaseModel):
     # It sent something to someone (an email, a message), for Done for
     # you's "Sent as …" (``_as_tag``). Never served.
     sent: bool = Field(default=False, exclude=True)
+    # The chat a step ran in and the card it went through, so Done for you
+    # leaves out a step a take-on row already shows. Never served.
+    session_id: str = Field(default="", exclude=True)
+    decision_id: int | None = Field(default=None, exclude=True)
 
 
 class ActivityResponse(BaseModel):
@@ -2099,6 +2103,8 @@ def _build_activity(
             mail_to=row.mail_to,
             lead_line=_lead_line(row, jobs, answers),
             sent=mailed or take_the_lead.is_message_send(row.tool),
+            session_id=row.session_id,
+            decision_id=row.decision_id,
         ))
 
     # Operational alerts the Executive raised. For the rail, all statuses are
@@ -3077,11 +3083,9 @@ async def get_today(request: Request, background_tasks: BackgroundTasks) -> Toda
     # A connection that needs reconnecting goes first: everything that runs
     # through it waits on it. Everyone's own mailbox is theirs to reconnect;
     # the Executive's accounts and the Watch list are the principal's.
-    response.waiting_elsewhere = [
-        *await asyncio.to_thread(_needs_reconnecting, caller, accounts=principal),
-        *(_waiting_elsewhere() if principal else []),
-    ]
-    response.done_for_you = _done_for_you(request, caller, datetime.now(UTC))
+    # A watch it would like to add shows on "I can also take on" instead.
+    response.waiting_elsewhere = await asyncio.to_thread(_needs_reconnecting, caller, accounts=principal)
+    response.done_for_you = await asyncio.to_thread(_done_for_you, request, caller, datetime.now(UTC))
     response.watching = _watching(request, caller)
     response.to_act_on = await asyncio.to_thread(_to_act_on, response, caller)
     response.tidied_today, response.tidied_week = await asyncio.to_thread(_tidied_counts, caller, principal)
@@ -3162,6 +3166,38 @@ def _done_for_you(request: Request, caller: int | None, now: datetime) -> list[D
                 ))
         except Exception:
             logger.warning("today: reading approvals for Done for you failed", exc_info=True)
+    # Steps they started from "I can also take on" that finished. They leave
+    # that list when done and show here, the caller's own: what each run
+    # did (in its chat while it ran, or once the card it went to was
+    # approved) is that row, never a second one. A later ask in that chat is
+    # its own step and still shows.
+    ran_in: dict[str, list[tuple[datetime, datetime]]] = {}
+    ran_cards: set[int] = set()
+    try:
+        from openexecutive.api.routes import take_on as take_on_route
+        from openexecutive.briefing import take_on
+
+        email = take_on_route.reader(request).email
+        for o in take_on.finished(email, since) if email else []:
+            began, ended = _parse_aware(o.started_at), _parse_aware(o.finished_at)
+            if o.session_id and began and ended:
+                ran_in.setdefault(o.session_id, []).append((began, ended))
+            if o.decision_id:
+                ran_cards.add(o.decision_id)
+            title = o.title[6:] if o.title.startswith("I can ") else o.title
+            artifact = next((u for _, u in o.done if u.startswith("/artifacts/")), "")
+            rows.append(DoneRow(
+                key=f"take_on:{o.key}",
+                kind="take_on",
+                title=(title[:1].upper() + title[1:])[:240],
+                detail=o.done[0][0] if o.done else o.outcome,
+                status="done",
+                at=o.finished_at,
+                session_id=o.session_id,
+                artifact_id=artifact.removeprefix("/artifacts/") or None,
+            ))
+    except Exception:
+        logger.warning("today: reading finished take-on steps for Done for you failed", exc_info=True)
     try:
         # What the Executive did for the team, plus the reader's own items
         # (``_build_activity``'s viewer rule): a teammate never gets the
@@ -3186,6 +3222,8 @@ def _done_for_you(request: Request, caller: int | None, now: datetime) -> list[D
     for item in activity:
         at = _parse_aware(item.at)
         if item.kind in _DONE_SKIP_KINDS or at is None or at < since:
+            continue
+        if item.decision_id in ran_cards or any(a <= at <= b for a, b in ran_in.get(item.session_id, ())):
             continue
         if reader and " ".join((item.target or "").split()).casefold() == reader:
             continue
@@ -3528,70 +3566,6 @@ def _right_now_rows(now: datetime | None = None) -> list[RightNowRow]:
         )
         for r in found
     ]
-
-
-# How many watch suggestions Home's row names before "and N more".
-_ELSEWHERE_NAMED = 2
-
-
-def _watch_label(target: str) -> str:
-    """A suggestion's short name: a URL's host, or the target itself."""
-    from urllib.parse import urlsplit
-
-    text = " ".join(str(target or "").split())
-    try:
-        host = urlsplit(text).hostname if "://" in text else None
-    except ValueError:  # a malformed bracketed host
-        host = None
-    if host:
-        return host.removeprefix("www.")
-    return text if len(text) <= 40 else text[:39].rstrip() + "…"
-
-
-def _named(labels: list[str]) -> str:
-    """ "a, b and 3 more" from the first few labels."""
-    seen: list[str] = []
-    for label in labels:
-        if label and label not in seen:
-            seen.append(label)
-    if not seen:
-        return ""
-    shown = seen[:_ELSEWHERE_NAMED]
-    rest = len(seen) - len(shown)
-    if rest > 0:
-        return f"{', '.join(shown)} and {rest} more"
-    return " and ".join(shown) if len(shown) == 2 else shown[0]
-
-
-def _waiting_elsewhere() -> list[WaitingElsewhereItem]:
-    """The principal's things waiting on other pages: the Watch list's
-    suggestions waiting for a yes or no. Never raises."""
-    from openexecutive.monitoring import store as monitoring_store
-
-    items: list[WaitingElsewhereItem] = []
-    try:
-        # A suggestion routed to a department head is that head's to answer
-        # (watch_policy._nudge_if_piled_up); the rest are the principal's.
-        suggestions = [
-            w for w in monitoring_store.list_pending_suggestions() if w.route_to_person_id is None
-        ]
-    except Exception:
-        logger.exception("today: reading watch suggestions failed")
-        suggestions = []
-    if suggestions:
-        n = len(suggestions)
-        items.append(
-            WaitingElsewhereItem(
-                key="watch-suggestions",
-                title=f"{n} {'thing' if n == 1 else 'things'} I'd like to watch",
-                detail=_named([_watch_label(w.target) for w in suggestions]),
-                count=n,
-                href="/watchlist",
-                action="Look",
-                at=max((w.created_at or "" for w in suggestions), default=""),
-            )
-        )
-    return items
 
 
 def _counted(n: int, one: str, many: str) -> str:

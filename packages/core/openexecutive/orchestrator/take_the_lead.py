@@ -348,7 +348,9 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     # standing job it worked for (``job_id``), what came of it (``outcome``)
     # and whom a message went to (``to_person_id``), for the second line of
     # a Done for you row.
-    for column in ("mail_to", "mail_subject", "prompted_by", "outcome"):
+    # ``session_id``: the chat the step ran in, so Home's Done for you can
+    # leave out a step that a row of its own already shows (a take-on run).
+    for column in ("mail_to", "mail_subject", "prompted_by", "outcome", "session_id"):
         if column not in log_columns:
             try:
                 conn.execute(f"ALTER TABLE {LOG_TABLE} ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")  # noqa: S608
@@ -2238,6 +2240,13 @@ def asked_by_now() -> int | None:
         return None
 
 
+def _session_now() -> str:
+    """The chat the step being logged runs in, or "" outside one."""
+    from openexecutive.orchestrator.schedule_tools import current_session
+
+    return str(getattr(current_session.get(), "session_id", "") or "")
+
+
 def record(
     *, scope: str, source: str, tool: str, summary: str, status: str, why: str = "",
     decision_id: int | None = None, db_path: Path | None = None,
@@ -2257,11 +2266,11 @@ def record(
         try:
             conn.execute(
                 f"INSERT INTO {LOG_TABLE} (at, scope, source, tool, summary, status, why, decision_id, "  # noqa: S608
-                "mail_to, mail_subject, prompted_by, job_id, outcome, to_person_id, goal_id, asked_by) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "mail_to, mail_subject, prompted_by, job_id, outcome, to_person_id, goal_id, asked_by, session_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (datetime.now(UTC).isoformat(), scope, source, tool, summary, status, why, decision_id,
                  mail_to, mail_subject, prompted_by, job_id, _one_line(outcome, 160), to_person_id, goal_id,
-                 asked_by_now()),
+                 asked_by_now(), _session_now()),
             )
             conn.commit()
         finally:
@@ -2311,6 +2320,7 @@ class Done:
     to_person_id: int | None = None
     goal_id: int | None = None
     asked_by: int | None = None
+    session_id: str = ""
 
 
 def done(scopes: list[str], *, days: int = 7, limit: int = 100, db_path: Path | None = None) -> list[Done]:
