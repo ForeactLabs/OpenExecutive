@@ -653,3 +653,9 @@ async def test_a_long_result_is_read_in_parts_without_running_again(
     assert "exactly the same input" in first and len(first) <= 2_000
     assert "[LAST PART" in second
     assert out[-1][0] == "output"
+
+
+def test_a_step_reads_before_it_sends_and_never_sends_a_correction() -> None:
+    """Test lab 11-25: a quiet-check nudged about a "coffee order" from the
+    flour supplier, then sent a second message to correct it."""
+    assert "Never send one and then a second to correct it" in WORKFLOW_ACTOR_SYSTEM

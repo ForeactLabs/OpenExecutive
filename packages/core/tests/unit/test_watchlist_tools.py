@@ -375,14 +375,65 @@ async def test_a_teammates_watch_tells_them_and_the_principals_tells_the_princip
     monkeypatch.setattr(wt, "_teammate_asking", lambda: SimpleNamespace(id=12))
     out = json.loads(await wt.handle_add_watchlist_entry({"slug": "news-oe", "signal_type": "query", "target": "Open Executive"}))
     assert out["ok"] is True
-    item = ms.get_watchlist_item_by_slug("news-oe")
+    item = ms.get_watchlist_item_by_slug(out["slug"])
     assert item is not None and item.route_to_person_id == 12
 
     monkeypatch.setattr(wt, "_teammate_asking", lambda: None)
     out = json.loads(await wt.handle_add_watchlist_entry({"slug": "news-acme", "signal_type": "query", "target": "Acme"}))
     assert out["ok"] is True
-    item = ms.get_watchlist_item_by_slug("news-acme")
+    item = ms.get_watchlist_item_by_slug(out["slug"])
     assert item is not None and item.route_to_person_id is None
+
+
+@pytest.mark.asyncio
+async def test_a_watch_someone_sets_for_themselves_is_theirs_alone(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Test lab 11-25: Morgan's own Starbucks and egg-price watches showed
+    their cards on Drew's Home. A watch set up in someone's own chat for
+    themselves is theirs, like the chat."""
+    from types import SimpleNamespace
+
+    from openexecutive.monitoring import mailbox
+
+    monkeypatch.setattr(wt, "_teammate_asking", lambda: SimpleNamespace(id=12))
+    out = json.loads(await wt.handle_add_watchlist_entry({"slug": "egg-prices", "signal_type": "query", "target": "egg prices"}))
+    assert out["ok"] is True
+    # Named like an email watch, so no one else's name runs into it.
+    assert out["slug"].startswith("egg-prices-") and ms.get_watchlist_item_by_slug("egg-prices") is None
+    item = ms.get_watchlist_item_by_slug(out["slug"])
+    assert item is not None and mailbox.set_by(item) == 12
+    assert mailbox.shown_to(item, 12) and not mailbox.shown_to(item, 7) and not mailbox.shown_to(item, None)
+    # Not in anyone else's list of watches, and the same name is free to them.
+    monkeypatch.setattr(wt, "_teammate_asking", lambda: SimpleNamespace(id=7))
+    listed = json.loads(await wt.handle_list_watchlist({}))["watchlist"]
+    assert out["slug"] not in {r["slug"] for r in listed}
+    theirs = json.loads(await wt.handle_add_watchlist_entry({"slug": "egg-prices", "signal_type": "query", "target": "egg prices"}))
+    assert theirs["ok"] is True and theirs["slug"] != out["slug"]
+    # Moved to someone else or to a goal later (its page, the update tool),
+    # it is the company's: its cards follow the new person.
+    assert mailbox.set_by(item.model_copy(update={"route_to_person_id": 7})) is None
+    assert mailbox.set_by(item.model_copy(update={"goal_id": 3})) is None
+    moved = item.model_copy(update={"route_to_person_id": 7})
+    assert mailbox.shown_to(moved, 7) and mailbox.shown_to(moved, None)
+
+    # The principal's own, from their own chat: theirs by name, not by
+    # whoever is principal when it is read.
+    monkeypatch.setattr(wt, "_teammate_asking", lambda: None)
+    monkeypatch.setattr(wt, "_principal_asked", lambda: True)
+    monkeypatch.setattr("openexecutive.people.store.find_principal_person", lambda: SimpleNamespace(id=1))
+    mine = json.loads(await wt.handle_add_watchlist_entry({"slug": "rent", "signal_type": "query", "target": "office rent"}))
+    item = ms.get_watchlist_item_by_slug(mine["slug"])
+    assert item is not None and item.route_to_person_id == 1 and mailbox.set_by(item) == 1
+    assert mailbox.shown_to(item, 1) and not mailbox.shown_to(item, 7)
+
+    # A watch the Executive set up with no one asking is the company's.
+    monkeypatch.setattr(wt, "_teammate_asking", lambda: None)
+    monkeypatch.setattr(wt, "_principal_asked", lambda: False)
+    out = json.loads(await wt.handle_add_watchlist_entry({"slug": "flour-news", "signal_type": "query", "target": "flour"}))
+    assert out["ok"] is True
+    item = ms.get_watchlist_item_by_slug("flour-news")
+    assert item is not None and mailbox.set_by(item) is None and mailbox.shown_to(item, 7)
 
 
 @pytest.mark.asyncio

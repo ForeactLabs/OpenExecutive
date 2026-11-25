@@ -1247,12 +1247,19 @@ def list_recent_signals(
 ) -> list[dict[str, Any]]:
     """Read recent signals — used by the reflection context extension in PR-C
     and by the audit/debug endpoints. The company's only: an email watch's
-    signals are its owner's (``monitoring.mailbox``)."""
+    signals are its owner's, and an own watch's its setter's
+    (``monitoring.mailbox.set_by``)."""
     resolved = _resolve_db_path(db_path)
     if not resolved.exists():
         return []
+    from openexecutive.monitoring import mailbox
+
     clauses: list[str] = ["source_kind != ?"]
     params: list[Any] = [SOURCE_KIND_MAILBOX]
+    own = [i.id for i in list_watchlist(every_watch=True, db_path=db_path) if i.id is not None and mailbox.set_by(i) is not None]
+    if own:
+        clauses.append(f"watchlist_id NOT IN ({', '.join('?' * len(own))})")
+        params.extend(own)
     if since is not None:
         clauses.append("captured_at >= ?")
         params.append(since.isoformat())

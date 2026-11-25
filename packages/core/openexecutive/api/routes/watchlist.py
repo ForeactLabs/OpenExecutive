@@ -445,7 +445,11 @@ async def create_watchlist_entry(body: WatchlistCreate, request: Request) -> Wat
             detail=f"slug {slug!r} already exists; PATCH it instead",
         )
 
-    config: dict[str, Any] = dict(body.config)
+    # Whose own watch it is comes from who is signed in, never the body: a
+    # body naming someone would hide the watch from everyone else.
+    config: dict[str, Any] = {
+        k: v for k, v in body.config.items() if k not in (mailbox.SET_BY_KEY, mailbox.OWNER_KEY)
+    }
     for key, value in display_label_config(signal_type, body.display_label).items():
         config.setdefault(key, value)
     trigger: dict[str, Any] = body.trigger

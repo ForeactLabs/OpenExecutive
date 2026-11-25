@@ -3,8 +3,9 @@
 A card that waits for a tap (Approve, a question) and came out of someone's
 own chat is that person's: it and its decision show to them and to the person
 it went to for the OK, and to nobody else on the team. Every other card is
-the team's, as before: one from a department's own run, a watch, company
-mail, a workflow.
+the team's, as before: one from a department's own run, a company watch,
+company mail, a workflow (a watch someone set up for themselves is theirs:
+``models.own_watch_owner``).
 
 "Their own chat" is a saved conversation (``memory.session_store``): its
 caller, or the principal for one saved before callers were recorded, the same

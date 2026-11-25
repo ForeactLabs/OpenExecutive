@@ -94,6 +94,19 @@ def test_a_watch_a_teammate_makes_tells_them(
     assert row is not None and row.route_to_person_id is None
 
 
+def test_a_body_never_names_whose_own_watch_it_is(client: TestClient, tmp_path: Path) -> None:
+    """A watch made with someone else's id in its config would hide it from
+    everyone but them: the body never sets whose it is."""
+    from openexecutive.monitoring import mailbox
+
+    db_path = tmp_path / "watchlist_routes.db"
+    body = {"slug": "stock-nvda", "signal_type": "stock", "target": "NVDA", "config": {"set_by": 999999, "mailbox_of": 5}}
+    assert client.post("/watchlist", json=body).status_code == 201
+    row = ms.get_watchlist_item_by_slug("stock-nvda", db_path=db_path)
+    assert row is not None and mailbox.set_by(row) is None
+    assert "set_by" not in row.config_json and "mailbox_of" not in row.config_json
+
+
 def test_create_rejects_uppercase_slug(client: TestClient) -> None:
     resp = client.post(
         "/watchlist",

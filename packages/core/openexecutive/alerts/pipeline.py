@@ -17,6 +17,7 @@ from openexecutive.alerts.models import (
     AlertEvent,
     AlertSeverity,
     TriageDecision,
+    is_one_persons,
 )
 
 if TYPE_CHECKING:
@@ -211,7 +212,7 @@ async def _triage(event: AlertEvent, path: Path) -> TriageDecision:
         # Never anyone's drafted documents or personal cards: they are their
         # owners' alone (``models.visible_alert``).
         for a in store.recent_alerts(limit=20, db_path=path, exclude_source="artifact")
-        if a.source not in PERSONAL_SOURCES
+        if not is_one_persons(a)
     ]
     try:
         initiatives = get_active_initiatives()
@@ -323,9 +324,10 @@ async def evaluate_and_dispatch(
         effective_channels = [
             c for c in effective_channels if c != AlertChannel.COMPANY_BROADCAST
         ]
-    if event.source in PERSONAL_SOURCES:
+    if event.source in PERSONAL_SOURCES or event.own_watch_of is not None:
         # A card that is one person's alone (an email watch's sender and
-        # subject, say) reaches only them: their page, their own DM. Never a
+        # subject, or a card from a watch they set up for themselves) reaches
+        # only them: their page, their own DM. Never a
         # room, and never the Executive's own mailbox, whatever triage made
         # of its words.
         effective_channels = [c for c in effective_channels if c in _PERSONAL_CHANNELS]
@@ -345,6 +347,11 @@ async def evaluate_and_dispatch(
             sorted(t for t in topic_tags if t.startswith("department:"))
         )
         dedup_key = f"raised_by:{(event.from_ or event.raised_by).lower()}:{for_whom}:{dedup_key}"
+    if event.own_watch_of is not None:
+        # Someone's own watch never folds into a card others can see (a
+        # company watch that once had the same slug), nor theirs into one of
+        # another person's: the owner is part of the key.
+        dedup_key = f"{dedup_key}#own:{event.own_watch_of}"
     if event.private:
         topic_tags, routed_to, dedup_key, effective_channels = _make_private(
             topic_tags, dedup_key
@@ -468,7 +475,8 @@ def _insert(
         routed_to_person_id=routed_to,
         # A card a team member raised is theirs and its reader's
         # (``models.visible_alert``): who raised it is kept beside whom it is for.
-        owner_person_id=event.raised_by_person_id if event.source == TEAM_RAISED_SOURCE else None,
+        # A card from someone's own watch is theirs alone (``models.own_watch_owner``).
+        owner_person_id=event.raised_by_person_id if event.source == TEAM_RAISED_SOURCE else event.own_watch_of,
         needs=event.needs,
         question=event.question,
         choices=event.choices,
