@@ -873,6 +873,7 @@ def _since_block(session_id: str, person: Any, turns: list[sqlite3.Row]) -> str:
     on this person since the chat began (a draft waiting there is not lost).
     Never raises."""
     from openexecutive.memory.workspace_settings import get_user_timezone
+    from openexecutive.orchestrator.content_trust import wrap_untrusted
 
     lines: list[str] = []
     try:
@@ -892,7 +893,8 @@ def _since_block(session_id: str, person: Any, turns: list[sqlite3.Row]) -> str:
             for a in ours:
                 state = states.get(str(a["status"]), str(a["status"]))
                 error = str(a["last_error"] or "")
-                why = f" ({' '.join(error.split())[:120]})" if a["status"] == "failed" and error else ""
+                why = (f" ({wrap_untrusted(' '.join(error.split())[:120], source='followup_error')})"
+                       if a["status"] == "failed" and error else "")
                 lines.append(f"- #{a['id']}, {_local(a['run_at'])}, {state}{why}: "
                              f"{' '.join(str(a['intent_text']).split())[:_SINCE_SAYS]}")
         else:
@@ -906,6 +908,7 @@ def _since_block(session_id: str, person: Any, turns: list[sqlite3.Row]) -> str:
         cards = list_for_person_since(int(person.id), since, limit=20)
         if cards:
             lines.append("CARDS THAT WAITED ON THEM SINCE THE CHAT BEGAN:")
+            card_lines: list[str] = []
             for card in reversed(cards):
                 try:
                     payload = json.loads(card.proposed_payload_json or "{}")
@@ -913,9 +916,12 @@ def _since_block(session_id: str, person: Any, turns: list[sqlite3.Row]) -> str:
                     payload = {}
                 head = " ".join(str(payload.get("headline") or payload.get("summary") or "a step").split())
                 says = " ".join(str(payload.get("summary") or "").split())[:_SINCE_SAYS]
-                lines.append(f"- card #{card.id}, {_local(card.created_at)}, "
-                             f"{_CARD_STATES.get(card.status, card.status)}: {head}"
-                             f"{f' - {says}' if says and says != head else ''}")
+                card_lines.append(f"- card #{card.id}, {_local(card.created_at)}, "
+                                  f"{_CARD_STATES.get(card.status, card.status)}: {head}"
+                                  f"{f' - {says}' if says and says != head else ''}")
+            # A card's words can come from mail or an alert: shown as data,
+            # like the replies.
+            lines.append(wrap_untrusted("\n".join(card_lines), source="cards"))
         else:
             lines.append("CARDS THAT WAITED ON THEM SINCE THE CHAT BEGAN: none.")
     except Exception:

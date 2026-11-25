@@ -920,6 +920,7 @@ def test_it_sees_the_time_in_the_company_zone_and_what_already_ran(
         assert "It is now Thu Oct 15, 12:00 PM in the company's time zone (America/New_York)" in content
         assert f"#{ran}, Thu Oct 15, 11:20 AM, already ran: Remind Olivia to call Jamie" in content
         assert "waiting on their OK: Email Robin Hale - Hi Robin, the order ships Friday." in content
+        assert '<untrusted_content source="cards"' in content.split("THE CHAT:")[0]
         assert "THEM (Thu Oct 15, 11:00 AM): Remind me in 20 minutes" in content
     assert "Their own email address, for a follow-up to them: olivia@co.example" in seen
 
