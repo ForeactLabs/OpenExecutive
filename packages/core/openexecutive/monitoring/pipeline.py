@@ -369,8 +369,11 @@ def _signal_to_alert_event(
         # An email watch's cards are its owner's alone: their mail never
         # reaches anyone else, whoever or whichever department the watch was
         # set to tell.
-        routed_to_person_id=mailbox.owner_id(item) if mailbox.is_mailbox(item) else item.route_to_person_id,
-        department="" if mailbox.is_mailbox(item) else item.route_to_department,
+        # A watch someone set up for themselves in their own chat is theirs
+        # the same way: its cards go to them and show to no one else.
+        routed_to_person_id=mailbox.set_by(item) or item.route_to_person_id,
+        department="" if mailbox.set_by(item) is not None or mailbox.is_mailbox(item) else item.route_to_department,
+        own_watch_of=None if mailbox.is_mailbox(item) else mailbox.set_by(item),
         **mail,
         **card,
     )

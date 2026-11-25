@@ -156,18 +156,18 @@ def _kept_by_own_code(alert: Alert) -> bool:
 
 def _quiet(alert: Alert) -> bool:
     """A card that is one person's alone: the principal's (``is_private_alert``),
-    its own person's (``PERSONAL_SOURCES``, an email watch's sender and
-    subject), the ask a teammate raised from their own chat
+    its own person's (``is_one_persons``: an email watch's sender and
+    subject, a finding of someone's own watch), the ask a teammate raised from their own chat
     (``TEAM_RAISED_SOURCE``), or a step waiting on its approver. The review
     tidies these (settle, merge with the same reader's cards) but never
     routes, nudges, escalates or drafts on them, and never shows them as
     evidence for a card someone else reads: privacy hides, it never stops
     the tidy-up."""
-    from openexecutive.alerts.models import PERSONAL_SOURCES, TEAM_RAISED_SOURCE, is_private_alert
+    from openexecutive.alerts.models import TEAM_RAISED_SOURCE, is_one_persons, is_private_alert
 
     return (
         alert.source in TTL_EXEMPT_SOURCES
-        or alert.source in PERSONAL_SOURCES
+        or is_one_persons(alert)
         or alert.source == TEAM_RAISED_SOURCE
         or is_private_alert(alert)
     )

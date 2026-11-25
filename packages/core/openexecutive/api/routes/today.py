@@ -1914,7 +1914,7 @@ def _build_activity(
         if d.config.authority_level == "propose_only"
     }
 
-    from openexecutive.alerts.models import PERSONAL_SOURCES, is_private_alert, visible_alert
+    from openexecutive.alerts.models import is_one_persons, is_private_alert, visible_alert
 
     for action in list_scheduled_actions(status="done", limit=pool, exclude_internal=True):
         if action.kind == "nudge_scan" or action.channel == "__internal__":
@@ -2114,7 +2114,7 @@ def _build_activity(
     for alert in (alerts_store.recent_alerts(
         limit=pool, exclude_source=decision_ledger.DECISION_ALERT_SOURCE,
     ) if include_alert_raised else []):
-        personal = alert.source in PERSONAL_SOURCES
+        personal = is_one_persons(alert)
         if is_private_alert(alert) or (not personal and not visible_alert(alert, None)):
             continue  # the rail is shown to everyone
         if personal and (viewer is None or alert.routed_to_person_id != viewer):

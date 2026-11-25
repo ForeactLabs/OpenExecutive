@@ -792,3 +792,11 @@ def test_a_short_quote_backs_a_fix_when_it_names_the_thing() -> None:
 def test_a_filler_reply_backs_no_fix(quote: str, tool: str, tool_input: dict[str, str]) -> None:
     assert cr._target_refusal(tool, {**tool_input, "source_quote": quote}, quote) == (
         "what this changes isn't named in their own words")
+
+
+def test_a_made_up_claim_is_a_miss() -> None:
+    """A reply invented that the person had asked Jamie to move a delivery;
+    the look-back counted no miss because the person hadn't complained."""
+    assert "states as fact something they never said" in cr._GRADE_SYSTEM
+    assert "whether or not \\\nthey noticed" not in cr._GRADE_SYSTEM
+    assert "whether or not they noticed" in cr._GRADE_SYSTEM

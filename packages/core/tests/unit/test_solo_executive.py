@@ -29,7 +29,6 @@ from openexecutive.orchestrator.schedule_tools import (
     tools_withheld_in_mode,
 )
 from openexecutive.orchestrator.session import Session
-from tests.unit.offered_tools import capture_offered
 from openexecutive.people import registry as people_registry
 from openexecutive.people import store as people_store
 from openexecutive.prompts.cache_manager import build_system_blocks
@@ -38,6 +37,7 @@ from openexecutive.prompts.executive_persona import (
     EXECUTIVE_PERSONA_SOLO_PROMPT,
     default_persona,
 )
+from tests.unit.offered_tools import capture_offered
 
 from ._agent_loop_fakes import FinalMsg, ScriptedProvider, TextBlock, ToolUseBlock
 
@@ -56,7 +56,8 @@ from ._agent_loop_fakes import FinalMsg, ScriptedProvider, TextBlock, ToolUseBlo
 # And again: Big jobs (do the whole job; a one-line heads-up for a long one).
 # And again: an email reply may quote a draft signed by the sender for them to send.
 # And again: Doing what was asked (a figure that looks off goes through, with the doubt said).
-TEAM_PERSONA_SHA256 = "d078430adb4412899b8e812aa0b74195386eca88f09941452e9aef8de2939ba0"
+# And again: a typed address goes through whatever name shows on it, and a repeat is sent, not asked about.
+TEAM_PERSONA_SHA256 = "1a9aeaca1077728fd34b7a50403b44358f662579bc48e09f8c11bfc7ea52e880"
 
 SOLO_HEADINGS = (
     "## You Work for One Person",

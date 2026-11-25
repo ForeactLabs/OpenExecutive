@@ -847,7 +847,10 @@ is fine unless the reply plainly didn't answer.
 - miss: the reply fell short and the chat shows it: a thumbs down, a stopped \
 or taken-back reply, a correction or the same ask again in the next messages, \
 a claim no tool backed that its final words still stand by, a failed tool the \
-reply didn't get past, a reply that said it couldn't do what was asked. A \
+reply didn't get past, a reply that said it couldn't do what was asked, a \
+reply that states as fact something they never said and nothing shown backs \
+(a made-up detail, or a step it says they or anyone took), whether or not \
+they noticed, quoting their ask from that turn. A \
 claim the same reply then made good or plainly took back, or a failed tool \
 another call made up for, is not a miss on its own.
 - unclear: you can't tell either way.

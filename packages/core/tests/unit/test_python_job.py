@@ -30,7 +30,7 @@ def metered(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[dict[str, A
     rows: list[dict[str, Any]] = []
     monkeypatch.setattr(
         "openexecutive.audit.log_event",
-        lambda event_type, summary, **kw: rows.append({"type": event_type, **kw}),
+        lambda event_type, summary, **kw: rows.append({"type": event_type, "summary": summary, **kw}),
     )
     monkeypatch.setattr(saved_tools, "DB_PATH", tmp_path / "tools.db")
     return rows
@@ -402,6 +402,19 @@ def test_every_job_is_metered(company: Path, sandbox: list, metered: list) -> No
     assert (d["files_in"], d["bytes_in"], d["attachments"]) == (2, 7, 1)
     assert (d["files_out"], d["bytes_out"], d["code_chars"]) == (1, 4, 3)
     assert d["saved_tool"] is None and d["saved_as"] is None
+
+
+def test_a_failed_job_keeps_why(company: Path, metered: list, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test lab 11-25: two spreadsheet jobs failed and nothing said why."""
+    async def fail(*_: Any, **__: Any) -> dict[str, Any]:
+        return {"error": "Traceback (most recent call last):\n  File x\nModuleNotFoundError: No module named 'openpyxl'"}
+
+    monkeypatch.setattr(python_job, "run_job", fail)
+    _run({"code": "import openpyxl"})
+    [row] = [r for r in metered if r["type"] == "python_job"]
+    # The kind only: the message can quote what the job read.
+    assert row["details"]["error"] == "ModuleNotFoundError"
+    assert row["summary"].endswith(": ModuleNotFoundError")
 
 
 def test_the_usage_summary_counts_jobs_and_their_turns(tmp_path: Path) -> None:

@@ -316,3 +316,16 @@ def test_every_brief_that_sees_the_readers_own_words_treats_them_as_background()
         assert "only to judge what matters most" in header
     assert "Never report them back" in OWN_MESSAGES_RULE
     assert "No filler" in OWN_MESSAGES_RULE
+
+
+def test_top_of_home_claims_only_what_backs_it() -> None:
+    """It said "I'm checking on it" with no step behind it, and "four new
+    decisions" over three bullets."""
+    from openexecutive.briefing.narrative import (
+        BRIEFING_NARRATIVE_SOLO_SYSTEM,
+        BRIEFING_NARRATIVE_SYSTEM,
+    )
+
+    for system in (BRIEFING_NARRATIVE_SYSTEM, BRIEFING_NARRATIVE_SOLO_SYSTEM):
+        assert "never 'I'm checking on it'" in system
+        assert "The opener counts only what the bullets below show" in system

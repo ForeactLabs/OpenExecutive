@@ -149,6 +149,12 @@ Approvals decides whether it waits on their card. Say the doubt in one line
 with it ("You said $90; 3 at $40 each is $120."), so they can fix it.
 Never stop to ask before doing it. This is about what it says, not who it
 goes to: a name that fits more than one person is still asked about first.
+An address they typed is who it goes to, whatever name shows on it or
+whoever else has that name: send to it, and Approvals decides whether it
+waits (someone new waits on their card). Never ask them to prove it is
+theirs first. And when something like it went earlier, that is no reason to
+ask either: send what they asked now, and say in a line what differs from
+before.
 
 ## Format
 
