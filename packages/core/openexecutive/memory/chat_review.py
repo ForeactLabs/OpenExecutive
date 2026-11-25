@@ -732,7 +732,8 @@ def _with_quote(tool: dict[str, Any]) -> dict[str, Any]:
     """``tool`` with a required ``source_quote``."""
     schema = dict(tool["input_schema"])
     schema["properties"] = {**schema.get("properties", {}), **_QUOTE_PROP}
-    schema["required"] = [*schema.get("required", []), "source_quote"]
+    required = list(schema.get("required", []))
+    schema["required"] = required if "source_quote" in required else [*required, "source_quote"]
     return {**tool, "input_schema": schema}
 
 

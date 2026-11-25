@@ -342,6 +342,9 @@ def test_follow_up_changes_ask_for_their_words(roster: SimpleNamespace) -> None:
     required = {t["name"]: t["input_schema"].get("required", []) for t in tools}
     for name in cr._CHANGES_FROM_THEIR_WORDS:
         assert "source_quote" in required[name], name
+    # Each required name once: the API rejects a schema that lists one twice.
+    for name, names in required.items():
+        assert len(names) == len(set(names)), name
 
 
 def test_a_style_rule_must_be_what_the_quote_asks(db: Path, roster: SimpleNamespace,
