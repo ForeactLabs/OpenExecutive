@@ -324,11 +324,10 @@ def test_a_save_files_card_shows_who_else_sees_it_and_saves_on_the_tap(
     # A team member's card can't hold one.
     member = SimpleNamespace(id=2, is_principal=False)
     assert "owner" in str(action_cards.check([{"kind": "save_files", "folder": FOLDER, "files": [{"file": "file:a"}]}], member, now=datetime.now(UTC)))
-    # Never on its own; on the tap it saves the kept copy, in another request.
-    assert asyncio.run(action_cards._do_save_files(stored, tapped=False))["status"] == "failed"
+    # On the tap it saves the kept copy, in another request.
     # Another file kept under the same name before the tap: not what the card showed.
     conversation_files.keep(company.session_id, {"Willow Court 2026 Tax Bill.pdf": b"something else"})
-    got = asyncio.run(action_cards._do_save_files(stored, tapped=True))
+    got = asyncio.run(action_cards._do_save_files(stored))
     assert got["status"] == "failed" and "changed since the card was made" in got["detail"]
     conversation_files.keep(company.session_id, {"Willow Court 2026 Tax Bill.pdf": b"page one"})
     token = current_session.set(Session(unattended=True))
@@ -355,13 +354,14 @@ def test_a_save_files_card_refuses_what_it_shouldnt_hold(
     assert "at most" in str(action_cards.check([{"kind": "save_files", "folder": FOLDER, "files": many}], owner, now=now))
     twice = action_cards.check([{"kind": "save_files", "folder": FOLDER, "files": one + one}], owner, now=now)
     assert isinstance(twice, list) and len(twice[0]["input"]["files"]) == 1
-    # Never carried out on its own, whatever the settings.
+    # A folder people outside the team can open is sharing: below Hands-off
+    # it waits for a tap.
     monkeypatch.setattr("openexecutive.delegation.handle_it.get", lambda _pid: SimpleNamespace(enabled=True))
-    monkeypatch.setattr("openexecutive.delegation.handle_it.approvals_hold", lambda: False)
     monkeypatch.setattr("openexecutive.delegation.settings.can_delegate", lambda _p: True)
     monkeypatch.setattr("openexecutive.delegation.settings.is_enabled", lambda _pid: True)
     monkeypatch.setattr("openexecutive.delegation.handle_it.signing_ok", lambda: True)
-    assert action_cards._on_its_own_refusal(owner, twice, now) == "tap_only"
+    monkeypatch.setattr("openexecutive.orchestrator.outside_mode.get_mode", lambda **_: "outsiders")
+    assert action_cards._on_its_own_refusal(owner, twice, now) == "shared"
     # Two files under one name: no card (one would be lost).
     conversation_files.keep(company.session_id, {"x.pdf": b"1", "y.pdf": b"2"})
     same = action_cards.check([{"kind": "save_files", "folder": FOLDER, "files": [
@@ -395,7 +395,7 @@ def test_a_team_only_folder_needs_no_card_and_a_lost_copy_isnt_saved(
     assert "no card needed" in str(asyncio.run(action_cards.describe_save_files(checked, company.session_id)))
     # A kept copy that's gone (a week on): nothing saved, and it says so.
     stored = {"folder": FOLDER, "session_id": company.session_id, "files": [{"file": "file:gone.pdf", "name": "gone.pdf", "kept": "gone.pdf"}]}
-    got = asyncio.run(action_cards._do_save_files(stored, tapped=True))
+    got = asyncio.run(action_cards._do_save_files(stored))
     assert got["status"] == "failed" and "no longer kept" in got["detail"]
 
 
@@ -423,7 +423,7 @@ def test_a_card_left_before_saves_stopped_waiting_still_saves_on_the_tap(
     conversation_files.keep(company.session_id, {"a.pdf": b"x"})
     files = [{"file": "file:a.pdf", "name": "a.pdf", "kept": "a.pdf", "sha256": hashlib.sha256(b"x").hexdigest()}]
     shown = {"folder": FOLDER, "session_id": company.session_id, "files": files, "outside": []}
-    assert asyncio.run(action_cards._do_save_files(shown, tapped=True))["status"] == "done"
+    assert asyncio.run(action_cards._do_save_files(shown))["status"] == "done"
     assert sum(1 for n, _ in shared_drive[1:] if n.endswith("create_drive_file")) == 1
 
 

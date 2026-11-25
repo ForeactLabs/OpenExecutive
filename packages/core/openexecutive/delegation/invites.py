@@ -37,7 +37,7 @@ offering Accept (``can_answer``).
 invite is accepted with no tap when plain code finds nothing against it
 (``refusal``): Approvals is not on Careful, the sender is on their team or
 in their contacts (anyone under Hands-off), signed sign-ins or local login, nothing clashes, nothing sensitive in the
-title below Hands-off (``handle_it.content_hold``), their sign-in can answer, and the daily limit and once-a-day-per-thread
+title below Hands-off (``take_the_lead.as_you``), their sign-in can answer, and the daily limit and once-a-day-per-thread
 rule of Handle it for me (``handle_it.count_refusal``) allow it. It never
 declines on its own. Accepted ones are listed with the replies it sent
 (``handled``: ``GET /delegation/handled``, Today's ``sent_as_you``), the
@@ -406,21 +406,19 @@ def _refusal(
 
     if not handle_it.get(person_id).enabled:
         return "off"
-    if handle_it.approvals_hold():
-        return "level"
-    # In training, only a sender they allowed; otherwise, below Hands-off,
-    # only someone on their team or a contact: someone they have only
-    # written to (which a reply sent on its own can make anyone) gets a card.
-    held = handle_it.training_hold(person_id, [sender])
-    if held is not None:
-        return held
-    if not handle_it.in_training(person_id) and relation not in ON_ITS_OWN_RELATIONS and not _hands_off():
-        return "stranger"
-    if not handle_it.signing_ok():
-        return "signing_off"
-    held = handle_it.content_hold(title, recipients=(sender,))
+    from openexecutive.orchestrator import take_the_lead
+
+    # Below Hands-off, only someone on their team or a contact: someone they
+    # have only written to (which a reply sent on its own can make anyone)
+    # is someone new.
+    held = take_the_lead.as_you(
+        person_id, texts=(title,), recipients=[sender],
+        noticed=["stranger" if relation not in ON_ITS_OWN_RELATIONS else ""],
+    )
     if held:
         return held
+    if not handle_it.signing_ok():
+        return "signing_off"
     if clash is None:
         return "calendar_unread"
     if clash:
@@ -540,16 +538,6 @@ async def consider(
     })
     if held is None and await accept_on_its_own(person, client, decision_id, now=now):
         result.handled += 1
-
-
-def _hands_off() -> bool:
-    """Whether Approvals is on Hands-off. Never raises: unreadable is no."""
-    try:
-        from openexecutive.orchestrator import outside_mode
-
-        return outside_mode.get_mode() == outside_mode.TRUST
-    except Exception:
-        return False
 
 
 def _handle_it_on(person_id: int) -> bool:

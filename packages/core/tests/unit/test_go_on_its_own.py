@@ -70,7 +70,8 @@ def _sent_unchanged(owner: Any, to: str = KENJI, times: int = ttl.SUGGEST_AFTER)
 
 
 def test_three_unchanged_sends_in_training_offer_that_person(owner: Any) -> None:
-    training.set_(owner.id, {training.TRAINING: True}, updated_by="t")
+    from openexecutive.orchestrator import take_the_lead as _ttl
+    _ttl.set_(_ttl.SCOPE_EXECUTIVE, training=True, updated_by="t")
     _sent_unchanged(owner, times=ttl.SUGGEST_AFTER - 1)
     assert training.offers(owner.id) == []
     _reply(owner.id, KENJI, status=ledger.STATUS_APPROVED_WITH_EDIT)  # an edit doesn't count
@@ -88,7 +89,8 @@ def test_no_offer_outside_training(owner: Any) -> None:
 
 
 def test_let_it_go_allows_the_person(owner: Any) -> None:
-    training.set_(owner.id, {training.TRAINING: True}, updated_by="t")
+    from openexecutive.orchestrator import take_the_lead as _ttl
+    _ttl.set_(_ttl.SCOPE_EXECUTIVE, training=True, updated_by="t")
     _sent_unchanged(owner)
     [offer] = training.offers(owner.id)
     assert training.let_go(owner.id, "act_as_me|person:1|person|nobody@x.example") is None
@@ -98,7 +100,8 @@ def test_let_it_go_allows_the_person(owner: Any) -> None:
 
 
 def test_keep_asking_waits_for_three_more(owner: Any) -> None:
-    training.set_(owner.id, {training.TRAINING: True}, updated_by="t")
+    from openexecutive.orchestrator import take_the_lead as _ttl
+    _ttl.set_(_ttl.SCOPE_EXECUTIVE, training=True, updated_by="t")
     _sent_unchanged(owner)
     [offer] = training.offers(owner.id)
     assert training.keep_asking(owner.id, offer.key) is True
@@ -113,7 +116,8 @@ def test_someone_elses_cards_never_count(owner: Any) -> None:
     from openexecutive.people import store as people_store
 
     sam = people_store.upsert_person(full_name="Sam Teammate", email="sam@co.example")
-    training.set_(owner.id, {training.TRAINING: True}, updated_by="t")
+    from openexecutive.orchestrator import take_the_lead as _ttl
+    _ttl.set_(_ttl.SCOPE_EXECUTIVE, training=True, updated_by="t")
     for _ in range(ttl.SUGGEST_AFTER):
         _reply(sam, KENJI)
     assert training.offers(owner.id) == []
@@ -175,7 +179,8 @@ def test_a_card_that_lapsed_is_not_declined(owner: Any) -> None:
 
 
 def test_the_route_lists_and_answers_offers(client: TestClient, owner: Any) -> None:
-    training.set_(owner.id, {training.TRAINING: True}, updated_by="t")
+    from openexecutive.orchestrator import take_the_lead as _ttl
+    _ttl.set_(_ttl.SCOPE_EXECUTIVE, training=True, updated_by="t")
     _sent_unchanged(owner)
     body = client.get("/approvals/summary").json()
     [offer] = body["offers"]
@@ -195,7 +200,8 @@ def test_a_teammate_cant_answer_someone_elses_offers(client: TestClient, owner: 
     people_registry.invalidate()
     ttl.set_(ttl.SCOPE_EXECUTIVE, training=True, updated_by="t")
     as_me_key = _as_me_unchanged(ttl.SUGGEST_AFTER)
-    training.set_(owner.id, {training.TRAINING: True}, updated_by="t")
+    from openexecutive.orchestrator import take_the_lead as _ttl
+    _ttl.set_(_ttl.SCOPE_EXECUTIVE, training=True, updated_by="t")
     _sent_unchanged(owner)
     [as_you_key] = [o.key for o in training.offers(owner.id)]
     headers = {"x-caller-email": sam}
@@ -210,7 +216,8 @@ def test_a_teammate_cant_answer_someone_elses_offers(client: TestClient, owner: 
 
 
 def test_letting_go_needs_a_provable_person(client: TestClient, owner: Any, monkeypatch: pytest.MonkeyPatch) -> None:
-    training.set_(owner.id, {training.TRAINING: True}, updated_by="t")
+    from openexecutive.orchestrator import take_the_lead as _ttl
+    _ttl.set_(_ttl.SCOPE_EXECUTIVE, training=True, updated_by="t")
     _sent_unchanged(owner)
     [offer] = client.get("/approvals/summary").json()["offers"]
     monkeypatch.delenv("OE_LOCAL_LOGIN", raising=False)
@@ -219,7 +226,8 @@ def test_letting_go_needs_a_provable_person(client: TestClient, owner: Any, monk
 
 
 def test_an_address_with_a_bar_is_offered_whole(owner: Any) -> None:
-    training.set_(owner.id, {training.TRAINING: True}, updated_by="t")
+    from openexecutive.orchestrator import take_the_lead as _ttl
+    _ttl.set_(_ttl.SCOPE_EXECUTIVE, training=True, updated_by="t")
     _sent_unchanged(owner, to="x|ceo@partner.example")
     [offer] = training.offers(owner.id)
     assert offer.address == "x|ceo@partner.example"

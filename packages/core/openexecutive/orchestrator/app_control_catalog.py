@@ -675,14 +675,13 @@ _SETTINGS: dict[str, str] = {
     "urgent_through": "Let urgent things through quiet hours",
     "act_as_me": "As you",
     "inbox_drafts": "Draft replies to your inbox",
-    "as_you_training": "In training for As you",
-    "as_me_training": "In training for As me",
+    "as_me_training": "In training",
 }
 # Turning these on lets the Executive write as the person, or (inbox
 # replies, where Approvals lets them go) send as them.
 _WIDENING = frozenset({"act_as_me", "inbox_drafts"})
 # Turning these off lets more go on its own: In training holds everything.
-_TRAINING = frozenset({"as_you_training", "as_me_training"})
+_TRAINING = frozenset({"as_me_training"})
 
 
 async def _find_settings(request: Any) -> list[Item]:
@@ -704,10 +703,6 @@ async def _find_settings(request: Any) -> list[Item]:
         state = d.model_dump()
         items.append(Item(id="act_as_me", title=_SETTINGS["act_as_me"], detail="on" if state.get("enabled") else "off"))
         items.append(Item(id="inbox_drafts", title=_SETTINGS["inbox_drafts"]))
-        training = state.get("training") or {}
-        if "training" in training:
-            items.append(Item(id="as_you_training", title=_SETTINGS["as_you_training"],
-                              detail="on" if training.get("training") else "off"))
     except Exception:
         pass
     try:
@@ -765,8 +760,6 @@ async def _change_setting(request: Any, setting: str, value: str) -> str:
         await delegation.update_delegation(request, delegation.DelegationUpdate(enabled=on))
     elif setting == "inbox_drafts":
         await delegation.update_delegation_inbox(request, delegation.InboxUpdate(enabled=on))
-    elif setting == "as_you_training":
-        await _signed(delegation.update_delegation_training, request, delegation.TrainingUpdate(training=on))
     else:
         from openexecutive.api.routes import take_the_lead as lead_route
 
@@ -1115,8 +1108,8 @@ _ACTIONS = (
     # Settings
     Action("change_setting", "setting",
            "Change one of the person's own settings: quiet_hours (start-end or off), delivery "
-           "(instant or digest), urgent_through, act_as_me, inbox_drafts, as_you_training, "
-           "as_me_training (on or off)",
+           "(instant or digest), urgent_through, act_as_me, inbox_drafts, "
+           "as_me_training (In training, on or off)",
            _change_setting, confirm=_setting_needs_tap, value="the new value", card="Set {title} to {value}"),
     # Approvals and Your rules: holding more is done now, letting more go waits.
     Action("set_approvals_level", "approvals",

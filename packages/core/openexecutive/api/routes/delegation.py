@@ -234,8 +234,9 @@ class LearnedOut(BaseModel):
 
 
 class TrainingOut(BaseModel):
-    """As you in training (delegation.training): the switch, Learn from my
-    edits, and what it learned."""
+    """As you in training (delegation.training): whether In training is on
+    (the company's one switch, read only here), Learn from my edits, and
+    what it learned."""
 
     # In training: nothing goes out as them on its own but to people they allowed.
     training: bool = False
@@ -246,9 +247,11 @@ class TrainingOut(BaseModel):
 
 
 class TrainingUpdate(BaseModel):
+    """Learn from my edits. In training is the company's one switch
+    (``PUT /take-the-lead``), not a person's own."""
+
     model_config = ConfigDict(extra="forbid")
 
-    training: bool | None = None
     drafts: bool | None = None
 
 
@@ -1609,13 +1612,12 @@ async def update_delegation_disclosure(request: Request, body: DisclosureUpdate)
 
 @router.put("/delegation/training", response_model=DelegationOut)
 async def update_delegation_training(request: Request, body: TrainingUpdate) -> DelegationOut:
-    """In training (holds everything sent as them but to people they
-    allowed) and Learn from my edits. Putting it in training, or keeping
-    less, needs no signed sign-in; leaving training or keeping more does."""
+    """Learn from my edits. Keeping less needs no signed sign-in; keeping
+    more does."""
     from openexecutive.delegation import training
 
     changes = {k: v for k, v in body.model_dump().items() if v is not None}
-    narrowing = all(v is (k == training.TRAINING) for k, v in changes.items())
+    narrowing = all(v is False for v in changes.values())
     person = _signed_caller(request, narrowing=narrowing)
     person_id = _person_id(person)
     before = training.get(person_id)

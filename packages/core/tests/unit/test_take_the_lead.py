@@ -2656,41 +2656,59 @@ def test_a_person_or_company_rule_never_lets_a_share_go(owner: Any, balanced: No
     assert "lee@far.example" not in mcp_gateway._roster_allow_set()
 
 
+def _as_you_hold(*texts: str, recipients: tuple[str, ...] = ()) -> str | None:
+    """What the one gate says about a message sent as the owner on its own
+    (``take_the_lead.as_you``), with In training off."""
+    return ttl.as_you(1, texts=texts, recipients=list(recipients))
+
+
 def test_a_topic_goes_rule_releases_its_words_in_what_it_sends_on_its_own(owner: Any, balanced: None) -> None:
-    assert handle_it.content_hold("Please sign the contract") == "sensitive"
+    assert _as_you_hold("Please sign the contract") == "sensitive"
     _go("topic", "money")
     # A money rule doesn't cover a contract.
-    assert handle_it.content_hold("Please sign the NDA") == "sensitive"
+    assert _as_you_hold("Please sign the NDA") == "sensitive"
     _go("topic", "contracts")
-    assert handle_it.content_hold("Please sign the contract") is None
+    assert _as_you_hold("Please sign the contract") is None
+
+
+def test_in_training_an_allowed_person_is_no_longer_someone_new(owner: Any, balanced: None) -> None:
+    from openexecutive.delegation import training
+
+    ttl.set_(ttl.SCOPE_EXECUTIVE, training=True, updated_by="t")
+    bob = "bob@far.example"
+    assert ttl.as_you(1, recipients=[bob], noticed=["new_person"]) == ttl.TRAINING
+    training.allow_person(1, bob, "Bob", decision_id=None)
+    # Allowed: a recent roster entry no longer waits, a new contact still does.
+    assert ttl.as_you(1, recipients=[bob], noticed=["new_person"]) is None
+    assert ttl.as_you(1, recipients=[bob], noticed=["new_contact"]) == "new_contact"
 
 
 def test_topic_rules_on_what_it_sends_as_you(owner: Any, balanced: None) -> None:
     _go("topic", "contracts")
-    assert handle_it.content_hold("The contract is attached.") is None
+    assert _as_you_hold("The contract is attached.") is None
     # Handing over a password is sharing, which a contracts rule doesn't cover.
-    assert handle_it.content_hold("The contract is attached, password inside.") == "sensitive"
+    assert _as_you_hold("The contract is attached, password inside.") == "sensitive"
     assert ttl.topics_in("Your API key is sk-1") == {ttl.SHARE}
     assert ttl.topics_in("Use the login page") == set()
-    assert handle_it.content_hold("Here is the invoice for $450.") == "sensitive"
+    assert _as_you_hold("Here is the invoice for $450.") == "sensitive"
     _go("topic", "money")
-    assert handle_it.content_hold("Here is the invoice for $450.") is None
+    assert _as_you_hold("Here is the invoice for $450.") is None
     ttl.add_rule(ttl.SCOPE_COMPANY, "topic", "money", created_by="t")
-    assert handle_it.content_hold("Here is the invoice for $450.") == "rule"
+    assert _as_you_hold("Here is the invoice for $450.") == "rule"
 
 
 def test_a_topic_read_that_fails_releases_nothing(
     owner: Any, balanced: None, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _go("topic", "big_send")
-    assert handle_it.content_hold("About the lawsuit") == "sensitive"
+    assert _as_you_hold("About the lawsuit") == "sensitive"
 
     def boom(*_a: Any, **_k: Any) -> Any:
         raise RuntimeError("boom")
 
     monkeypatch.setattr(ttl, "_topics", boom)
     assert ttl.topics_in("About the lawsuit") == set(ttl.KINDS)
-    assert handle_it.content_hold("About the lawsuit") == "sensitive"
+    assert _as_you_hold("About the lawsuit") == "sensitive"
 
 
 def test_a_someone_new_waits_rule_holds_a_reply_as_you_on_hands_off(
@@ -2699,10 +2717,10 @@ def test_a_someone_new_waits_rule_holds_a_reply_as_you_on_hands_off(
     from openexecutive.orchestrator import outside_mode
 
     monkeypatch.setattr(outside_mode, "get_mode", lambda **_: outside_mode.TRUST)
-    assert handle_it.content_hold("Thanks!", recipients=("stranger@acme.io",)) is None
+    assert _as_you_hold("Thanks!", recipients=("stranger@acme.io",)) is None
     ttl.add_rule(ttl.SCOPE_COMPANY, "topic", "someone_new", created_by="t")
-    assert handle_it.content_hold("Thanks!", recipients=("stranger@acme.io",)) == "rule"
-    assert handle_it.content_hold("Thanks!", recipients=(owner.email,)) is None
+    assert _as_you_hold("Thanks!", recipients=("stranger@acme.io",)) == "rule"
+    assert _as_you_hold("Thanks!", recipients=(owner.email,)) is None
     many = tuple(f"p{i}@co.example" for i in range(ttl.BIG_SEND_RECIPIENTS + 1))
     assert ttl.BIG_SEND in ttl.topics_in("Thanks!", many)
 

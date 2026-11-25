@@ -450,11 +450,35 @@ def test_on_hands_off_someone_new_is_reached_too(
     assert result["status"] == "done_on_its_own" and len(sends) == 1
 
 
-def test_a_link_or_amount_goes_too(actions_on: SimpleNamespace, sends: list[Any], signed: dict[str, Any]) -> None:
+def test_a_link_goes_and_money_waits_on_balanced(
+    actions_on: SimpleNamespace, sends: list[Any], signed: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A card on its own meets Your rules and the topics like any step:
+    on Balanced, a message about money waits; on Hands-off it goes."""
     roster = actions_on
-    actions = [_message(roster.teammate, "See https://files.example.com/x"), _message(roster.teammate, "Is $400 right?")]
-    result = _propose(_session(FakeMailbox()), {"why": "y", "actions": actions})
-    assert result["status"] == "done_on_its_own" and len(sends) == 2
+    result = _propose(_session(FakeMailbox()), {"why": "y", "actions": [_message(roster.teammate, "See https://files.example.com/x")]})
+    assert result["status"] == "done_on_its_own" and len(sends) == 1
+    person = people_store.get_person(roster.principal)
+    money = action_cards.check([_message(roster.teammate, "Is $400 right?")], person, now=datetime.now(UTC))
+    assert not isinstance(money, str)
+    assert action_cards.on_its_own_refusal(person, money, now=datetime.now(UTC)) == "sensitive"
+    _level(monkeypatch, "trust")
+    assert action_cards.on_its_own_refusal(person, money, now=datetime.now(UTC)) is None
+
+
+def test_your_rules_hold_a_card_on_its_own_on_hands_off(
+    actions_on: SimpleNamespace, signed: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.orchestrator import take_the_lead as ttl
+
+    roster = actions_on
+    _level(monkeypatch, "trust")
+    person = people_store.get_person(roster.principal)
+    checked = action_cards.check([_message(roster.teammate, "The lawsuit papers are ready")], person, now=datetime.now(UTC))
+    assert not isinstance(checked, str)
+    assert action_cards.on_its_own_refusal(person, checked, now=datetime.now(UTC)) is None
+    ttl.add_rule(ttl.SCOPE_COMPANY, "words", "lawsuit", created_by="t")
+    assert action_cards.on_its_own_refusal(person, checked, now=datetime.now(UTC)) == "rule"
 
 
 @pytest.mark.parametrize(("arrange", "reason"), [("careful", "level"), ("off", "handle_it_off")])
@@ -522,13 +546,17 @@ SCAN_1, SCAN_2, PROCESSED = "1scanFileAAAA01", "1scanFileBBBB02", "1processedFol
 class _DriveGateway:
     def __init__(self) -> None:
         self.changes: list[tuple[str, str, str]] = []
+        self.tapped: list[bool] = []
 
     async def drive_item_names(self, ids: list[str]) -> dict[str, str]:
         names = {SCAN_1: "scan_0001.pdf", SCAN_2: "scan_0002.pdf", PROCESSED: "processed"}
         return {i: names[i] for i in ids if i in names}
 
-    async def tapped_drive_change(self, file_id: str, *, name: str = "", move_to: str = "") -> str | None:
+    async def tapped_drive_change(
+        self, file_id: str, *, name: str = "", move_to: str = "", tapped: bool = True,
+    ) -> str | None:
         self.changes.append((file_id, name, move_to))
+        self.tapped.append(tapped)
         return "Drive said no." if file_id == SCAN_2 and move_to else None
 
 
@@ -592,15 +620,20 @@ def test_a_team_member_cant_leave_a_drive_card(roster: SimpleNamespace) -> None:
     assert "owner's" in _propose(_teammate_session(), {"why": "x", "actions": [_drive(two="x.pdf")]})["error"]
 
 
-def test_a_drive_card_always_waits_for_the_tap(
-    actions_on: SimpleNamespace, drive: _DriveGateway, signed: dict[str, Any],
+def test_a_drive_card_follows_the_level(
+    actions_on: SimpleNamespace, drive: _DriveGateway, signed: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A rename or move is no topic: on Balanced it goes on its own like
+    any other step; on Careful it waits."""
     person = people_store.get_person(actions_on.principal)
     checked = action_cards.check([_drive(two="Elm Street.pdf")], person, now=datetime.now(UTC))
     assert not isinstance(checked, str)
-    assert action_cards.on_its_own_refusal(person, checked, now=datetime.now(UTC)) == "tap_only"
-    result = _propose(_session(FakeMailbox()), {"why": "y", "actions": [_drive(two="Elm Street.pdf")]})
-    assert result["status"] == "waiting_for_approval" and drive.changes == []
+    assert action_cards.on_its_own_refusal(person, checked, now=datetime.now(UTC)) is None
+    # Run on its own, each change meets the gateway's usual Drive checks.
+    asyncio.run(action_cards._do(checked[0], person))
+    assert drive.tapped and not any(drive.tapped)
+    _level(monkeypatch, "ask")
+    assert action_cards.on_its_own_refusal(person, checked, now=datetime.now(UTC)) == "level"
 
 
 def test_a_drive_card_with_a_file_drive_cant_name_is_refused(
@@ -629,7 +662,8 @@ def test_in_training_a_card_waits_until_they_allow_who_it_reaches(
     from openexecutive.delegation import training
 
     roster = actions_on
-    training.set_(roster.principal, {training.TRAINING: True}, updated_by="t")
+    from openexecutive.orchestrator import take_the_lead as _ttl
+    _ttl.set_(_ttl.SCOPE_EXECUTIVE, training=True, updated_by="t")
     person = people_store.get_person(roster.principal)
     checked = action_cards.check([_message(roster.teammate)], person, now=datetime.now(UTC))
     assert not isinstance(checked, str)

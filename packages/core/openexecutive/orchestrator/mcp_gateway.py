@@ -4454,10 +4454,13 @@ class MCPGateway:
                 out[item_id] = first[len("File: "):].strip()
         return out
 
-    async def tapped_drive_change(self, file_id: str, *, name: str = "", move_to: str = "") -> str | None:
-        """Rename and/or move one Drive file as the person approved it on a
-        card (``tapped_drive_call``): a move takes it out of every folder it
-        is in now. None when it worked, else what went wrong in plain words."""
+    async def tapped_drive_change(
+        self, file_id: str, *, name: str = "", move_to: str = "", tapped: bool = True,
+    ) -> str | None:
+        """Rename and/or move one Drive file from a card: a move takes it out
+        of every folder it is in now. ``tapped``: the person approved it on
+        the card (``tapped_drive_call``); otherwise the change meets every
+        usual check. None when it worked, else what went wrong in plain words."""
         arguments: dict[str, Any] = {"file_id": file_id}
         if name:
             arguments["name"] = name
@@ -4485,7 +4488,10 @@ class MCPGateway:
                 if not arguments["remove_parents"]:
                     del arguments["remove_parents"]
         tool_input = {"name": "google_workspace__update_drive_file", "arguments": arguments}
-        with tapped_drive_call(tool_input):
+        if tapped:
+            with tapped_drive_call(tool_input):
+                result = await self.call_tool(tool_input)
+        else:
             result = await self.call_tool(tool_input)
         text = result if isinstance(result, str) else ""
         head = text.lstrip()
@@ -4496,6 +4502,9 @@ class MCPGateway:
                 parsed = None
             if isinstance(parsed, dict) and parsed.get("error"):
                 return str(parsed["error"])[:300]
+            # Run on its own, the change can wait on its own card instead.
+            if isinstance(parsed, dict) and parsed.get("status") == "waiting_for_approval":
+                return "Not done yet: it waits for your approval on its own card."
         if not head or head.lower().startswith(("error", "tool error")):
             return (head or "Drive didn't answer.")[:300]
         return None
