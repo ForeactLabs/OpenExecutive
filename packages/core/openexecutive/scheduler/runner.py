@@ -1465,8 +1465,9 @@ def _since_scheduled_block(action: ScheduledAction, person: Person | None) -> st
         f"<since_scheduled>\n{lines}\n</since_scheduled>\n\n"
         f"What they said last wins over what was scheduled: if they since "
         f"asked to hold it, change it or drop it, do that, and make the one "
-        f"message to them say so in a line (held as you asked, and what "
-        f"they need to say to send it). If it only looks done already, still "
+        f"message to them say so in a line (held as you asked, what it "
+        f"was, and that they can ask for it again any time). If it only "
+        f"looks done already, still "
         f"send the one message, and say in a line that it looks handled. "
         f"Never send something to someone else that they asked to hold. "
         f"If you held it or dropped it as they asked, start your final reply "
@@ -1483,8 +1484,9 @@ def _tell_setter_block(name: str) -> str:
         f" If what {name} said since asks to hold it or drop it, "
         f"send nothing to anyone else. Either way, end with one short "
         f"line to {name} saying what you did (sent it, or held it as "
-        f"they asked and what to say to send it): that line is sent "
-        f"to them as written."
+        f"they asked, what it was, and that they can ask for it again "
+        f"any time). Your whole final reply is sent to them as written, "
+        f"so make it that one line alone."
     )
 
 

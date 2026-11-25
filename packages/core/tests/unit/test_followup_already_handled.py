@@ -153,11 +153,11 @@ def test_a_note_to_someone_else_they_asked_to_hold_tells_them(
     _message(db, "web-2", me, "user", "Hold the note to Dana, terms changed", -timedelta(hours=2), sender=me)
     with patch.object(runner, "deliver_to_person", new_callable=AsyncMock) as tell:
         tell.return_value = SimpleNamespace(ok=True, detail="")
-        _, prompt = _fire(action_id, "PAUSED: Held the note to Dana as you asked; say 'send it' and it goes.")
+        _, prompt = _fire(action_id, "PAUSED: Held the note to Dana as you asked; ask again any time.")
     assert "Hold the note to Dana" in prompt and "send nothing to anyone else" in prompt
     tell.assert_called_once()
     assert tell.call_args.args[0].id == me
-    assert tell.call_args.args[1] == "Held the note to Dana as you asked; say 'send it' and it goes."
+    assert tell.call_args.args[1] == "Held the note to Dana as you asked; ask again any time."
     assert episodic.get_scheduled_action(action_id).status == "cancelled"  # type: ignore[union-attr]
 
 
@@ -206,12 +206,13 @@ def test_a_teammates_held_note_to_someone_else_tells_them_it_was_held(
         conn.execute("UPDATE scheduled_actions SET created_at = ? WHERE id = ?",
                      (_iso(-timedelta(days=1)), action_id))
     _message(db, "ben-2", ben, "user", "Hold the vendor email for now", -timedelta(hours=1), sender=ben)
-    line = "Held the vendor email as you asked. Say 'send it' and it goes."
+    line = "Held the vendor email as you asked; ask again any time."
     with patch.object(runner, "deliver_to_person", new_callable=AsyncMock) as tell:
         tell.return_value = SimpleNamespace(ok=True, detail="")
         _, prompt = _fire(action_id, f"PAUSED: {line}")
     assert "Hold the vendor email for now" in prompt
     assert "send nothing to anyone else" in prompt and "end with one short line to Ben" in prompt
+    assert "that one line alone" in prompt and "send it" not in prompt
     tell.assert_called_once()
     assert tell.call_args.args[0].id == ben and tell.call_args.args[1] == line
     row = episodic.get_scheduled_action(action_id)
@@ -252,7 +253,7 @@ def test_a_reminder_they_asked_to_hold_is_paused_not_done(db: Path, roster: Simp
     action_id = _followup("tg-1", created_by=me)
     _repeating(action_id)
     _message(db, "web-2", me, "user", "Hold the Dana reminder until the board call", -timedelta(hours=2), sender=me)
-    _, prompt = _fire(action_id, "PAUSED: Told you it's held until you say send it.")
+    _, prompt = _fire(action_id, "PAUSED: Held the Dana reminder as you asked; ask again any time.")
     assert "PAUSED:" in prompt and "DROPPED:" in prompt
     row = episodic.get_scheduled_action(action_id)
     assert row is not None and row.status == "cancelled" and "paused as Olivia Owner asked" in row.last_error
@@ -292,6 +293,6 @@ def test_a_teammates_held_reminder_to_themself_gets_the_line_without_the_marker(
     _message(db, "ben-2", ben, "user", "Hold the vendor call reminder", -timedelta(hours=1), sender=ben)
     with patch.object(runner, "_send_on_plan", new_callable=AsyncMock) as send:
         send.return_value = SimpleNamespace(ok=True, detail="")
-        _fire(action_id, "PAUSED: Held the vendor call reminder as you asked; say 'remind me' and it goes.")
-    assert send.call_args.args[2] == "Held the vendor call reminder as you asked; say 'remind me' and it goes."
+        _fire(action_id, "PAUSED: Held the vendor call reminder as you asked; ask again any time.")
+    assert send.call_args.args[2] == "Held the vendor call reminder as you asked; ask again any time."
     assert episodic.get_scheduled_action(action_id).status == "cancelled"  # type: ignore[union-attr]
