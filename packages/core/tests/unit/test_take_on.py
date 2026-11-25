@@ -245,6 +245,16 @@ def test_or_tell_me_changes_the_offer_and_undo_puts_it_back() -> None:
     assert not back.changed and back.title == o.title
 
 
+def test_an_offer_changed_to_match_another_still_shows() -> None:
+    a = _offer()
+    b = _offer("I can chase Priya for the March invoice", "followup")
+    take_on.put_made(ME, [a, b])
+    assert len(_list()) == 2
+    # Or tell me turns b into the same thing as a: both stay, as b is theirs now.
+    take_on.change(ME, b, a.title, a.preview, "send Dana the proposal instead", kind="email")
+    assert {o.key for o in _list()} == {a.key, b.key}
+
+
 def test_the_working_one_comes_first() -> None:
     a, b = _offer("I can book the review", "meeting"), _offer("I can chase the invoice", "followup")
     take_on.put_made(ME, [a, b])

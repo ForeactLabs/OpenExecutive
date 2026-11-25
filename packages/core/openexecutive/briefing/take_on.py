@@ -740,14 +740,15 @@ def offers_for(
     out: list[Offer] = []
     seen_keys: set[str] = set()
     # What each untouched offer kept so far is about: one about the same
-    # thing as another on the list shows once.
+    # thing as another on the list shows once. One they started or changed
+    # with Or tell me is theirs now and always shows.
     listed: list[str] = []
     for offer in candidates:
         if offer.key in seen_keys:
             continue
         seen_keys.add(offer.key)
         state = states.get(offer.key)
-        untouched = not (state is not None and state["status"])
+        untouched = not (state is not None and (state["status"] or state["changed"]))
         # A watch suggestion is answered one by one (a hide declines that
         # one on the Watch list), so a kind turned down never quiets the
         # others still waiting there.
