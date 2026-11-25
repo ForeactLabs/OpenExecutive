@@ -295,6 +295,27 @@ def test_an_ask_waits_for_a_send(ids: dict[str, int]) -> None:
     assert taken is not None and taken[0].text == "hi"
 
 
+def test_a_browser_that_left_takes_no_send(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    send = tx.queue_send(owner, "hi", to_number="5552013344")
+    left = [False]
+
+    async def gone() -> bool:
+        return left[0]
+
+    async def go() -> Any:
+        ask = asyncio.create_task(tx.next_send(owner, wait_s=5, gone=gone))
+        left[0] = True
+        return await asyncio.wait_for(ask, 2)
+
+    assert asyncio.run(go()) is None
+    still = tx.get_send(send.id)
+    assert still is not None and still.status == tx.PENDING
+    taken = asyncio.run(tx.next_send(owner, wait_s=0))
+    assert taken is not None and taken[0].id == send.id
+
+
 def test_off_for_the_install_nothing_is_read_or_sent(
     client: TestClient, ids: dict[str, int], noticed: list[int], monkeypatch: pytest.MonkeyPatch,
 ) -> None:

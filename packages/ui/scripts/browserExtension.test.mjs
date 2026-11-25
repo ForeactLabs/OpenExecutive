@@ -444,5 +444,15 @@ test("texts: a new number is sent to only through its own Send-to choice, never 
   const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
   const start = texts.slice(texts.indexOf("async function startConversation"), texts.indexOf("async function send("));
   assert.ok(!start.includes("pressEnter"));
-  assert.ok(start.includes("shown.includes(want)"));
+  assert.ok(start.includes("T.sameNumber(textOf(el), number)"));
+  assert.ok(!start.includes("mw-contact-selector-button"));
+});
+
+test("texts: the Send-to choice must show the same number, not one containing it", () => {
+  const T = textsHelpers();
+  assert.equal(T.sameNumber("Send to +1 (555) 010-0123", "5550100123"), true);
+  assert.equal(T.sameNumber("Send to 0555 010 0123", "+1 555 010 0123"), true);
+  assert.equal(T.sameNumber("Send to +1 555 010 01234", "555 010 0123"), false);
+  assert.equal(T.sameNumber("Send to 12", "12"), false);
+  assert.equal(T.sameNumber("", ""), false);
 });

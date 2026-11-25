@@ -173,7 +173,7 @@ async def next_send(request: Request, wait: float = Query(default=MAX_WAIT_S, ge
     settings = await asyncio.to_thread(tx.get_settings, person_id)
     if not settings.active:
         return NextOut(enabled=False, send=None)
-    taken = await tx.next_send(person_id, wait_s=min(wait, MAX_WAIT_S))
+    taken = await tx.next_send(person_id, wait_s=min(wait, MAX_WAIT_S), gone=request.is_disconnected)
     if taken is None:
         return NextOut(enabled=True, send=None)
     send, key = taken

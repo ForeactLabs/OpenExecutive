@@ -34,6 +34,7 @@ import re
 import secrets
 import sqlite3
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -654,13 +655,23 @@ def wake(person_id: int) -> None:
         event.set()
 
 
-async def next_send(person_id: int, *, wait_s: float, db_path: Path | None = None) -> tuple[Send, str] | None:
-    """The next send for their browser, waiting up to ``wait_s`` for one."""
+async def next_send(
+    person_id: int,
+    *,
+    wait_s: float,
+    gone: Callable[[], Awaitable[bool]] | None = None,
+    db_path: Path | None = None,
+) -> tuple[Send, str] | None:
+    """The next send for their browser, waiting up to ``wait_s`` for one.
+    ``gone`` says whether the browser has stopped waiting: then nothing is
+    taken, so a send is never handed to a browser that isn't there to get it."""
     _asked[person_id] = time.monotonic()
     deadline = time.monotonic() + max(0.0, wait_s)
     while True:
         event = _ready.setdefault(person_id, asyncio.Event())
         event.clear()
+        if gone is not None and await gone():
+            return None
         taken = await asyncio.to_thread(take_send, person_id, db_path=db_path)
         left = deadline - time.monotonic()
         if taken is not None or left <= 0:

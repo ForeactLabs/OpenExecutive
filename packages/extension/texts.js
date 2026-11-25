@@ -38,6 +38,13 @@
     return bare.length >= 3 && /^\d+$/.test(bare);
   };
 
+  /** Whether two phone numbers are the same, by their last ten digits. */
+  T.sameNumber = function (a, b) {
+    const x = String(a || "").replace(/\D/g, "").slice(-10);
+    const y = String(b || "").replace(/\D/g, "").slice(-10);
+    return x.length >= 7 && x === y;
+  };
+
   /** One line of text, at most `max` characters. */
   T.squeeze = function (text, max) {
     return String(text || "").replace(/\s+/g, " ").trim().slice(0, max);
@@ -263,11 +270,9 @@
     // Google Messages offers "Send to <number>" once it reads a number.
     // Only the "Send to <number>" choice, showing that very number: never a
     // contact suggestion or Enter, either of which can be someone else.
-    const want = String(number).replace(/\D/g, "");
     const pick = await waitFor(() => {
-      const el = first(document, ["[data-e2e-send-to-button]", "mw-contact-selector-button button"]);
-      const shown = el ? textOf(el.closest("mw-contact-selector-button") || el).replace(/\D/g, "") : "";
-      return el && want && shown.includes(want) ? el : null;
+      const el = document.querySelector("[data-e2e-send-to-button]");
+      return el && T.sameNumber(textOf(el), number) ? el : null;
     }, 6000);
     if (!pick) return "Google Messages didn't offer to send to that number. Nothing went.";
     pick.click();
