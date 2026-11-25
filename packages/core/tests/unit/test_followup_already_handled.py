@@ -538,3 +538,27 @@ def test_nobody_is_told_of_a_move_that_didnt_happen(db: Path, roster: SimpleName
         chat, _, tell = _fire_decided(action_id, "moved", when=friday)
     chat.assert_not_called()
     tell.assert_not_called()
+
+
+def test_a_since_line_is_in_company_time_near_midnight(
+    db: Path, roster: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """6:30 PM in Los Angeles is already the next day in UTC: "tomorrow" in
+    that line must read from the 24th there, not the 25th."""
+    from zoneinfo import ZoneInfo
+
+    monkeypatch.setattr("openexecutive.memory.workspace_settings.get_user_timezone",
+                        lambda: ZoneInfo("America/Los_Angeles"))
+    me = roster.principal.id
+    create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
+    action_id = _followup("tg-1", created_by=me)
+    _message(db, "web-2", me, "user", "Hold it until tomorrow at 9", -timedelta(hours=2), sender=me)
+    with episodic._get_conn(db) as conn:
+        conn.execute("UPDATE chat_messages SET created_at = '2026-11-25T02:30:00+00:00' "
+                     "WHERE content = 'Hold it until tomorrow at 9'")
+        conn.execute("UPDATE scheduled_actions SET created_at = '2026-11-24T00:00:00+00:00' WHERE id = ?",
+                     (action_id,))
+    action = episodic.get_scheduled_action(action_id)
+    assert action is not None
+    assert runner._since_lines(action, roster.principal) == (
+        "- 2026-11-24 18:30 (Tuesday): Hold it until tomorrow at 9")

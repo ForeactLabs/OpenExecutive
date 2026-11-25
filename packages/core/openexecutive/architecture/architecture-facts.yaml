@@ -5198,7 +5198,9 @@ scheduler:
     a row back to them, runner._own_ref) gets their own chat
     messages since created_at (session_store.own_messages_since: role user,
     sent by them or in their own conversation from before senders were
-    recorded; newest 30, 300 chars each) in <since_scheduled> tags, and is
+    recorded; newest 30, 300 chars each; each stamped in company time, as
+    "now" and a moved time are, so "tomorrow" reads from the day it was
+    written there) in <since_scheduled> tags, and is
     told that what they said last wins: asked since to change it, the run
     sends it changed; when it only looks done, it still sends its one
     message and says so. Whether it goes at all is settled before any run,
