@@ -1718,13 +1718,26 @@ async def _run_loop(
                 _note_lesson(notes, tool_input, f"not kept: {_refusal_code(out)}")
         return out
 
-    # The review ends when the model has nothing more to call
-    # (orchestrator.rounds), within MAX_ITERATIONS rounds.
-    await run_rounds(
-        get_provider(model), model=model, max_tokens=_MAX_TOKENS, system=_SYSTEM,
-        tools=tools, messages=messages, run_call=_run, actor="chat_review", max_rounds=MAX_ITERATIONS,
-        on_response=_read,
-    )
+    # What the replies quoted (mail, a page, a file) and the cards and
+    # follow-ups listed above came from outside this pass: checked like any
+    # read, so a step it takes waits or runs where the chat's own would
+    # (``levels``), never on the review's word alone.
+    from openexecutive.orchestrator import outside_content
+
+    turn = outside_content.begin_turn(session, own_words=words)
+    try:
+        read = "\n\n".join(str(r["reply"] or "") for r in turns)
+        outside_content.mark_pending(outside_content.QUOTED, f"{intro}\n{read}")
+        await outside_content.settle()
+        # The review ends when the model has nothing more to call
+        # (orchestrator.rounds), within MAX_ITERATIONS rounds.
+        await run_rounds(
+            get_provider(model), model=model, max_tokens=_MAX_TOKENS, system=_SYSTEM,
+            tools=tools, messages=messages, run_call=_run, actor="chat_review", max_rounds=MAX_ITERATIONS,
+            on_response=_read,
+        )
+    finally:
+        outside_content.end_turn(turn)
     return done
 
 
