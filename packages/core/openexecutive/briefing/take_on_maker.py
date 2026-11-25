@@ -641,7 +641,7 @@ def _addressed_to(to: str, people: list[tuple[str, str]]) -> bool:
 # goes to.
 _ASKED_RE = re.compile(
     r"\b(?i:ask|asking|tell|telling|remind|reminding|message|ping|nudge|let|get)\s+"
-    r"([A-Z][\w-]*)(?:'s)?(?:\s+(to|for|about|if|whether|that|know)\b)?"
+    r"([A-Z][\w-]*)(?:\s+[A-Z][\w-]*)?(?:'s)?(?:\s+(to|for|about|if|whether|that|know)\b)?"
 )
 _NOT_NAMES = frozenset({"me", "you", "them", "the", "everyone", "your", "our", "us", "him", "her"})
 

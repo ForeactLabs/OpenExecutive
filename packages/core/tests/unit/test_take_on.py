@@ -342,6 +342,8 @@ def test_a_message_goes_to_the_person_its_title_names() -> None:
          "preview": [{"label": "To", "value": "Sam Lee"}]},
         {"kind": "message", "title": "Ask Casey for the invoice", "source": "x",
          "preview": [{"label": "To", "value": "Sam Lee"}]},
+        {"kind": "message", "title": "I can ask Casey Jones to send the invoice", "source": "x",
+         "preview": [{"label": "To", "value": "Sam Lee"}]},
         {"kind": "message", "title": "I can get Sam's sign-off on the budget", "source": "x",
          "preview": [{"label": "To", "value": "Sam Lee"}]},
         {"kind": "message", "title": "I can let Finance know the PO is in", "source": "x",
@@ -356,7 +358,7 @@ def test_a_message_goes_to_the_person_its_title_names() -> None:
         "I can let Finance know the PO is in",
         "Get Q3 numbers from Sam",
     ]
-    assert dropped == {"title names someone other than its To": 2}
+    assert dropped == {"title names someone other than its To": 3}
 
 
 def test_check_keeps_only_steps_that_can_be_done() -> None:
