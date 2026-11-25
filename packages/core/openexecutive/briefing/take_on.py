@@ -741,7 +741,10 @@ def offers_for(
         seen_keys.add(offer.key)
         state = states.get(offer.key)
         untouched = not (state is not None and state["status"])
-        if offer.kind in quiet and untouched:
+        # A watch suggestion is answered one by one (a hide declines that
+        # one on the Watch list), so a kind turned down never quiets the
+        # others still waiting there.
+        if offer.kind in quiet and untouched and offer.origin != "watch":
             continue
         kept = _apply(offer, state, now)
         if kept is None:

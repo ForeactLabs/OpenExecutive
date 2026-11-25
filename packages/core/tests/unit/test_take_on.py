@@ -127,6 +127,17 @@ def test_not_useful_twice_on_one_kind_stops_that_kind() -> None:
     assert [o.kind for o in _list()] == ["doc"]
 
 
+def test_watch_suggestions_still_show_after_two_watches_were_not_useful(monkeypatch: pytest.MonkeyPatch) -> None:
+    watches = [take_on.Offer(key=f"watch:w{i}", origin="watch", kind="watch", title=f"I can watch {name}",
+                             source="News I watch") for i, name in enumerate(("diesel prices", "Acme hiring", "rates"))]
+    monkeypatch.setattr(take_on, "_watch", lambda _pid, _p: list(watches))
+    for o in _list()[:2]:
+        take_on.hide(ME, o, "not_useful")
+    assert take_on.turned_down_kinds(ME) == {"watch"}
+    # Each was declined on its own; the one still waiting on the Watch list shows.
+    assert [o.key for o in _list()] == ["watch:w2"]
+
+
 def test_do_it_runs_once_and_records_what_came_of_it() -> None:
     o = _offer()
     take_on.put_made(ME, [o])
