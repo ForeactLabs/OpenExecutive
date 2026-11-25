@@ -363,8 +363,10 @@ def put_made(email: str, offers: list[Offer], *, db_path: Path | None = None) ->
 
 
 def _made(person: str, now: datetime, db_path: Path | None) -> list[Offer]:
-    # Long enough for one put off with Later to come back for its days.
-    since = (now - timedelta(days=LATER_DAYS + KEEP_DAYS + DONE_DAYS)).isoformat()
+    # Long enough for one put off with Later on its last shown day to come
+    # back for its days: shown (KEEP_DAYS), away (LATER_DAYS), back
+    # (KEEP_DAYS), then done for a day.
+    since = (now - timedelta(days=LATER_DAYS + 2 * KEEP_DAYS + DONE_DAYS)).isoformat()
     with _connect(db_path) as conn:
         rows = conn.execute(
             f"SELECT * FROM {OFFERS_TABLE} WHERE person = ? AND created_at >= ? ORDER BY created_at DESC",  # noqa: S608

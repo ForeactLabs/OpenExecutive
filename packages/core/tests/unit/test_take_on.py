@@ -116,6 +116,20 @@ def test_hide_already_done_keeps_it_away_and_later_brings_it_back_in_a_week() ->
     assert _list(now=back + timedelta(days=take_on.KEEP_DAYS, hours=1)) == []
 
 
+def test_one_put_off_late_with_later_gets_its_days_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    o = _offer()
+    take_on.put_made(ME, [o])
+    start = datetime.now(UTC)
+    _list(now=start)
+    late = start + timedelta(days=take_on.KEEP_DAYS - 0.5)
+    monkeypatch.setattr(take_on, "_now", lambda: late)
+    (shown,) = _list(now=late)
+    take_on.hide(ME, shown, "later")
+    back = late + timedelta(days=take_on.LATER_DAYS, hours=1)
+    assert [x.key for x in _list(now=back)] == [o.key]
+    assert [x.key for x in _list(now=back + timedelta(days=take_on.KEEP_DAYS - 1))] == [o.key]
+
+
 def test_one_back_from_later_and_done_is_not_offered_again(monkeypatch: pytest.MonkeyPatch) -> None:
     o = _offer()
     take_on.put_made(ME, [o])
