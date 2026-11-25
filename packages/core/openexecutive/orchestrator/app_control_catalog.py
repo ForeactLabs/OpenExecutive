@@ -71,7 +71,10 @@ async def _find_chats(request: Any) -> list[Item]:
 
     rows = await _call(sessions.get_sessions, request)
     return [
-        Item(id=s.session_id, title=s.title or "Untitled chat", detail="pinned" if s.pinned_at else "")
+        Item(
+            id=s.session_id, title=s.title or "Untitled chat", detail="pinned" if s.pinned_at else "",
+            private=True,
+        )
         for s in rows
     ]
 
@@ -172,7 +175,7 @@ async def _find_topics(request: Any) -> list[Item]:
     return [
         Item(id=str(t.id), title=t.name, detail=", ".join(
             x for x in ((f"in {t.area}" if t.area else ""), ("pinned" if t.pinned_at else "")) if x
-        ))
+        ), private=True)
         for t in await _topics(request)
     ]
 
@@ -229,7 +232,7 @@ async def _remove_topic(request: Any, topic_id: str, value: str) -> str:
 
 async def _find_areas(request: Any) -> list[Item]:
     areas = sorted({t.area for t in await _topics(request) if t.area})
-    return [Item(id=a, title=a) for a in areas]
+    return [Item(id=a, title=a, private=True) for a in areas]
 
 
 async def _rename_area(request: Any, area: str, value: str) -> str:
@@ -570,6 +573,7 @@ async def _find_decisions(request: Any) -> list[Item]:
         Item(
             id=str(d.id), title=d.summary[:120],
             detail="private to you" if d.private else "shared with the team",
+            private=bool(d.private),
         )
         for d in await _call(episodic.get_decisions, request)
         if d.can_share or d.can_make_private

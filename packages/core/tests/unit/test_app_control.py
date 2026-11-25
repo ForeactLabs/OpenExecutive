@@ -536,13 +536,22 @@ def test_a_shared_chat_still_does_what_its_person_asks(roster: dict[str, Any]) -
     # Privacy hides; it never stops work. The person asked in a chat others
     # read, so the list and the change are theirs to have there.
     sid = _chat(roster["owner"].id, "s-shared", "Board prep")
+    other = _chat(roster["owner"].id, "s-mine", "Layoff plan")
     session = _web(roster["owner"], sid)
     session.shared_chat = True
     out = _run(app_control.handle_find_in_app, {"kind": "chat"}, session)
+    # Privacy hides: the chat everyone here reads is listed, the owner's
+    # other chat isn't, and the list says something was left out.
     assert [i["id"] for i in out["items"]] == [sid]
+    assert "Layoff plan" not in json.dumps(out)
+    assert out["private_left_out"] == 1
     out = _run(app_control.handle_do_in_app, {"action": "rename_chat", "id": sid, "value": "Board pack"}, session)
     assert out["status"] == "done", out
     assert (_meta(sid) or {})["title"] == "Board pack"
+    # Asked in their own chat, the same list has both.
+    mine = _run(app_control.handle_find_in_app, {"kind": "chat"}, _web(roster["owner"], other))
+    assert {i["id"] for i in mine["items"]} == {sid, other}
+    assert "private_left_out" not in mine
 
 
 def test_a_chat_turn_never_counts_as_a_signed_request() -> None:

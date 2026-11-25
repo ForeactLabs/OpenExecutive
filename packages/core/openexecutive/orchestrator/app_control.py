@@ -77,6 +77,9 @@ class Item:
     id: str
     title: str
     detail: str = ""
+    # Only the speaker sees it (their own chats and topics, a decision they
+    # kept to themselves): left out of a list in a conversation others read.
+    private: bool = False
 
 
 # (request) → everything of the kind the caller may act on.
@@ -386,14 +389,35 @@ async def handle_find_in_app(tool_input: dict[str, Any]) -> str:
         return _error("Couldn't read that list just now.")
     query = _clean_value(tool_input.get("query"))
     found = [i for i in items if _matches(i, query)] if query else items
+    shown, hidden = _hide_private(found)
     return json.dumps({
         "kind": kind.name,
         "items": [
             {"id": i.id, "title": i.title, **({"detail": i.detail} if i.detail else {})}
-            for i in found[:_FIND_MAX]
+            for i in shown[:_FIND_MAX]
         ],
-        **({"more": len(found) - _FIND_MAX} if len(found) > _FIND_MAX else {}),
+        **({"more": len(shown) - _FIND_MAX} if len(shown) > _FIND_MAX else {}),
+        **({"private_left_out": hidden, "private_note": _PRIVATE_NOTE} if hidden else {}),
     })
+
+
+_PRIVATE_NOTE = (
+    "Others read this conversation, so what is private to the speaker is left out of this "
+    "list. They see it in a chat only they read, or on its screen."
+)
+
+
+def _hide_private(items: list[Item]) -> tuple[list[Item], int]:
+    """Privacy hides: in a conversation others read, leave out what only the
+    speaker sees (the chat itself stays, everyone in it reads it already)."""
+    from openexecutive.delegation.settings import private_conversation
+
+    session = _session()
+    if private_conversation(session):
+        return items, 0
+    here = str(getattr(session, "session_id", "") or "")
+    shown = [i for i in items if not i.private or (here and i.id == here)]
+    return shown, len(items) - len(shown)
 
 
 def card_text(action: Action, title: str, value: str) -> str:
