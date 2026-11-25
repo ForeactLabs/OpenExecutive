@@ -82,9 +82,108 @@
   }
 
   chrome.storage.onChanged.addListener((changes) => {
-    if (changes.origins) void relay();
+    if (changes.origins) {
+      void relay();
+      void textsLoop();
+    }
   });
   void relay();
+
+  // ---- Texts (connected Open Executive sites only) ----
+  //
+  // Asks the site for the next text to send (texts the person's Approvals
+  // let go), has the background send it in Google Messages, and says how it
+  // went. Also says whether the person has Texts on, so the background keeps
+  // Google Messages open (``textsOn``).
+
+  const TEXTS = "/api/backend/delegation/texts";
+  let texting = false;
+
+  async function textsLoop() {
+    if (texting) return;
+    texting = true;
+    let backoff = 1000;
+    try {
+      while (OE.onConnected(location.href, await connectedOrigins())) {
+        let res;
+        try {
+          res = await fetch(`${TEXTS}/next?wait=20`, { cache: "no-store", credentials: "same-origin" });
+        } catch {
+          await pause(backoff);
+          backoff = Math.min(backoff * 2, 30000);
+          continue;
+        }
+        if (!res.ok) {
+          // Not here (texts off for the install), signed out, or not theirs.
+          if (res.status === 404 || res.status === 403) await textsState(false);
+          await pause(res.status === 401 || res.status === 403 || res.status === 404 ? 60000 : backoff);
+          backoff = Math.min(backoff * 2, 30000);
+          continue;
+        }
+        backoff = 1000;
+        const body = await res.json().catch(() => ({}));
+        const on = body.enabled === true;
+        await textsState(on);
+        if (!on) {
+          await pause(60000);
+          continue;
+        }
+        const send = body.send;
+        if (!send || !Number.isInteger(send.id)) continue;
+        let result;
+        try {
+          result = await chrome.runtime.sendMessage({ type: "text_send", send });
+        } catch {
+          result = { ok: false, unsure: true, error: "The browser extension didn't answer" };
+        }
+        const ok = Boolean(result && result.ok);
+        const unsure = !ok && Boolean(result && result.unsure);
+        await fetch(`${TEXTS}/sends/${send.id}`, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            status: ok ? "sent" : unsure ? "unsure" : "failed",
+            error: ok ? "" : String((result && result.error) || "No answer from the browser.").slice(0, 300),
+            conversation: ok && typeof result.conversation === "string" ? result.conversation.slice(0, 300) : "",
+          }),
+        }).catch(() => undefined);
+      }
+    } finally {
+      texting = false;
+    }
+  }
+  void textsLoop();
+
+  // Whether Texts is on for the person signed in on this site. The
+  // background keeps one answer per site: on while any site says on.
+  async function textsState(on) {
+    try {
+      await chrome.runtime.sendMessage({ type: "texts_state", on: on === true });
+    } catch {
+      // The background is starting: the next answer tells it.
+    }
+  }
+
+  // What Google Messages shows, from the background: told to the site as
+  // the person signed in here.
+  async function postTexts(body) {
+    if (!OE.onConnected(location.href, await connectedOrigins())) return { ok: false };
+    try {
+      const res = await fetch(`${TEXTS}/seen`, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) return { ok: false };
+      // An install with Texts off for them answers enabled: false: try the next tab.
+      const answer = await res.json().catch(() => ({}));
+      return { ok: answer.enabled === true };
+    } catch {
+      return { ok: false };
+    }
+  }
 
   async function hello() {
     try {
@@ -606,6 +705,11 @@
   }
 
   chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
+    if (msg && msg.type === "texts_post") {
+      if (_sender.id !== chrome.runtime.id || _sender.tab) return false;
+      postTexts(msg.body || {}).then(reply, () => reply({ ok: false }));
+      return true;
+    }
     if (!msg || typeof msg !== "object") return false;
     if (msg.type === "hello") {
       void hello().then(reply);

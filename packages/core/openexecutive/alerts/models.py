@@ -44,7 +44,8 @@ def artifact_visible_to(
 # An email watch's card (``monitoring.mailbox``) names a sender and a subject
 # from one person's own inbox: theirs alone.
 MAILBOX_SOURCE = "mailbox"
-PERSONAL_SOURCES: frozenset[str] = frozenset({"browser_handover", MAILBOX_SOURCE})
+# "texts": a text from their own phone that didn't go (delegation.texts).
+PERSONAL_SOURCES: frozenset[str] = frozenset({"browser_handover", MAILBOX_SOURCE, "texts"})
 
 
 def visible_alert(

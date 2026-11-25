@@ -214,6 +214,10 @@ class Session:
     # flagged, as if the content check had flagged a read, so below
     # Hands-off its replies wait on a card. Set by the email poller only.
     sender_gave_orders: bool = False
+    # The turn answers a text that came in (``delegation.texts_watch``). It
+    # never sees the person's other texts, whoever it seems to be from: the
+    # number a text shows can be one the sender picked.
+    answers_a_text: bool = False
     # How many steps this turn put on an Approve card (``note_step_held``).
     steps_held: int = 0
     # The thread of the inbound email this turn answers: its cards are about

@@ -12799,6 +12799,41 @@ delegation:
     company — in the blank-slot sweep (clients.slots._wipe_per_client_tables) and
     cli.fixture_loader.reset_all_state. A reply card is a decision_instances
     row (see trust_ledger).
+  texts: |
+    Texts (delegation.texts, texts_watch, orchestrator.text_tools,
+    api/routes/texts.py): the person's own texts through Google Messages for
+    web in their browser, Android only. Off until the person turns on Texts on
+    the Delegate page; OE_TEXTS_OFF=1 or OE_BROWSER_OFF=1 turns it off for the
+    install. Tables delegation_text_settings, delegation_text_conversations,
+    delegation_texts, delegation_text_sends; 30 days, 5000 a person; off
+    forgets them. New incoming texts wake one unattended turn for that person
+    with the texts as untrusted_content source text_message, as a sender off
+    the team (Session.sender_off_team, every text: its number can be one the
+    sender picked, so a teammate's number earns nothing). send_text is an
+    acting tool: the one gate decides; its card records own_device_for
+    (acting_for, to_words) so a tap carries it out as that person
+    (take_the_lead._asker). A held text is always on its phone owner's own
+    card, whatever held it (In training, Careful, a Waits rule, someone
+    outside the team; a hold for the asker's role, NOT_OWNER or READ_ONLY,
+    stays with the owner): take_the_lead.card_of and levels._approver both
+    route _OWN_DEVICE_TOOLS to acting_for, and only that person's tap
+    relaxes the gate for it (carry_out own_ok); anyone else's Approve runs
+    as nobody, so no phone sends and the card says nothing went. A turn
+    answering a text, an inbox reply card's email (reply_card_work), or
+    someone outside the team, sees none of the
+    person's other texts (read_texts shows nothing there; Session
+    answers_a_text): a text's number can be one its sender picked, so
+    seeming to come from a teammate earns no more. Why: it goes as them,
+    from their own phone, which they could text from themselves, so their
+    OK gives them nothing they lack, and their texts stay off other lists.
+    A send waits for the browser (long-poll
+    GET /delegation/texts/next, at most 20 s); untaken in an hour it fails
+    with a reason and the chat is told. Never claims sent before Google
+    Messages shows it. A turn no chat shows (new texts, an approved card)
+    tells a text that didn't go on a card of the person's own (source texts,
+    a personal source). A turn that read mail never reads texts
+    (read_texts is mail-touched withheld). Why: Rufus (2026-11-25) wanted texts only, through the
+    extension, not a phone app reading notifications.
   later_phases: |
     Each is its own change behind its own switch, off by default: more
     kinds under Handle it for me (meetings, handing to a teammate,
@@ -12870,6 +12905,13 @@ browser:
     In the extension's own window, Approvals in
     the step (extensions.workflow_hold), and extensions.workflow_wait when
     not connected; browser.relay resumes the run when the extension asks.
+  texts: |
+    texts.js runs on messages.google.com only: reports changed conversations
+    and pairing (texts_seen, via the background to an Open Executive tab that
+    posts /delegation/texts/seen), and types, sends and confirms a text it is
+    handed (texts_send_here). The background keeps Google Messages pinned in
+    the extension's own window while Texts is on; a send is ignored while the
+    Stop bar holds steps.
   customizing: |
     packages/extension/build.mjs stamps name, icons and version and zips it
     for an operator's own store listing. site-rules.js holds the sending

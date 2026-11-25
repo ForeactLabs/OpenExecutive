@@ -486,6 +486,10 @@ def _own_ref(tool: str, norm: str, value: Any) -> tuple[str, str] | tuple[()] | 
         if value in (None, ""):
             return ()
         person = take_the_lead._target_person(tool, {target[0]: value})
+        if person is None and target[1] == "text":
+            # A text conversation's id means nothing to anyone: the card
+            # names it from ``to_words`` (``served``).
+            return ("To", "A conversation on their phone")
         return ("To", (person.full_name or person.email or str(value)) if person is not None else str(value))
     if norm.endswith("person_ids"):
         ids = value if isinstance(value, list) else [value]
@@ -638,6 +642,13 @@ def served(payload: dict[str, Any]) -> dict[str, Any]:
     out = dict(payload)
     steps = held_steps(payload)
     out["details"] = plain_steps(str(payload.get("tool") or ""), steps) + _why(payload, steps)
+    to_words = payload.get("to_words")
+    if isinstance(to_words, str) and to_words.strip():
+        # Who it reaches, named on the turn that held it (a text).
+        out["details"] = [
+            {**d, "value": to_words.strip()} if isinstance(d, dict) and d.get("field") == "To" else d
+            for d in out["details"]
+        ]
     with contextlib.suppress(Exception):
         out.update(_named(payload, tool_input))
 

@@ -25,6 +25,7 @@ from openexecutive.audit.redaction import (
 )
 from openexecutive.audit.usage import log_model_usage
 from openexecutive.config import get_settings
+from openexecutive.delegation import texts as delegation_texts
 from openexecutive.delegation.lockdown import (
     mail_turn_withholds,
 )
@@ -210,6 +211,7 @@ from openexecutive.orchestrator.schedule_tools import (
 from openexecutive.orchestrator.session import Session
 from openexecutive.orchestrator.skills_tools import SKILL_TOOL_HANDLERS, SKILL_TOOLS
 from openexecutive.orchestrator.teammate_mail import guard_call_tool
+from openexecutive.orchestrator.text_tools import TEXT_TOOL_HANDLERS, TEXT_TOOLS
 from openexecutive.orchestrator.turn_inbox import (
     HAND_OVER_EMPTY_REPLY,
     HAND_OVER_NOTE,
@@ -632,6 +634,7 @@ _ALL_SKILL_TOOLS = [
     *WORKFLOW_RUN_TOOLS,
     *FORM_TOOLS,
     *GUIDE_TOOLS,
+    *TEXT_TOOLS,
     *PYTHON_JOB_TOOLS,
     *FILE_TOOLS,
     *APP_TOOLS,
@@ -667,6 +670,7 @@ _ALL_SKILL_HANDLERS = {
     **WORKFLOW_RUN_TOOL_HANDLERS,
     **FORM_TOOL_HANDLERS,
     **GUIDE_TOOL_HANDLERS,
+    **TEXT_TOOL_HANDLERS,
     **PYTHON_JOB_TOOL_HANDLERS,
     **FILE_TOOL_HANDLERS,
     **APP_TOOL_HANDLERS,
@@ -2480,6 +2484,10 @@ class Executive:
         # Python jobs need the sandbox the API image installs: without it the
         # tool is not offered (fixed per process, so the prefix stays stable).
         sandbox_missing = frozenset() if python_job.available() else frozenset({python_job.TOOL_NAME})
+        # Texts, while the install has them off (``delegation.texts.available``;
+        # fixed per process).
+        if not delegation_texts.available():
+            sandbox_missing = sandbox_missing | frozenset(t["name"] for t in TEXT_TOOLS)
         # A turn that may only read and advise (`read_only_turn`: a page in
         # another app, or a scheduled run a teammate queued, whose message the
         # runner sends): nothing that sends, posts, books, schedules, runs or
