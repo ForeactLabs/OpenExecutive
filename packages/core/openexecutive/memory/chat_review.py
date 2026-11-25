@@ -1787,6 +1787,8 @@ async def _run_loop(
             _note_refused(refused, name, _refusal_code(out))
             if name == "learn_lesson":
                 _note_lesson(notes, tool_input, f"not kept: {_refusal_code(out)}")
+        else:
+            _note_refused(refused, name, _change_refusal(out))
         return out
 
     # What the replies quoted (mail, a page, a file) and the cards and
@@ -1906,6 +1908,22 @@ def _refusal_code(out: str) -> str:
     return str(data.get("detail") or data.get("status") or data.get("error") or "refused")
 
 
+def _change_refusal(out: str) -> str:
+    """Why a change didn't go through, for the audit row: our own checks'
+    fixed wording, else only the status a tool gave (its detail may carry
+    the person's text)."""
+    code = _refusal_code(out)
+    if code in _OWN_REFUSALS or code in _BRIEF_WHY.values():
+        return code
+    try:
+        data = json.loads(out)
+    except (TypeError, ValueError):
+        return "unreadable"
+    if not isinstance(data, dict):
+        return "unreadable"
+    return "error" if "error" in data else str(data.get("status") or "refused")
+
+
 def _fact_key(tool_input: dict[str, Any]) -> str:
     return " ".join(str(tool_input.get("subject") or "").casefold().split())
 
@@ -1981,6 +1999,16 @@ def _not_named(target: str, words: str) -> str | None:
 
 
 # Why a brief line wasn't kept, said so the line can be written again.
+# Our own checks' fixed reasons, safe to keep in the audit row.
+_OWN_REFUSALS = frozenset({
+    "source_quote must be their own words from this chat",
+    "what this changes isn't named in their own words",
+    "this names a change that didn't go through in this review",
+    "this follow-up was already set in this review",
+    f"this review already made {MAX_CHANGES} changes",
+    "a fact under this subject was already saved in this review; a different fact needs its own subject",
+})
+
 _BRIEF_WHY = {
     "too_long": "over 30 words: say it shorter",
     "denied_content": "it has a link, an address, an id, an underscore or a word like tool or system: say it in plain words",

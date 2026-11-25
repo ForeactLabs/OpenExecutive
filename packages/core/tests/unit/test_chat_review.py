@@ -317,6 +317,10 @@ def test_a_change_without_their_words_is_refused(db: Path, roster: SimpleNamespa
     _review(db)
     assert get_open_loop(loop_id) is not None  # still open
     assert _tool_results(provider)[0]["status"] == "refused"
+    events = audit_logger.get_audit_logger().query(event_type="chat_review", all_owners=True)
+    review = next(e for e in events if e.details.get("op") == "chat_review")
+    assert review.details["refused"] == [
+        {"tool": "close_open_loop", "reason": "source_quote must be their own words from this chat"}]
 
 
 def test_a_filler_quote_or_an_unnamed_target_is_refused(db: Path, roster: SimpleNamespace,
