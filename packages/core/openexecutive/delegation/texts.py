@@ -345,12 +345,13 @@ def _echo_of(conn: sqlite3.Connection, person_id: int, conversation_id: str, tex
     once: the same words again are someone's reply. None when they aren't."""
     if not (text or "").strip():
         return None
-    # Only a send of the last few minutes, in this conversation, or one to a
-    # new number still on its way: a reply an hour later in the same words is
-    # someone's reply.
+    # Only a send of the last few minutes (since the browser took it or said
+    # how it went, as it can wait in the queue), in this conversation, or one
+    # to a new number still on its way: a reply an hour later in the same
+    # words is someone's reply.
     rows = conn.execute(
         f"SELECT id, text, conversation_id, to_number FROM {TEXT_SENDS_TABLE} WHERE person_id=? AND status<>? "
-        "AND echoed=0 AND created_at >= ? AND (conversation_id=? OR (conversation_id IS NULL AND status IN (?, ?))) "
+        "AND echoed=0 AND COALESCE(done_at, created_at) >= ? AND (conversation_id=? OR (conversation_id IS NULL AND status IN (?, ?))) "
         "ORDER BY id",
         (person_id, FAILED, _iso(now - _ECHO_WITHIN), conversation_id, PENDING, HANDED),
     ).fetchall()
@@ -645,7 +646,8 @@ def take_send(person_id: int, *, db_path: Path | None = None) -> tuple[Send, str
             # Claimed on its own: two of the person's browsers asking at once
             # never both get the same send.
             cur = conn.execute(
-                f"UPDATE {TEXT_SENDS_TABLE} SET status=? WHERE id=? AND status=?", (HANDED, r["id"], PENDING),
+                f"UPDATE {TEXT_SENDS_TABLE} SET status=?, done_at=? WHERE id=? AND status=?",
+                (HANDED, _iso(datetime.now(UTC)), r["id"], PENDING),
             )
             if cur.rowcount == 1:
                 return _send(r), str(r["conv_key"] or "")

@@ -282,6 +282,24 @@ def test_a_sent_text_and_its_echo_are_one_text(ids: dict[str, int]) -> None:
     assert [t.text for t in tx.texts(conv.id)].count("See you there") == 1
 
 
+def test_a_send_that_waited_in_the_queue_still_has_one_echo(ids: dict[str, int]) -> None:
+    from datetime import datetime as dt
+
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("a", text="Lunch?")])
+    (conv,) = tx.conversations(owner)
+    send = tx.queue_send(owner, "Yes, see you at 3", conversation_id=conv.id)
+    # Chrome was closed for half an hour before it took the send.
+    with tx._connect() as conn:
+        conn.execute(f"UPDATE {tx.TEXT_SENDS_TABLE} SET created_at=? WHERE id=?",
+                     (tx._iso(dt.now(UTC) - timedelta(minutes=30)), send.id))
+    tx.take_send(owner)
+    tx.settle_send(owner, send.id, status=tx.SENT)
+    assert tx.record(owner, [_item("b", text="You: Yes, see you at 3")]) == []
+    assert [t.text for t in tx.texts(conv.id)].count("Yes, see you at 3") == 1
+
+
 # --- the routes ------------------------------------------------------------
 
 

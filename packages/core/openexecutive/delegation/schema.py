@@ -105,6 +105,7 @@ _DDL: tuple[str, ...] = (
     "  status TEXT NOT NULL DEFAULT 'pending',"
     "  error TEXT NOT NULL DEFAULT '',"
     "  created_at TEXT NOT NULL,"
+    # When the browser took it, then when it said how it went.
     "  done_at TEXT,"
     # The chat that was told "on its way": how it went is said there.
     "  tell_session TEXT,"
