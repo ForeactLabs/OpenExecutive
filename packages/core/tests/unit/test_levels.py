@@ -377,22 +377,26 @@ def test_mail_an_earlier_round_left_unchecked_waits_on_balanced_even_beside_a_ne
     assert levels.decide(shared, mode=outside_mode.TRUST) == levels.RUN
 
 
-def test_a_round_with_a_script_is_not_asked_before_its_mail_was_seen() -> None:
-    """A step asked with this round's mail read runs on Balanced, but a
-    script's own calls come after what it reads: that round's mail counts as
-    unchecked, as it would with the script alone."""
+async def test_a_scripts_own_calls_are_not_asked_before_its_mail_was_seen() -> None:
+    """A step asked with this round's mail read runs on Balanced, a script's
+    sibling steps included. The script's own calls come after what it read:
+    inside them that round's mail counts as unchecked."""
     from openexecutive.delegation.settings import TurnDelegation
 
     pin = TurnDelegation()
-    levels.mark_round(pin, reads_mail=True, script=False)
+    levels.mark_round(pin, reads_mail=True)
     pin.read_mail, pin.mail_vetted = True, False
     assert levels.mail_reason(pin) == levels.OWN_MAIL
-    pin = TurnDelegation()
-    levels.mark_round(pin, reads_mail=True, script=True)
-    pin.read_mail, pin.mail_vetted = True, False
-    assert levels.mail_reason(pin) == levels.MAIL_UNCHECKED
-    assert levels.decide(levels.mail_reason(pin), mode=outside_mode.OUTSIDERS) == levels.CARD
-    levels.mark_round(None, reads_mail=True, script=False)
+
+    async def _call(tool: str) -> str:
+        return levels.mail_reason(pin, tool=tool)
+
+    inside = await levels.in_script_call(_call)("message_person")
+    assert inside == levels.MAIL_UNCHECKED
+    assert levels.decide(inside, mode=outside_mode.OUTSIDERS) == levels.CARD
+    # Back outside the script, the sibling steps still run.
+    assert levels.mail_reason(pin) == levels.OWN_MAIL
+    levels.mark_round(None, reads_mail=True)
 
 
 def test_a_clean_read_held_on_careful_is_not_called_unchecked(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -415,7 +419,7 @@ def test_a_round_that_never_finished_leaves_its_mail_unchecked() -> None:
     from openexecutive.delegation.settings import TurnDelegation
 
     pin = TurnDelegation()
-    levels.mark_round(pin, reads_mail=True, script=False)
+    levels.mark_round(pin, reads_mail=True)
     pin.read_mail, pin.mail_vetted = True, False
     assert levels.mail_reason(pin) == levels.OWN_MAIL
     levels.end_round(pin)

@@ -48,10 +48,11 @@ import contextvars
 import json
 import logging
 import re
-from collections.abc import Iterator
-from typing import Any
+from collections.abc import Awaitable, Callable, Coroutine, Iterator
+from typing import Any, TypeVar
 
 logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
 
 RUN = "run"
 CARD = "card"
@@ -223,22 +224,40 @@ def turn_level(session: Any = None) -> str:
     return outside_mode.for_turn(session)
 
 
-def mark_round(pinned: Any, *, reads_mail: bool, script: bool) -> None:
+def mark_round(pinned: Any, *, reads_mail: bool) -> None:
     """Mark the turn's ``TurnDelegation`` for the round being dispatched:
     whether an earlier round left mail unchecked (``unvetted_before_round``)
     and whether this round's steps were asked before its mail was seen
-    (``round_reading``). A round with a script isn't: the script's own calls
-    come after what it reads, and the loop never checks that mail. Never
-    raises."""
+    (``round_reading``). A script's own calls come after what it reads, so
+    they don't count as asked first (``in_script_call``). Never raises."""
     if pinned is None:
         return
     try:
         pinned.unvetted_before_round = bool(
             getattr(pinned, "read_mail", False) and getattr(pinned, "mail_vetted", False) is not True
         )
-        pinned.round_reading = bool(reads_mail and not script)
+        pinned.round_reading = bool(reads_mail)
     except Exception:
         logger.debug("levels: couldn't mark the round", exc_info=True)
+
+
+_IN_SCRIPT: contextvars.ContextVar[bool] = contextvars.ContextVar("levels_in_script", default=False)
+
+
+def in_script_call(call: Callable[..., Awaitable[_T]]) -> Callable[..., Coroutine[Any, Any, _T]]:
+    """Wrap a script's per-call function: each call the script makes was
+    chosen after what the script read, so inside it a read in this round
+    isn't counted as one the step was asked before (``mail_reason``). The
+    script's sibling steps in the round are unaffected."""
+
+    async def _wrapped(*args: Any, **kwargs: Any) -> _T:
+        token = _IN_SCRIPT.set(True)
+        try:
+            return await call(*args, **kwargs)
+        finally:
+            _IN_SCRIPT.reset(token)
+
+    return _wrapped
 
 
 def end_round(pinned: Any) -> None:
@@ -263,7 +282,8 @@ def mail_reason(pinned: Any = None, tool: str = "", tool_input: Any = None) -> s
     ``OWN_MAIL``. A read in the round
     being dispatched (``round_reading``, set by the chat loop until that
     round's reads are checked) isn't counted: the step was asked for before
-    anyone saw what that mail says.
+    anyone saw what that mail says. A script's own calls are the exception
+    (``in_script_call``): they come after what the script read.
     ``pinned`` is the turn's ``TurnDelegation``, else the bound session's.
     Never raises: an error is ``MAIL_UNCHECKED``."""
     try:
@@ -291,7 +311,7 @@ def mail_reason(pinned: Any = None, tool: str = "", tool_input: Any = None) -> s
             pinned is not None and getattr(pinned, "read_mail", False) is True
             and getattr(pinned, "mail_vetted", False) is not True
         ):
-            if getattr(pinned, "round_reading", False) is not True:
+            if getattr(pinned, "round_reading", False) is not True or _IN_SCRIPT.get():
                 return MAIL_UNCHECKED
             if getattr(pinned, "unvetted_before_round", False) is True:
                 return MAIL_UNCHECKED

@@ -3116,10 +3116,7 @@ class Executive:
             # Until this round's reads are checked, only mail an earlier
             # round left unchecked makes this round's steps wait
             # (levels.mail_reason), in the loop and in every handler.
-            levels.mark_round(
-                pinned_delegation, reads_mail=reads_mail_now,
-                script=any(tu["name"] in (step_script.RUN_SCRIPT_TOOL, "run_python_job") for tu in dispatch_uses),
-            )
+            levels.mark_round(pinned_delegation, reads_mail=reads_mail_now)
             if pinned_delegation is not None and (pinned_delegation.read_mail or reads_mail_now):
                 mail_touched_uses = [
                     tu for tu in [*skill_tool_uses, *mcp_tool_uses, *script_tool_uses]
@@ -3866,7 +3863,7 @@ class Executive:
                         step_script.run_script_tool(
                             script_args,
                             tools=None,
-                            call=_script_call,
+                            call=levels.in_script_call(_script_call),
                             origin="chat",
                             # Saving and running while someone on the team
                             # (the principal or a teammate) speaks on a
