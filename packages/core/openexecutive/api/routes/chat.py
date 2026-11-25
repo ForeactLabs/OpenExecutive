@@ -1354,9 +1354,9 @@ async def _run_chat_turn(
     session.shared_chat = bool(people) or member or unreadable
     # Everyone who writes in a shared web chat is on the team (``chat_people``),
     # so whoever speaks is the one asking, at the company's level, wherever
-    # the chat is (``Session.others_spoke_last`` stays for chat spaces that
-    # let in people not on People).
-    session.others_spoke_last = False
+    # the chat is. Only a chat whose people couldn't be read counts as one
+    # someone not on the team may have written in (``Session.others_spoke_last``).
+    session.others_spoke_last = unreadable
     exec_message = message
     turn_memory_text = memory_text
     shared_block = ""

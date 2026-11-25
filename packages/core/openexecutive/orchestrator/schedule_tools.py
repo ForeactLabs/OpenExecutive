@@ -2338,14 +2338,14 @@ def read_only_withheld_error(tool_name: str) -> str:
 
 
 # A chat space that lets in people not on People (a Google Chat space) where
-# the last line wasn't the speaker's (`Session.others_spoke_last`): the turn
-# may read lines from someone with no level of their own, so nothing on it sends mail or
-# invites, messages or posts to people, or changes who is on the roster,
-# whoever speaks: noticed as `levels.SHARED`. A shared web chat is only the
-# team's, so it never sets it. That includes the owner's own turn right after someone
-# else's line: a request carried over from that line ("sounds good") must not
-# send. The owner's next message with nobody else's in between lifts it, so
-# asking again works. Owner-only tools are already withheld in every shared
+# the last line wasn't the speaker's (`Session.others_spoke_last`), or a web
+# chat whose people couldn't be read: the turn may read lines from someone
+# with no level of their own, so what on it sends mail or invites, messages
+# or posts to people, or changes who is on the roster is noticed as
+# `levels.SHARED`, whoever speaks, a reply carried over from that line
+# ("sounds good") included. A shared web chat is only the team's, so a
+# teammate's line there is a teammate's ask and never sets it.
+# Owner-only tools are already withheld in every shared
 # chat (`content_trust.principal_only_withheld`). Of the gateway tools, the
 # mail and calendar writes whose recipients the gateway checks are refused too
 # (`shared_chat_withholds`): a recipient on the roster is still a send nobody
