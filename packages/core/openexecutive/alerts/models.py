@@ -56,8 +56,8 @@ def visible_alert(
 ) -> bool:
     """Whether ``alert`` may be shown to ``viewer`` (anything with
     ``person_id`` and ``is_principal``, e.g. ``artifact_records.Viewer``).
-    Every alert but a drafted artifact, a personal card or a card from
-    someone's own chat may; an artifact only to its owner, a personal card
+    Every alert but a drafted artifact, a personal card, a card from
+    someone's own chat or from their own watch may; an artifact only to its owner, a personal card
     (``PERSONAL_SOURCES``) only to the person it is routed to, a card a held
     step raised from one person's own chat only to them and its approver
     (``alerts.own_chat``), and none of them to anyone when there is no viewer
@@ -78,6 +78,8 @@ def visible_alert(
         return viewer is not None and routed is not None and getattr(viewer, "person_id", None) == routed
     if source == TEAM_RAISED_SOURCE:
         return _team_card_reader(alert, reader, viewer)
+    if (owner := own_watch_owner(alert)) is not None:
+        return reader is not None and reader == owner
     if source != ARTIFACT_SOURCE:
         return True
     if viewer is None:
@@ -87,6 +89,15 @@ def visible_alert(
         getattr(viewer, "person_id", None),
         is_principal=bool(getattr(viewer, "is_principal", False)),
     )
+
+
+def own_watch_owner(alert: object) -> int | None:
+    """Whose own watch ``alert`` is a card from (``AlertEvent.own_watch_of``,
+    kept as its owner), or None for a company watch's card or any other."""
+    if not str(getattr(alert, "dedup_key", "") or "").startswith("watch:"):
+        return None
+    owner = getattr(alert, "owner_person_id", None)
+    return owner if isinstance(owner, int) and not isinstance(owner, bool) else None
 
 
 def _team_card_reader(alert: object, reader: int | None, viewer: object | None) -> bool:
@@ -203,6 +214,11 @@ class AlertEvent(BaseModel):
     # card is theirs and its reader's, not the whole team's
     # (``visible_alert``).
     raised_by_person_id: int | None = None
+    # Set only by the watch pipeline: the person whose own watch this card
+    # comes from (``monitoring.mailbox.set_by``, one they set up for
+    # themselves in their own chat). The card is theirs alone, like the chat
+    # (``visible_alert``).
+    own_watch_of: int | None = None
     # Set only by the create_alert tool: the Executive itself chose to raise
     # this card. When review makes no decision on it (the call failed, or its
     # answer was cut off), the card is kept as raised instead of dropped

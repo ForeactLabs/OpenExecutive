@@ -710,6 +710,10 @@ async def handle_run_python_job(tool_input: dict[str, Any]) -> str:
         "code_chars": len(code),
         "saved_tool": saved.name if saved is not None else None,
         "saved_as": (reply.get("saved") or {}).get("name"),
+        # Why it failed, so a failure can be traced (Test lab 11-25: two
+        # spreadsheet jobs failed with no reason kept): the error's last
+        # line, short.
+        "error": None if ok else _why(reply),
     })
     return json.dumps(reply, ensure_ascii=False)
 
@@ -754,6 +758,26 @@ def _save(name: str, description: str, code: str, ok: bool) -> dict[str, Any]:
     return {"saved": saved}
 
 
+def _why(reply: dict[str, Any]) -> str:
+    """What kind of failure a failed job had, for its company-wide audit row:
+    the exception's type ("ModuleNotFoundError") or the runner's own reason,
+    never the message, which can quote the data the job read. The whole
+    last line goes to the server log only."""
+    text = str(reply.get("error") or reply.get("files_error") or "")
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    last = lines[-1] if lines else ""
+    if last:
+        logger.warning("python job failed: %s", last[:300])
+    kind = re.match(r"([A-Za-z_][\w.]*(?:Error|Exception|Exit|Interrupt))\b", last)
+    if kind:
+        return kind.group(1)[:80]
+    if "s limit" in last:
+        return "ran past its time limit"
+    if "files are too many" in last:
+        return "result files too many or too large"
+    return "failed in the runner" if last else "no reason given"
+
+
 def _meter(details: dict[str, Any]) -> None:
     """One audit row per job, summed by GET /audit/usage (python_jobs). The
     turn's model tokens are already in its cache_event rows."""
@@ -762,7 +786,8 @@ def _meter(details: dict[str, Any]) -> None:
     try:
         log_event(
             "python_job",
-            f"Python job {'worked' if details['ok'] else 'failed'} in {details['duration_ms'] / 1000:.1f}s",
+            f"Python job worked in {details['duration_ms'] / 1000:.1f}s" if details["ok"] else
+            f"Python job failed in {details['duration_ms'] / 1000:.1f}s: {details.get('error') or 'no reason given'}",
             actor="executive",
             details=details,
         )

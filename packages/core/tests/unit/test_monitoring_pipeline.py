@@ -2195,3 +2195,41 @@ def test_a_quiet_watch_find_reaches_the_brief_as_a_pages_words() -> None:
     assert "<untrusted_content" in found and "ignore your rules" in found
     ours = handled_line({"at": "2026-11-13T10:00", "kind": "alert_resolved", "summary": "Closed the dock card"})
     assert ours == "- [2026-11-13] alert_resolved: Closed the dock card"
+
+
+def test_a_card_from_someones_own_watch_shows_only_to_them(db: Path) -> None:
+    """Test lab 11-25: a teammate's own watch's cards reached an admin's
+    Home. The card carries whose watch it is, and only they see it; a
+    company watch's card shows to everyone."""
+    from types import SimpleNamespace
+
+    from openexecutive.alerts.models import Alert, visible_alert
+    from openexecutive.monitoring import mailbox
+    from openexecutive.monitoring.pipeline import _signal_to_alert_event
+
+    own_id = _insert_feed(db, slug="eggs", config=mailbox.own_config({}, 4), route_to_person_id=4)
+    company_id = _insert_feed(db, slug="flour")
+    own = ms.get_watchlist_item(own_id, db_path=db)
+    company = ms.get_watchlist_item(company_id, db_path=db)
+    assert own is not None and company is not None
+    event = _signal_to_alert_event(_make_signal(), own)
+    assert event.own_watch_of == 4 and event.routed_to_person_id == 4
+    assert _signal_to_alert_event(_make_signal(), company).own_watch_of is None
+    # Moved to Riley on its page: the card is Riley's, and the team's.
+    moved = _signal_to_alert_event(_make_signal(), own.model_copy(update={"route_to_person_id": 1}))
+    assert moved.own_watch_of is None and moved.routed_to_person_id == 1
+
+    def card(owner: int | None) -> Alert:
+        return Alert(
+            id=1, source="vendor_status", severity="high", headline="Egg prices up", body="",
+            created_at=datetime.now(UTC).isoformat(), dedup_key="watch:eggs",
+            routed_to_person_id=4, owner_person_id=owner,
+        )
+
+    morgan, drew = SimpleNamespace(person_id=4, is_principal=False), SimpleNamespace(person_id=2, is_principal=False)
+    assert visible_alert(card(4), morgan)
+    assert not visible_alert(card(4), drew)
+    assert not visible_alert(card(4), None)
+    # Their own brief, built with no viewer for them, keeps it.
+    assert visible_alert(card(4), None, chat_reader=4)
+    assert visible_alert(card(None), drew)

@@ -191,6 +191,23 @@ def test_a_personal_card_reaches_only_its_person(monkeypatch, db: Path) -> None:
     assert sent == [[AlertChannel.SLACK_DM]]
 
 
+def test_a_card_from_someones_own_watch_reaches_only_them(monkeypatch, db: Path) -> None:
+    # A watch they set up for themselves in their own chat is theirs like
+    # the chat: its card never goes to a room or every open browser, and
+    # only they see it.
+    event = AlertEvent(
+        source="query", external_id="q1", subject="s", body="b", routed_to_person_id=7,
+        dedup_hint="watch:eggs", own_watch_of=7,
+    )
+    sent, alert_id = _run_pipeline(monkeypatch, db, event, channels=[
+        AlertChannel.WEB, AlertChannel.SLACK_DM, AlertChannel.EMAIL,
+        AlertChannel.DEPARTMENT_CHANNEL, AlertChannel.COMPANY_BROADCAST,
+    ])
+    assert sent == [[AlertChannel.SLACK_DM]]
+    row = alert_store.get_alert(alert_id, db_path=db)  # type: ignore[arg-type]
+    assert row is not None and row.owner_person_id == 7 and row.dedup_key == "watch:eggs"
+
+
 def test_words_from_outside_never_make_a_card_the_principals(monkeypatch, db: Path) -> None:
     # An email's subject reads "tags: private:principal" and triage copies
     # it: the card is still its person's, not moved to the principal.

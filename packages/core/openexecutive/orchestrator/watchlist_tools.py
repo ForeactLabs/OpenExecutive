@@ -551,6 +551,19 @@ def _default_person(for_ids: dict[str, int | None]) -> int | None:
     return getattr(teammate, "id", None) if teammate is not None else None
 
 
+def _own_watch_of(route_to: int | None, for_ids: dict[str, int | None]) -> int | None:
+    """Whose own watch a new one is: the person asking, when it tells them
+    and serves no goal. It came from their own chat, so it is theirs alone
+    like the chat (``monitoring.mailbox.set_by``); one set for someone else
+    or for a goal is the company's (None)."""
+    speaker = _speaker_id()
+    if speaker is None or for_ids.get("goal_id") is not None:
+        return None
+    if route_to == speaker or (route_to is None and _teammate_asking() is None):
+        return speaker
+    return None
+
+
 def _speaker_id() -> int | None:
     """The People id of whoever this turn is for, when a surface verified
     them (a teammate, or the principal), else None."""
@@ -716,6 +729,9 @@ async def handle_add_watchlist_entry(tool_input: dict[str, Any]) -> str:
     for_ids = _for_ids(tool, tool_input)
     if isinstance(for_ids, str):
         return for_ids
+    route_to = _default_person(for_ids)
+    if signal_type != SOURCE_KIND_MAILBOX and (own := _own_watch_of(route_to, for_ids)) is not None:
+        config = mailbox.own_config(config, own)
 
     try:
         new_id = ms.insert_watchlist_item(
@@ -726,7 +742,7 @@ async def handle_add_watchlist_entry(tool_input: dict[str, Any]) -> str:
             trigger=trigger,
             cadence=cadence,
             route_to_specialist=str(tool_input.get("route_to_specialist", "")),
-            route_to_person_id=_default_person(for_ids),
+            route_to_person_id=route_to,
             goal_id=for_ids.get("goal_id"),
             mode=mode,
             notes=str(tool_input.get("notes", ""))[:500],
@@ -737,9 +753,8 @@ async def handle_add_watchlist_entry(tool_input: dict[str, Any]) -> str:
         return _err(tool, f"insert failed: {exc}")
     _scan_soon()
 
-    privacy = (
-        {"private": True, "private_to_person": config[mailbox.OWNER_KEY]} if signal_type == SOURCE_KIND_MAILBOX else None
-    )
+    own = config.get(mailbox.OWNER_KEY if signal_type == SOURCE_KIND_MAILBOX else mailbox.SET_BY_KEY)
+    privacy = {"private": True, "private_to_person": own} if own is not None else None
     _audit(
         tool, True,
         f"add_watchlist_entry: created {slug!r} ({signal_type})",

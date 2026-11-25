@@ -48,6 +48,8 @@ from openexecutive.monitoring.models import SOURCE_KIND_MAILBOX, WatchlistItem
 logger = logging.getLogger(__name__)
 
 OWNER_KEY = "mailbox_of"
+# Whose own watch a non-email watch is (``set_by``).
+SET_BY_KEY = "set_by"
 FROM_KEY = "from"
 KEYWORDS_KEY = "keywords"
 # ``config_json`` key: when the last read that worked began
@@ -269,13 +271,46 @@ def _keep(
     scan_soon()
 
 
+def own_config(config: dict[str, Any], person_id: int) -> dict[str, Any]:
+    """``config`` for a watch someone set up for themselves in their own
+    chat: it is theirs alone, like their chats (``set_by``)."""
+    return {**config, SET_BY_KEY: int(person_id)}
+
+
+def set_by(item: WatchlistItem) -> int | None:
+    """Whose own watch this is: an email watch's owner, or the person who
+    set it up for themselves in their own chat. None: the company's (one set
+    for someone else, a department or a goal, or by the Executive's own
+    research)."""
+    if is_mailbox(item):
+        return owner_id(item)
+    raw = (item.config_json or {}).get(SET_BY_KEY)
+    if not isinstance(raw, int) or isinstance(raw, bool):
+        return None
+    # Theirs only while it still tells them and serves no goal: moved to
+    # someone else or to a goal (its page, update_watchlist_entry), it is
+    # the company's like any watch set that way.
+    if item.goal_id is not None:
+        return None
+    routed = item.route_to_person_id
+    if routed == raw:
+        return raw
+    if routed is None:
+        from openexecutive.people import registry as people_registry
+
+        principal = people_registry.get_principal()
+        return raw if principal is not None and principal.id == raw else None
+    return None
+
+
 def shown_to(item: WatchlistItem, person_id: int | None) -> bool:
     """Whether the person ``person_id`` (None: nobody in particular, a
-    surface everyone reads) may see this watch. Every watch but an email
-    watch is the company's; an email watch is its owner's alone."""
-    if not is_mailbox(item):
+    surface everyone reads) may see this watch. A company watch shows to
+    everyone; someone's own watch (an email watch, or one they set up for
+    themselves in their own chat) only to them."""
+    if not is_mailbox(item) and set_by(item) is None:
         return True
-    return person_id is not None and owner_id(item) == person_id
+    return person_id is not None and set_by(item) == person_id
 
 
 def own_slug(slug: str) -> str:
@@ -292,10 +327,11 @@ def own_slug(slug: str) -> str:
 def audit_privacy(item: WatchlistItem) -> dict[str, Any]:
     """The ``audit.log_event`` keywords for a row about this watch: an email
     watch's rows name a sender and a subject, so they are its owner's
-    alone; every other watch's rows are the company's (no keywords)."""
-    if not is_mailbox(item):
+    alone, and so are those of a watch someone set up for themselves; every
+    other watch's rows are the company's (no keywords)."""
+    if not is_mailbox(item) and set_by(item) is None:
         return {}
-    return {"private": True, "private_to_person": owner_id(item)}
+    return {"private": True, "private_to_person": set_by(item)}
 
 
 def _words(values: object, *, cap: int, each: int) -> list[str]:
@@ -360,6 +396,7 @@ __all__ = [
     "FROM_KEY",
     "KEYWORDS_KEY",
     "OWNER_KEY",
+    "SET_BY_KEY",
     "READ_FROM_KEY",
     "READ_THROUGH_KEY",
     "audit_privacy",
@@ -369,5 +406,7 @@ __all__ = [
     "matches",
     "owner_config",
     "owner_id",
+    "own_config",
+    "set_by",
     "shown_to",
 ]

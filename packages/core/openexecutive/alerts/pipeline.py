@@ -323,9 +323,10 @@ async def evaluate_and_dispatch(
         effective_channels = [
             c for c in effective_channels if c != AlertChannel.COMPANY_BROADCAST
         ]
-    if event.source in PERSONAL_SOURCES:
+    if event.source in PERSONAL_SOURCES or event.own_watch_of is not None:
         # A card that is one person's alone (an email watch's sender and
-        # subject, say) reaches only them: their page, their own DM. Never a
+        # subject, or a card from a watch they set up for themselves) reaches
+        # only them: their page, their own DM. Never a
         # room, and never the Executive's own mailbox, whatever triage made
         # of its words.
         effective_channels = [c for c in effective_channels if c in _PERSONAL_CHANNELS]
@@ -468,7 +469,8 @@ def _insert(
         routed_to_person_id=routed_to,
         # A card a team member raised is theirs and its reader's
         # (``models.visible_alert``): who raised it is kept beside whom it is for.
-        owner_person_id=event.raised_by_person_id if event.source == TEAM_RAISED_SOURCE else None,
+        # A card from someone's own watch is theirs alone (``models.own_watch_owner``).
+        owner_person_id=event.raised_by_person_id if event.source == TEAM_RAISED_SOURCE else event.own_watch_of,
         needs=event.needs,
         question=event.question,
         choices=event.choices,
