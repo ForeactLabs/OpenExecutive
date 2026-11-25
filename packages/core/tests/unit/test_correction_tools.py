@@ -331,3 +331,36 @@ def test_a_teammates_today_header_follows_their_own_leave_out(
     )
     assert context.rstrip().endswith("- Halcyon renewal")
     assert "Maple House" not in context
+
+
+def test_a_teammates_raised_line_shows_on_a_quiet_board(
+    db: Path, roster: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.api.routes import today as today_route
+    from openexecutive.briefing import narrative_cache
+
+    monkeypatch.setattr(today_route, "_with_due_soon", lambda data, *_a: data)
+    monkeypatch.setattr(today_route, "_narrative_activity", lambda *_a: [])
+    viewer = SimpleNamespace(id=roster.teammate.id)
+
+    def context() -> str:
+        return today_route._narrative_context(
+            {}, viewer, {"name": "Ben", "role": ""}, "team", f"person:{roster.teammate.id}", reader=None,  # type: ignore[arg-type]
+        )[0]
+
+    assert context() == narrative_cache.QUIET_CONTEXT
+    brief_requests.add(brief_requests.KIND_FIXED, "I set the reminder to call Jamie.", source_quote="q",
+                       person_id=roster.teammate.id, db_path=db)
+    assert "I set the reminder to call Jamie." in context()
+
+
+def test_the_owners_right_now_tells_what_was_put_right(
+    db: Path, roster: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.api.routes import today as today_route
+
+    monkeypatch.setattr(today_route, "principal_id", lambda: roster.principal.id)
+    brief_requests.add(brief_requests.KIND_FIXED, "I set the reminder to call Jamie.", source_quote="q",
+                       person_id=roster.principal.id, db_path=db)
+    context, _ = today_route._header_context({}, None, "team", "principal", None)
+    assert "something I put right (already done, nothing to ask): I set the reminder to call Jamie." in context

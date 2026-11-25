@@ -2492,7 +2492,8 @@ def _narrative_context(
     resolved = _narrative_reader(scope, viewer) if reader is _LOOKUP else reader
     if viewer_desc is None:
         return _header_context(today_data, viewer, mode, scope, resolved, sources_out)  # type: ignore[arg-type]
-    if _nothing_needs_attention(today_data, mode):
+    # A line their chat raised or put right is told even on a quiet board.
+    if _nothing_needs_attention(today_data, mode) and not _has_brief_lines(viewer):
         return narrative_cache.QUIET_CONTEXT, None
     activity = _narrative_activity(viewer, viewer_desc)
     context = render_briefing_context(
@@ -2505,6 +2506,21 @@ def _narrative_context(
         reader=resolved,  # type: ignore[arg-type]
     )
     return context, activity
+
+
+def _has_brief_lines(viewer: PersonBriefItem | None) -> bool:
+    """Whether ``viewer`` has a raise or put-right line waiting in their own
+    brief (``brief_requests``). Never raises."""
+    pid = getattr(viewer, "id", None)
+    if not isinstance(pid, int):
+        return False
+    try:
+        from openexecutive.briefing import brief_requests
+
+        return bool(brief_requests.render_parts(pid)[0])
+    except Exception:
+        logger.warning("today: couldn't read a person's brief lines", exc_info=True)
+        return False
 
 
 def _header_context(
