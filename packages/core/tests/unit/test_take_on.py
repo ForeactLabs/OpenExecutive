@@ -209,6 +209,29 @@ def test_a_run_left_working_reads_as_failed_after_a_while() -> None:
     assert _list(now=datetime.now(UTC) + timedelta(days=take_on.DONE_DAYS, hours=1)) == []
 
 
+def test_a_run_that_ran_late_doesnt_write_over_the_one_started_again(monkeypatch: pytest.MonkeyPatch) -> None:
+    import copy
+
+    from openexecutive.api.routes import take_on as route
+    from openexecutive.memory import decision_ledger, session_store
+
+    o = _offer()
+    take_on.put_made(ME, [o])
+    first = copy.copy(o)
+    assert take_on.start(ME, first)
+    later = datetime.now(UTC) + background_turn_limit() + timedelta(minutes=1)
+    monkeypatch.setattr(take_on, "_now", lambda: later)
+    second = copy.copy(o)
+    assert take_on.start(ME, second) and second.started_at != first.started_at
+    monkeypatch.setattr(session_store, "load_messages", lambda _s: [
+        {"role": "assistant", "content": "Sent it.", "actions": [{"summary": "Emailed Dana"}]}])
+    monkeypatch.setattr(decision_ledger, "open_for_session", lambda _s: [])
+    # The first run's end changes nothing: the second is still working.
+    assert route._what_came_of_it(route.Me(ME, 1, True), first, "sess-1", True) == ""
+    assert _list(now=later)[0].status == "working"
+    assert route._what_came_of_it(route.Me(ME, 1, True), second, "sess-2", True) == "done"
+
+
 def test_or_tell_me_changes_the_offer_and_undo_puts_it_back() -> None:
     o = _offer()
     take_on.put_made(ME, [o])

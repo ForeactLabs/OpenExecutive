@@ -320,7 +320,8 @@ def _asked_back(replies: list[dict[str, Any]]) -> str:
 
 def _what_came_of_it(me: Me, offer: take_on.Offer, session_id: str, answered: bool) -> str:
     """Read the run's own record: the card it went to, what it did, or why
-    it stopped. Returns the status it left the offer in."""
+    it stopped. Returns the status it left the offer in, or "" when the row
+    has moved on (started again after this run ran late)."""
     from openexecutive.memory import decision_ledger as dl
     from openexecutive.memory.session_store import load_messages
     from openexecutive.workflows.run_outcome import first_sentence
@@ -342,26 +343,27 @@ def _what_came_of_it(me: Me, offer: take_on.Offer, session_id: str, answered: bo
     except Exception:
         logger.warning("take_on: couldn't read the run's cards", exc_info=True)
         cards = []
+    run = offer.started_at
     if cards:
-        take_on.finish(me.email, key, "card", outcome=said, done=done, decision_id=cards[0])
-        return "card"
-    if done:
+        status, wrote = "card", take_on.finish(me.email, key, "card", outcome=said, done=done,
+                                               decision_id=cards[0], from_run=run)
+    elif done:
         # What it did shows, even from a turn cut off at its deadline.
-        take_on.finish(me.email, key, "done", outcome=said, done=done)
-        return "done"
-    if answered and offer.kind == "doc" and not _asked_back(replies):
+        status, wrote = "done", take_on.finish(me.email, key, "done", outcome=said, done=done, from_run=run)
+    elif answered and offer.kind == "doc" and not _asked_back(replies):
         # A doc answered in words is the doc: what it said shows, and See
         # how opens the chat.
-        take_on.finish(me.email, key, "done", outcome=said)
-        return "done"
-    if answered:
+        status, wrote = "done", take_on.finish(me.email, key, "done", outcome=said, from_run=run)
+    elif answered:
         # It did nothing: asked one thing back, or said why not (nothing
         # sent, nothing set up). The offer stays, with that, until they
         # answer in the chat or start it again.
-        take_on.finish(me.email, key, "asked", outcome=_asked_back(replies) or said or "It answered in the chat.")
-        return "asked"
-    take_on.finish(me.email, key, "failed", outcome=said or "It stopped before it finished.")
-    return "failed"
+        status, wrote = "asked", take_on.finish(
+            me.email, key, "asked", outcome=_asked_back(replies) or said or "It answered in the chat.", from_run=run)
+    else:
+        status, wrote = "failed", take_on.finish(me.email, key, "failed",
+                                                 outcome=said or "It stopped before it finished.", from_run=run)
+    return status if wrote else ""
 
 
 @router.post("/take-on/{key}/do", status_code=202, response_model=OfferOut)
@@ -398,17 +400,19 @@ async def do_it(key: str, request: Request) -> OfferOut:
             request, message=DO_PREFIX + take_on.ask_text(offer), memory_text=offer.title, on_finished=_finished,
         )
     except HTTPException as exc:
-        await asyncio.to_thread(take_on.finish, me.email, key, "failed", outcome=str(exc.detail))
+        await asyncio.to_thread(take_on.finish, me.email, key, "failed", outcome=str(exc.detail),
+                                from_run=offer.started_at)
         raise
     except asyncio.CancelledError:
         # The request went away before the run started: Do it can start it
         # again at once. Written here, not in a thread, as the task is
         # being cancelled.
-        take_on.finish(me.email, key, "failed", outcome="It couldn't be started.")
+        take_on.finish(me.email, key, "failed", outcome="It couldn't be started.", from_run=offer.started_at)
         raise
     except Exception:
         logger.exception("take_on: couldn't start %s", key)
-        await asyncio.to_thread(take_on.finish, me.email, key, "failed", outcome="It couldn't be started.")
+        await asyncio.to_thread(take_on.finish, me.email, key, "failed", outcome="It couldn't be started.",
+                                from_run=offer.started_at)
         raise HTTPException(status_code=500, detail="It couldn't be started. Try again.") from None
     run["session_id"] = session_id
     await asyncio.to_thread(take_on.set_session, me.email, key, session_id)

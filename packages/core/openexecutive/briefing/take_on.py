@@ -140,6 +140,9 @@ class Offer:
     said: str = ""
     changed: bool = False
     finished_at: str = ""
+    # When this Do it began (set by ``start``): its run writes what came of
+    # it only while the row is still on that run.
+    started_at: str = ""
 
 
 @dataclass
@@ -823,7 +826,7 @@ def _from_snapshot(key: str, raw: str | None) -> Offer | None:
 def start(email: str, offer: Offer, *, db_path: Path | None = None) -> bool:
     """Record Do it. False when it's already working, on a card, or done. A
     run left working past ``config.background_turn_limit`` shows as failed, so it can start
-    again."""
+    again. On a start, ``offer.started_at`` names this run."""
     person, now = who(email), _now()
     stale = (now - background_turn_limit()).isoformat()
     with _connect(db_path) as conn:
@@ -836,6 +839,8 @@ def start(email: str, offer: Offer, *, db_path: Path | None = None) -> bool:
             "OR (status = 'working' AND started_at < ?))",
             (now.isoformat(), _snapshot(offer), person, offer.key, stale),
         )
+        if cur.rowcount > 0:
+            offer.started_at = now.isoformat()
         return cur.rowcount > 0
 
 
@@ -893,18 +898,24 @@ def finish(
     done: list[tuple[str, str]] | None = None,
     decision_id: int | None = None,
     from_card: int | None = None,
+    from_run: str | None = None,
     db_path: Path | None = None,
 ) -> bool:
     """What came of Do it: done (with what it did), on a card for them
     (the gate's), asked them a question back (with the question), or failed
     (with why). With ``from_card``, only while the row is still on that
-    card, so two readers settling the same card write it once. Returns
-    whether a row changed. Never raises."""
+    card, so two readers settling the same card write it once. With
+    ``from_run`` (the run's ``started_at``), only while that run is still the
+    one working, so a run that ran late and was started again can't write
+    over the new one. Returns whether a row changed. Never raises."""
     where = "WHERE person = ? AND key = ?"
     args: list[Any] = [who(email), key]
     if from_card is not None:
         where += " AND status = 'card' AND decision_id = ?"
         args.append(from_card)
+    if from_run is not None:
+        where += " AND status = 'working' AND started_at = ?"
+        args.append(from_run)
     try:
         with _connect(db_path) as conn:
             cur = conn.execute(
