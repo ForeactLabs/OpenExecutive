@@ -100,7 +100,7 @@ def get(person_id: int, *, db_path: Path | None = None, strict: bool = False) ->
     # goes out as a person follows it like every other step.
     from openexecutive.orchestrator import take_the_lead
 
-    company = take_the_lead.get(take_the_lead.SCOPE_EXECUTIVE, db_path=db_path).training
+    company = take_the_lead.get(take_the_lead.SCOPE_EXECUTIVE, db_path=db_path, strict=strict).training
     return Training(person_id=person_id, training=company, drafts=DRAFTS in on)
 
 

@@ -2671,6 +2671,18 @@ def test_a_topic_goes_rule_releases_its_words_in_what_it_sends_on_its_own(owner:
     assert _as_you_hold("Please sign the contract") is None
 
 
+def test_in_training_an_allowed_person_is_no_longer_someone_new(owner: Any, balanced: None) -> None:
+    from openexecutive.delegation import training
+
+    ttl.set_(ttl.SCOPE_EXECUTIVE, training=True, updated_by="t")
+    bob = "bob@far.example"
+    assert ttl.as_you(1, recipients=[bob], noticed=["new_person"]) == ttl.TRAINING
+    training.allow_person(1, bob, "Bob", decision_id=None)
+    # Allowed: a recent roster entry no longer waits, a new contact still does.
+    assert ttl.as_you(1, recipients=[bob], noticed=["new_person"]) is None
+    assert ttl.as_you(1, recipients=[bob], noticed=["new_contact"]) == "new_contact"
+
+
 def test_topic_rules_on_what_it_sends_as_you(owner: Any, balanced: None) -> None:
     _go("topic", "contracts")
     assert _as_you_hold("The contract is attached.") is None

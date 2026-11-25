@@ -4502,6 +4502,9 @@ class MCPGateway:
                 parsed = None
             if isinstance(parsed, dict) and parsed.get("error"):
                 return str(parsed["error"])[:300]
+            # Run on its own, the change can wait on its own card instead.
+            if isinstance(parsed, dict) and parsed.get("status") == "waiting_for_approval":
+                return "Not done yet: it waits for your approval on its own card."
         if not head or head.lower().startswith(("error", "tool error")):
             return (head or "Drive didn't answer.")[:300]
         return None

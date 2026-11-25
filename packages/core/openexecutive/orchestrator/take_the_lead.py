@@ -4373,7 +4373,7 @@ def _released(
 # Reasons a feature notices about what goes out as a person that wait below
 # Hands-off (``as_you``), the someone-new topic in that feature's words, and
 # those In training's "on its own to them" covers.
-AS_YOU_FORGIVEN_IN_TRAINING = frozenset({"stranger"})
+AS_YOU_FORGIVEN_IN_TRAINING = frozenset({"stranger", "new_person"})
 
 
 def as_you(
