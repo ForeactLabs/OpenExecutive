@@ -440,6 +440,9 @@ def test_a_held_reminder_to_the_owner_tells_them_whatever_the_run_wrote(
     ("DROPPED.", ("dropped", "")),
     ("**PAUSED:** held it", ("paused", "held it")),
     ("**DROPPED**: done", ("dropped", "done")),
+    # The token as the last word: the run held it and said so first.
+    ("Understood, holding it. PAUSED", ("paused", "Understood, holding it.")),
+    ("Okay, dropping it as asked. **DROPPED**", ("dropped", "Okay, dropping it as asked.")),
     # Ordinary words are a message, never a marker.
     ("Paused.", ("", "Paused.")),
     ("dropped: done", ("", "dropped: done")),

@@ -5205,7 +5205,8 @@ scheduler:
     it still sends its one message and says so. A run told to hold or drop
     it sends nothing and answers only PAUSED: or DROPPED: (the setter then
     gets the fixed runner._set_aside_line, whatever the run wrote)
-    (runner._followup_outcome, read only when they wrote since); the runner
+    (runner._followup_outcome, read only when they wrote since: the
+    marker in capitals at the start of the reply, or as its last word); the runner
     then cancels that occurrence with the reason (runner._end_as_asked;
     DROPPED also ends a repeating one, PAUSED lets the next occurrence come)
     and audits phase paused or dropped, not delivered. The runner never

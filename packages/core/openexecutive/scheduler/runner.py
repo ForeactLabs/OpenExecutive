@@ -1407,6 +1407,9 @@ _DROPPED = "DROPPED:"
 # Only the token itself, in capitals: with its colon (bold or not), or
 # alone as the whole reply. "Dropped you a note" is a message, not a marker.
 _MARKER_RE = re.compile(r"[*_\s]*(PAUSED|DROPPED)(?:[*_]*:[*_\s]*|[*_.\s]*$)")
+# The same token as the last word of the reply ("Understood, holding it.
+# PAUSED"): a run that put it at the end still held it, so it is read too.
+_TRAILING_MARKER_RE = re.compile(r"(?:^|(?<=[\s.!?]))[*_]*(PAUSED|DROPPED)[*_:.\s]*$")
 
 
 def _followup_owner(action: ScheduledAction) -> Person | None:
@@ -1582,6 +1585,9 @@ def _followup_outcome(reply: object) -> tuple[str, str]:
     m = _MARKER_RE.match(text)
     if m:
         return ("paused" if m.group(1) == "PAUSED" else "dropped"), text[m.end():].strip()
+    m = _TRAILING_MARKER_RE.search(text)
+    if m:
+        return ("paused" if m.group(1) == "PAUSED" else "dropped"), text[: m.start()].strip()
     return "", text
 
 
