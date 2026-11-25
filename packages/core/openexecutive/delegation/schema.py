@@ -27,6 +27,12 @@ SAVED_FILES_TABLE = "delegation_saved_files"
 SAVED_FOLDER_TABLE = "delegation_saved_folder"
 UPGRADES_TABLE = "delegation_upgrades"
 CARD_FILES_TABLE = "delegation_card_files"
+# The person's own texts, through Google Messages in their browser
+# (``delegation.texts``).
+TEXT_SETTINGS_TABLE = "delegation_text_settings"
+TEXT_CONVERSATIONS_TABLE = "delegation_text_conversations"
+TEXTS_TABLE = "delegation_texts"
+TEXT_SENDS_TABLE = "delegation_text_sends"
 
 TABLES: tuple[str, ...] = (
     SETTINGS_TABLE,
@@ -47,9 +53,62 @@ TABLES: tuple[str, ...] = (
     SAVED_FOLDER_TABLE,
     UPGRADES_TABLE,
     CARD_FILES_TABLE,
+    TEXT_SETTINGS_TABLE,
+    TEXT_CONVERSATIONS_TABLE,
+    TEXTS_TABLE,
+    TEXT_SENDS_TABLE,
 )
 
 _DDL: tuple[str, ...] = (
+    # Texts: the person's switch, and what their browser last said about
+    # Google Messages. One row per person; absent means off.
+    f"CREATE TABLE IF NOT EXISTS {TEXT_SETTINGS_TABLE} ("
+    "  person_id INTEGER PRIMARY KEY,"
+    "  enabled INTEGER NOT NULL DEFAULT 0,"
+    "  paired INTEGER NOT NULL DEFAULT 0,"
+    "  seen_at TEXT,"
+    "  updated_at TEXT"
+    ")",
+    # One conversation in their Google Messages (a person or a group). ``id``
+    # is ours and random; ``key`` is Google Messages' own.
+    f"CREATE TABLE IF NOT EXISTS {TEXT_CONVERSATIONS_TABLE} ("
+    "  id TEXT PRIMARY KEY,"
+    "  person_id INTEGER NOT NULL,"
+    "  key TEXT NOT NULL,"
+    "  title TEXT NOT NULL DEFAULT '',"
+    "  number TEXT NOT NULL DEFAULT '',"
+    "  is_group INTEGER NOT NULL DEFAULT 0,"
+    "  updated_at TEXT NOT NULL,"
+    "  UNIQUE (person_id, key)"
+    ")",
+    f"CREATE TABLE IF NOT EXISTS {TEXTS_TABLE} ("
+    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "  person_id INTEGER NOT NULL,"
+    "  conversation_id TEXT NOT NULL,"
+    "  ref TEXT NOT NULL,"
+    "  sender TEXT NOT NULL DEFAULT '',"
+    "  text TEXT NOT NULL DEFAULT '',"
+    "  outgoing INTEGER NOT NULL DEFAULT 0,"
+    "  at TEXT NOT NULL,"
+    "  handled INTEGER NOT NULL DEFAULT 0,"
+    "  UNIQUE (person_id, ref)"
+    ")",
+    f"CREATE INDEX IF NOT EXISTS idx_{TEXTS_TABLE}_conv ON {TEXTS_TABLE} (conversation_id, at)",
+    # What the Executive asked their browser to send, until it says how it
+    # went: in a conversation, or to a number (a new conversation).
+    f"CREATE TABLE IF NOT EXISTS {TEXT_SENDS_TABLE} ("
+    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "  person_id INTEGER NOT NULL,"
+    "  conversation_id TEXT,"
+    "  to_number TEXT NOT NULL DEFAULT '',"
+    "  text TEXT NOT NULL,"
+    "  status TEXT NOT NULL DEFAULT 'pending',"
+    "  error TEXT NOT NULL DEFAULT '',"
+    "  created_at TEXT NOT NULL,"
+    "  done_at TEXT,"
+    # The chat that was told "on its way": how it went is said there.
+    "  tell_session TEXT"
+    ")",
     # The owner's "Let team members use Act as me": one row, absent means off.
     f"CREATE TABLE IF NOT EXISTS {TEAM_TABLE} ("
     "  id INTEGER PRIMARY KEY CHECK (id = 1),"

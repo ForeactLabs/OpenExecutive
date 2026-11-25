@@ -99,13 +99,16 @@ GROUPS: dict[str, tuple[str, tuple[str, ...]]] = {
         ("do_in_app", "find_in_app", "open_in_app"),
     ),
     "messaging": (
-        "Slack, Telegram and Discord messages, department messages, company broadcasts",
+        "Slack, Telegram and Discord messages, department messages, company broadcasts; the person's own "
+        "texts: read them and send a text from their phone",
         (
+            "read_texts",
             "send_company_broadcast",
             "send_department_message",
             "send_discord_dm",
             "send_slack_dm",
             "send_telegram_message",
+            "send_text",
         ),
     ),
 }

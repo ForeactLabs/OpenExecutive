@@ -184,7 +184,12 @@ ACTING_TOOLS: frozenset[str] = frozenset({
     "send_discord_dm",
     "send_slack_dm",
     "send_telegram_message",
+    "send_text",
 })
+# Steps that only ever run on the person's own device, as them: a text goes
+# from their own phone. Approved on their own card, the tap is their OK for
+# that call (``carry_out``), as for an extension's ``card`` tool.
+_OWN_DEVICE_TOOLS = frozenset({"send_text"})
 _DELETE_TOOLS = frozenset({"archive_person", "cancel_calendar_event"})
 # The name ``in_app`` gives a change to the app asked for in chat.
 APP_STEP = "do_in_app:"
@@ -754,7 +759,18 @@ _TARGET_KEYS: dict[str, tuple[str, str]] = {
     "send_slack_dm": ("user_id", "slack"),
     "send_telegram_message": ("chat_id", "telegram"),
     "send_discord_dm": ("discord_user_id", "discord"),
+    # A text: one of the person's own conversations, or a number ("to").
+    "send_text": ("conversation_id", "text"),
 }
+# The other key that can name who an id-addressed tool reaches.
+_TARGET_ALT_KEYS: dict[str, str] = {"send_text": "to"}
+
+
+def _target_raw(tool: str, tool_input: dict[str, Any], key: str) -> Any:
+    raw = tool_input.get(key)
+    if (raw is None or raw == "") and tool in _TARGET_ALT_KEYS:
+        raw = tool_input.get(_TARGET_ALT_KEYS[tool])
+    return raw
 
 
 def _target_person(tool: str, tool_input: dict[str, Any]) -> Person | None:
@@ -763,12 +779,16 @@ def _target_person(tool: str, tool_input: dict[str, Any]) -> Person | None:
     spec = _TARGET_KEYS.get(tool)
     if spec is None:
         return None
-    raw = tool_input.get(spec[0])
+    raw = _target_raw(tool, tool_input, spec[0])
     if raw is None or raw == "":
         return None
     from openexecutive.people import store
 
     try:
+        if spec[1] == "text":
+            from openexecutive.orchestrator.text_tools import reached_person
+
+            return reached_person(tool_input)
         if spec[1] == "person":
             return store.get_person(int(raw))
         if spec[1] == "slack":
@@ -787,7 +807,7 @@ def _targets(tool: str, tool_input: dict[str, Any]) -> tuple[list[str], list[str
     spec = _TARGET_KEYS.get(tool)
     if spec is None:
         return [], []
-    raw = tool_input.get(spec[0])
+    raw = _target_raw(tool, tool_input, spec[0])
     if raw is None or raw == "":
         return [], []
     person = _target_person(tool, tool_input)
@@ -2005,6 +2025,7 @@ _TOOL_LABELS: dict[str, str] = {
     "send_discord_dm": "Send a Discord message",
     "send_slack_dm": "Send a Slack message",
     "send_telegram_message": "Send a Telegram message",
+    "send_text": "Send a text",
 }
 
 
@@ -2121,6 +2142,16 @@ def summarize(tool: str, tool_input: dict[str, Any], *, mcp: bool = False, quote
             person = get_person(int(tool_input.get("person_id")))  # type: ignore[arg-type]
             if person is not None:
                 label = f"Message {person.full_name or person.email}"
+        except Exception:
+            pass
+    elif tool == "send_text":
+        # Who it reaches, by name when the conversation is the person's own.
+        try:
+            from openexecutive.orchestrator.text_tools import recipient_words
+
+            who = recipient_words(tool_input)
+            if who:
+                label = f"Text {who}"
         except Exception:
             pass
     elif tool == "create_calendar_event" and tool_input.get("title"):
@@ -2607,6 +2638,7 @@ _NEEDS: dict[str, tuple[str, ...]] = {
     "send_discord_dm": ("discord_user_id", "text"),
     "send_slack_dm": ("user_id", "text"),
     "send_telegram_message": ("chat_id", "text"),
+    "send_text": ("text",),
 }
 
 
@@ -2648,6 +2680,25 @@ def _google_chat_space_named(tool: str, tool_input: dict[str, Any]) -> str:
         return ""
 
 
+def own_device_for(tool: str, tool_input: dict[str, Any]) -> dict[str, Any]:
+    """For a step that only runs on the person's own device (``_OWN_DEVICE_TOOLS``):
+    whose device it is (``acting_for``, read on the turn that holds it, when
+    that is known) and who it reaches in words (``to_words``). Empty for any
+    other step. Never raises."""
+    if tool not in _OWN_DEVICE_TOOLS:
+        return {}
+    try:
+        from openexecutive.orchestrator.text_tools import _actor, recipient_words
+
+        actor, words = _actor(), recipient_words(tool_input)
+    except Exception:
+        return {}
+    return {
+        **({"acting_for": actor} if isinstance(actor, int) else {}),
+        **({"to_words": words} if words else {}),
+    }
+
+
 def where(tool: str, tool_input: dict[str, Any]) -> str:
     """Where a held message would go, in a few words ("On Slack", "Dana will
     see it in Open Executive"); "" when it isn't a message or can't be
@@ -2655,6 +2706,8 @@ def where(tool: str, tool_input: dict[str, Any]) -> str:
     app set up here that the person has an id for, else an alert to them.
     Never raises."""
     try:
+        if tool == "send_text":
+            return "A text from your phone"
         if tool in _DM_CHANNEL:
             return f"On {_CHANNEL_NAMES[_DM_CHANNEL[tool]]}"
         if tool in _BROADCAST_TOOLS:
@@ -2779,6 +2832,10 @@ def hold(
         # message or details show under it, and where it would go.
         "headline": title(tool, tool_input, mcp=mcp, private=private),
         "where": where(tool, tool_input),
+        # A step that runs on the person's own device (a text from their
+        # phone): whose it is, and who it reaches in words, since its input
+        # names them by an id only the system reads (``card_details.served``).
+        **own_device_for(tool, tool_input),
         "details": card_details(tool, tool_input, mcp=mcp),
         "fields": editable_fields(tool, tool_input, mcp=mcp),
         **({"allow": {"key": grant[0], "label": grant[1]}} if grant is not None else {}),
@@ -3434,6 +3491,19 @@ def asked_call_tool(call_tool: _Handler) -> _Handler:
     return _call
 
 
+def _asker(tool: str, payload: dict[str, Any]) -> int | None:
+    """Who an approved step is for: whoever asked for it in chat, else, for a
+    step on the person's own device, whose device it is (``acting_for``, kept
+    when it was held: an unattended run's text has no asker)."""
+    asked = payload.get("requested_by_person_id")
+    if isinstance(asked, int) and not isinstance(asked, bool):
+        return asked
+    acting = payload.get("acting_for")
+    if tool in _OWN_DEVICE_TOOLS and isinstance(acting, int) and not isinstance(acting, bool):
+        return acting
+    return None
+
+
 async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bool = False) -> str:
     """Do a held action someone approved: the exact call, outside the gate,
     as an unattended run. Returns the tool's result. ``own_card``: the
@@ -3453,7 +3523,13 @@ async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bo
     from openexecutive.orchestrator.artifact_records import viewer_for_person
 
     card_handler = extensions.card_handler(tool) if payload.get("held") is True and not payload.get("mcp") else None
-    own_ok = own_card and card_handler is not None
+    asker = _asker(tool, payload)
+    # A step on the person's own device (a text from their phone), tapped on
+    # their own card by them, is their OK for that call too.
+    own_ok = (own_card and card_handler is not None) or (
+        tool in _OWN_DEVICE_TOOLS and not payload.get("mcp") and asker is not None
+        and asker == payload.get("tapped_by")
+    )
     # The step reads the documents of the person whose own card it is (the
     # viewer on the turn that held it, ``documents_for``), and only when that
     # person is the one who tapped (``tapped_by``, set by the approve route,
@@ -3471,7 +3547,7 @@ async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bo
             grant_contact_egress() if by_principal else nullcontext(),
             # The tap approves this one call: a skill that runs others
             # (a workflow, research) keeps every check for them.
-            levels.approved(payload.get("requested_by_person_id"))
+            levels.approved(asker)
             if (by_principal or own_ok) and payload.get("held") is True and tool not in levels.NOT_RELAXED_SKILLS
             else nullcontext(),
         ):

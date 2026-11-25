@@ -226,6 +226,112 @@ chrome.windows.onRemoved.addListener((id) => {
   });
 });
 
+// ---- Texts (Google Messages) ----
+//
+// While the person has Texts on in Open Executive (an Open Executive tab's
+// relay says so, ``textsOn``), a Google Messages tab stays open: theirs if
+// they have one, else one it keeps pinned in its own window. texts.js on that
+// page says what it shows, which goes on to Open Executive through an Open
+// Executive tab, signed in as them; a text Open Executive asks to send is
+// typed there.
+
+const MESSAGES = "https://messages.google.com/web/conversations";
+const onMessages = (url) => {
+  try {
+    const u = new URL(String(url || ""));
+    return u.protocol === "https:" && u.hostname === "messages.google.com";
+  } catch {
+    return false;
+  }
+};
+
+async function messagesTab() {
+  const tabs = await chrome.tabs.query({ url: "https://messages.google.com/*" });
+  const { textsTabId } = await chrome.storage.session.get("textsTabId");
+  return tabs.find((t) => t.id === textsTabId) || tabs[0] || null;
+}
+
+async function keepTexts() {
+  const { textsOn } = await chrome.storage.local.get("textsOn");
+  const { textsTabId } = await chrome.storage.session.get("textsTabId");
+  if (textsOn !== true) {
+    // Off: close the tab it opened, never one of theirs.
+    if (typeof textsTabId === "number") {
+      await chrome.tabs.remove(textsTabId).catch(() => undefined);
+      await chrome.storage.session.set({ textsTabId: null });
+    }
+    return null;
+  }
+  const have = await messagesTab();
+  if (have) return have;
+  const id = await ownWindowId();
+  let tab;
+  if (id !== null) {
+    tab = await chrome.tabs.create({ windowId: id, url: MESSAGES, pinned: true, active: false });
+  } else {
+    const win = await makeOwnWindow(MESSAGES);
+    tab = win.tabs && win.tabs[0];
+    if (tab) await chrome.tabs.update(tab.id, { pinned: true });
+  }
+  if (tab) await chrome.storage.session.set({ textsTabId: tab.id });
+  return tab || null;
+}
+
+const TEXTS_ALARM = "oe-keep-texts";
+chrome.alarms.create(TEXTS_ALARM, { periodInMinutes: 1 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === TEXTS_ALARM) void keepTexts().catch(() => undefined);
+});
+chrome.runtime.onStartup.addListener(() => void keepTexts().catch(() => undefined));
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.textsOn) void keepTexts().catch(() => undefined);
+});
+
+// What Google Messages shows, passed on through a connected Open Executive tab.
+async function passOnTexts(body) {
+  const origins = await connectedOrigins();
+  const tabs = (await chrome.tabs.query({})).filter((t) => OE.onConnected(t.url, origins));
+  for (const tab of tabs) {
+    try {
+      const out = await chrome.tabs.sendMessage(tab.id, { type: "texts_post", body });
+      if (out && out.ok) return out;
+    } catch {
+      // That tab's script isn't there yet: try the next.
+    }
+  }
+  return { ok: false };
+}
+
+// Send one text in Google Messages: open its conversation (or a new one) in
+// the Google Messages tab and have texts.js type and send it there.
+async function sendText(send) {
+  const text = typeof send.text === "string" ? send.text : "";
+  const key = typeof send.conversation === "string" ? send.conversation : "";
+  const number = typeof send.number === "string" ? send.number : "";
+  if (!text.trim() || (!key && !number)) return { ok: false, error: "Nothing to send, or no one to send it to." };
+  const tab = await keepTexts();
+  if (!tab) return { ok: false, error: "Texts are off in this browser." };
+  const url = key ? `${MESSAGES}/${encodeURIComponent(key)}` : `${MESSAGES}/new`;
+  await chrome.tabs.update(tab.id, { url });
+  await waitLoaded(tab.id);
+  // The page script starts after the page loads: ask until it answers.
+  for (let i = 0; i < 20; i++) {
+    try {
+      const ping = await chrome.tabs.sendMessage(tab.id, { type: "texts_ping" });
+      if (ping && ping.ok) break;
+    } catch {
+      // Not there yet.
+    }
+    await new Promise((ok) => setTimeout(ok, 500));
+  }
+  try {
+    const out = await chrome.tabs.sendMessage(tab.id, { type: "texts_send_here", conversation: key, number, text });
+    return out && typeof out === "object" ? out : { ok: false, error: "Google Messages didn't answer." };
+  } catch {
+    return { ok: false, error: "Google Messages didn't answer. Is it open and paired?" };
+  }
+}
+
 function waitLoaded(tabId, ms = 20000) {
   return new Promise((done) => {
     const timer = setTimeout(finish, ms);
@@ -776,6 +882,25 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
         return { ok: false, error: `The browser couldn't do that (${String(e && e.message ? e.message : e).slice(0, 120)}).` };
       }
     })().then(reply);
+    return true;
+  }
+  if (msg.type === "texts_seen") {
+    // Only the Google Messages page says what Google Messages shows.
+    if (!sender.tab || !onMessages(sender.url || sender.tab.url)) return false;
+    const body = { paired: msg.paired === true, items: Array.isArray(msg.items) ? msg.items.slice(0, 100) : [] };
+    passOnTexts(body).then(reply, () => reply({ ok: false }));
+    return true;
+  }
+  if (msg.type === "text_send") {
+    // Only a connected Open Executive tab hands out texts to send.
+    (async () => {
+      const origins = await connectedOrigins();
+      if (!sender.tab || !OE.onConnected(sender.url || sender.tab.url, origins)) {
+        return { ok: false, error: "Not from a connected Open Executive site." };
+      }
+      if (Date.now() < stoppedUntil) return { ok: false, error: "The person pressed Stop in their browser." };
+      return await sendText(msg.send || {});
+    })().then(reply, (e) => reply({ ok: false, error: String(e && e.message ? e.message : e).slice(0, 200) }));
     return true;
   }
   if (msg.type === "handover") {

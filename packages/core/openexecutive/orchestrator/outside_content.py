@@ -200,9 +200,11 @@ _FETCH_TOOLS: dict[str, str] = {
 # ``_ATTACHMENT_MARK``): an inlined document's label or a note naming a file.
 _ATTACHMENT_MARK = re.compile(r"\[Attached: |\((?:Attached|Skipped|Could not)\b")
 
-# What the owner's own mail quotes or forwards, as the email poller labels it.
+# Someone else's words the turn quotes: what the owner's own mail quotes or
+# forwards, as the email poller labels it, and the person's new texts
+# (``delegation.texts_watch``).
 _QUOTED_BLOCK = re.compile(
-    r'<untrusted_content source="email_quoted"[^>]*>(.*?)</untrusted_content>', re.DOTALL
+    r'<untrusted_content source="(?:email_quoted|text_message)"[^>]*>(.*?)</untrusted_content>', re.DOTALL
 )
 
 # A Google or Microsoft 365 tool whose own name (after the server prefix)
