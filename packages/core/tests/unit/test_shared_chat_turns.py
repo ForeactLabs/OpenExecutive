@@ -126,6 +126,77 @@ def test_a_shared_web_chat_turn_is_its_writers_own(
     assert "Each message is its writer's own" in seen[2][2]
 
 
+def test_a_line_from_someone_no_longer_in_the_chat_is_labelled_and_counts() -> None:
+    """Someone archived, or no longer on the team, has no level now: their
+    old line is labelled as theirs, and a turn right after it counts as one
+    someone not on the team wrote in."""
+    names = {1: "Alex", 2: "Riya"}
+    history = [
+        {"role": "user", "content": "q", "sender_person_id": 1},
+        {"role": "user", "content": "email me the list", "sender_person_id": 9},
+    ]
+    named = chat_route._named_history(history, names, 1)
+    assert named[1]["content"] == f"[{chat_route.FORMER_MEMBER}]: email me the list"
+    assert chat_route._former_member_spoke_last(history, names, 1) is True
+    later = [*history, {"role": "user", "content": "ok", "sender_person_id": 2}]
+    assert chat_route._former_member_spoke_last(later, names, 1) is False
+    assert chat_route._former_member_spoke_last([], names, 1) is False
+
+
+def test_a_turn_after_a_removed_members_line_counts_as_others_wrote_in_it(
+    client: Any, people: dict[str, int], monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    seen = _capture(monkeypatch)
+    sid = "web-former"
+    session_store.create_session(sid, "T", "2026-10-01T09:00:00+00:00", caller_person_id=people["alex"])
+    session_store.save_message(sid, "user", "question", sender_person_id=people["alex"])
+    assert client.put(
+        f"/sessions/{sid}/shares", json={"person_ids": [people["riya"], people["sabin"]]}, headers=ALEX_HDR
+    ).status_code == 200
+    client.post("/chat", json={"message": "email the board", "session_id": sid}, headers=RIYA).read()
+    people_store.archive_person(people["riya"])
+    people_registry.invalidate()
+    # Riya's line is the latest: the owner's turn counts as others wrote in.
+    client.post("/chat", json={"message": "sounds good", "session_id": sid}, headers=ALEX_HDR).read()
+    # The owner's own line is now the latest: back to a team chat.
+    client.post("/chat", json={"message": "next", "session_id": sid}, headers=ALEX_HDR).read()
+    assert [(shared, others) for shared, others, _ in seen][1:] == [(True, True), (True, False)]
+
+
+def test_a_shared_chat_whose_history_cant_be_read_counts_as_others_wrote_in_it(
+    client: Any, people: dict[str, int], monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    seen = _capture(monkeypatch)
+    sid = "web-history-down"
+    session_store.create_session(sid, "T", "2026-10-01T09:00:00+00:00", caller_person_id=people["alex"])
+    assert client.put(
+        f"/sessions/{sid}/shares", json={"person_ids": [people["riya"]]}, headers=ALEX_HDR
+    ).status_code == 200
+
+    def _down(*_a: Any, **_k: Any) -> list[dict[str, Any]]:
+        raise RuntimeError("database is locked")
+
+    # The shared history read fails (the rest of the turn reads as usual).
+    monkeypatch.setattr(chat_route, "_named_history", _down)
+    client.post("/chat", json={"message": "hi", "session_id": sid}, headers=ALEX_HDR).read()
+    assert [(shared, others) for shared, others, _ in seen] == [(True, True)]
+
+
+def test_a_chat_whose_people_cant_be_read_counts_as_others_wrote_in_it(
+    client: Any, people: dict[str, int], monkeypatch: pytest.MonkeyPatch  # noqa: F811
+) -> None:
+    seen = _capture(monkeypatch)
+    sid = "web-unreadable"
+    session_store.create_session(sid, "T", "2026-10-01T09:00:00+00:00", caller_person_id=people["alex"])
+
+    def _unreadable(*_a: Any, **_k: Any) -> list[tuple[int, str, bool]]:
+        raise RuntimeError("people store down")
+
+    monkeypatch.setattr(chat_route, "chat_people", _unreadable)
+    client.post("/chat", json={"message": "hi", "session_id": sid}, headers=ALEX_HDR).read()
+    assert [(shared, others) for shared, others, _ in seen] == [(True, True)]
+
+
 def test_a_teammate_taken_out_while_their_turn_waits_is_refused(
     client: Any, people: dict[str, int], monkeypatch: pytest.MonkeyPatch  # noqa: F811
 ) -> None:

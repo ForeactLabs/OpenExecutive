@@ -1401,6 +1401,8 @@ async def _run_chat_turn(
                 session.others_spoke_last = True
         except Exception:
             logger.exception("chat.shared_history_failed session_id=%s", session.session_id)
+            # Fails closed: who wrote last can't be told.
+            session.others_spoke_last = True
         speaker_name = names.get(caller_person_id, "") if caller_person_id is not None else ""
         if speaker_name:
             exec_message = f"[{speaker_name}]: {_unlabelled(message)}"
