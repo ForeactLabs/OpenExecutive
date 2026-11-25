@@ -919,7 +919,7 @@ def test_it_is_told_not_to_repeat_what_they_already_have() -> None:
 def test_the_look_back_checks_what_the_chat_quoted_like_any_read(
     db: Path, roster: SimpleNamespace, provider: _Provider, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Security review: a reply that quoted an email giving orders must not
+    """A reply that quoted an email giving orders must not
     let the look-back act on it with no outside hold: what the chat read is
     checked like any read, so ``levels`` sees the same reason the chat would."""
     from openexecutive.orchestrator import content_scan, outside_content

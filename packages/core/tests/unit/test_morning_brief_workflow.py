@@ -613,7 +613,7 @@ async def test_eod_digest_is_written_to_its_reader(
 async def test_brief_lines_only_on_the_delivery_to_the_principal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Security review: the principal's raise, fixed and leave-out lines come
+    """The principal's raise, fixed and leave-out lines come
     from their own chats, so a brief someone else starts never carries them."""
     from openexecutive.workflows.morning_brief import PRINCIPAL_DELIVERY
 
