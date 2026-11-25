@@ -155,8 +155,8 @@ class Offer:
 class Source:
     """Another place offers come from (``register_source``). ``read`` gives
     the offers for one person (their People id, and whether they are the
-    company's main person); ``taken_up`` hears that one finished done or
-    went to a card; ``set_aside`` hears that one was hidden (not useful or
+    company's main person); ``taken_up`` hears that one finished done
+    (directly, or once its card was approved); ``set_aside`` hears that one was hidden (not useful or
     already done), so the place it came from stops offering it too. Each is
     called inside a try: a failing source reads as no offers."""
 
