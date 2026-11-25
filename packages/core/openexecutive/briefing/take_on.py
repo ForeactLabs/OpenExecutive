@@ -28,8 +28,10 @@ that long; Already done keeps that offer away; Later holds it for
 remembered by what it is about, not by its words (``close_to``): the same
 idea, reworded or offered as another kind of step, is never offered again
 (``about_already``, read by the list and by the daily pass). An offer
-nobody used leaves ``KEEP_DAYS`` after it was first shown, so nothing
-piles up.
+the pass wrote that nobody used leaves ``KEEP_DAYS`` after it was first
+shown, so nothing piles up. One from a place that still has it (a repeat
+ask, a pending watch suggestion, a registered source) stays while that
+place still offers it.
 
 Nothing here decides whether a step runs or waits. Do it starts one chat
 turn as the person (``api.routes.take_on``), so the step meets the same
@@ -204,51 +206,46 @@ hooks = Hooks()
 _db = db.company_path
 
 
-def _connect(db_path: Path | None = None) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(_db(db_path)))
-    conn.row_factory = sqlite3.Row
-    conn.execute(
-        f"CREATE TABLE IF NOT EXISTS {OFFERS_TABLE} ("  # noqa: S608 — constant table name
-        "  person TEXT NOT NULL,"
-        "  key TEXT NOT NULL,"
-        "  kind TEXT NOT NULL,"
-        "  title TEXT NOT NULL,"
-        "  source TEXT NOT NULL,"
-        "  source_detail TEXT NOT NULL DEFAULT '',"
-        "  preview TEXT NOT NULL DEFAULT '[]',"
-        "  created_at TEXT NOT NULL,"
-        "  PRIMARY KEY (person, key)"
-        ")"
-    )
-    conn.execute(
-        f"CREATE TABLE IF NOT EXISTS {STATE_TABLE} ("  # noqa: S608 — constant table name
-        "  person TEXT NOT NULL,"
-        "  key TEXT NOT NULL,"
-        "  kind TEXT NOT NULL DEFAULT '',"
-        "  first_seen TEXT NOT NULL,"
-        "  status TEXT NOT NULL DEFAULT '',"
-        "  session_id TEXT,"
-        "  started_at TEXT,"
-        "  finished_at TEXT,"
-        "  outcome TEXT NOT NULL DEFAULT '',"
-        "  done TEXT NOT NULL DEFAULT '[]',"
-        "  decision_id INTEGER,"
-        "  changed TEXT,"
-        "  said TEXT NOT NULL DEFAULT '',"
-        "  hidden_reason TEXT NOT NULL DEFAULT '',"
-        "  hidden_at TEXT,"
-        "  offer TEXT,"
-        "  PRIMARY KEY (person, key)"
-        ")"
-    )
-    conn.execute(
-        f"CREATE TABLE IF NOT EXISTS {PASSES_TABLE} ("  # noqa: S608 — constant table name
-        "  person TEXT PRIMARY KEY,"
-        "  last_at TEXT NOT NULL,"
-        "  input_hash TEXT NOT NULL DEFAULT ''"
-        ")"
-    )
-    return conn
+_SCHEMA = f"""
+CREATE TABLE IF NOT EXISTS {OFFERS_TABLE} (
+  person TEXT NOT NULL,
+  key TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL,
+  source TEXT NOT NULL,
+  source_detail TEXT NOT NULL DEFAULT '',
+  preview TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (person, key)
+);
+CREATE TABLE IF NOT EXISTS {STATE_TABLE} (
+  person TEXT NOT NULL,
+  key TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT '',
+  first_seen TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT '',
+  session_id TEXT,
+  started_at TEXT,
+  finished_at TEXT,
+  outcome TEXT NOT NULL DEFAULT '',
+  done TEXT NOT NULL DEFAULT '[]',
+  decision_id INTEGER,
+  changed TEXT,
+  said TEXT NOT NULL DEFAULT '',
+  hidden_reason TEXT NOT NULL DEFAULT '',
+  hidden_at TEXT,
+  offer TEXT,
+  PRIMARY KEY (person, key)
+);
+CREATE TABLE IF NOT EXISTS {PASSES_TABLE} (
+  person TEXT PRIMARY KEY,
+  last_at TEXT NOT NULL,
+  input_hash TEXT NOT NULL DEFAULT ''
+);
+"""
+
+# Rows by column name, committed when the block ends cleanly, always closed.
+_connect = db.opener(lambda db_path: _db(db_path), schema=_SCHEMA)
 
 
 def who(email: str) -> str:
@@ -688,7 +685,7 @@ def _apply(offer: Offer, state: sqlite3.Row | None, now: datetime) -> Offer | No
     offer.done = _done_list(state["done"])
     offer.session_id = state["session_id"]
     offer.decision_id = state["decision_id"]
-    if not status and seen and now - seen > timedelta(days=KEEP_DAYS):
+    if not status and offer.origin == "made" and seen and now - seen > timedelta(days=KEEP_DAYS):
         return None
     return offer
 

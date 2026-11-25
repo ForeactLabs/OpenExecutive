@@ -91,6 +91,18 @@ def test_an_offer_nobody_used_leaves_after_three_days() -> None:
     assert _list(now=later) == []
 
 
+def test_a_suggested_watch_stays_while_it_is_still_pending(monkeypatch: pytest.MonkeyPatch) -> None:
+    watch = take_on.Offer(key="watch:eia", origin="watch", kind="watch", title="I can watch diesel prices",
+                          source="News I watch")
+    monkeypatch.setattr(take_on, "_watch", lambda _pid, _p: [watch])
+    assert [o.key for o in _list()] == ["watch:eia"]
+    later = datetime.now(UTC) + timedelta(days=take_on.KEEP_DAYS + 5)
+    assert [o.key for o in _list(now=later)] == ["watch:eia"]
+    # Answered on the Watch list: it goes.
+    monkeypatch.setattr(take_on, "_watch", lambda _pid, _p: [])
+    assert _list(now=later) == []
+
+
 def test_hide_already_done_keeps_it_away_and_later_brings_it_back_in_a_week() -> None:
     a, b = _offer("I can book the review"), _offer("I can chase the invoice", "followup")
     take_on.put_made(ME, [a, b])
