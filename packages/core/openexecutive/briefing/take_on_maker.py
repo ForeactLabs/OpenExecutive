@@ -361,7 +361,9 @@ def _chats(person: Any, now: datetime) -> list[str]:
                     continue
                 if m.get("role") == "user":
                     mine = m.get("sender_person_id") in (None, person.id)
-                    if mine and (text := take_on.line(content, _CHAT_LINE)):
+                    # A chat Do it started reads as the step it asked for.
+                    ask = content.removeprefix(take_on.DO_PREFIX)
+                    if mine and (text := take_on.line(ask, _CHAT_LINE)):
                         asks.append(text)
                 elif m.get("role") == "assistant" and mine:
                     reply = take_on.line(content, _CHAT_LINE)

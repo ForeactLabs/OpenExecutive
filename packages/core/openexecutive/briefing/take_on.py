@@ -98,6 +98,12 @@ LEARN_AFTER = 2
 # A run still "working" past ``config.background_turn_limit`` lost its turn
 # (a restart). It may have done part of the step, so its chat is the place to look.
 STALE_OUTCOME = "It stopped before it finished. Check its chat before trying again."
+# What Do it says before the step, in the chat it starts as the person.
+DO_PREFIX = (
+    "I pressed Do it on my Home page, so this is my go-ahead: do it now, without asking me to "
+    "confirm the plan first. Do exactly this one step, as shown, and nothing more. If something "
+    "truly needs me, ask only that. Then tell me in a line what you did.\n\n"
+)
 
 TITLE_MAX = 200
 LABEL_MAX = 24

@@ -1346,6 +1346,19 @@ def test_the_pass_is_told_each_listed_kind_and_to_prefer_steps_that_act(monkeypa
     assert f"never more than {maker.PER_KIND} of one kind" in maker.SYSTEM
 
 
+def test_a_chat_do_it_started_reads_as_its_step(db: Path) -> None:
+    from openexecutive.memory import session_store
+
+    episodic.initialize_db(db)
+    now = datetime.now(UTC)
+    session_store.create_session("s-do", "Proposal", now.isoformat(), caller_person_id=1, db_path=db)
+    session_store.save_message("s-do", "user", take_on.DO_PREFIX + "I can send Dana the signed proposal", db_path=db)
+    session_store.save_message("s-do", "assistant", "Sent it.", db_path=db)
+    assert maker._chats(SimpleNamespace(id=1), now) == [
+        "- Proposal\n  You: I can send Dana the signed proposal\n  Executive: Sent it."
+    ]
+
+
 def test_the_pass_reads_inside_the_persons_own_recent_chats(db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from openexecutive.memory import session_store
 

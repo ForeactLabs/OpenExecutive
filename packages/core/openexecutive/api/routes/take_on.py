@@ -37,13 +37,6 @@ router = APIRouter()
 # How many Home shows; See all shows the rest.
 HOME_MAX = 3
 
-DO_PREFIX = (
-    "I pressed Do it on my Home page, so this is my go-ahead: do it now, without asking me to "
-    "confirm the plan first. Do exactly this one step, as shown, and nothing more. If something "
-    "truly needs me, ask only that. Then tell me in a line what you did.\n\n"
-)
-
-
 class PreviewLine(BaseModel):
     label: str
     value: str
@@ -410,7 +403,7 @@ async def do_it(key: str, request: Request) -> OfferOut:
 
     try:
         session_id = await start_background_turn(
-            request, message=DO_PREFIX + take_on.ask_text(offer), memory_text=offer.title, on_finished=_finished,
+            request, message=take_on.DO_PREFIX + take_on.ask_text(offer), memory_text=offer.title, on_finished=_finished,
         )
     except HTTPException as exc:
         await asyncio.to_thread(take_on.finish, me.email, key, "failed", outcome=str(exc.detail),
