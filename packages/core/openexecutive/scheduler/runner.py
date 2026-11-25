@@ -1539,22 +1539,20 @@ async def _as_setter_said(
     """A follow-up its setter asked since to hold or drop: nothing runs,
     they are told in a line, and the occurrence is recorded as such. Read
     from their chats, a drop never ends a repeating series: only this time
-    goes, and the line says how to stop it for good."""
-    await _tell_setter(action, person, _set_aside_line(action, outcome))
-    _end_as_asked(action, outcome, person.full_name or "they")
-
-
-async def _tell_setter(action: ScheduledAction, person: Person, text: str) -> None:
-    """Deliver the run's line about a held or dropped follow-up to the
-    person who set it. After the run, outside its retry: whatever happens
-    here is logged, never raised, so nothing the run sent goes twice."""
+    goes, and the line says how to stop it for good. When the line can't
+    reach them it is tried again like any failed run: nothing was sent, so
+    a retry only reads their chats and tells them again."""
+    assert action.id is not None
     try:
-        notice = await deliver_to_person(person, text, label="Follow-up")
+        notice = await deliver_to_person(person, _set_aside_line(action, outcome), label="Follow-up")
+        problem = "" if notice.ok else str(notice.detail)
     except Exception as exc:
-        logger.warning("scheduler: action %s: couldn't tell its setter: %s", action.id, exc)
+        problem = str(exc)
+    if problem:
+        logger.warning("scheduler: action %s: couldn't tell its setter: %s", action.id, problem)
+        mark_action_failed_or_retry(action.id, f"couldn't tell its setter: {problem}"[:300])
         return
-    if not notice.ok:
-        logger.warning("scheduler: action %s: couldn't tell its setter: %s", action.id, notice.detail)
+    _end_as_asked(action, outcome, person.full_name or "they")
 
 
 def _end_as_asked(
