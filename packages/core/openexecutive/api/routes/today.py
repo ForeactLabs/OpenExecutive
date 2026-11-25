@@ -3079,7 +3079,7 @@ async def get_today(request: Request, background_tasks: BackgroundTasks) -> Toda
     # the Executive's accounts and the Watch list are the principal's.
     # A watch it would like to add shows on "I can also take on" instead.
     response.waiting_elsewhere = await asyncio.to_thread(_needs_reconnecting, caller, accounts=principal)
-    response.done_for_you = _done_for_you(request, caller, datetime.now(UTC))
+    response.done_for_you = await asyncio.to_thread(_done_for_you, request, caller, datetime.now(UTC))
     response.watching = _watching(request, caller)
     response.to_act_on = await asyncio.to_thread(_to_act_on, response, caller)
     response.tidied_today, response.tidied_week = await asyncio.to_thread(_tidied_counts, caller, principal)

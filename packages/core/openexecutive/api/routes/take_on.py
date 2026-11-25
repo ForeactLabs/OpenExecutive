@@ -299,7 +299,8 @@ def _asked_back(replies: list[dict[str, Any]]) -> str:
 
 def _what_came_of_it(me: Me, key: str, session_id: str, answered: bool) -> str:
     """Read the run's own record: the card it went to, what it did, or why
-    it stopped. Returns the status it left the offer in."""
+    it stopped. Returns the status it left the offer in, or ``said`` for a
+    ``done`` that only answered in words."""
     from openexecutive.memory import decision_ledger as dl
     from openexecutive.memory.session_store import load_messages
     from openexecutive.workflows.run_outcome import first_sentence
@@ -334,9 +335,10 @@ def _what_came_of_it(me: Me, key: str, session_id: str, answered: bool) -> str:
         return "asked"
     if answered:
         # Answered in words (a doc in the chat): what it said shows, and
-        # See how opens the chat.
+        # See how opens the chat. Nothing was set up, so only a doc counts
+        # as taken up (``_settle``).
         take_on.finish(me.email, key, "done", outcome=said)
-        return "done"
+        return "said"
     take_on.finish(me.email, key, "failed", outcome=said or "It stopped before it finished.")
     return "failed"
 
@@ -351,9 +353,11 @@ async def do_it(key: str, request: Request) -> OfferOut:
 
     def _settle(answered: bool) -> None:
         # The place it came from hears it was taken up once it was done: a
-        # run that failed or asked back keeps it, and one on a card waits
-        # for the card (``_settle_cards``).
-        if _what_came_of_it(me, key, run.get("session_id", ""), answered) == "done":
+        # run that failed or asked back keeps it, one on a card waits for
+        # the card (``_settle_cards``), and one that only answered in words
+        # set nothing up unless the offer was a doc.
+        came = _what_came_of_it(me, key, run.get("session_id", ""), answered)
+        if came == "done" or (came == "said" and offer.kind == "doc"):
             _taken_up(me, offer)
 
     def _finished(answered: bool) -> None:

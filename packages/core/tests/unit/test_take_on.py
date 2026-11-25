@@ -807,14 +807,25 @@ def test_a_repeat_offer_shows_what_came_of_it_and_is_taken_up_only_when_done(
     turns[0]["on_finished"](False)
     assert client.get("/take-on").json()["offers"][0]["status"] == "failed" and answered == []
     assert client.post("/take-on/repeat:5/do").status_code == 202
+    # It only answered in words: nothing was set up, so the ask stays.
     monkeypatch.setattr(session_store, "load_messages", lambda _s: [
-        {"role": "assistant", "content": "It runs every Monday now."},
+        {"role": "assistant", "content": "Sure, I'll put that together every Monday."},
     ])
     turns[1]["on_finished"](True)
+    assert answered == [] and client.get("/take-on").json()["offers"] == []
+    rep6 = take_on.Offer(key="repeat:6", origin="repeat", kind="workflow",
+                         title="I can do the board update every Friday", source="Your chats")
+    source["open"] = [rep6]
+    assert client.post("/take-on/repeat:6/do").status_code == 202
+    monkeypatch.setattr(session_store, "load_messages", lambda _s: [
+        {"role": "assistant", "content": "It runs every Monday now.",
+         "actions": [{"summary": "Made the Monday pipeline summary", "link": "/workflows"}]},
+    ])
+    turns[2]["on_finished"](True)
     assert answered == [True]
     assert client.get("/take-on").json()["offers"] == []
     got = take_on.finished(ME, datetime.now(UTC) - timedelta(hours=1))
-    assert [(g.key, g.status, g.outcome) for g in got] == [("repeat:5", "done", "It runs every Monday now.")]
+    assert ("repeat:6", "done", "It runs every Monday now.") in [(g.key, g.status, g.outcome) for g in got]
 
 
 def test_the_reply_is_read_whatever_is_around_the_array() -> None:
