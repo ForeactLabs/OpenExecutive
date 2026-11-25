@@ -1404,7 +1404,9 @@ _SINCE_MAX_MESSAGES = 30
 _SINCE_MAX_CHARS = 300
 _PAUSED = "PAUSED:"
 _DROPPED = "DROPPED:"
-_MARKER_RE = re.compile(r"[*_\s]*(PAUSED|DROPPED)\b[*_:.\s]*", re.I)
+# Only the token itself, in capitals: with its colon (bold or not), or
+# alone as the whole reply. "Dropped you a note" is a message, not a marker.
+_MARKER_RE = re.compile(r"[*_\s]*(PAUSED|DROPPED)(?:[*_]*:[*_\s]*|[*_.\s]*$)")
 
 
 def _followup_owner(action: ScheduledAction) -> Person | None:
@@ -1575,10 +1577,9 @@ def _followup_outcome(reply: object) -> tuple[str, str]:
     without the marker)``. Only read when they wrote since: the run never
     stands one down on its own judgement."""
     text = str(reply or "").strip()
-    # The marker as written, or bold, or without its colon.
     m = _MARKER_RE.match(text)
     if m:
-        return ("paused" if m.group(1).upper() == "PAUSED" else "dropped"), text[m.end():].strip()
+        return ("paused" if m.group(1) == "PAUSED" else "dropped"), text[m.end():].strip()
     return "", text
 
 

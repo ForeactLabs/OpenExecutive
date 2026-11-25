@@ -223,7 +223,7 @@ def test_a_repeating_followup_they_asked_to_drop_ends(db: Path, roster: SimpleNa
     action_id = _followup("tg-1", created_by=me)
     _repeating(action_id)
     _message(db, "web-2", me, "user", "Drop the daily Dana check, we signed", -timedelta(hours=2), sender=me)
-    _fire(action_id, "dropped: Told you the daily check is off.")
+    _fire(action_id, "DROPPED: Told you the daily check is off.")
     assert _status_and_next(action_id) == ("cancelled", 0)
 
 
@@ -434,11 +434,16 @@ def test_a_held_reminder_to_the_owner_tells_them_whatever_the_run_wrote(
 @pytest.mark.parametrize(("reply", "expected"), [
     ("PAUSED: held it", ("paused", "held it")),
     ("PAUSED", ("paused", "")),
+    ("DROPPED.", ("dropped", "")),
     ("**PAUSED:** held it", ("paused", "held it")),
-    ("Paused.", ("paused", "")),
-    ("dropped: done", ("dropped", "done")),
-    ("Pausedness is not a marker", ("", "Pausedness is not a marker")),
-    ("Sent it. PAUSED later", ("", "Sent it. PAUSED later")),
+    ("**DROPPED**: done", ("dropped", "done")),
+    # Ordinary words are a message, never a marker.
+    ("Paused.", ("", "Paused.")),
+    ("dropped: done", ("", "dropped: done")),
+    ("Dropped you a note on Slack about the Acme renewal.", ("", "Dropped you a note on Slack about the Acme renewal.")),
+    ("Paused hiring: time to revisit it.", ("", "Paused hiring: time to revisit it.")),
+    ("PAUSED hiring for now", ("", "PAUSED hiring for now")),
+    ("Sent it. PAUSED: later", ("", "Sent it. PAUSED: later")),
 ])
 def test_the_marker_is_read_however_it_is_written(reply: str, expected: tuple[str, str]) -> None:
     assert runner._followup_outcome(reply) == expected
@@ -454,3 +459,21 @@ def test_a_drop_read_apart_never_ends_a_repeating_series(db: Path, roster: Simpl
     chat.assert_not_called()
     assert _status_and_next(action_id) == ("cancelled", 1)  # this time only
     assert "It still repeats" in tell.call_args.args[1]
+
+
+def test_a_reply_that_starts_with_dropped_is_sent_as_written(db: Path, roster: SimpleNamespace) -> None:
+    ben = roster.teammate.id
+    action_id = episodic.insert_scheduled_action(
+        run_at=_iso(timedelta(days=1)), channel="slack_dm", channel_ref="UBEN",
+        intent_text="Remind me about the Acme renewal.", originating_session_id="ben-1",
+        created_by_person_id=ben,
+    )
+    with episodic._get_conn(db) as conn:
+        conn.execute("UPDATE scheduled_actions SET created_at = ? WHERE id = ?",
+                     (_iso(-timedelta(days=1)), action_id))
+    _message(db, "ben-2", ben, "user", "What's on today?", -timedelta(hours=1), sender=ben)
+    with patch.object(runner, "_send_on_plan", new_callable=AsyncMock) as send:
+        send.return_value = SimpleNamespace(ok=True, detail="")
+        _fire(action_id, "Dropped you a note on Slack about the Acme renewal.")
+    assert send.call_args.args[2] == "Dropped you a note on Slack about the Acme renewal."
+    assert episodic.get_scheduled_action(action_id).status == "done"  # type: ignore[union-attr]
