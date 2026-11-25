@@ -3560,9 +3560,9 @@ async def carry_out(payload: dict[str, Any], *, by_principal: bool, own_card: bo
             grant_contact_egress() if by_principal else nullcontext(),
             # The tap approves this one call: a skill that runs others
             # (a workflow, research) keeps every check for them.
-            # A text from someone's phone goes only on their own tap: anyone
-            # else's Approve runs it through the gate again, which puts it
-            # back on their card.
+            # A text from someone's phone goes only on their own tap. Anyone
+            # else's Approve runs as nobody: no phone sends, and the result
+            # says so.
             levels.approved(asker)
             if (own_ok if tool in _OWN_DEVICE_TOOLS else (by_principal or own_ok))
             and payload.get("held") is True and tool not in levels.NOT_RELAXED_SKILLS

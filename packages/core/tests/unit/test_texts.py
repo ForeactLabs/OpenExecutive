@@ -854,14 +854,18 @@ def test_each_conversation_gets_its_own_turn(ids: dict[str, int], monkeypatch: p
     assert "482913" not in stranger
 
 
-def test_a_turn_on_a_strangers_texts_never_reads_the_others() -> None:
-    from openexecutive.delegation import lockdown
-    from openexecutive.orchestrator import levels
-
-    # Off-team words withhold read_texts, and as a step only the turn reads it
-    # is never put on a card either.
-    assert lockdown.mail_touched_withholds("read_texts", {})
-    assert "read_texts" in levels.TURN_OWN
+def test_a_turn_on_a_strangers_texts_never_reads_the_others(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("b", conv="bank", title="BANK", sender="BANK", text="Your code is 482913")])
+    token = current_session.set(Session(unattended=True, caller_person_id=owner, sender_off_team=True))
+    try:
+        out = json.loads(asyncio.run(text_tools.handle_read_texts({})))
+        assert out["conversations"] == []
+        (conv,) = tx.conversations(owner)
+        assert "482913" not in asyncio.run(text_tools.handle_read_texts({"conversation_id": conv.id}))
+    finally:
+        current_session.reset(token)
 
 
 def test_a_new_numbers_echo_never_lands_in_another_numbers_conversation(ids: dict[str, int]) -> None:

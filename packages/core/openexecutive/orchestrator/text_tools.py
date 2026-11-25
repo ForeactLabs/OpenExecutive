@@ -140,10 +140,16 @@ def _line(conv: Any) -> dict[str, Any]:
 
 async def handle_read_texts(tool_input: dict[str, Any]) -> str:
     from openexecutive.delegation import texts
+    from openexecutive.orchestrator.schedule_tools import current_session
 
     actor = _actor()
     if actor is None:
         return json.dumps({"conversations": [], "note": "Nobody's texts are read on this turn."})
+    if getattr(current_session.get(), "sender_off_team", False) is True:
+        # A turn answering someone outside the team (a stranger's text, a
+        # contact's mail) never sees the person's other texts: codes from
+        # their bank are in them. What it answers is in its prompt.
+        return json.dumps({"conversations": [], "note": "Their other texts aren't shown on a turn answering someone outside the team."})
     settings = await asyncio.to_thread(texts.get_settings, actor)
     if not settings.active:
         return json.dumps({"conversations": [], "note": _OFF_NOTE})
@@ -171,7 +177,9 @@ async def handle_send_text(tool_input: dict[str, Any]) -> str:
         return json.dumps({"error": "send_text needs the words to send in text."})
     actor = _actor()
     if actor is None:
-        return json.dumps({"error": "Nobody's phone sends texts on this turn."})
+        return json.dumps({
+            "error": "Nothing went: a text goes from someone's own phone only when they approve it themselves.",
+        })
     conversation_id = str(tool_input.get("conversation_id") or "").strip()
     to = str(tool_input.get("to") or "").strip()
     conv = None
