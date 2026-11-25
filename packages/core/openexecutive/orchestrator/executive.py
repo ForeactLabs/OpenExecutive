@@ -3099,12 +3099,14 @@ class Executive:
             # but is not locked: it is the person asking again. The offered
             # list stays as it is, so the cached prefix never changes
             # mid-turn.
-            # How much of it holds is the safety level's, like any read: every
-            # mail read is checked once its round is done (check_mail_read
-            # below), and Balanced then holds it all only if one was flagged
-            # or too big to check; a round that reads mail holds it all for
-            # that round, since its reads aren't checked yet; Hands-off holds
-            # none of it (delegation.lockdown.mail_turn_withholds).
+            # These only notice; the level decides (levels.mail_reason, then
+            # levels.decide). Every mail read is checked once its round is
+            # done (check_mail_read below). On Balanced a step waits only if a
+            # read was flagged or left unchecked (too big, a script beside it,
+            # or an earlier round's), or it posts to everyone or changes
+            # People; a step asked in the round that reads mail was asked
+            # before that mail was seen, so it runs. Careful waits on all of
+            # it; Hands-off on none (delegation.lockdown.mail_turn_withholds).
             mail_touched_uses: list[dict[str, Any]] = []
             reads_mail_now = any(
                 tu["name"] in MAILBOX_TOOL_NAMES or tu["name"] in _OWN_RECALL_TOOL_NAMES for tu in dispatch_uses

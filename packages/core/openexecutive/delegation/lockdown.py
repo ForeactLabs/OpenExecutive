@@ -397,11 +397,13 @@ def mail_touched_withholds(tool_name: str, tool_input: Any) -> bool:
 
 
 def mail_lock_holds(pinned: Any, *, reading_now: bool = False) -> bool:
-    """Whether the whole lockdown (``mail_touched_withholds``) holds for the
-    turn ``pinned`` is for, by the owner's safety level: Careful after any
-    mail read, Balanced only once a read was flagged or too big to check or
-    while one waits for its check (``reading_now``: this round reads mail),
-    Hands-off never on the principal's own turn. A turn with no safety state
+    """Whether the whole lockdown (``mail_touched_withholds``) is noticed for
+    the turn ``pinned`` is for, by the owner's safety level: Careful after any
+    mail read, Balanced once a read was flagged or too big to check or while
+    one waits for its check (``reading_now``: this round reads mail),
+    Hands-off never on the principal's own turn. It only notices: the reason
+    (``levels.mail_reason``) and ``levels.decide`` say whether a step waits,
+    and on Balanced a step asked in the reading round runs. A turn with no safety state
     (a workflow, a script outside chat) holds it after any read. Never
     raises; fails closed."""
     from openexecutive.orchestrator import outside_content, outside_mode
