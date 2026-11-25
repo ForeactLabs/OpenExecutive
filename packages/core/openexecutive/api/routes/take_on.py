@@ -515,7 +515,9 @@ def hide(key: str, body: HideIn, request: Request) -> None:
     # reason: the places an offer came from hear it too, so it isn't
     # offered there.
     # Later only holds it here for a week: the place it came from keeps it.
-    if body.reason == "later":
+    # One changed with Or tell me was turned down as they changed it, which
+    # says nothing about what the place it came from offered.
+    if body.reason == "later" or (offer is not None and offer.changed):
         return
     try:
         if key.startswith("repeat:") and me.person_id is not None:

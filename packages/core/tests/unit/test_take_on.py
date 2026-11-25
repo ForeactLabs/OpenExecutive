@@ -830,6 +830,26 @@ def test_hiding_a_watch_declines_it_only_when_not_useful(
     assert declined == declines and gone == removed
 
 
+def test_hiding_a_watch_changed_into_another_step_leaves_the_suggestion(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.monitoring import store as ms
+    from openexecutive.monitoring.research import watch_policy
+
+    item = SimpleNamespace(id=5, slug="eia", target="https://www.eia.gov/petroleum/", notes="Diesel prices",
+                           route_to_person_id=None)
+    monkeypatch.setattr(take_on, "_watch", lambda _pid, _p: WATCH_REAL(_pid, _p))
+    monkeypatch.setattr(ms, "list_pending_suggestions", lambda: [item])
+    monkeypatch.setattr(ms, "get_watchlist_item_by_slug", lambda slug: item if slug == "eia" else None)
+    declined: list[str] = []
+    monkeypatch.setattr(watch_policy, "decline_suggestion", lambda it, r, *, actor: declined.append(r) or True)
+    (offer,) = [o for o in _list() if o.key == "watch:eia"]
+    take_on.change(ME, offer, "I can email Dana about diesel prices", [("To", "dana@client.example")],
+                   "email Dana instead", kind="email")
+    assert client.post("/take-on/watch:eia/hide", json={"reason": "not_useful"}).status_code == 204
+    assert declined == []
+
+
 def test_a_skipped_card_takes_the_offer_away(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     from openexecutive.memory import decision_ledger
 
