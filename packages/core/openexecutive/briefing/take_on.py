@@ -931,6 +931,18 @@ def finish(
         return False
 
 
+def _settle_stale(conn: sqlite3.Connection, person: str, key: str, now: datetime) -> None:
+    """Write down what the list already shows for a run left working past
+    ``config.background_turn_limit`` (a restart mid-turn): failed, aging from
+    when it began. Hide, Or tell me and its Undo then treat it as the failed
+    step it reads as."""
+    conn.execute(
+        f"UPDATE {STATE_TABLE} SET status = 'failed', outcome = ? "  # noqa: S608
+        "WHERE person = ? AND key = ? AND status = 'working' AND started_at < ?",
+        (STALE_OUTCOME, person, key, (now - background_turn_limit()).isoformat()),
+    )
+
+
 def hide(email: str, offer: Offer | str, reason: HideReason, *, from_card: int | None = None,
          db_path: Path | None = None) -> bool:
     """Hide an offer. Given only a key that's already off the list: when it
@@ -943,6 +955,7 @@ def hide(email: str, offer: Offer | str, reason: HideReason, *, from_card: int |
     if not person:
         return False
     with _connect(db_path) as conn:
+        _settle_stale(conn, person, offer if isinstance(offer, str) else offer.key, now)
         if isinstance(offer, str):
             cur = conn.execute(
                 f"UPDATE {STATE_TABLE} SET hidden_reason = ?, hidden_at = ? "  # noqa: S608
@@ -986,6 +999,7 @@ def change(email: str, offer: Offer, title: str, preview: list[tuple[str, str]],
         changed["kind"] = kind
     with _connect(db_path) as conn:
         _ensure(conn, person, offer.key, offer.kind, now)
+        _settle_stale(conn, person, offer.key, now)
         cur = conn.execute(
             f"UPDATE {STATE_TABLE} SET changed = ?, said = ? WHERE person = ? AND key = ? "  # noqa: S608
             "AND status NOT IN ('working', 'card', 'done')",
@@ -995,11 +1009,13 @@ def change(email: str, offer: Offer, title: str, preview: list[tuple[str, str]],
 
 
 def undo_change(email: str, key: str, *, db_path: Path | None = None) -> None:
+    person = who(email)
     with _connect(db_path) as conn:
+        _settle_stale(conn, person, key, _now())
         conn.execute(
             f"UPDATE {STATE_TABLE} SET changed = NULL, said = '' WHERE person = ? AND key = ? "  # noqa: S608
             "AND status NOT IN ('working', 'card', 'done')",
-            (who(email), key),
+            (person, key),
         )
 
 

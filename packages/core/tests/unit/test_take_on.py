@@ -232,6 +232,23 @@ def test_a_run_that_ran_late_doesnt_write_over_the_one_started_again(monkeypatch
     assert route._what_came_of_it(route.Me(ME, 1, True), second, "sess-2", True) == "done"
 
 
+def test_a_run_stopped_by_a_restart_can_be_hidden_and_changed(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    a, b = _offer(), _offer("I can chase Priya for the March invoice", "followup")
+    take_on.put_made(ME, [a, b])
+    take_on.start(ME, a)
+    take_on.start(ME, b)
+    later = datetime.now(UTC) + background_turn_limit() + timedelta(minutes=1)
+    monkeypatch.setattr(take_on, "_now", lambda: later)
+    shown = {o["key"]: o["status"] for o in client.get("/take-on").json()["offers"]}
+    assert shown == {a.key: "failed", b.key: "failed"}
+    assert client.post(f"/take-on/{a.key}/hide", json={"reason": "not_useful"}).status_code == 204
+    assert [o["key"] for o in client.get("/take-on").json()["offers"]] == [b.key]
+    assert take_on.change(ME, b, "I can chase Priya on Friday", b.preview, "on Friday")
+    assert _list(now=later)[0].title == "I can chase Priya on Friday"
+
+
 def test_or_tell_me_changes_the_offer_and_undo_puts_it_back() -> None:
     o = _offer()
     take_on.put_made(ME, [o])
