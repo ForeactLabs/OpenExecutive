@@ -1296,6 +1296,17 @@ def short_title(text: str | None) -> str | None:
     return f"{cut or line[: SCHEDULED_TITLE_MAX - 1]}…"
 
 
+def quoted_title(before: str, name: str, after: str = "") -> str | None:
+    """A title that quotes a name ('Chase a reply on "…"'): the name is cut
+    so the whole line fits ``SCHEDULED_TITLE_MAX`` with its quotes kept."""
+    room = SCHEDULED_TITLE_MAX - len(before) - len(after) - 2
+    line = " ".join(str(name or "").split())
+    if len(line) > room:
+        line = line[: room - 1].rsplit(" ", 1)[0].rstrip(" ,;:-") or line[: room - 1]
+        line = f"{line}…"
+    return short_title(f'{before}"{line}"{after}')
+
+
 def insert_scheduled_action(
     *,
     run_at: str,

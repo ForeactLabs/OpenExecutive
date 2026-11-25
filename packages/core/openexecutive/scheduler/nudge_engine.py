@@ -52,6 +52,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from openexecutive.memory.episodic import quoted_title
+
 logger = logging.getLogger(__name__)
 
 # Scope-key prefixes per source. Used both when minting the key and when
@@ -175,7 +177,7 @@ def _select_stalled_workflow_candidates(
             NudgeCandidate(
                 scope_key=f"{SCOPE_PREFIX_STALLED}:{run_id}",
                 intent_text=intent,
-                title=f'Ask for a decision on "{title}"',
+                title=quoted_title("Ask for a decision on ", str(title)) or "",
                 source="stalled",
                 urgency_seconds=(awaiting_until - now).total_seconds(),
                 cooldown=cooldown,
@@ -229,7 +231,7 @@ def _select_stale_commitment_candidates(
         original = (r["intent_text"] or "")[:200]
         what = r["title"] or original
         if r["kind"] == "open_loop":
-            title = f'Check on "{what}"'
+            title = quoted_title("Check on ", what) or ""
 
             intent = (
                 f"Follow up on this task: \"{original}\". It was "
@@ -241,7 +243,7 @@ def _select_stale_commitment_candidates(
                 f"it. Do not call schedule_followup."
             )
         else:
-            title = f'Chase a reply on "{what}"'
+            title = quoted_title("Chase a reply on ", what) or ""
             intent = (
                 f"Chase the open commitment from scheduled action #{action_id}: "
                 f'"{original}". No reply since {awaiting.isoformat()}. Send ONE '
@@ -363,7 +365,7 @@ def _select_idle_initiative_candidates(
         since = i.updated_at[:10]
         card: UnreachableCard | None = None
         if person_id == principal_id:
-            title = f'Ask if "{i.title}" is still going'
+            title = quoted_title("Ask if ", i.title, " is still going") or ""
             intent = (
                 f'Remind the principal (you are writing to them directly) that '
                 f'"{i.title}" has not moved since {since}. Ask in one line '
@@ -386,7 +388,7 @@ def _select_idle_initiative_candidates(
                 ),
             )
         else:
-            title = f'Ask how "{i.title}" is going'
+            title = quoted_title("Ask how ", i.title, " is going") or ""
             intent = (
                 f'Check in on the active initiative "{i.title}". It is in '
                 f"status {i.status!r} and was last updated on "

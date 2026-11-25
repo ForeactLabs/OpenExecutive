@@ -243,6 +243,18 @@ class TestStaleCommitmentCandidates:
         [cand] = nudge_engine._select_stale_commitment_candidates(now, stale_days=3, cooldown_hours=48)
         assert cand.title == 'Chase a reply on "Ask Bob about the Q3 close"'
 
+    def test_a_chase_of_a_long_untitled_row_keeps_its_quotes(self) -> None:
+        now = _now()
+        pid = _make_person()
+        episodic.insert_scheduled_action(
+            run_at=now.isoformat(), channel="slack_dm", channel_ref="U_BOB",
+            intent_text="Check whether Alex Cohen replied to the Nov 25 message on the launch email: (1) can m " * 2,
+            assigned_to_person_id=pid, awaiting_response_since=now - timedelta(days=4),
+        )
+        [cand] = nudge_engine._select_stale_commitment_candidates(now, stale_days=3, cooldown_hours=48)
+        assert cand.title.startswith('Chase a reply on "Check whether') and cand.title.endswith('…"')
+        assert len(cand.title) <= episodic.SCHEDULED_TITLE_MAX
+
     def test_recent_awaiting_excluded(self) -> None:
         now = _now()
         pid = _make_person()
