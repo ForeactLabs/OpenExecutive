@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from openexecutive.memory import decision_ledger
 from openexecutive.memory.decision_ledger import (
     STATUS_APPROVED_UNCHANGED,
     STATUS_APPROVED_WITH_EDIT,
@@ -94,7 +95,9 @@ def test_mark_reversed(db: Path) -> None:
     assert get_decision_instance(iid, db_path=db).status == STATUS_REVERSED
 
 
-def test_list_recent_resolved_cross_class_newest_first(db: Path) -> None:
+def test_list_recent_resolved_cross_class_newest_first(
+    db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """list_recent_resolved spans all classes, returns only terminal rows
     (resolved_at set), newest-resolved first, and honours the limit."""
     # A still-proposed row must NOT appear — it's a pending proposal, not activity.
@@ -103,11 +106,22 @@ def test_list_recent_resolved_cross_class_newest_first(db: Path) -> None:
     a = _create(db, idem="a")
     b = _create(db, idem="b")
     c = _create(db, idem="c")
-    import time
+
+    # Each resolve is a minute after the last. Sleeping between them relied on
+    # the wall clock, which a CI virtual machine can step backwards mid-test.
+    start = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+    calls = 0
+
+    class _Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[override]
+            nonlocal calls
+            calls += 1
+            return start + timedelta(minutes=calls)
+
+    monkeypatch.setattr(decision_ledger, "datetime", _Clock)
     mark_resolved(a, STATUS_APPROVED_UNCHANGED, db_path=db)
-    time.sleep(0.01)
     mark_resolved(b, STATUS_REJECTED, db_path=db)
-    time.sleep(0.01)
     mark_resolved(c, STATUS_APPROVED_WITH_EDIT, db_path=db)
 
     resolved = list_recent_resolved(limit=10, db_path=db)
