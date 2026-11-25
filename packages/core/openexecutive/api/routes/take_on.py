@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
@@ -61,7 +62,7 @@ class OfferOut(BaseModel):
     source: str
     source_detail: str = ""
     preview: list[PreviewLine] = Field(default_factory=list)
-    status: Literal["", "working", "done", "failed", "card"] = ""
+    status: Literal["", "working", "done", "failed", "card", "asked"] = ""
     outcome: str = ""
     done: list[DoneLine] = Field(default_factory=list)
     session_id: str | None = None
@@ -258,6 +259,16 @@ def _taken_up(me: Me, offer: take_on.Offer) -> None:
     _tell_source(offer.key, taken=True)
 
 
+_QUESTION_END = re.compile(r"([^.!?\n]{1,300}\?)[\s*_\"')]*$")
+
+
+def _asked_back(replies: list[dict[str, Any]]) -> str:
+    """The question a run ended on, when its last reply ends on one."""
+    text = str(replies[-1].get("content") or "") if replies else ""
+    found = _QUESTION_END.search(text.strip()[-600:])
+    return take_on.line(re.sub(r"[*_`]+", "", found.group(1)).strip(" -"), 300) if found else ""
+
+
 def _what_came_of_it(me: Me, key: str, session_id: str, answered: bool) -> str:
     """Read the run's own record: the card it went to, what it did, or why
     it stopped. Returns the status it left the offer in."""
@@ -284,11 +295,19 @@ def _what_came_of_it(me: Me, key: str, session_id: str, answered: bool) -> str:
     if cards:
         take_on.finish(me.email, key, "card", outcome=said, done=done, decision_id=cards[0])
         return "card"
-    if answered or done:
-        # Done, or answered in words (a doc in the chat, one question back):
-        # what it said shows, and See how opens the chat. A turn cut off at
-        # its deadline after it acted is done too: what it did shows.
+    if done:
+        # What it did shows, even from a turn cut off at its deadline.
         take_on.finish(me.email, key, "done", outcome=said, done=done)
+        return "done"
+    if answered and (question := _asked_back(replies)):
+        # It did nothing and asked one thing back: the offer stays, with the
+        # question, until they answer in the chat or start it again.
+        take_on.finish(me.email, key, "asked", outcome=question)
+        return "asked"
+    if answered:
+        # Answered in words (a doc in the chat): what it said shows, and
+        # See how opens the chat.
+        take_on.finish(me.email, key, "done", outcome=said)
         return "done"
     take_on.finish(me.email, key, "failed", outcome=said or "It stopped before it finished.")
     return "failed"

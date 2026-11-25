@@ -4,7 +4,7 @@
 
 const API_BASE = "/api/backend";
 
-export type OfferStatus = "" | "working" | "done" | "failed" | "card";
+export type OfferStatus = "" | "working" | "done" | "failed" | "card" | "asked";
 export type HideReason = "not_useful" | "already_done" | "later";
 
 export interface Offer {
@@ -33,7 +33,7 @@ export interface OfferList {
   on_its_own: string[];
 }
 
-const STATUSES: OfferStatus[] = ["", "working", "done", "failed", "card"];
+const STATUSES: OfferStatus[] = ["", "working", "done", "failed", "card", "asked"];
 
 function str(v: unknown): string {
   return typeof v === "string" ? v : "";

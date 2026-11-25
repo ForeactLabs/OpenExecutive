@@ -308,6 +308,52 @@ def test_do_it_runs_one_turn_as_the_caller_and_reads_what_it_did(
     assert got.session_id == "sess-1" and got.title == o.title
 
 
+def test_a_run_that_only_asks_back_keeps_the_offer_with_the_question(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nothing done and one question back is not done: the offer stays on
+    the list with the question, and the place it came from keeps it."""
+    from openexecutive.api.routes import chat as chat_route
+    from openexecutive.api.routes import take_on as route
+    from openexecutive.memory import decision_ledger, session_store
+
+    o = _offer("I can book a meeting with Dana on Thursday", "meeting")
+    take_on.put_made(ME, [o])
+    seen: dict[str, Any] = {}
+    taken: list[str] = []
+
+    async def fake_turn(_request: object, **kw: Any) -> str:
+        seen.update(kw)
+        return "sess-ask"
+
+    monkeypatch.setattr(chat_route, "start_background_turn", fake_turn)
+    monkeypatch.setattr(route, "_taken_up", lambda _me, offer: taken.append(offer.key))
+    client.post(f"/take-on/{o.key}/do")
+    monkeypatch.setattr(session_store, "load_messages", lambda _s: [
+        {"role": "assistant", "content": "Dana is free Thursday at 10 and at 2.\n\nWhich time works, 10 or 2?"},
+    ])
+    monkeypatch.setattr(decision_ledger, "open_for_session", lambda _s: [])
+    seen["on_finished"](True)
+    (got,) = client.get("/take-on").json()["offers"]
+    assert got["status"] == "asked" and got["outcome"] == "Which time works, 10 or 2?"
+    assert got["session_id"] == "sess-ask"
+    assert take_on.finished(ME, datetime.now(UTC) - timedelta(hours=1)) == []
+    assert taken == []
+    # They can start it again, or hide it.
+    assert client.post(f"/take-on/{o.key}/do").status_code == 202
+
+
+def test_a_doc_written_in_the_chat_is_done() -> None:
+    assert route_asked([{"role": "assistant", "content": "Here is your 30-day plan.\n\n1. Week one..."}]) == ""
+    assert route_asked([{"role": "assistant", "content": "Want me to send it to **Dana?**"}]) == "Want me to send it to Dana?"
+
+
+def route_asked(replies: list[dict[str, Any]]) -> str:
+    from openexecutive.api.routes import take_on as route
+
+    return route._asked_back(replies)
+
+
 def test_a_turn_cut_off_after_it_acted_shows_what_it_did(
     client: TestClient, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

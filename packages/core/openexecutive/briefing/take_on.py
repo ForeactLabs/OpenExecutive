@@ -79,7 +79,7 @@ KIND_LABEL: dict[str, str] = {
 Origin = str
 ORIGINS: tuple[str, ...] = ("made", "repeat", "watch")
 # "card": the step went to a card in Needs you, as the gate decided.
-Status = Literal["", "working", "done", "failed", "card"]
+Status = Literal["", "working", "done", "failed", "card", "asked"]
 # "skipped": Skip on the card the step went to; not counted as turned down.
 HideReason = Literal["not_useful", "already_done", "later", "skipped"]
 
@@ -678,7 +678,7 @@ def _apply(offer: Offer, state: sqlite3.Row | None, now: datetime) -> Offer | No
         began = _parse(state["started_at"])
         if began and now - began > background_turn_limit():
             status, offer.outcome = "failed", STALE_OUTCOME
-    if status in ("done", "failed"):
+    if status in ("done", "failed", "asked"):
         ended = _parse(state["finished_at"])
         if ended and now - ended > timedelta(days=DONE_DAYS):
             return None
@@ -762,7 +762,7 @@ def offers_for(
                     _ensure(conn, person, o.key, o.kind, now)
         except (sqlite3.Error, OSError):
             logger.warning("take_on: couldn't mark offers seen", exc_info=True)
-    rank = {"working": 0, "card": 0, "failed": 1, "": 2, "done": 3}
+    rank = {"working": 0, "card": 0, "asked": 0, "failed": 1, "": 2, "done": 3}
     out.sort(key=lambda o: rank.get(o.status, 2))
     return out
 
@@ -873,7 +873,8 @@ def finish(
     db_path: Path | None = None,
 ) -> None:
     """What came of Do it: done (with what it did), on a card for them
-    (the gate's), or failed (with why). Never raises."""
+    (the gate's), asked them a question back (with the question), or failed
+    (with why). Never raises."""
     try:
         with _connect(db_path) as conn:
             conn.execute(
@@ -899,7 +900,7 @@ def hide(email: str, offer: Offer | str, reason: HideReason, *, db_path: Path | 
         if isinstance(offer, str):
             cur = conn.execute(
                 f"UPDATE {STATE_TABLE} SET hidden_reason = ?, hidden_at = ? "  # noqa: S608
-                "WHERE person = ? AND key = ? AND status IN ('', 'failed') "
+                "WHERE person = ? AND key = ? AND status IN ('', 'failed', 'asked') "
                 "AND hidden_reason IN ('not_useful', 'already_done', 'later')",
                 (reason, now.isoformat(), person, offer),
             )

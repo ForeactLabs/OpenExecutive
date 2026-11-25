@@ -162,6 +162,22 @@ export function OfferCard({
         </div>
       )}
 
+      {offer.status === "asked" && (
+        <div className="mt-2 space-y-2" role="status">
+          <p className="text-sm text-fg">{offer.outcome || "I have a question before I start."}</p>
+          <div className="flex flex-wrap gap-2">
+            {offer.session_id && onOpenChat && (
+              <button type="button" onClick={() => onOpenChat(offer.session_id as string)} className={buttonClass("primary", "sm")}>
+                Answer in chat
+              </button>
+            )}
+            <button type="button" disabled={busy !== null} onClick={() => void doIt()} className={buttonClass("secondary", "sm")}>
+              {busy === "do" ? "Starting…" : "Start again"}
+            </button>
+          </div>
+        </div>
+      )}
+
       {offer.status === "failed" && (
         <div className="mt-2 space-y-2" role="status">
           <p className="text-sm text-rose-700 dark:text-rose-300">{offer.outcome || "It didn't finish."}</p>

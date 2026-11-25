@@ -29,6 +29,8 @@ test("offers are read with only what they should carry", () => {
   assert.equal(a.decision_id, 42);
   assert.equal(sourceLine(a), "Your inbox · Dana, Nov 20");
   assert.equal(b.status, "");
+  assert.equal(parseOfferList({ offers: [{ ...b, status: "asked", outcome: "Which time, 10 or 2?" }] }).offers[0].status, "asked");
+  assert.equal(parseOfferList({ offers: [{ ...b, status: "bogus" }] }).offers[0].status, "");
   assert.equal(anyWorking(list.offers), false);
   assert.equal(anyWorking([{ ...b, status: "working" }]), true);
 });
