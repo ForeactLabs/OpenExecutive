@@ -171,8 +171,8 @@ def _rebuild() -> None:
             "button would: pin, rename, delete, share, turn a setting on or off. "
             f"id comes from find_in_app; for the chat you are in, use id \"{THIS}\". "
             "Approvals decides whether it is done now or leaves a card for them to confirm "
-            "(a delete or a share waits on Balanced; anything that sends as them or lets more "
-            "go on its own takes their tap): if the result says waiting_for_approval, say it "
+            "(a delete or a share waits on Balanced; raising the level or adding a Goes rule "
+            "takes their tap): if the result says waiting_for_approval, say it "
             "is waiting for their OK, "
             "never that it is done. If it is refused, say why "
             "in their words; don't retry.\n" + "\n".join(lines)
