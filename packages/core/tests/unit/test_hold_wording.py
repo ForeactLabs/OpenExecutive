@@ -33,7 +33,7 @@ def test_each_hold_asks_for_a_yes_not_i_cant(text: str) -> None:
         (lockdown.REFUSAL, "read their mail"),
         (outside_content.REFUSAL, "read something from outside"),
         (outside_content.ADDED_REFUSAL, "new contact"),
-        (schedule_tools.SHARED_CHAT_REFUSAL, "others have written here"),
+        (schedule_tools.SHARED_CHAT_REFUSAL, "may not be on the team"),
     ],
 )
 def test_each_hold_gives_its_reason(text: str, reason: str) -> None:

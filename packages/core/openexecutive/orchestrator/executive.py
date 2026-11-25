@@ -1628,6 +1628,7 @@ class Executive:
                         full_response = ""
                     yield item
             finally:
+                levels.end_round(delegation_pin)
                 outside_content.end_turn(outside_turn)
 
         if debug_collector:
@@ -2075,6 +2076,7 @@ class Executive:
             # token can't be reset there; the turn still ends.
             with contextlib.suppress(ValueError):
                 _REFUSED.reset(refusing)
+            levels.end_round(delegation_pin)
             outside_content.end_turn(outside_turn)
 
         draft_ms = round((time.monotonic() - t0) * 1000)
@@ -2487,10 +2489,13 @@ class Executive:
         # web chat.
         mcp_client = read_only_turn(current_session.get())
         mcp_client_withheld = READ_ONLY_WITHHELD_TOOLS if mcp_client else frozenset()
-        # A shared web chat someone other than its owner has written into
-        # since the owner last did (`Session.others_spoke_last`): nothing
-        # that sends to people or changes contacts (`SHARED_CHAT_WITHHELD_TOOLS`,
-        # and the gateway's mail writes through `shared_chat_withholds`).
+        # A chat space that lets in people not on People (a Google Chat
+        # space) whose last line wasn't the speaker's
+        # (`Session.others_spoke_last`): its sends to people and contact
+        # changes are noticed as `levels.SHARED` (`SHARED_CHAT_WITHHELD_TOOLS`,
+        # and the gateway's mail writes through `shared_chat_withholds`). A
+        # shared web chat is only the team's, so it never sets it: whoever
+        # speaks there asks at the company's level.
         others_spoke = (
             getattr(current_session.get(), "shared_chat", False) is True
             and getattr(current_session.get(), "others_spoke_last", False) is True
@@ -3099,16 +3104,22 @@ class Executive:
             # but is not locked: it is the person asking again. The offered
             # list stays as it is, so the cached prefix never changes
             # mid-turn.
-            # How much of it holds is the safety level's, like any read: every
-            # mail read is checked once its round is done (check_mail_read
-            # below), and Balanced then holds it all only if one was flagged
-            # or too big to check; a round that reads mail holds it all for
-            # that round, since its reads aren't checked yet; Hands-off holds
-            # none of it (delegation.lockdown.mail_turn_withholds).
+            # These only notice; the level decides (levels.mail_reason, then
+            # levels.decide). Every mail read is checked once its round is
+            # done (check_mail_read below). On Balanced a step waits only if a
+            # read was flagged or left unchecked (too big, a script beside it,
+            # or an earlier round's), or it posts to everyone or changes
+            # People; a step asked in the round that reads mail was asked
+            # before that mail was seen, so it runs. Careful waits on all of
+            # it; Hands-off on none (delegation.lockdown.mail_turn_withholds).
             mail_touched_uses: list[dict[str, Any]] = []
             reads_mail_now = any(
                 tu["name"] in MAILBOX_TOOL_NAMES or tu["name"] in _OWN_RECALL_TOOL_NAMES for tu in dispatch_uses
             )
+            # Until this round's reads are checked, only mail an earlier
+            # round left unchecked makes this round's steps wait
+            # (levels.mail_reason), in the loop and in every handler.
+            levels.mark_round(pinned_delegation, reads_mail=reads_mail_now)
             if pinned_delegation is not None and (pinned_delegation.read_mail or reads_mail_now):
                 mail_touched_uses = [
                     tu for tu in [*skill_tool_uses, *mcp_tool_uses, *script_tool_uses]
@@ -3152,11 +3163,16 @@ class Executive:
                 for tu in [*skill_tool_uses, *mcp_tool_uses, *script_tool_uses]
                 if tu["id"] in gate_reasons
             }
-            mail_why = levels.mail_reason() if mail_touched_uses else levels.OWN_MAIL
-            for tu in mail_touched_uses:
-                noticed.setdefault(tu["id"], (tu, mail_why))
-            for tu in outside_uses:
-                noticed.setdefault(tu["id"], (tu, levels.STRANGER if stranger else levels.outside_reason()))
+            # A step with several reasons keeps the one that waits on more
+            # levels (levels.stronger), so a shared chat never lets a
+            # flagged read's step run.
+            for tu, why in [
+                *((tu, levels.mail_reason(pinned_delegation, tool=tu["name"], tool_input=tu["input"]))
+                  for tu in mail_touched_uses),
+                *((tu, levels.STRANGER if stranger else levels.outside_reason()) for tu in outside_uses),
+            ]:
+                had = noticed.get(tu["id"])
+                noticed[tu["id"]] = (tu, levels.stronger(had[1] if had else None, why))
             held_uses = [
                 (tu, reason) for tu, reason in noticed.values()
                 # The level now, not the turn's first: a flagged read drops
@@ -3321,7 +3337,7 @@ class Executive:
                     },
                     private=private_turn or bool(
                         pinned_delegation is not None and pinned_delegation.touched_mail
-                    ) or reason in (levels.OWN_MAIL, levels.MAIL_FLAGGED, levels.PRIVATE),
+                    ) or reason in (levels.OWN_MAIL, levels.MAIL_FLAGGED, levels.MAIL_UNCHECKED, levels.MAIL_SHARED, levels.PRIVATE),
                 )
                 if not can_card:
                     results_by_id[tu["id"]] = levels.not_carriable_error(label, reason)
@@ -3763,7 +3779,7 @@ class Executive:
                     elif pinned_delegation is not None and mail_turn_withholds(
                         probe_name, probe_input, pinned=pinned_delegation
                     ):
-                        script_reason = levels.mail_reason()
+                        script_reason = levels.mail_reason(pinned_delegation, tool=probe_name, tool_input=probe_input)
                     if (
                         script_reason is not None
                         and levels.decide(script_reason) == levels.CARD
@@ -3850,7 +3866,7 @@ class Executive:
                         step_script.run_script_tool(
                             script_args,
                             tools=None,
-                            call=_script_call,
+                            call=levels.in_script_call(_script_call),
                             origin="chat",
                             # Saving and running while someone on the team
                             # (the principal or a teammate) speaks on a
@@ -4079,6 +4095,7 @@ class Executive:
                 )
                 if not ran_script:
                     outside_content.check_mail_reads_done(pinned_delegation)
+                levels.end_round(pinned_delegation)
 
             current_messages.append({"role": "assistant", "content": response_content})
             # Cap here, at the single point every result reaches the model,
