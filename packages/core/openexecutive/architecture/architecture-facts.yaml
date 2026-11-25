@@ -5199,11 +5199,14 @@ scheduler:
     messages since created_at (session_store.own_messages_since: role user,
     sent by them or in their own conversation from before senders were
     recorded; newest 30, 300 chars each) in <since_scheduled> tags, and is
-    asked to answer ALREADY_HANDLED: <why> and send nothing when that shows
-    it is done. The runner then marks the row cancelled (last_error
-    'skipped: already handled (...)') and audits phase skipped. The
-    teammate path (_run_teammate_followup) applies the same block and skips
-    its own send. Only the person's own words are quoted, never replies, so
+    told that what they said last wins: asked since to hold, change or drop
+    it, the run does that and its one message to them says so, and never
+    sends to someone else what they asked to hold; when it only looks done,
+    it still sends its one message and says so. The runner never cancels
+    the row on the run's own judgement (a reminder someone asked for was
+    dropped as "already handled"); only the person cancels one. The
+    teammate path (_run_teammate_followup) applies the same block and sends
+    what it wrote. Only the person's own words are quoted, never replies, so
     mail a reply quoted cannot reach an unattended run this way. In chat:
     every turn by a verified speaker carries <pending_followups> in the user
     turn (correction_tools.pending_followups_block, list_followups' ownership

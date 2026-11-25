@@ -1,8 +1,10 @@
 """A follow-up overtaken by events stays current: when it fires the run sees
-what its setter wrote since (scheduler.runner._since_scheduled_block) and
-stands down when that shows it is handled, and every chat turn shows the
+what its setter wrote since (scheduler.runner._since_scheduled_block), and
+its message says when it looks handled, but it is always sent: the run never
+drops what someone asked for (11-25: Avery's own reminder to call Pat was
+cancelled as "already handled" and never came). Every chat turn shows the
 speaker's pending ones (correction_tools.pending_followups_block) so the
-turn that settles one can cancel it."""
+person can cancel one themselves."""
 from __future__ import annotations
 
 import asyncio
@@ -108,16 +110,18 @@ def _fire(action_id: int, reply: object) -> tuple[AsyncMock, str]:
     return chat, str(chat.call_args.kwargs["user_message"])
 
 
-def test_a_handled_followup_is_not_sent(db: Path, roster: SimpleNamespace) -> None:
+def test_a_followup_that_looks_handled_is_still_sent(db: Path, roster: SimpleNamespace) -> None:
     me = roster.principal.id
     create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
     action_id = _followup("tg-1", created_by=me)
     _message(db, "web-2", me, "user", "Dana replied with new terms, compare them", -timedelta(hours=2), sender=me)
-    _, prompt = _fire(action_id, "ALREADY_HANDLED: they compared Dana's terms yesterday")
+    # Even a reply that starts like the old stand-down marker is a sent run.
+    _, prompt = _fire(action_id, "ALREADY_HANDLED: looks like you compared Dana's terms. Sent a note saying so.")
     assert "<since_scheduled>" in prompt and "Dana replied with new terms" in prompt
+    assert "still send the one message" in prompt and "ALREADY_HANDLED" not in prompt
+    assert "What they said last wins" in prompt and "asked to hold" in prompt
     row = episodic.get_scheduled_action(action_id)
-    assert row is not None and row.status == "cancelled"
-    assert row.last_error == "skipped: already handled (they compared Dana's terms yesterday)"
+    assert row is not None and row.status == "done"
 
 
 def test_a_followup_still_due_runs_as_before(db: Path, roster: SimpleNamespace) -> None:
@@ -157,7 +161,7 @@ def test_the_turn_shows_the_speakers_pending_followups(db: Path, roster: SimpleN
     assert ct.pending_followups_block(session) == ""
 
 
-def test_a_teammates_handled_followup_is_not_sent(db: Path, roster: SimpleNamespace) -> None:
+def test_a_teammates_followup_that_looks_handled_is_still_sent(db: Path, roster: SimpleNamespace) -> None:
     ben = roster.teammate.id
     action_id = episodic.insert_scheduled_action(
         run_at=_iso(timedelta(days=1)), channel="slack_dm", channel_ref="UBEN",
@@ -169,7 +173,9 @@ def test_a_teammates_handled_followup_is_not_sent(db: Path, roster: SimpleNamesp
                      (_iso(-timedelta(days=1)), action_id))
     _message(db, "ben-2", ben, "user", "The vendor answered, all sorted", -timedelta(hours=1), sender=ben)
     with patch.object(runner, "_send_on_plan", new_callable=AsyncMock) as send:
-        _, prompt = _fire(action_id, "ALREADY_HANDLED: the vendor answered")
-    send.assert_not_called()
+        send.return_value = SimpleNamespace(ok=True, detail="")
+        _, prompt = _fire(action_id, "Looks sorted: the vendor answered.")
+    send.assert_called_once()
+    assert send.call_args.args[2] == "Looks sorted: the vendor answered."
     assert "The vendor answered, all sorted" in prompt
-    assert episodic.get_scheduled_action(action_id).status == "cancelled"  # type: ignore[union-attr]
+    assert episodic.get_scheduled_action(action_id).status == "done"  # type: ignore[union-attr]
