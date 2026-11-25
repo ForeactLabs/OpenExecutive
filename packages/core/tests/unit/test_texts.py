@@ -519,3 +519,18 @@ def test_a_send_is_settled_once(ids: dict[str, int]) -> None:
     finally:
         tx._tell = orig  # type: ignore[assignment]
     assert told == [send.id]
+
+
+def test_a_send_the_browser_took_but_never_answered_is_told_as_unsure(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    send = tx.queue_send(owner, "Running late", to_number="5550002222")
+    assert tx.take_send(owner) is not None
+    _age(send.id, 1.5)
+    assert tx.take_send(owner) is None
+    assert tx.get_send(send.id).status == tx.HANDED  # still time to finish
+    _age(send.id, 3)
+    tx.take_send(owner)
+    late = tx.get_send(send.id)
+    assert late.status == tx.UNSURE
+    assert "Check your phone" in tx.outcome_words(late, "Sam")

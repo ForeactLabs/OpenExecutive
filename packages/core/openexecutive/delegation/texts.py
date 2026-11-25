@@ -63,7 +63,9 @@ PENDING = "pending"
 HANDED = "handed_to_browser"
 SENT = "sent"
 FAILED = "failed"
-SETTLED = frozenset({SENT, FAILED})
+# Handed to the browser, which never said how it went: it may or may not have gone.
+UNSURE = "unsure"
+SETTLED = frozenset({SENT, FAILED, UNSURE})
 
 _db = db.company_path
 
@@ -404,6 +406,8 @@ def outcome_words(send: Send, who: str) -> str:
     """How a settled send went, in a line for the person."""
     if send.status == SENT:
         return f'Texted {who}: "{send.text}"'
+    if send.status == UNSURE:
+        return f'I don\'t know whether my text to {who} "{send.text}" went: Chrome never said. Check your phone.'
     reason = send.error.strip().rstrip(".") if send.error.strip() else "the browser didn't say why"
     return f'I couldn\'t text {who} "{send.text}": {reason}. Nothing went.'
 
@@ -448,20 +452,26 @@ def queue_send(
 def _expire(person_id: int, db_path: Path | None) -> None:
     """A send not taken within ``SEND_WITHIN`` fails instead of going late,
     and the chat that waits on it hears so."""
+    expired = []
     with _connect(db_path) as conn:
-        late = conn.execute(
-            f"SELECT id FROM {TEXT_SENDS_TABLE} WHERE person_id=? AND status=? AND created_at < ?",
-            (person_id, PENDING, _iso(_now() - SEND_WITHIN)),
-        ).fetchall()
-        expired = []
-        for r in late:
-            cur = conn.execute(
-                f"UPDATE {TEXT_SENDS_TABLE} SET status=?, error=?, done_at=? WHERE id=? AND status=?",
-                (FAILED, "Chrome wasn't open on your computer within the hour", _iso(_now()), r["id"], PENDING),
-            )
-            if cur.rowcount == 1:
-                row = conn.execute(f"SELECT * FROM {TEXT_SENDS_TABLE} WHERE id=?", (r["id"],)).fetchone()
-                expired.append(_send(row))
+        for waiting, within, now_status, error in (
+            (PENDING, SEND_WITHIN, FAILED, "Chrome wasn't open on your computer within the hour"),
+            # Taken by the browser, which never said how it went (one taken
+            # late in the hour still gets time to finish).
+            (HANDED, 2 * SEND_WITHIN, UNSURE, "Chrome never said whether it went"),
+        ):
+            late = conn.execute(
+                f"SELECT id FROM {TEXT_SENDS_TABLE} WHERE person_id=? AND status=? AND created_at < ?",
+                (person_id, waiting, _iso(_now() - within)),
+            ).fetchall()
+            for r in late:
+                cur = conn.execute(
+                    f"UPDATE {TEXT_SENDS_TABLE} SET status=?, error=?, done_at=? WHERE id=? AND status=?",
+                    (now_status, error, _iso(_now()), r["id"], waiting),
+                )
+                if cur.rowcount == 1:
+                    row = conn.execute(f"SELECT * FROM {TEXT_SENDS_TABLE} WHERE id=?", (r["id"],)).fetchone()
+                    expired.append(_send(row))
     for gone in expired:
         _tell(gone, db_path=db_path)
 

@@ -160,6 +160,8 @@
     if (reporting) return;
     reporting = true;
     try {
+      // Off: read nothing at all.
+      if ((await chrome.storage.local.get("textsOn")).textsOn !== true) return;
       const now = Date.now();
       const isPaired = paired();
       let items = [];
@@ -230,12 +232,14 @@
     'button[aria-label^="Send" i]',
   ];
 
-  function outgoingTexts() {
-    const sent = document.querySelectorAll(
-      'mws-message-wrapper[is-outgoing="true"], [data-e2e-is-outgoing="true"], .outgoing mws-text-message-part',
-    );
-    return [...sent].map((el) => T.squeeze(textOf(el), 4000));
+  function outgoingBubbles() {
+    return [
+      ...document.querySelectorAll(
+        'mws-message-wrapper[is-outgoing="true"], [data-e2e-is-outgoing="true"], .outgoing mws-text-message-part',
+      ),
+    ];
   }
+  const outgoingTexts = () => outgoingBubbles().map((el) => T.squeeze(textOf(el), 4000));
 
   async function startConversation(number) {
     const input = await waitFor(
@@ -287,9 +291,15 @@
     if (!went) return { ok: false, error: "Google Messages didn't show the text as sent." };
     // A text Google Messages couldn't send shows a "Not sent" note on it.
     await pause(1500);
-    const failed = [...document.querySelectorAll("mws-message-status, [data-e2e-message-status]")].some((el) =>
-      /not sent|failed/i.test(textOf(el)),
-    );
+    // Only the text just sent: an older one that failed says nothing about it.
+    const failed = outgoingBubbles()
+      .slice(before)
+      .some((bubble) => {
+        const wrap = bubble.closest("mws-message-wrapper") || bubble;
+        return [...wrap.querySelectorAll("mws-message-status, [data-e2e-message-status]")].some((el) =>
+          /not sent|failed/i.test(textOf(el)),
+        );
+      });
     if (failed) return { ok: false, error: "Google Messages says it wasn't sent." };
     return { ok: true, conversation: T.keyOf(location.href) };
   }

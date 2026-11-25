@@ -166,7 +166,10 @@
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
       });
-      return { ok: res.ok };
+      if (!res.ok) return { ok: false };
+      // An install with Texts off for them answers enabled: false: try the next tab.
+      const answer = await res.json().catch(() => ({}));
+      return { ok: answer.enabled === true };
     } catch {
       return { ok: false };
     }

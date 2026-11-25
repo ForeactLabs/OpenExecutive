@@ -897,7 +897,11 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
     // Only the Google Messages page says what Google Messages shows.
     if (!sender.tab || !onMessages(sender.url || sender.tab.url)) return false;
     const body = { paired: msg.paired === true, items: Array.isArray(msg.items) ? msg.items.slice(0, 100) : [] };
-    passOnTexts(body).then(reply, () => reply({ ok: false }));
+    // Nothing leaves the browser while Texts is off.
+    chrome.storage.local
+      .get("textsOn")
+      .then((got) => (got.textsOn === true ? passOnTexts(body) : { ok: false, off: true }))
+      .then(reply, () => reply({ ok: false }));
     return true;
   }
   if (msg.type === "text_send") {
