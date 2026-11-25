@@ -593,8 +593,9 @@ def test_a_failure_to_start_noting_never_touches_the_send(
 
 def test_send_with_allow_lets_that_sender_go_on_its_own(owner: Any, models: dict[str, Any]) -> None:
     from openexecutive.delegation import training
+    from openexecutive.orchestrator import take_the_lead as _ttl
 
-    training.set_(owner.id, {training.TRAINING: True}, updated_by="test")
+    _ttl.set_(_ttl.SCOPE_EXECUTIVE, training=True, updated_by="t")
     mailbox, card = _card(owner)
     asyncio.run(send_approved_reply(
         card, caller=LOCAL, resolver=owner.id, allow=True, gmail=mailbox, now=NOW + timedelta(minutes=30),

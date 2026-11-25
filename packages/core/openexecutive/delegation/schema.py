@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import UTC, datetime
 
 SETTINGS_TABLE = "delegation_settings"
 VOICE_TABLE = "delegation_voice"
@@ -256,7 +255,7 @@ _DDL: tuple[str, ...] = (
     "  current INTEGER NOT NULL DEFAULT 1,"
     "  PRIMARY KEY (provider, folder_id)"
     ")",
-    # One-time upgrades of what is stored (``_keep_the_old_opt_in``), by name.
+    # One-time upgrades of what is stored, by name.
     f"CREATE TABLE IF NOT EXISTS {UPGRADES_TABLE} ("
     "  name TEXT PRIMARY KEY,"
     "  done_at TEXT NOT NULL"
@@ -324,42 +323,6 @@ def _move_training_off_the_dial(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def _keep_the_old_opt_in(conn: sqlite3.Connection) -> None:
-    """Handle it for me was a switch of its own (``enabled`` on
-    ``delegation_handle_it``, off until the person turned it on, and absent
-    was off too); now Approvals alone decides what goes from the inbox
-    replies. Once, on upgrade: everyone who had Act as me or the inbox
-    watcher set up and never turned that switch on is put In training, so
-    everything still waits on a card until they allow it. Turning it off
-    afterwards sticks (the row is only ever added), and anyone who sets up
-    Act as me later gets the new default: Approvals decides."""
-    name = "handle_it_opt_in"
-    if conn.execute(f"SELECT 1 FROM {UPGRADES_TABLE} WHERE name = ?", (name,)).fetchone():  # noqa: S608
-        return
-    opted_in = {
-        row[0] for row in conn.execute(
-            f"SELECT person_id FROM {HANDLE_IT_TABLE} WHERE enabled = 1"  # noqa: S608 — constant table name
-        ).fetchall()
-    }
-    people = {
-        row[0] for row in conn.execute(
-            f"SELECT person_id FROM {SETTINGS_TABLE} UNION SELECT person_id FROM {INBOX_WATCH_TABLE} "  # noqa: S608
-            f"UNION SELECT person_id FROM {HANDLE_IT_TABLE}"
-        ).fetchall()
-    }
-    for person_id in sorted(people - opted_in):
-        conn.execute(
-            f"INSERT INTO {TRAINING_TABLE} (person_id, setting, enabled, updated_by) "  # noqa: S608
-            "VALUES (?, 'training', 1, 'migration') ON CONFLICT(person_id, setting) DO NOTHING",
-            (person_id,),
-        )
-    conn.execute(
-        f"INSERT INTO {UPGRADES_TABLE} (name, done_at) VALUES (?, ?)",  # noqa: S608
-        (name, datetime.now(UTC).isoformat()),
-    )
-    conn.commit()
-
-
 def _add_mailbox_drafts(conn: sqlite3.Connection) -> None:
     """Give a watch table made before ``mailbox_drafts`` existed the column,
     off: replies wait on their cards and no longer fill the person's Drafts."""
@@ -412,4 +375,3 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     _add_draft_replaced_by(conn)
     _add_draft_from_executive(conn)
     _move_training_off_the_dial(conn)
-    _keep_the_old_opt_in(conn)

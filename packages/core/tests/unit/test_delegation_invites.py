@@ -414,7 +414,8 @@ def test_in_training_an_invite_waits_and_accepting_with_allow_teaches_it(
     from openexecutive.delegation import training
 
     _on(person, monkeypatch, level="trust")
-    training.set_(person.id, {training.TRAINING: True}, updated_by="test")
+    from openexecutive.orchestrator import take_the_lead as _ttl
+    _ttl.set_(_ttl.SCOPE_EXECUTIVE, training=True, updated_by="t")
     mailbox = _mailbox()
     assert _scan(person, mailbox).handled == 0 and mailbox.answers == []
     (card,) = invites.cards(person)

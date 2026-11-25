@@ -418,8 +418,9 @@ def _ask_first(db_path: Path | None) -> dict[str, bool]:
     return out
 
 
-def get(scope: str, *, db_path: Path | None = None) -> Lead:
-    """The switch for ``scope``. Never raises: unreadable is off."""
+def get(scope: str, *, db_path: Path | None = None, strict: bool = False) -> Lead:
+    """The switch for ``scope``. Never raises unless ``strict`` (for a caller
+    that holds when it can't read it): unreadable is off."""
     try:
         conn = _connect(db_path)
         try:
@@ -429,6 +430,8 @@ def get(scope: str, *, db_path: Path | None = None) -> Lead:
         finally:
             conn.close()
     except Exception:
+        if strict:
+            raise
         logger.warning("take_the_lead: couldn't read the switch — treating it as off", exc_info=True)
         return Lead(scope=scope, ask_first=_ask_first(db_path))
     return Lead(
@@ -4365,6 +4368,70 @@ def _released(
             released.add(SOMEONE_NEW)
             goes = [*goes, *reach]
     return released, goes
+
+
+# Reasons a feature notices about what goes out as a person that wait below
+# Hands-off (``as_you``), the someone-new topic in that feature's words, and
+# those In training's "on its own to them" covers.
+AS_YOU_FORGIVEN_IN_TRAINING = frozenset({"stranger"})
+
+
+def as_you(
+    person_id: int,
+    *,
+    texts: Iterable[str] = (),
+    sent_texts: Iterable[str] = (),
+    recipients: Iterable[str] = (),
+    noticed: Iterable[str] = (),
+    db_path: Path | None = None,
+) -> str | None:
+    """The one gate for what goes out as a person on its own (``delegation``:
+    replies, follow-ups, invite answers, action cards): why it waits on its
+    card, as a ``handle_it.REASONS`` code, or None when it goes. In order,
+    as ``gate``:
+
+    1. **Your rules**: a Waits rule matching ``texts`` or ``recipients``
+       (``"rule"``), on every level.
+    2. **The level** (the company's): Careful holds (``"level"``).
+    3. **In training**: on, it goes only to people ``person_id`` allowed
+       (``"training"``); everyone allowed covers who they are.
+    4. Balanced: the first of ``noticed`` (reasons the feature noticed,
+       e.g. ``"stranger"`` for someone they don't know), then the topics
+       (``"sensitive"``) unless a Goes rule lets them go. Hands-off runs it.
+
+    ``sent_texts`` (what it would send) are read for Goes amounts. Never
+    raises: an error holds (``"rule"``)."""
+    try:
+        from openexecutive.delegation import training as as_you_training
+        from openexecutive.orchestrator import outside_mode
+
+        going = [r.strip().lower() for r in recipients if r and r.strip()]
+        joined = "\n".join(t or "" for t in texts)
+        rules = list_rules([SCOPE_COMPANY], db_path=db_path)
+        if rule_waits(rules, joined, going, topics=topics_in(joined, going)) is not None:
+            return "rule"
+        mode = outside_mode.get_mode(db_path=db_path)
+        if mode == outside_mode.ASK:
+            return "level"
+        reasons = [n for n in noticed if n]
+        if get(SCOPE_EXECUTIVE, db_path=db_path, strict=True).training:
+            addresses = list(recipients)
+            if not addresses or len([a for a in addresses if a]) != len(addresses) or as_you_training.all_allowed(
+                person_id, [a for a in addresses if a], db_path=db_path,
+            ) is None:
+                return TRAINING
+            reasons = [n for n in reasons if n not in AS_YOU_FORGIVEN_IN_TRAINING]
+        if mode == outside_mode.TRUST:
+            return None
+        if reasons:
+            return reasons[0]
+        own = "\n".join(t or "" for t in sent_texts)
+        if held_topic(rules, joined, going, words_text=own) is not None:
+            return "sensitive"
+        return None
+    except Exception:
+        logger.warning("take_the_lead: couldn't decide what goes as a person — holding", exc_info=True)
+        return "rule"
 
 
 def held_topic(rules: list[Rule], text: str, recipients: Iterable[str], *, words_text: str | None = None) -> str | None:

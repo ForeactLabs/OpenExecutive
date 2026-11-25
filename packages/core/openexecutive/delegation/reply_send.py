@@ -295,20 +295,19 @@ async def _send_checked(
         stored = handle_it.get(person.id)
         if getattr(instance, "gate_mode", "") != "auto_execute" or not stored.enabled:
             raise SendRefused(409, "handle_it_off", "Sending on its own is off for this reply.")
-        if handle_it.approvals_hold():
-            raise SendRefused(409, "level", handle_it.REASONS["level"])
-        # In training, only people they allowed (one removed since the card
-        # was made holds it); otherwise, below Hands-off, only people they know.
-        held = handle_it.training_hold(person.id, _going(payload))
-        if held is not None:
-            raise SendRefused(409, held, handle_it.REASONS[held])
+        # The one gate again (Your rules, the level, In training; below
+        # Hands-off, someone they don't know): a rule added, a person
+        # removed from what it learned, or a level changed since the card
+        # was made holds it.
+        from openexecutive.orchestrator import take_the_lead
+
         relation = str(payload.get("handled_as") or "stranger")
-        if (
-            not handle_it.in_training(person.id)
-            and handle_it.kind_for(relation) != handle_it.KIND_REPLY_KNOWN
-            and not handle_it.hands_off()
-        ):
-            raise SendRefused(409, "stranger", handle_it.REASONS["stranger"])
+        held = take_the_lead.as_you(
+            person.id, recipients=_going(payload),
+            noticed=["stranger" if handle_it.kind_for(relation) != handle_it.KIND_REPLY_KNOWN else ""],
+        )
+        if held:
+            raise SendRefused(409, held, handle_it.REASONS[held])
         if not handle_it.signing_ok():
             raise SendRefused(409, "caller_signing_required", handle_it.REASONS["signing_off"])
         # It goes on its own only when it leaves them nothing to answer.

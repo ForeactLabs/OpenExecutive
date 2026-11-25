@@ -20,9 +20,9 @@ checked when it is proposed and again when it is carried out:
 - ``drive_files``: rename and/or move up to ``DRIVE_FILES_MAX`` Google Drive
   files (``MCPGateway.tapped_drive_change``); the principal's cards only. For
   a change the Drive gate won't make on the model's say-so (a file that isn't
-  the company's own, or a turn that read outside content): the tap is the
-  approval, so only the folder it goes to is checked. It always waits for
-  the tap.
+  the company's own, or a turn that read outside content): the card's
+  approval, a tap or the one gate on Hands-off, is the approval, so only the
+  folder it goes to is checked.
 
 **Whose it is.** A card is a ``delegation_actions`` decision for the person
 who was speaking, theirs alone (``approver_only``: not even the principal sees
@@ -33,15 +33,14 @@ exactly as stored, with no model call: claimed first, so it runs once.
 **Limits.** ``CARDS_PER_TURN`` a turn and ``OPEN_CARDS_MAX`` waiting a
 person; a card is dropped after ``CARD_TTL``.
 
-**On their own.** With Handle it for me on and Approvals above Careful, a
-card is carried out as soon as it is proposed (``run_on_its_own``), with no
-tap, when plain code finds nothing against it (``on_its_own_refusal``): Act
-as me on, and a server that can tie the switch to the person. On Balanced
-it also reaches nobody new:
-a new contact, or anyone whose roster entry is under ``SETTLED_AFTER`` old,
-waits on its card (``_known_people_refusal``), so someone added or planted
-lately is never reached without a tap, and a Drive change or a save into a
-shared folder waits too. On Hands-off those checks lift. Anything refused waits on its card as before. An invite carried
+**On their own.** With Handle it for me on, a card is carried out as soon
+as it is proposed (``run_on_its_own``), with no tap, when the one gate lets
+it (``take_the_lead.as_you``: Your rules and the topics on what it says, the
+level, In training) and the server can tie the switch to the person. Below
+Hands-off, someone new waits on its card (``_someone_new``): a new contact,
+or anyone whose roster entry is under ``SETTLED_AFTER`` old, so someone
+added or planted lately is never reached without a tap. Anything that waits
+stays on its card as before. An invite carried
 out on its own is never booked as already approved: the meeting gate
 decides as for any meeting nobody tapped, so it may go to the approver as a
 proposal. A card another AI app asked for names the app (``via``) on every
@@ -63,8 +62,6 @@ logger = logging.getLogger(__name__)
 
 DECISION_CLASS = "delegation_actions"
 KINDS: tuple[str, ...] = ("invite", "message", "add_contact", "drive_files", "save_files")
-# Kinds that wait for the person's tap below Hands-off.
-TAP_ONLY_KINDS = frozenset({"add_contact", "drive_files", "save_files"})
 HANDLE_MAX = 300
 # Most people outside the team a save_files card lists; a folder open to
 # more gets no card (the tap compares against every one shown).
@@ -591,24 +588,16 @@ def on_its_own_refusal(person: Any, actions: list[dict[str, Any]], *, now: datet
         return "uncountable"
 
 
-def hands_off() -> bool:
-    """Whether Approvals is on Hands-off. Unreadable is not."""
-    try:
-        from openexecutive.orchestrator import outside_mode
-
-        return outside_mode.get_mode() == outside_mode.TRUST
-    except Exception:
-        return False
-
-
-def _known_people_refusal(person: Any, actions: list[dict[str, Any]], now: datetime) -> str | None:
-    """Below Hands-off, a card carried out on its own reaches only people
-    settled on the roster: a new contact, or anyone added lately, waits for
-    a tap."""
+def _someone_new(person: Any, actions: list[dict[str, Any]], now: datetime) -> str | None:
+    """The someone-new and sharing topics on a card: a new contact, anyone
+    whose roster entry is under ``SETTLED_AFTER`` old (so someone added or
+    planted lately is never reached on its own below Hands-off), or files
+    saved into a folder people outside the team can open (a ``save_files``
+    card exists only for such a folder)."""
     if any(a.get("kind") == "add_contact" for a in actions):
         return "new_contact"
-    if any(a.get("kind") in TAP_ONLY_KINDS for a in actions):
-        return "tap_only"
+    if any(a.get("kind") == "save_files" for a in actions):
+        return "shared"
     if not all(_settled(pid, person.id, now) for pid in _recipients(actions)):
         return "new_person"
     return None
@@ -654,6 +643,7 @@ def _settled(person_id: Any, speaker_id: int, now: datetime) -> bool:
 def _on_its_own_refusal(person: Any, actions: list[dict[str, Any]], now: datetime) -> str | None:
     from openexecutive.delegation import handle_it
     from openexecutive.delegation.settings import can_delegate, is_enabled
+    from openexecutive.orchestrator import take_the_lead
 
     if person is None or person.id is None:
         return "handle_it_off"
@@ -661,22 +651,29 @@ def _on_its_own_refusal(person: Any, actions: list[dict[str, Any]], now: datetim
         return "act_as_me_off"
     if not handle_it.get(person.id).enabled:
         return "handle_it_off"
-    if handle_it.approvals_hold():
-        return "level"
     if not handle_it.signing_ok():
         return "signing_off"
     if not actions:
         return "not_allowed"
-    # In training, only people they allowed, every one on the card;
-    # otherwise, below Hands-off, nobody new.
-    held = handle_it.training_hold(person.id, _addresses(actions) or [""])
-    if held is not None:
-        return held
-    if not handle_it.in_training(person.id) and not hands_off():
-        refused = _known_people_refusal(person, actions, now)
-        if refused is not None:
-            return refused
-    return None
+    # The one gate: Your rules and the topics on what the card says, the
+    # level, In training (only people they allowed); below Hands-off,
+    # someone new (``_someone_new``) waits.
+    held = take_the_lead.as_you(
+        person.id, texts=_texts(actions), recipients=_addresses(actions) or [""],
+        noticed=[_someone_new(person, actions, now) or ""],
+    )
+    return held or None
+
+
+def _texts(actions: list[dict[str, Any]]) -> list[str]:
+    """What a card's actions say, for Your rules and the topics."""
+    out: list[str] = []
+    for action in actions:
+        out.append(str(action.get("summary") or ""))
+        given = action.get("input")
+        stored: dict[str, Any] = given if isinstance(given, dict) else {}
+        out += [str(v) for v in stored.values() if isinstance(v, str)]
+    return out
 
 
 # One card carried out on its own at a time.
@@ -758,26 +755,29 @@ async def _do(action: dict[str, Any], person: Any, *, tapped: bool = False) -> d
         if kind == "drive_files":
             return await _do_drive_files(tool_input, tapped=tapped)
         if kind == "save_files":
-            return await _do_save_files(tool_input, tapped=tapped)
+            return await _do_save_files(tool_input)
     except Exception:
         logger.exception("action_cards: a %s action failed", kind)
         return {"status": "failed", "detail": "Something went wrong, so it may not have happened. Check before trying again."}
     return {"status": "failed", "detail": "Unknown action."}
 
 
-async def _do_drive_files(stored: dict[str, Any], *, tapped: bool) -> dict[str, str]:
-    """Rename and/or move each file on a ``drive_files`` action, one by one."""
+async def _do_drive_files(stored: dict[str, Any], *, tapped: bool = False) -> dict[str, str]:
+    """Rename and/or move each file on a ``drive_files`` action, one by one.
+    Run on its own (not ``tapped``), each change goes through the gateway's
+    usual checks, so a file the company doesn't own meets the level as any
+    other Drive change does."""
     from openexecutive.orchestrator.mcp_gateway import ensure_active_gateway
 
-    if not tapped:
-        return {"status": "failed", "detail": "A Drive change waits for a tap."}
     gateway = await ensure_active_gateway()
     if gateway is None:
         return {"status": "failed", "detail": "Google Drive isn't connected right now."}
     failed: list[str] = []
     files = stored["files"]
     for f in files:
-        error = await gateway.tapped_drive_change(f["file_id"], name=f["name"], move_to=stored["move_to"])
+        error = await gateway.tapped_drive_change(
+            f["file_id"], name=f["name"], move_to=stored["move_to"], tapped=tapped,
+        )
         if error is not None:
             failed.append(f"{f['name'] or f['file_id']}: {error}")
     if not failed:
@@ -786,17 +786,16 @@ async def _do_drive_files(stored: dict[str, Any], *, tapped: bool) -> dict[str, 
     return {"status": "failed", "detail": detail[:300]}
 
 
-async def _do_save_files(stored: dict[str, Any], *, tapped: bool) -> dict[str, str]:
+async def _do_save_files(stored: dict[str, Any]) -> dict[str, str]:
     """Save each file on a ``save_files`` action into its folder, one by one,
-    from the copy kept when the card was made. Only on the person's tap:
-    the folder is still checked (``file_tools.folder_check``), but people
-    outside the team being able to open it is what they approved."""
+    from the copy kept when the card was made, on the person's tap or on its
+    own where the one gate let it (Hands-off): the folder is still checked
+    (``file_tools.folder_check``), but people outside the team being able to
+    open it is what was approved."""
     from openexecutive.orchestrator import conversation_files, file_refs, file_tools
     from openexecutive.orchestrator import mail_file_save as save
     from openexecutive.orchestrator.mcp_gateway import ensure_active_gateway
 
-    if not tapped:
-        return {"status": "failed", "detail": "Saving into a folder shared outside the team waits for a tap."}
     gateway = await ensure_active_gateway()
     if gateway is None or save.storage_for(gateway) != save.GOOGLE:
         return {"status": "failed", "detail": "Google Drive isn't connected right now."}

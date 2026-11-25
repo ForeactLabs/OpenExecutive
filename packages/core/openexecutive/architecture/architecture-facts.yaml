@@ -1005,8 +1005,8 @@ routing:
   app_control_checks: |
     Chat changes the three checks through do_in_app, with the routes the Delegate buttons call:
     set_approvals_level (PUT /executive/outside-content), add_waits_rule / add_goes_rule /
-    remove_rule (POST and DELETE /take-the-lead/rules) and change_setting as_you_training /
-    as_me_training (PUT /delegation/training, PUT /take-the-lead). A change that holds more
+    remove_rule (POST and DELETE /take-the-lead/rules) and change_setting
+    as_me_training (In training, the company's one switch, PUT /take-the-lead). A change that holds more
     (a lower level, a Waits rule, removing a Goes rule, In training on) is done in the turn;
     one that lets more go (a higher level, a Goes rule, removing a Waits rule, leaving
     training) is a card, and raising the level from a chat turn is always a card (a turn that
@@ -12041,7 +12041,7 @@ delegation:
     one-line note into the card's conversation and gist. Note only = the ask
     is the person's to do. A mailbox-kept reply is replaced by a new draft
     with the files. An auto_execute card waits for the work, then goes once
-    handle_it.content_hold passes on the new words, else waits on its card.
+    take_the_lead.as_you passes on the new words, else waits on its card.
     The card's "Tell me what to change" box sends work (needs_tools from the
     rewrite model, answers.NeedsWork) to the same turn with the person's
     words as the ask. Why: an email that asked for a spreadsheet made from its
@@ -12368,11 +12368,13 @@ delegation:
     sent and no longer read as a switch (PUT /delegation/handle-it is
     gone; "handle_it" as a reach step is read as inbox). The company's
     Approvals level (outside_mode: ask Careful, outsiders Balanced, trust
-    Hands-off) decides what goes; handle_it.approvals_hold() is True on
-    Careful (and when unreadable). Above it the person's own In training
-    (delegation.training, setting training, one row per person in
-    delegation_training; PUT /delegation/training {training}, leaving it
-    needs a provable caller): on, every reply, follow-up, invite answer and
+    Hands-off) decides what goes, through the one gate every step as a
+    person passes: take_the_lead.as_you (Your rules on every level, Careful,
+    In training, then the reason the feature noticed and the 7 Balanced
+    topics; Hands-off runs all but rules). Above it the company's one In
+    training switch (take_the_lead SCOPE_EXECUTIVE training, PUT
+    /take-the-lead; delegation.training.get reads it, delegation_training
+    keeps only drafts): on, every reply, follow-up, invite answer and
     suggested action waits on its card on any level (refusal "training",
     REASONS "In training: you haven't let it send to them on its own
     yet.") until the person allows everyone it goes to. Send / Accept /
@@ -12406,12 +12408,12 @@ delegation:
     correspondent), and sensitive: on Balanced, a topic the words of the
     email, its subject or the reply are about (who it goes to is the
     recipients check above)
-    (handle_it.content_hold -> take_the_lead.held_topic, also on follow-ups
+    (take_the_lead.as_you -> held_topic, also on follow-ups
     and, topic only, invite titles); Hands-off sends them. No word list,
     link or password check of its own: the same topics and Goes rules as
     any other step (take_the_lead._released, shared with _balanced). The
     owner's rules (take_the_lead_rules, company scope) apply here too,
-    inside content_hold: a Waits rule (take_the_lead.rule_waits, against
+    inside as_you: a Waits rule (take_the_lead.rule_waits, against
     the texts and the reply's recipients) holds as reason "rule" on every
     level; on Balanced Goes rules release by kind (goes_kinds, amounts read
     in the reply too, sent_texts). Words rules only wait. Unreadable rules
@@ -12465,11 +12467,11 @@ delegation:
     not team/contact, below Hands-off), signing_off, calendar_unread,
     clash, calendar_write, then count_refusal. Never declines on its own.
     Suggested actions (action_cards.on_its_own_refusal): Act as me on,
-    the inbox on, Approvals above Careful (level), In training allowed for
-    every address (training), signing_ok, no
-    drive_files / save_files (tap_only), below Hands-off
-    _known_people_refusal (no add_contact, every recipient settled on the
-    roster for SETTLED_AFTER 7 days), no daily cap; run_on_its_own claims it, gate_mode auto_execute,
+    the inbox on, signing_ok, then take_the_lead.as_you with the cards'
+    words and addresses and one noticed reason (_someone_new:
+    new_contact for add_contact, shared for save_files, new_person for a
+    recipient on the roster under SETTLED_AFTER 7 days), which wait below
+    Hands-off; drive_files follows the level; no daily cap; run_on_its_own claims it, gate_mode auto_execute,
     status executed; a refusal there hand_back()s it to an ordinary card.
     An invite run on its own skips
     calendar_tools.approved_by, so the meeting gate decides (a mail-chosen
@@ -12568,7 +12570,7 @@ delegation:
     changed rows for ten seconds. It sits beside the one Delegate page
     (/delegate; /delegate/what-it-may-do redirects there). It reads the same settings the gates read, so it cannot say
     something they don't do: As you from settings.is_enabled,
-    inbox.get_watch, handle_it.get / approvals_hold, training.in_training and
+    inbox.get_watch, handle_it.get, training.in_training and
     action_cards.on_its_own_refusal; As the Executive (principal only) from
     the Approvals level (take_the_lead._gated: Hands-off goes, otherwise an
     Approve card) and Meetings asked for in chat (the owner asking books
@@ -12690,7 +12692,7 @@ delegation:
     One answer everywhere: new_people (the egress list) and lets_go (a
     topic Goes rule, where mcp_gateway._goes_rules_apply) are what the
     gate, the gateway checks and schedule_tools._off_roster_runs ask;
-    what goes out as a person (handle_it.content_hold) reads its topics
+    what goes out as a person (take_the_lead.as_you) reads its topics
     with topics_in(text, recipients), the same _topics, so a Someone new
     Waits rule holds a reply on Hands-off too. Held cards carry offers
     (rule_offers): Goes rules verified by re-running _balanced with them;

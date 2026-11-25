@@ -3,8 +3,8 @@
 **No switch of its own.** It is on whenever Act as me writes replies to the
 person's inbox (``delegation.settings.is_enabled`` and the inbox watcher,
 ``delegation.inbox.get_watch``): one setting, What it writes as you, on the
-Delegate page. Whether a reply then goes on its own is Approvals' alone
-(``orchestrator.outside_mode``, ``approvals_hold``): on Careful every reply
+Delegate page. Whether a reply then goes on its own is the one gate's
+(``take_the_lead.as_you``: Your rules, the level, In training): on Careful every reply
 waits on a card, since any outside read waits there; on Balanced and
 Hands-off a reply goes on its own unless one of the checks below holds it;
 below Hands-off that includes a reply to someone they don't know
@@ -36,7 +36,7 @@ with the reason recorded.
 - one of the owner's Waits rules (Delegate → Approvals → Your rules,
   ``take_the_lead.rule_waits``) matches, on every level;
 - on Balanced, the email or the reply is about one of the topics (money,
-  a contract, hiring, someone new, a lot of people; ``content_hold``),
+  a contract, hiring, someone new, a lot of people; ``take_the_lead.as_you``),
   unless a Goes rule lets it go, as for any other step;
 - the draft carries a flag other than ``ALLOWED_FLAGS`` (they asked whether
   it's an AI, recipients were trimmed, the draft names the Executive
@@ -53,9 +53,9 @@ with the reason recorded.
 Below Hands-off, never sent on its own: a reply to a new recipient. A reply the Executive
 rewrote after doing what the email asked (``delegation.card_work``), files
 and all, is checked again here once that work is on its card, with its new
-words (``content_hold``), and goes on its own only when they pass and the
-email came from someone they know (``KNOWN_RELATIONS``): what the work made
-for anyone else waits for them (``work_stranger``), on every level.
+words (``take_the_lead.as_you``), and goes on its own only when they pass;
+below Hands-off, what the work made for someone they don't know
+(``KNOWN_RELATIONS``) waits for them (``work_stranger``).
 
 **Meeting invites.** It also accepts a meeting invite on its own
 (``delegation.invites``, never a decline) from someone the person knows,
@@ -148,88 +148,6 @@ def leaves_questions(payload: dict[str, Any]) -> bool:
     from openexecutive.delegation.answers import questions_for
 
     return any(q["text"].strip() and not q["answer"].strip() for q in questions_for(payload))
-
-
-def hands_off(*, db_path: Path | None = None) -> bool:
-    """Whether Approvals is on Hands-off. Never raises: unreadable is no."""
-    try:
-        from openexecutive.orchestrator import outside_mode
-
-        return outside_mode.get_mode(db_path=db_path) == outside_mode.TRUST
-    except Exception:
-        logger.warning("delegation.handle_it: couldn't read Approvals — not Hands-off", exc_info=True)
-        return False
-
-
-def content_hold(
-    *texts: str, sent_texts: tuple[str, ...] = (), recipients: tuple[str, ...] = (), db_path: Path | None = None,
-) -> str | None:
-    """Why what it would send on its own must wait, or None: a Waits rule
-    (``rule``) on every level; then, on Balanced, one of the topics
-    (``sensitive``) unless a Goes rule lets it go
-    (``take_the_lead.held_topic``), as for any other step. ``texts`` are
-    read for rules and topics, ``sent_texts`` (what it would send) for
-    Goes amounts, ``recipients`` for Waits rules (Someone new and Big sends
-    among them) and for which person and company Goes rules match. Who it
-    may go to is the sender's own check. Unreadable rules hold, on
-    Hands-off too."""
-    from openexecutive.orchestrator import take_the_lead
-
-    going = [r.strip().lower() for r in recipients if r and r.strip()]
-    joined = "\n".join(t or "" for t in texts)
-    try:
-        rules = take_the_lead.list_rules([take_the_lead.SCOPE_COMPANY], db_path=db_path)
-    except Exception:
-        logger.warning("delegation.handle_it: couldn't read the rules — holding", exc_info=True)
-        return "rule"
-    if take_the_lead.rule_waits(rules, joined, going, topics=take_the_lead.topics_in(joined, going)) is not None:
-        return "rule"
-    if hands_off(db_path=db_path):
-        return None
-    own = "\n".join(t or "" for t in sent_texts)
-    if take_the_lead.held_topic(rules, joined, going, words_text=own) is not None:
-        return "sensitive"
-    return None
-
-
-def in_training(person_id: int, *, db_path: Path | None = None) -> bool:
-    """Whether the person's As you is in training (``delegation.training``):
-    then nothing goes on its own but to people they allowed."""
-    from openexecutive.delegation import training
-
-    return training.in_training(person_id, db_path=db_path)
-
-
-def training_hold(person_id: int, addresses: list[str], *, db_path: Path | None = None) -> str | None:
-    """``"training"`` when As you is in training and any of ``addresses``
-    isn't allowed yet, someone with no address on file included; None when
-    it may go (not in training, or every one allowed). An unreadable
-    setting holds, as Approvals does."""
-    from openexecutive.delegation import training
-
-    try:
-        if not training.in_training(person_id, db_path=db_path, strict=True):
-            return None
-    except Exception:
-        logger.warning("delegation.handle_it: couldn't read In training — holding", exc_info=True)
-        return "training"
-    going = [a for a in addresses if a]
-    if len(going) != len(addresses) or training.all_allowed(person_id, going, db_path=db_path) is None:
-        return "training"
-    return None
-
-
-def approvals_hold(*, db_path: Path | None = None) -> bool:
-    """Whether Approvals holds what it would send as someone on its own:
-    Careful does (any outside read waits there). Never raises: unreadable
-    holds."""
-    try:
-        from openexecutive.orchestrator import outside_mode
-
-        return outside_mode.get_mode(db_path=db_path) == outside_mode.ASK
-    except Exception:
-        logger.warning("delegation.handle_it: couldn't read Approvals — asking", exc_info=True)
-        return True
 
 
 @dataclass
@@ -360,23 +278,33 @@ def _refusal(
     exec_address: str, now: datetime, db_path: Path | None,
 ) -> str | None:
     from openexecutive.delegation.threads import MAX_RECIPIENTS
+    from openexecutive.orchestrator import take_the_lead
 
     settings = get(person_id, db_path=db_path)
     if not settings.enabled:
         return "off"
-    if approvals_hold(db_path=db_path):
-        return "level"
-    # In training, only when everyone the reply reaches (its sender and the
-    # others on it) was allowed; otherwise, below Hands-off, a reply to
-    # someone they don't know waits on a card, as an invite from one does
-    # (delegation.invites).
-    held = training_hold(person_id, [*reply.to, *reply.cc], db_path=db_path)
-    if held is not None:
+    # Exactly the people the email already went to, minus the person and the
+    # Executive: the sender first, then everyone else on it.
+    allowed = {message.from_addr, *message.to, *message.cc} - own - ({exec_address} if exec_address else set())
+    going = [*reply.to, *reply.cc]
+    if not going:
+        return "recipients"
+    # What waits below Hands-off, as the someone-new topic: a reply to
+    # someone they don't know, or to anyone the email didn't go to.
+    noticed = [
+        "stranger" if kind_for(relation) != KIND_REPLY_KNOWN else "",
+        "recipients" if (
+            len(going) > MAX_RECIPIENTS or not set(going) <= allowed or message.from_addr not in reply.to
+        ) else "",
+    ]
+    held = take_the_lead.as_you(
+        person_id,
+        texts=(getattr(message, "subject", "") or "", getattr(message, "text", "") or "", reply.subject or "",
+               reply.body or ""),
+        sent_texts=(reply.body or "",), recipients=going, noticed=noticed, db_path=db_path,
+    )
+    if held:
         return held
-    if not in_training(person_id, db_path=db_path) and kind_for(relation) != KIND_REPLY_KNOWN and not hands_off(
-        db_path=db_path
-    ):
-        return "stranger"
     if not signing_ok():
         return "signing_off"
     if getattr(message, "sender_authenticated", False) is not True:
@@ -385,27 +313,8 @@ def _refusal(
         return "kind"
     if float(verdict.confidence) < MIN_CONFIDENCE:
         return "unsure"
-
-    # Exactly the people the email already went to, minus the person and the
-    # Executive: the sender first, then everyone else on it.
-    allowed = {message.from_addr, *message.to, *message.cc} - own - ({exec_address} if exec_address else set())
-    going = [*reply.to, *reply.cc]
-    if not going:
-        return "recipients"
-    # Anyone the email didn't go to waits on a card below Hands-off, as any
-    # send to someone new does (orchestrator.levels.NEW_PERSON).
-    if (
-        len(going) > MAX_RECIPIENTS or not set(going) <= allowed or message.from_addr not in reply.to
-    ) and not hands_off(db_path=db_path):
-        return "recipients"
     if any(f not in ALLOWED_FLAGS for f in reply.flags):
         return "flagged"
-    held = content_hold(
-        getattr(message, "subject", "") or "", getattr(message, "text", "") or "", reply.subject or "",
-        reply.body or "", sent_texts=(reply.body or "",), recipients=(*reply.to, *reply.cc), db_path=db_path,
-    )
-    if held:
-        return held
     return _last_checks(person_id, thread, own, now, db_path)
 
 
@@ -448,39 +357,30 @@ def _follow_up_refusal(
     db_path: Path | None,
 ) -> str | None:
     from openexecutive.delegation.threads import MAX_RECIPIENTS
+    from openexecutive.orchestrator import take_the_lead
 
     settings = get(person_id, db_path=db_path)
     if not settings.enabled:
         return "off"
-    if approvals_hold(db_path=db_path):
-        return "level"
-    # In training, only follow-ups to people they allowed, every one of them;
-    # otherwise, below Hands-off, one to someone they don't know waits on a
-    # card, as a reply to one does.
-    held = training_hold(person_id, [*reply.to, *reply.cc], db_path=db_path)
-    if held is not None:
-        return held
-    if not in_training(person_id, db_path=db_path) and kind_for(relation) != KIND_REPLY_KNOWN and not hands_off(
-        db_path=db_path
-    ):
-        return "stranger"
-    if not signing_ok():
-        return "signing_off"
     # Exactly the people their own email went to: nobody added, nobody left out.
     allowed = {*sent.to, *sent.cc} - own - ({exec_address} if exec_address else set())
     going = [*reply.to, *reply.cc]
     if not going:
         return "recipients"
-    if (len(going) > MAX_RECIPIENTS or set(going) != allowed) and not hands_off(db_path=db_path):
-        return "recipients"
-    if any(f not in ALLOWED_FLAGS for f in reply.flags):
-        return "flagged"
-    held = content_hold(
-        getattr(sent, "subject", "") or "", reply.subject or "", reply.body or "",
-        sent_texts=(reply.body or "",), recipients=(*reply.to, *reply.cc), db_path=db_path,
+    noticed = [
+        "stranger" if kind_for(relation) != KIND_REPLY_KNOWN else "",
+        "recipients" if len(going) > MAX_RECIPIENTS or set(going) != allowed else "",
+    ]
+    held = take_the_lead.as_you(
+        person_id, texts=(getattr(sent, "subject", "") or "", reply.subject or "", reply.body or ""),
+        sent_texts=(reply.body or "",), recipients=going, noticed=noticed, db_path=db_path,
     )
     if held:
         return held
+    if not signing_ok():
+        return "signing_off"
+    if any(f not in ALLOWED_FLAGS for f in reply.flags):
+        return "flagged"
     return count_refusal(person_id, str(getattr(sent, "thread_id", "") or ""), now, db_path=db_path)
 
 

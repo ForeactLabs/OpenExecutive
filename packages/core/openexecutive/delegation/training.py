@@ -1,16 +1,16 @@
-"""As you, in training: one switch and what it learns.
+"""As you, in training: what it learns.
 
-**In training** (``training``, one row in ``delegation_training``, absent
-means off) sits above Approvals for everything sent as the person. While it
-is on, nothing goes out as them on its own, on any level: every reply,
-follow-up, invite answer and suggested action waits on its card, which says
-what it would have done. Send (Accept, Approve) does it once. Ticked "Send to
-them on its own next time", it also allows that person (``allow_person``,
-one allowance per address): from then on replies to them, follow-ups to
-them, their invites and messages or meetings with them go on their own,
-where Approvals lets them (Careful still holds everything; the checks
-``handle_it.refusal`` always makes still apply). Everything not allowed yet
-keeps coming as a card. Off, Approvals alone decides.
+**In training** is the company's one switch (``take_the_lead``, Delegate →
+Approvals); what goes out as a person follows it like every other step
+(``take_the_lead.as_you``). While it is on, nothing goes out as them on its
+own: every reply, follow-up, invite answer and suggested action waits on its
+card, which says what it would have done. Send (Accept, Approve) does it
+once. Ticked "Send to them on its own next time", it also allows that person
+(``allow_person``, one allowance per address): from then on replies to them,
+follow-ups to them, their invites and messages or meetings with them go on
+their own, where Approvals lets them (Careful still holds everything; the
+checks ``handle_it.refusal`` always makes still apply). Everything not
+allowed yet keeps coming as a card. Off, Approvals alone decides.
 
 **Drafts** (``drafts``): nothing is sent. When they change a reply's draft
 in their mailbox before tapping Send and tick "Do it like this next time",
@@ -96,14 +96,21 @@ def get(person_id: int, *, db_path: Path | None = None, strict: bool = False) ->
         logger.warning("delegation.training: couldn't read the switches", exc_info=True)
         return Training(person_id=person_id)
     on = {setting for setting, enabled in rows if enabled and setting in SETTINGS}
-    return Training(person_id=person_id, **{s: s in on for s in SETTINGS})
+    # In training is one switch, the company's (``take_the_lead``): what
+    # goes out as a person follows it like every other step.
+    from openexecutive.orchestrator import take_the_lead
+
+    company = take_the_lead.get(take_the_lead.SCOPE_EXECUTIVE, db_path=db_path).training
+    return Training(person_id=person_id, training=company, drafts=DRAFTS in on)
 
 
 def set_(
     person_id: int, changes: dict[str, bool], *, updated_by: str, db_path: Path | None = None,
 ) -> Training:
     """Turn settings in or out of training (callers authorize first). An
-    unknown setting is ignored."""
+    unknown setting is ignored, and so is ``training``: In training is the
+    company's one switch (``take_the_lead.set_``)."""
+    changes = {k: v for k, v in changes.items() if k != TRAINING}
     now = datetime.now(UTC).isoformat()
     conn = _connect(db_path)
     try:
