@@ -85,7 +85,8 @@
       if (before === print) continue;
       if (first && (!row.unread || row.outgoing)) continue;
       items.push({
-        ref: `${row.key}:${print}`,
+        // The time too: the same words again later ("ok") are a new text.
+        ref: `${row.key}:${print}:${Number(now).toString(36)}`,
         conversation: row.key,
         title: row.title,
         sender: row.outgoing || row.group ? "" : row.title,

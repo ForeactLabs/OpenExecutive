@@ -410,3 +410,13 @@ test("texts: one send at a time, and only into the conversation it is for", () =
   const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
   assert.ok(texts.includes("T.keyOf(location.href) !== String(msg.conversation)"));
 });
+
+test("texts: the same words again later are a new text", () => {
+  const T = textsHelpers();
+  const rows = (snippet) => [{ key: "1", title: "Sam Lee", snippet, unread: true }];
+  const a = T.changes(rows("ok"), null, 1000);
+  const b = T.changes(rows("You: sure"), a.seen, 2000);
+  const c = T.changes(rows("ok"), b.seen, 3000);
+  assert.equal(c.items.length, 1);
+  assert.notEqual(c.items[0].ref, a.items[0].ref);
+});
