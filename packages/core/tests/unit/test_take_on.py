@@ -804,9 +804,10 @@ def test_the_source_hears_only_once_the_card_is_done(
     assert heard == ([o.key] if heard_it else [])
 
 
-@pytest.mark.parametrize(("reason", "why"), [("not_useful", "not_relevant"), ("already_done", "wrong_source")])
-def test_hiding_a_watch_declines_the_suggestion_as_the_watch_list_does(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch, reason: str, why: str,
+@pytest.mark.parametrize(("reason", "declines", "removed"), [("not_useful", [(5, "not_relevant", ME)], []),
+                                                            ("already_done", [], [5])])
+def test_hiding_a_watch_declines_it_only_when_not_useful(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, reason: str, declines: list[Any], removed: list[int],
 ) -> None:
     from openexecutive.monitoring import store as ms
     from openexecutive.monitoring.research import watch_policy
@@ -819,10 +820,14 @@ def test_hiding_a_watch_declines_the_suggestion_as_the_watch_list_does(
     declined: list[tuple[int, str, str]] = []
     monkeypatch.setattr(watch_policy, "decline_suggestion",
                         lambda it, r, *, actor: declined.append((it.id, r, actor)) or True)
+    gone: list[int] = []
+    monkeypatch.setattr(ms, "delete_pending_suggestion", lambda i: gone.append(i) or True)
     assert client.post("/take-on/watch:eia/hide", json={"reason": "later"}).status_code == 204
-    assert declined == []
+    assert declined == [] and gone == []
+    # Already done says nothing against the source: its row goes, with no
+    # decline remembered against it.
     assert client.post("/take-on/watch:eia/hide", json={"reason": reason}).status_code == 204
-    assert declined == [(5, why, ME)]
+    assert declined == declines and gone == removed
 
 
 def test_a_skipped_card_takes_the_offer_away(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

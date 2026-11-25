@@ -287,9 +287,11 @@ def _answer_watch_suggestion(key: str, me: Me, *, taken: bool, reason: str = "")
     """Answer the research suggestion a ``watch:`` offer came from, as the
     Watch list's Approve and Decline do. Taken up: the run made the watch,
     so the pending row goes and the yes counts for the research pass's
-    calibration. Hidden as not useful or already done: declined
-    (``watch_policy.decline_suggestion``), so the no is remembered and the
-    source isn't suggested again under another name. Never raises."""
+    calibration. Hidden as not useful: declined as the Watch list's Decline
+    does (``watch_policy.decline_suggestion``), so the no is remembered and
+    the source isn't suggested again under another name. Hidden as already
+    done: they have it some other way, which says nothing against the
+    source, so only the pending row goes. Never raises."""
     from openexecutive.monitoring import models as mm
     from openexecutive.monitoring import store as ms
     from openexecutive.monitoring.research import watch_policy
@@ -302,8 +304,11 @@ def _answer_watch_suggestion(key: str, me: Me, *, taken: bool, reason: str = "")
             if ms.delete_pending_suggestion(item.id):
                 watch_policy.record_outcome_for(item, watch_policy.OUTCOME_APPROVED)
             return
-        why = mm.DECLINE_REASON_WRONG_SOURCE if reason == "already_done" else mm.DECLINE_REASON_NOT_RELEVANT
-        watch_policy.decline_suggestion(item, why, actor=me.email if "@" in me.email else "principal")
+        if reason == "already_done":
+            ms.delete_pending_suggestion(item.id)
+            return
+        watch_policy.decline_suggestion(item, mm.DECLINE_REASON_NOT_RELEVANT,
+                                        actor=me.email if "@" in me.email else "principal")
     except Exception:
         logger.warning("take_on: couldn't answer the watch suggestion", exc_info=True)
 
