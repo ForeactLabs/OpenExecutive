@@ -23,6 +23,7 @@ from openexecutive.memory import episodic
 ME = "olivia@co.example"
 # The real suggested-watch reader: the fixture below stubs it for every test.
 WATCH = take_on._watch
+WATCH_REAL = take_on._watch
 # The real reader of what runs on its own: the fixture stubs it too.
 ON_ITS_OWN = maker.on_its_own
 
@@ -252,6 +253,34 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     return TestClient(app)
 
 
+def test_an_unsigned_principal_reads_their_own_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    """On a local install the caller names no email: the list is keyed by
+    the principal's People email."""
+    from openexecutive.api import caller as api_caller
+    from openexecutive.api.routes import take_on as route
+    from openexecutive.people import store as people_store
+
+    monkeypatch.setattr(api_caller, "caller", lambda _r: SimpleNamespace(email=""))
+    monkeypatch.setattr(api_caller, "person_id_for", lambda _w: 1)
+    monkeypatch.setattr(people_store, "get_person", lambda _pid: SimpleNamespace(is_principal=True, email=ME))
+    me = route.reader(SimpleNamespace())
+    assert (me.email, me.person_id, me.principal) == (ME, 1, True)
+
+
+def test_done_for_you_reads_the_same_list_as_take_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.api.routes import take_on as route
+    from openexecutive.api.routes import today
+
+    monkeypatch.setattr(route, "reader", lambda _r: route.Me(ME, None, True))
+    monkeypatch.setattr(today, "_build_activity", lambda *a, **k: today.ActivityResponse(items=[]))
+    o = _offer()
+    take_on.put_made(ME, [o])
+    take_on.start(ME, o)
+    take_on.finish(ME, o.key, "done", outcome="Sent it.")
+    rows = today._done_for_you(SimpleNamespace(), None, datetime.now(UTC))  # type: ignore[arg-type]
+    assert f"take_on:{o.key}" in [r.key for r in rows]
+
+
 def test_get_lists_the_callers_offers(client: TestClient) -> None:
     take_on.put_made(ME, [_offer()])
     body = client.get("/take-on").json()
@@ -474,6 +503,42 @@ async def test_a_finished_run_settles_off_the_event_loop(client: TestClient, mon
     assert route._settling
     await asyncio.gather(*list(route._settling))
     assert [f.key for f in take_on.finished(ME, datetime.now(UTC) - timedelta(hours=1))] == [o.key]
+
+
+@pytest.mark.parametrize(("status", "heard_it"), [("executed", True), ("rejected", False)])
+def test_the_source_hears_only_once_the_card_is_done(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, status: str, heard_it: bool,
+) -> None:
+    from openexecutive.api.routes import take_on as route
+    from openexecutive.memory import decision_ledger
+
+    o = _offer()
+    take_on.put_made(ME, [o])
+    take_on.start(ME, o)
+    take_on.finish(ME, o.key, "card", decision_id=11)
+    heard: list[str] = []
+    monkeypatch.setattr(route, "_taken_up", lambda _me, offer: heard.append(offer.key))
+    monkeypatch.setattr(decision_ledger, "get_decision_instances", lambda ids: {11: SimpleNamespace(status=status)})
+    assert client.get("/take-on").json()["offers"] == []
+    assert heard == ([o.key] if heard_it else [])
+
+
+def test_hiding_a_watch_as_not_useful_retires_the_suggestion(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.monitoring import store as ms
+
+    item = SimpleNamespace(id=5, slug="eia", target="https://www.eia.gov/petroleum/", notes="Diesel prices",
+                           route_to_person_id=None)
+    monkeypatch.setattr(take_on, "_watch", lambda _pid, _p: WATCH_REAL(_pid, _p))
+    monkeypatch.setattr(ms, "list_pending_suggestions", lambda: [item])
+    monkeypatch.setattr(ms, "get_watchlist_item_by_slug", lambda slug: item if slug == "eia" else None)
+    gone: list[int] = []
+    monkeypatch.setattr(ms, "delete_pending_suggestion", lambda i: gone.append(i) or True)
+    assert client.post("/take-on/watch:eia/hide", json={"reason": "later"}).status_code == 204
+    assert gone == []
+    assert client.post("/take-on/watch:eia/hide", json={"reason": "not_useful"}).status_code == 204
+    assert gone == [5]
 
 
 def test_a_skipped_card_takes_the_offer_away(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

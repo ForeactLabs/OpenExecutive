@@ -3163,10 +3163,10 @@ def _done_for_you(request: Request, caller: int | None, now: datetime) -> list[D
     # Steps they started from "I can also take on" that finished. They leave
     # that list when done and show here, the caller's own.
     try:
-        from openexecutive.api import caller as api_caller
+        from openexecutive.api.routes import take_on as take_on_route
         from openexecutive.briefing import take_on
 
-        email = api_caller.caller_email(request)
+        email = take_on_route.reader(request).email
         for o in take_on.finished(email, since) if email else []:
             title = o.title[6:] if o.title.startswith("I can ") else o.title
             artifact = next((u for _, u in o.done if u.startswith("/artifacts/")), "")

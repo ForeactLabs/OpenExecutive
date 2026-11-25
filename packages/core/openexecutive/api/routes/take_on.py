@@ -98,6 +98,13 @@ class Me:
         self.email, self.person_id, self.principal = email, person_id, principal
 
 
+def reader(request: Request) -> Me:
+    """Whose list this is: the caller, with the email the take-on store is
+    keyed by (the People email when the caller names none, as on a local
+    install). Done for you (``today``) reads the same one."""
+    return _me(request)
+
+
 def _me(request: Request) -> Me:
     who = api_caller.caller(request)
     person_id = api_caller.person_id_for(who)
@@ -162,6 +169,7 @@ def _settle_cards(me: Me, offers: list[take_on.Offer]) -> None:
         elif card.status in _CARD_DONE:
             o.status, o.outcome = "done", "You approved it, and it's done."
             take_on.finish(me.email, o.key, "done", outcome=o.outcome, done=o.done, decision_id=o.decision_id)
+            _taken_up(me, o)
         elif card.status == dl.STATUS_REJECTED:
             take_on.hide(me.email, o, "skipped")
             o.status = "skipped"  # type: ignore[assignment]
@@ -246,17 +254,23 @@ def _taken_up(me: Me, offer: take_on.Offer) -> None:
         except Exception:
             logger.warning("take_on: couldn't retire the repeat-ask offer", exc_info=True)
     if offer.origin == "watch":
-        # The run made the watch (or put it on a card): the suggestion it
-        # came from goes, so the Watch list can't make it a second time.
-        from openexecutive.monitoring import store as ms
-
-        try:
-            item = ms.get_watchlist_item_by_slug(offer.key.removeprefix("watch:"))
-            if item is not None and item.id is not None:
-                ms.delete_pending_suggestion(item.id)
-        except Exception:
-            logger.warning("take_on: couldn't retire the watch suggestion", exc_info=True)
+        # The run made the watch: the suggestion it came from goes, so the
+        # Watch list can't make it a second time.
+        _retire_watch_suggestion(offer.key)
     _tell_source(offer.key, taken=True)
+
+
+def _retire_watch_suggestion(key: str) -> None:
+    """The research suggestion a ``watch:`` offer came from leaves the Watch
+    list (only while it is still a pending suggestion). Never raises."""
+    from openexecutive.monitoring import store as ms
+
+    try:
+        item = ms.get_watchlist_item_by_slug(key.removeprefix("watch:"))
+        if item is not None and item.id is not None:
+            ms.delete_pending_suggestion(item.id)
+    except Exception:
+        logger.warning("take_on: couldn't retire the watch suggestion", exc_info=True)
 
 
 _QUESTION_END = re.compile(r"([^.!?\n]{1,300}\?)[\s*_\"')]*$")
@@ -322,9 +336,10 @@ async def do_it(key: str, request: Request) -> OfferOut:
     run: dict[str, str] = {}
 
     def _settle(answered: bool) -> None:
-        # The place it came from hears it was taken up once it was: a run
-        # that failed keeps it, with Try again.
-        if _what_came_of_it(me, key, run.get("session_id", ""), answered) in ("done", "card"):
+        # The place it came from hears it was taken up once it was done: a
+        # run that failed or asked back keeps it, and one on a card waits
+        # for the card (``_settle_cards``).
+        if _what_came_of_it(me, key, run.get("session_id", ""), answered) == "done":
             _taken_up(me, offer)
 
     def _finished(answered: bool) -> None:
@@ -450,6 +465,8 @@ def hide(key: str, body: HideIn, request: Request) -> None:
             from openexecutive.workflows import repeat_asks
 
             repeat_asks.answer_offer(int(key.removeprefix("repeat:")), me.person_id, accept=False)
+        elif key.startswith("watch:"):
+            _retire_watch_suggestion(key)
         else:
             _tell_source(key, taken=False)
     except HTTPException:
@@ -457,4 +474,4 @@ def hide(key: str, body: HideIn, request: Request) -> None:
     except Exception:
         logger.warning("take_on: couldn't pass the hide on", exc_info=True)
 
-__all__ = ["router"]
+__all__ = ["reader", "router"]
