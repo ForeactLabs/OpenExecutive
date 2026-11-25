@@ -3153,7 +3153,7 @@ class Executive:
                 if tu["id"] in gate_reasons
             }
             mail_why = (
-                levels.mail_reason(pinned_delegation, reading_now=reads_mail_now)
+                levels.mail_reason(pinned_delegation)
                 if mail_touched_uses else levels.OWN_MAIL
             )
             for tu in mail_touched_uses:

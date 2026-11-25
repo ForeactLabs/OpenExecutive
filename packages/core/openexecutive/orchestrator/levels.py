@@ -209,14 +209,15 @@ def turn_level(session: Any = None) -> str:
     return outside_mode.for_turn(session)
 
 
-def mail_reason(pinned: Any = None, *, reading_now: bool = False) -> str:
+def mail_reason(pinned: Any = None) -> str:
     """Why a step waits after someone's own mail was read this turn:
     ``MAIL_FLAGGED`` when the content check flagged some of what it read,
     ``MAIL_UNCHECKED`` when a read from an earlier round went unchecked (too
-    big, or not yet checked), else ``OWN_MAIL``. A read in this very round
-    (``reading_now``) isn't unchecked: the step was asked for before anyone
-    saw what the mail says. ``pinned`` is the turn's ``TurnDelegation``,
-    else the bound session's. Never raises."""
+    big, or a script ran beside it), else ``OWN_MAIL``. The pin is read
+    before this round's own reads run, so a read in this very round isn't
+    counted: the step was asked for before anyone saw what that mail says.
+    ``pinned`` is the turn's ``TurnDelegation``, else the bound session's.
+    Never raises: an error is ``MAIL_UNCHECKED``."""
     try:
         from openexecutive.orchestrator import outside_content
 
@@ -234,7 +235,7 @@ def mail_reason(pinned: Any = None, *, reading_now: bool = False) -> str:
         ):
             return MAIL_UNCHECKED
         if (
-            pinned is not None and not reading_now and getattr(pinned, "read_mail", False) is True
+            pinned is not None and getattr(pinned, "read_mail", False) is True
             and getattr(pinned, "mail_vetted", False) is not True
         ):
             return MAIL_UNCHECKED

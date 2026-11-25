@@ -356,3 +356,17 @@ def test_balanced_waits_after_outside_text_too_big_to_check() -> None:
     """On Balanced a clean outside read never marks the turn, so a marked
     turn with no flag read something too big to check: it waits."""
     assert levels.decide(levels.OUTSIDE_READ, mode=outside_mode.OUTSIDERS) == levels.CARD
+
+
+def test_mail_an_earlier_round_left_unchecked_waits_on_balanced_even_beside_a_new_read() -> None:
+    """A script ran beside a mail read, so that round's mail was never
+    checked: every later step waits on Balanced, whatever the next round
+    reads. Mail the check cleared doesn't."""
+    from openexecutive.delegation.settings import TurnDelegation
+
+    unvetted = TurnDelegation(read_mail=True, mail_vetted=False)
+    assert levels.mail_reason(unvetted) == levels.MAIL_UNCHECKED
+    assert levels.decide(levels.mail_reason(unvetted), mode=outside_mode.OUTSIDERS) == levels.CARD
+    cleared = TurnDelegation(read_mail=True, mail_vetted=True)
+    assert levels.mail_reason(cleared) == levels.OWN_MAIL
+    assert levels.decide(levels.mail_reason(cleared), mode=outside_mode.OUTSIDERS) == levels.RUN

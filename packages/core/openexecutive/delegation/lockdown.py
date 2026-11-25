@@ -527,7 +527,7 @@ def outside_reach_reason(name: str, tool_input: Any = None) -> str | None:
     try:
         reason = levels.mail_reason() if mail_turn_withholds(name, tool_input) else None
     except Exception:
-        reason = levels.OWN_MAIL
+        reason = levels.MAIL_UNCHECKED
     if reason is None:
         # The same holds, with contact writes and gateway writes added, once the
         # turn has read anything from outside the team (outside_content).
