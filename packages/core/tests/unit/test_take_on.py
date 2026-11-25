@@ -934,6 +934,20 @@ def test_or_tell_me_rewrites_and_checks_it(client: TestClient, monkeypatch: pyte
     assert not client.post(f"/take-on/{o.key}/undo").json()["changed"]
 
 
+async def test_a_rewrite_that_isnt_json_reads_as_no_step(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive import providers
+    from openexecutive.api.routes import take_on as route
+    from openexecutive.audit import usage
+
+    class _Provider:
+        async def messages_create(self, **_k: Any) -> Any:
+            return SimpleNamespace(content=[SimpleNamespace(type="text", text='{"kind": "email", "title": "x",}')])
+
+    monkeypatch.setattr(providers, "get_provider", lambda _m: _Provider())
+    monkeypatch.setattr(usage, "log_model_usage", lambda *_a, **_k: None)
+    assert await route._rewrite(_offer(), "cc Sam") is None
+
+
 def test_or_tell_me_started_elsewhere_while_rewriting_leaves_the_step_as_it_was(
     client: TestClient, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -460,7 +460,13 @@ async def _rewrite(offer: take_on.Offer, said: str) -> Any:
     log_model_usage(response, model=model, actor="take_on")
     raw = "".join(getattr(b, "text", "") for b in response.content if getattr(b, "type", "") == "text")
     start, end = raw.find("{"), raw.rfind("}")
-    return json.loads(raw[start : end + 1]) if start >= 0 and end > start else None
+    if start < 0 or end <= start:
+        return None
+    try:
+        return json.loads(raw[start : end + 1])
+    except ValueError:
+        # Not one step it could read: the same as no step ("say it another way").
+        return None
 
 
 @router.post("/take-on/{key}/say", response_model=OfferOut)
