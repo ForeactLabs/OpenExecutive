@@ -477,6 +477,21 @@ def test_memory_edit_and_delete(roster: dict[str, Any], client: TestClient) -> N
     assert _run(app_control.handle_find_in_app, {"kind": "memory"}, session)["items"] == []
 
 
+def test_a_private_memory_is_left_out_where_others_read(roster: dict[str, Any]) -> None:
+    episodic.store_decision("sales", "Raise prices 5%")
+    from openexecutive.memory import facts
+
+    kept = episodic.store_decision("people", "Layoff plan for Q1")
+    assert facts.share_decision(kept.id, shared=False, person_id=roster["owner"].id, is_principal=True)
+    shared = _web(roster["owner"], "s-shared-m")
+    shared.shared_chat = True
+    out = _run(app_control.handle_find_in_app, {"kind": "memory"}, shared)
+    assert [i["title"] for i in out["items"]] == ["Raise prices 5%"]
+    assert "Layoff" not in json.dumps(out) and out["private_left_out"] == 1
+    own = _run(app_control.handle_find_in_app, {"kind": "memory"}, _web(roster["owner"], "s-own-m"))
+    assert {i["title"] for i in own["items"]} == {"Raise prices 5%", "Layoff plan for Q1"}
+
+
 @pytest.mark.parametrize("kind", sorted(k for k, v in app_control.CATALOG.kinds.items() if not v.no_item))
 def test_every_list_reads(kind: str, roster: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
     from openexecutive.knowledge import store as knowledge_store

@@ -516,17 +516,23 @@ async def _delete_run(request: Any, run_id: str, value: str) -> str:
 
 async def _find_memories(request: Any) -> list[Item]:
     from openexecutive.api.routes import episodic
+    from openexecutive.api.routes.today import _Owners
 
     items = [
-        Item(id=f"decision:{d.id}", title=d.summary[:120], detail="decision")
+        Item(id=f"decision:{d.id}", title=d.summary[:120], detail="decision", private=bool(d.private))
         for d in await _call(episodic.get_decisions, request)
     ]
     items += [
         Item(id=f"initiative:{i.id}", title=i.title[:120], detail=f"initiative, {i.status}")
         for i in await _call(episodic.get_initiatives)
     ]
+    # Advice from someone's own chat is theirs (``api.own_rows``): only they see it.
+    owners = _Owners()
     items += [
-        Item(id=f"advice:{a.id}", title=(a.query_summary or a.advice_summary)[:120], detail="advice")
+        Item(
+            id=f"advice:{a.id}", title=(a.query_summary or a.advice_summary)[:120], detail="advice",
+            private=owners.of_session(a.session_id or None, department=a.department or None) is not None,
+        )
         for a in await _call(episodic.get_advice_list, request)
     ]
     return items

@@ -572,6 +572,17 @@ def test_list_workflows_reads_one_for_its_owner(owner: Any) -> None:
     assert "know who is asking" in _call(wrt.handle_list_workflows, {"name": "meeting_prep"}, None)["error"]
 
 
+def test_a_workflows_steps_are_left_out_where_others_read(owner: Any) -> None:
+    # Privacy hides: in a chat others read, its name and whether it is on,
+    # never the steps (they can quote addresses and what it reads).
+    _stored()
+    shared = _web(owner)
+    shared.shared_chat = True
+    out = _call(wrt.handle_list_workflows, {"name": "meeting_prep"}, shared)
+    assert "definition" not in out and out["workflow"]["name"] == "meeting_prep"
+    assert GATEWAY_READ not in json.dumps(out)
+
+
 def test_the_list_says_whose_each_saved_workflow_is(owner: Any) -> None:
     """A teammate told about the owner's Monday recap heard "you already
     have it" (Test lab): the list never said who made a workflow."""

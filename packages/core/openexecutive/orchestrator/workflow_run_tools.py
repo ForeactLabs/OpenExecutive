@@ -252,9 +252,12 @@ def _input_fields(input_schema: dict[str, Any]) -> dict[str, Any]:
 
 
 def _definition_of(name: str) -> str:
-    """A custom workflow's full definition, for the account owner or its
-    creator in a conversation only they read: its steps can quote addresses
-    and what it does."""
+    """A custom workflow's definition, for the account owner or its creator.
+    Its steps can quote addresses and what it reads, so in a conversation
+    others read only its name, description and whether it is on are given
+    (privacy hides): the steps come in a chat only they read."""
+    from openexecutive.delegation.settings import private_conversation
+    from openexecutive.orchestrator.schedule_tools import current_session
     from openexecutive.orchestrator.workflow_change import may_read
     from openexecutive.workflows.dynamic_store import get_definition
 
@@ -266,6 +269,17 @@ def _definition_of(name: str) -> str:
     if defn is None:
         return _err("list_workflows", f"There is no custom workflow named {name!r}.")
     _audit("list_workflows", "read", True, f"list_workflows read {name}", {"name": name})
+    if not private_conversation(current_session.get()):
+        return json.dumps({
+            "workflow": {
+                "name": defn.name, "title": defn.title,
+                "description": defn.description, "is_active": defn.is_active,
+            },
+            "note": (
+                "Others read this conversation, so its steps are left out. They show in a chat "
+                "only the person reads, or on the Workflows page."
+            ),
+        })
     return json.dumps({
         "definition": defn.model_dump(mode="json", exclude={"created_at", "updated_at"}),
         "note": (
