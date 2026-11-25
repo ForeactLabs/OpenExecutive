@@ -252,21 +252,22 @@
       () => first(document, [
         "input[data-e2e-contact-input]",
         "mw-contact-chips-input input",
-        'input[placeholder*="name" i]',
-        'input[type="text"]',
       ]),
       15000,
     );
     if (!input) return "Google Messages didn't show where to type the number.";
     setValue(input, number);
     // Google Messages offers "Send to <number>" once it reads a number.
-    const pick = await waitFor(
-      // Only the "Send to <number>" choice: never a contact suggestion, which can be someone else.
-      () => first(document, ["[data-e2e-send-to-button]", "mw-contact-selector-button button"]),
-      6000,
-    );
-    if (pick) pick.click();
-    else pressEnter(input);
+    // Only the "Send to <number>" choice, showing that very number: never a
+    // contact suggestion or Enter, either of which can be someone else.
+    const want = String(number).replace(/\D/g, "");
+    const pick = await waitFor(() => {
+      const el = first(document, ["[data-e2e-send-to-button]", "mw-contact-selector-button button"]);
+      const shown = el ? textOf(el.closest("mw-contact-selector-button") || el).replace(/\D/g, "") : "";
+      return el && want && shown.includes(want) ? el : null;
+    }, 6000);
+    if (!pick) return "Google Messages didn't offer to send to that number. Nothing went.";
+    pick.click();
     const opened = await waitFor(() => T.keyOf(location.href), 15000);
     return opened ? "" : "Google Messages didn't open a conversation with that number.";
   }

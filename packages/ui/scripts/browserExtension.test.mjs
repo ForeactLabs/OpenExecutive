@@ -435,3 +435,10 @@ test("texts: once Send is pressed a missing answer is unsure, and a new number p
   const content = readFileSync(new URL("../../extension/content.js", import.meta.url), "utf8");
   assert.ok(content.includes('ok ? "sent" : unsure ? "unsure" : "failed"'));
 });
+
+test("texts: a new number is sent to only through its own Send-to choice, never Enter", () => {
+  const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
+  const start = texts.slice(texts.indexOf("async function startConversation"), texts.indexOf("async function send("));
+  assert.ok(!start.includes("pressEnter"));
+  assert.ok(start.includes("shown.includes(want)"));
+});

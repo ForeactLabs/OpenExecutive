@@ -194,6 +194,7 @@ async def handle_send_text(tool_input: dict[str, Any]) -> str:
         session_id = getattr(current_session.get(), "session_id", None)
         if isinstance(session_id, str) and session_id:
             await asyncio.to_thread(texts.tell_later, send.id, session_id)
+        texts.expire_later()
         away = "" if texts.connected(actor) else " Chrome isn't open on their computer right now; it goes when it is, within the hour."
         return json.dumps({
             "status": "on_its_way",

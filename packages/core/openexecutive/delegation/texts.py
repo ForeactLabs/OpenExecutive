@@ -153,11 +153,14 @@ def save_settings(person_id: int, *, enabled: bool, db_path: Path | None = None)
 
 def browser_seen(person_id: int, *, paired: bool, db_path: Path | None = None) -> Settings:
     """What their browser says about Google Messages, each time it reports."""
-    current = get_settings(person_id, db_path=db_path)
-    current.paired = paired
-    current.seen_at = _iso(_now())
-    _write(current, db_path)
-    return current
+    # Only the browser's own columns: never the switch, which the person
+    # may be turning off at this moment.
+    with _connect(db_path) as conn:
+        conn.execute(
+            f"UPDATE {TEXT_SETTINGS_TABLE} SET paired=?, seen_at=?, updated_at=? WHERE person_id=?",
+            (int(paired), _iso(_now()), _iso(_now()), person_id),
+        )
+    return get_settings(person_id, db_path=db_path)
 
 
 def _write(s: Settings, db_path: Path | None) -> None:
@@ -187,7 +190,23 @@ def tidy(*, db_path: Path | None = None) -> None:
             for table in (TEXTS_TABLE, TEXT_CONVERSATIONS_TABLE, TEXT_SENDS_TABLE):
                 conn.execute(f"DELETE FROM {table}")
             return
-        conn.execute(f"DELETE FROM {TEXTS_TABLE} WHERE at < ?", (_iso(_now() - timedelta(days=KEEP_DAYS)),))
+        _prune(conn, None)
+    expire_all(db_path=db_path)
+
+
+def _prune(conn: sqlite3.Connection, person_id: int | None) -> None:
+    """Drop texts, sends and conversations past ``KEEP_DAYS`` (one person's,
+    or everyone's)."""
+    cutoff = _iso(_now() - timedelta(days=KEEP_DAYS))
+    who, args = ("person_id=? AND ", (person_id,)) if person_id is not None else ("", ())
+    conn.execute(f"DELETE FROM {TEXTS_TABLE} WHERE {who}at < ?", (*args, cutoff))
+    conn.execute(f"DELETE FROM {TEXT_SENDS_TABLE} WHERE {who}created_at < ?", (*args, cutoff))
+    conn.execute(
+        f"DELETE FROM {TEXT_CONVERSATIONS_TABLE} WHERE {who}updated_at < ? AND id NOT IN "
+        f"(SELECT conversation_id FROM {TEXTS_TABLE}) AND id NOT IN "
+        f"(SELECT conversation_id FROM {TEXT_SENDS_TABLE} WHERE conversation_id IS NOT NULL)",
+        (*args, cutoff),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -261,7 +280,7 @@ def record(person_id: int, items: list[Incoming], *, db_path: Path | None = None
     now = _now()
     cutoff = now - timedelta(days=KEEP_DAYS)
     with _connect(db_path) as conn:
-        conn.execute(f"DELETE FROM {TEXTS_TABLE} WHERE person_id=? AND at < ?", (person_id, _iso(cutoff)))
+        _prune(conn, person_id)
         for item in items[:MAX_REPORT]:
             if not str(item.conversation or "").strip() or not str(item.ref or "").strip():
                 continue
@@ -496,6 +515,35 @@ def _expire(person_id: int, db_path: Path | None) -> None:
                     expired.append(_send(row))
     for gone in expired:
         _tell(gone, db_path=db_path)
+
+
+def expire_all(*, db_path: Path | None = None) -> None:
+    """Fail or settle every overdue send, whoever's (``_expire``): a send
+    stays on time even when their browser never asks again. Never raises."""
+    try:
+        with _connect(db_path) as conn:
+            people = [int(r[0]) for r in conn.execute(
+                f"SELECT DISTINCT person_id FROM {TEXT_SENDS_TABLE} WHERE status IN (?, ?)", (PENDING, HANDED),
+            ).fetchall()]
+        for person_id in people:
+            _expire(person_id, db_path)
+    except Exception:
+        logging.getLogger(__name__).exception("texts: expiring sends failed")
+
+
+def expire_later() -> None:
+    """Look for overdue sends once each could be due (``SEND_WITHIN`` for one
+    never taken, twice that for one taken and never answered), in this
+    process. A restart looks at start (``tidy``). Never raises."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    for after in (SEND_WITHIN, 2 * SEND_WITHIN):
+        loop.call_later(
+            after.total_seconds() + 60,
+            lambda: loop.run_in_executor(None, lambda: expire_all()),
+        )
 
 
 def take_send(person_id: int, *, db_path: Path | None = None) -> tuple[Send, str] | None:

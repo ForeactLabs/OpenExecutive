@@ -2927,6 +2927,11 @@ _HOLD_KEY_TRIES = 50
 
 def card_of(tool: str, tool_input: dict[str, Any], hit: Hit, *, source: str) -> int | None:
     """Whose list a step held for ``hit`` goes on."""
+    # A step on someone's own device (a text from their phone) is theirs
+    # alone: their private messages never show on anyone else's list.
+    acting = own_device_for(tool, tool_input).get("acting_for")
+    if isinstance(acting, int) and not isinstance(acting, bool):
+        return acting
     if hit.kind == TRAINING or (hit.kind == "level" and source == "chat"):
         # Teaching it is the principal's: only they can allow anything. So is
         # a step Careful held on a turn someone is in, the owner's own ask

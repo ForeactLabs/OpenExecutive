@@ -585,3 +585,47 @@ def test_its_own_text_coming_back_in_another_language_is_never_a_new_text(ids: d
     assert tx.texts(conv.id)[-1].outgoing is True
     tx.settle_send(owner, send.id, status=tx.SENT)
     assert tx.record(owner, [_item("c", text="Friday works?")]) != []  # someone else's words
+
+
+def test_an_overdue_send_fails_on_time_with_no_browser_asking(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    send = tx.queue_send(owner, "Running late", to_number="5550004444")
+    _age(send.id, 1.5)
+    tx.expire_all()
+    assert tx.get_send(send.id).status == tx.FAILED
+
+
+def test_the_browser_saying_paired_never_turns_texts_back_on(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    tx.save_settings(owner, enabled=False)
+    tx.browser_seen(owner, paired=True)
+    assert tx.get_settings(owner).enabled is False
+
+
+def test_sends_and_quiet_conversations_go_after_keep_days(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    send = tx.queue_send(owner, "old", to_number="5550005555")
+    with tx._connect() as conn:
+        old = tx._iso(NOW - timedelta(days=tx.KEEP_DAYS + 2))
+        conn.execute(f"UPDATE {tx.TEXT_SENDS_TABLE} SET created_at=?, status=? WHERE id=?", (old, tx.SENT, send.id))
+    tx.record(owner, [_item("x", conv="quiet", at=NOW)])
+    with tx._connect() as conn:
+        conn.execute(f"DELETE FROM {tx.TEXTS_TABLE}")
+        conn.execute(f"UPDATE {tx.TEXT_CONVERSATIONS_TABLE} SET updated_at=?", (old,))
+    tx.tidy()
+    assert tx.get_send(send.id) is None
+    assert tx.conversations(owner) == []
+
+
+def test_a_teammates_text_card_is_theirs_alone(ids: dict[str, int], as_turn_for: Any) -> None:
+    mate = ids["teammate"]
+    _on(mate)
+    tx.record(mate, [_item("m", conv="mate-conv")])
+    (conv,) = tx.conversations(mate)
+    as_turn_for(mate)
+    for kind in (ttl.TRAINING, "level", "someone_new"):
+        hit = ttl.Hit(kind=kind, reason="x")
+        assert ttl.card_of("send_text", {"conversation_id": conv.id, "text": "hi"}, hit, source="scheduled") == mate
