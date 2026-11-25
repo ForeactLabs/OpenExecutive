@@ -888,21 +888,31 @@ def finish(
     outcome: str = "",
     done: list[tuple[str, str]] | None = None,
     decision_id: int | None = None,
+    from_card: int | None = None,
     db_path: Path | None = None,
-) -> None:
+) -> bool:
     """What came of Do it: done (with what it did), on a card for them
     (the gate's), asked them a question back (with the question), or failed
-    (with why). Never raises."""
+    (with why). With ``from_card``, only while the row is still on that
+    card, so two readers settling the same card write it once. Returns
+    whether a row changed. Never raises."""
+    where = "WHERE person = ? AND key = ?"
+    args: list[Any] = [who(email), key]
+    if from_card is not None:
+        where += " AND status = 'card' AND decision_id = ?"
+        args.append(from_card)
     try:
         with _connect(db_path) as conn:
-            conn.execute(
+            cur = conn.execute(
                 f"UPDATE {STATE_TABLE} SET status = ?, outcome = ?, done = ?, decision_id = ?, finished_at = ? "  # noqa: S608
-                "WHERE person = ? AND key = ?",
+                + where,
                 (status, line(outcome, 300), json.dumps([[line(t, 160), _link(u)] for t, u in (done or [])][:4]),
-                 decision_id, _now().isoformat(), who(email), key),
+                 decision_id, _now().isoformat(), *args),
             )
+            return cur.rowcount > 0
     except (sqlite3.Error, OSError):
         logger.warning("take_on: couldn't record %s finishing", key, exc_info=True)
+        return False
 
 
 def hide(email: str, offer: Offer | str, reason: HideReason, *, db_path: Path | None = None) -> bool:

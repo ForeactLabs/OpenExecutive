@@ -302,6 +302,26 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     return TestClient(app)
 
 
+def test_two_readers_settling_one_approved_card_tell_its_source_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.api.routes import take_on as route
+    from openexecutive.memory import decision_ledger
+
+    monkeypatch.setattr(decision_ledger, "get_decision_instances",
+                        lambda ids: {9: SimpleNamespace(status="approved_unchanged")})
+    monkeypatch.setattr(decision_ledger, "open_for_session", lambda _s: [])
+    told: list[str] = []
+    monkeypatch.setattr(route, "_taken_up", lambda _me, o: told.append(o.key))
+    o = _offer()
+    take_on.put_made(ME, [o])
+    take_on.start(ME, o)
+    take_on.finish(ME, o.key, "card", decision_id=9)
+    me = route.Me(ME, 1, True)
+    first, second = _list(), _list()
+    route._settle_cards(me, first)
+    route._settle_cards(me, second)
+    assert told == [o.key]
+
+
 def test_hiding_a_step_already_under_way_leaves_it_running(
     client: TestClient, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

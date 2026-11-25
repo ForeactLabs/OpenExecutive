@@ -170,23 +170,28 @@ def _settle_cards(me: Me, offers: list[take_on.Offer]) -> None:
         except Exception:
             logger.warning("take_on: couldn't read the run's other cards", exc_info=True)
             waiting = []
+        # Each write holds only while the row is still on this card: of two
+        # readers settling it at once, one writes and tells the source.
+        was = int(o.decision_id or 0)
         if waiting:
             o.decision_id = waiting[0]
-            take_on.finish(me.email, o.key, "card", outcome=o.outcome, done=o.done, decision_id=o.decision_id)
+            take_on.finish(me.email, o.key, "card", outcome=o.outcome, done=o.done, decision_id=o.decision_id,
+                           from_card=was)
         elif status in _CARD_DONE:
             o.status, o.outcome = "done", "You approved it, and it's done."
-            take_on.finish(me.email, o.key, "done", outcome=o.outcome, done=o.done, decision_id=o.decision_id)
-            _taken_up(me, o)
+            if take_on.finish(me.email, o.key, "done", outcome=o.outcome, done=o.done, decision_id=o.decision_id,
+                              from_card=was):
+                _taken_up(me, o)
         elif status == dl.STATUS_REJECTED:
             take_on.hide(me.email, o, "skipped")
             o.status = "skipped"  # type: ignore[assignment]
         elif status == dl.STATUS_FAILED:
             o.status, o.outcome = "failed", "It didn't go through after you approved it."
-            take_on.finish(me.email, o.key, "failed", outcome=o.outcome, decision_id=o.decision_id)
+            take_on.finish(me.email, o.key, "failed", outcome=o.outcome, decision_id=o.decision_id, from_card=was)
         else:
             # Closed another way (no answer in time, handled elsewhere, undone).
             o.status, o.outcome = "failed", "The card closed before it was done."
-            take_on.finish(me.email, o.key, "failed", outcome=o.outcome, decision_id=o.decision_id)
+            take_on.finish(me.email, o.key, "failed", outcome=o.outcome, decision_id=o.decision_id, from_card=was)
 
 
 def _offers(me: Me) -> list[take_on.Offer]:
