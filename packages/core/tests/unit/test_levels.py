@@ -38,10 +38,24 @@ def test_hands_off_runs_every_noticed_step(reason: str) -> None:
     assert levels.decide(reason, mode=outside_mode.TRUST) == levels.RUN
 
 
-@pytest.mark.parametrize("mode", [outside_mode.ASK, outside_mode.OUTSIDERS])
 @pytest.mark.parametrize("reason", sorted(levels.REASONS))
-def test_below_hands_off_every_noticed_step_is_a_card(mode: str, reason: str) -> None:
-    assert levels.decide(reason, mode=mode) == levels.CARD
+def test_careful_makes_every_noticed_step_a_card(reason: str) -> None:
+    assert levels.decide(reason, mode=outside_mode.ASK) == levels.CARD
+
+
+@pytest.mark.parametrize("reason", sorted(levels.BALANCED_WAITS | {levels.STRANGER, levels.NOT_OWNER, levels.READ_ONLY}))
+def test_balanced_waits_for_planted_words_someone_new_a_share_and_unwatched_work(reason: str) -> None:
+    assert levels.decide(reason, mode=outside_mode.OUTSIDERS) == levels.CARD
+
+
+@pytest.mark.parametrize(
+    "reason", sorted(levels.REASONS - levels.BALANCED_WAITS - {levels.STRANGER, levels.NOT_OWNER, levels.READ_ONLY}),
+)
+def test_balanced_runs_every_other_noticed_step(reason: str) -> None:
+    """Reading someone's own mail, a private or shared chat, a script, a
+    click on a site: none of them is one of the seven topics, so Balanced
+    runs it."""
+    assert levels.decide(reason, mode=outside_mode.OUTSIDERS) == levels.RUN
 
 
 @pytest.mark.parametrize("mode", sorted(outside_mode.MODES))

@@ -512,7 +512,7 @@ def outside_reach_refusal(label: str, tool_input: Any = None, tool_name: str = "
         return None
     from openexecutive.orchestrator import levels, outside_content
 
-    mail = reason in (levels.OWN_MAIL, levels.MAIL_FLAGGED)
+    mail = reason in (levels.OWN_MAIL, levels.MAIL_FLAGGED, levels.MAIL_UNCHECKED)
     error = mail_touched_withheld_error(label) if mail else outside_content.outside_withheld_error(label)
     return _card_or(error, name, tool_input, reason)
 
@@ -523,19 +523,23 @@ def outside_reach_reason(name: str, tool_input: Any = None) -> str | None:
     holds nothing and remembers nothing. Never raises; fails closed."""
     from openexecutive.orchestrator import levels, outside_content
 
+    reason: str | None
     try:
-        if mail_turn_withholds(name, tool_input):
-            return levels.mail_reason()
+        reason = levels.mail_reason() if mail_turn_withholds(name, tool_input) else None
     except Exception:
-        return levels.OWN_MAIL
-    # The same holds, with contact writes and gateway writes added, once the
-    # turn has read anything from outside the team (outside_content).
-    try:
-        if outside_content.read_outside() and outside_content.outside_withholds(name, tool_input):
-            return levels.STRANGER if outside_content.answers_off_team_mail() else levels.outside_reason()
+        reason = levels.OWN_MAIL
+    if reason is None:
+        # The same holds, with contact writes and gateway writes added, once the
+        # turn has read anything from outside the team (outside_content).
+        try:
+            if outside_content.read_outside() and outside_content.outside_withholds(name, tool_input):
+                reason = levels.STRANGER if outside_content.answers_off_team_mail() else levels.outside_reason()
+        except Exception:
+            reason = levels.OUTSIDE
+    # A reason only noticed: the level decides whether it waits.
+    if reason is None or levels.decide(reason) == levels.RUN:
         return None
-    except Exception:
-        return levels.OUTSIDE
+    return reason
 
 
 def _card_or(error: str, name: str, tool_input: Any, reason: str) -> str:

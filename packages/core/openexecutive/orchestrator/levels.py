@@ -60,6 +60,9 @@ OWN_MAIL = "mail_touched"
 # The owner's own mail was read this turn and the content check flagged some
 # of what it read: Balanced holds then too, and the card says why.
 MAIL_FLAGGED = "mail_flagged"
+# Mail read this turn that the content check couldn't check (too big, or a
+# script read it beside the loop's check): Balanced waits, as for a flag.
+MAIL_UNCHECKED = "mail_unchecked"
 PRIVATE = "private_turn"
 SHARED = "shared_chat"
 # A turn that may only read and advise (``schedule_tools.read_only_turn``):
@@ -75,8 +78,14 @@ SCRIPT = "apps_script"
 # A click or typing on an email or chat site in the person's own browser
 # (``browser.tools``), where it can send a message.
 SEND_SITE = "send_site"
+# What Balanced waits for when a feature notices it: words that tried to
+# give it instructions, someone new, a share outside the company, and work
+# nobody is watching (which take_the_lead.gate then checks against the seven
+# topics). Every other reason a feature notices runs on Balanced and waits
+# on Careful.
+BALANCED_WAITS: frozenset[str] = frozenset({OUTSIDE, MAIL_FLAGGED, MAIL_UNCHECKED, NEW_PERSON, FILE_PLACE, UNATTENDED})
 REASONS: frozenset[str] = frozenset({
-    OUTSIDE, OUTSIDE_READ, OWN_MAIL, MAIL_FLAGGED, PRIVATE, SHARED, READ_ONLY, NOT_OWNER, UNATTENDED, STRANGER,
+    OUTSIDE, OUTSIDE_READ, OWN_MAIL, MAIL_FLAGGED, MAIL_UNCHECKED, PRIVATE, SHARED, READ_ONLY, NOT_OWNER, UNATTENDED, STRANGER,
     NEW_PERSON, FILE_PLACE, URL_FETCH, SCRIPT, SEND_SITE,
 })
 
@@ -86,6 +95,7 @@ _WHY: dict[str, str] = {
     OUTSIDE_READ: "it read something from outside the company first",
     OWN_MAIL: "it read your own mail first",
     MAIL_FLAGGED: "something it read looked like it was trying to give it instructions",
+    MAIL_UNCHECKED: "it read mail it couldn't check for planted instructions first",
     PRIVATE: "it came from mail that's private to you",
     SHARED: "someone else wrote in this shared chat",
     READ_ONLY: "it was asked from a page in another app or a run queued for someone else",
@@ -195,10 +205,14 @@ def turn_level(session: Any = None) -> str:
     return outside_mode.for_turn(session)
 
 
-def mail_reason() -> str:
-    """Why a step waits after the owner's own mail was read this turn:
+def mail_reason(pinned: Any = None, *, reading_now: bool = False) -> str:
+    """Why a step waits after someone's own mail was read this turn:
     ``MAIL_FLAGGED`` when the content check flagged some of what it read,
-    else ``OWN_MAIL``. Never raises."""
+    ``MAIL_UNCHECKED`` when a read from an earlier round went unchecked (too
+    big, or not yet checked), else ``OWN_MAIL``. A read in this very round
+    (``reading_now``) isn't unchecked: the step was asked for before anyone
+    saw what the mail says. ``pinned`` is the turn's ``TurnDelegation``,
+    else the bound session's. Never raises."""
     try:
         from openexecutive.orchestrator import outside_content
 
@@ -206,8 +220,23 @@ def mail_reason() -> str:
         flags = getattr(state, "flags", None) or []
         if any(source == outside_content.MAIL for source, _, _ in flags):
             return MAIL_FLAGGED
+        if pinned is None:
+            from openexecutive.delegation.settings import turn_delegation
+            from openexecutive.orchestrator.schedule_tools import current_session
+
+            pinned = turn_delegation(current_session.get())
+        if pinned is not None and (
+            getattr(pinned, "mail_held", False) is True or getattr(pinned, "unchecked_mail", False) is True
+        ):
+            return MAIL_UNCHECKED
+        if (
+            pinned is not None and not reading_now and getattr(pinned, "read_mail", False) is True
+            and getattr(pinned, "mail_vetted", False) is not True
+        ):
+            return MAIL_UNCHECKED
     except Exception:
-        logger.debug("levels: couldn't tell whether a mail read was flagged", exc_info=True)
+        logger.debug("levels: couldn't tell whether a mail read was checked", exc_info=True)
+        return MAIL_UNCHECKED
     return OWN_MAIL
 
 
@@ -227,8 +256,9 @@ def outside_reason() -> str:
 
 
 def decide(reason: str, *, mode: str | None = None) -> str:
-    """``RUN`` or ``CARD`` for a step noticed for ``reason``. Never raises:
-    an error is a card."""
+    """``RUN`` or ``CARD`` for a step noticed for ``reason``: Hands-off runs
+    it, Balanced waits only for ``BALANCED_WAITS``, Careful waits. Never
+    raises: an error is a card."""
     from openexecutive.orchestrator import outside_mode
 
     try:
@@ -238,6 +268,8 @@ def decide(reason: str, *, mode: str | None = None) -> str:
             return CARD
         current = mode if mode is not None else turn_level()
         if current == outside_mode.TRUST:
+            return RUN
+        if current == outside_mode.OUTSIDERS and reason not in BALANCED_WAITS:
             return RUN
         return CARD
     except Exception:
