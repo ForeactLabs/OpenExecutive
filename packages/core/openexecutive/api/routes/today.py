@@ -3550,10 +3550,6 @@ def _right_now_rows(now: datetime | None = None) -> list[RightNowRow]:
     ]
 
 
-# How many watch suggestions Home's row names before "and N more".
-_ELSEWHERE_NAMED = 2
-
-
 def _counted(n: int, one: str, many: str) -> str:
     return f"{n} {one if n == 1 else many}"
 

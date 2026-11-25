@@ -943,6 +943,14 @@ def hide(email: str, offer: Offer | str, reason: HideReason, *, db_path: Path | 
             "offer = COALESCE(offer, ?) WHERE person = ? AND key = ?",
             (reason, now.isoformat(), offer.kind, _snapshot(offer), person, offer.key),
         )
+        if reason == "later":
+            # Later on one that failed or asked back puts it back as it was
+            # first offered, so it comes back in a week like any other.
+            conn.execute(
+                f"UPDATE {STATE_TABLE} SET status = '', finished_at = NULL, outcome = '', done = '[]', "  # noqa: S608
+                "session_id = NULL, decision_id = NULL WHERE person = ? AND key = ? AND status IN ('failed', 'asked')",
+                (person, offer.key),
+            )
     return True
 
 

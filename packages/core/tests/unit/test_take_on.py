@@ -130,6 +130,18 @@ def test_one_put_off_late_with_later_gets_its_days_back(monkeypatch: pytest.Monk
     assert [x.key for x in _list(now=back + timedelta(days=take_on.KEEP_DAYS - 1))] == [o.key]
 
 
+def test_one_that_failed_and_was_put_off_with_later_comes_back() -> None:
+    o = _offer()
+    take_on.put_made(ME, [o])
+    take_on.start(ME, _list()[0])
+    take_on.finish(ME, o.key, "failed", outcome="It stopped before it finished.")
+    take_on.hide(ME, _list()[0], "later")
+    assert _list() == []
+    back = datetime.now(UTC) + timedelta(days=take_on.LATER_DAYS, hours=1)
+    (got,) = _list(now=back)
+    assert (got.key, got.status, got.outcome) == (o.key, "", "")
+
+
 def test_one_back_from_later_and_done_is_not_offered_again(monkeypatch: pytest.MonkeyPatch) -> None:
     o = _offer()
     take_on.put_made(ME, [o])
