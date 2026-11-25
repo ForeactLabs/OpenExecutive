@@ -75,7 +75,7 @@ _tasks: set[asyncio.Task[int]] = set()
 CHECK_AGAIN = timedelta(minutes=10)
 _checked: dict[str, datetime] = {}
 
-_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]{1,64}@[A-Za-z0-9.\-]{1,253}\.[A-Za-z]{2,24}")
 
 SYSTEM = (
     "You are a company's Executive. From what you can see for one person, offer a few real steps you "

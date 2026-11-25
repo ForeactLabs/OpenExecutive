@@ -304,7 +304,7 @@ def _words(text: str) -> set[str]:
     # An email address is one word: its pieces say nothing on their own. A
     # time of day says when, not what.
     text = re.sub(r"\b\d{1,2}:\d{2}\b", " ", text.lower())
-    for w in re.findall(r"[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}|[a-z0-9]+", text):
+    for w in re.findall(r"[a-z0-9._%+\-]{1,64}@[a-z0-9.\-]{1,253}\.[a-z]{2,24}|[a-z0-9]+", text):
         w = w[:-1] if len(w) > 4 and w.endswith("s") and "@" not in w else w
         if w in _FILLER or (len(w) < 3 and not any(c.isdigit() for c in w)):
             continue
