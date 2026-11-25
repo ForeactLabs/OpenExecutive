@@ -57,7 +57,12 @@ def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     monkeypatch.setattr(people_store, "DB_PATH", path)
     monkeypatch.setattr(episodic, "DB_PATH", path)
     monkeypatch.setattr(dept_store, "DB_PATH", path)
+    # The open cards a new alert checks against (alerts.one_card) too.
+    from openexecutive.alerts import store as alerts_store
+
+    monkeypatch.setattr(alerts_store, "DB_PATH", path)
     episodic.initialize_db(path)
+    alerts_store.initialize_db(path)
     people_store.initialize_db()
     dept_store.initialize_db()
     people_registry.invalidate()
