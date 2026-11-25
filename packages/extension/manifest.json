@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Open Executive",
   "short_name": "Open Executive",
-  "version": "0.3.9",
-  "description": "Lets your Open Executive get things done on websites for you: open pages, click, type and fill in forms.",
+  "version": "0.4.0",
+  "description": "Lets your Open Executive get things done on websites for you, and read and send your texts in Google Messages when you turn that on.",
   "minimum_chrome_version": "116",
   "icons": {
     "16": "icons/icon16.png",
@@ -42,6 +42,15 @@
         "site-rules.js",
         "shared.js",
         "content.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://messages.google.com/*"
+      ],
+      "js": [
+        "texts.js"
       ],
       "run_at": "document_idle"
     }

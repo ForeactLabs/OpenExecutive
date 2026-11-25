@@ -1,0 +1,165 @@
+"use client";
+
+// Delegate → As you → Texts: the Executive reads the person's own texts as
+// they arrive and texts from their own number, through Google Messages in
+// Chrome (delegation/texts.py, the browser extension's texts.js). Setup is
+// three steps: the extension, the switch, Google Messages paired with their
+// phone. Android only for now: on an iPhone, texts aren't reachable from
+// Chrome.
+import Link from "next/link";
+import { useEffect, useState, type ReactNode } from "react";
+
+import Switch from "@/components/Switch";
+import { BROWSER_SETTINGS_HREF } from "@/components/browser/BrowserExtensionCard";
+import SettingsCard from "@/components/settings/SettingsCard";
+import { buttonClass } from "@/components/ui/Button";
+import { getBrowserStatus, getTexts, updateTexts, type BrowserStatus, type Texts } from "@/lib/api";
+
+const GOOGLE_MESSAGES = "https://messages.google.com/web";
+const RECHECK_MS = 5000;
+
+type Phone = "android" | "iphone";
+
+function Step({ done, n, title, children }: { done: boolean; n: number; title: string; children?: ReactNode }) {
+  return (
+    <li className="flex gap-3 py-3">
+      <span
+        aria-hidden
+        className={`mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full text-[13px] font-semibold ${
+          done ? "bg-emerald-500 text-white" : "bg-zinc-200 text-fg dark:bg-zinc-700"
+        }`}
+      >
+        {done ? "✓" : n}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-[15px] font-medium text-fg">
+          {title}
+          {done && <span className="sr-only"> (done)</span>}
+        </p>
+        {children && <div className="mt-1 text-[14px] text-fg-muted">{children}</div>}
+      </div>
+    </li>
+  );
+}
+
+export default function TextsCard() {
+  const [state, setState] = useState<Texts | null>(null);
+  const [browser, setBrowser] = useState<BrowserStatus | null>(null);
+  const [phone, setPhone] = useState<Phone>("android");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    const ctl = new AbortController();
+    const load = () => {
+      getTexts(ctl.signal)
+        .then((s) => {
+          setState(s);
+          setError(null);
+        })
+        .catch((err: unknown) => {
+          if (!ctl.signal.aborted) setError(err instanceof Error ? err.message : "Couldn't load this setting.");
+        });
+      getBrowserStatus()
+        .then(setBrowser)
+        .catch(() => undefined);
+    };
+    load();
+    // Setup happens in other tabs (the store, Google Messages): keep up.
+    const timer = setInterval(load, RECHECK_MS);
+    return () => {
+      clearInterval(timer);
+      ctl.abort();
+    };
+  }, []);
+
+  if (!state) return error ? <SettingsCard><p className="text-[15px] text-fg-muted">{error}</p></SettingsCard> : null;
+  // Off for this install: nothing to set.
+  if (!state.available) return null;
+
+  const toggle = async (next: boolean) => {
+    setBusy(true);
+    try {
+      setState(await updateTexts(next));
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't save that.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const extension = Boolean(browser?.connected);
+  const ready = state.enabled && extension && state.paired;
+
+  return (
+    <SettingsCard
+      title={<span id="texts-title">Texts</span>}
+      description="I read your texts as they arrive and can reply or text someone new, from your own number. Your Approvals decide what goes on its own. Only you see them."
+      action={<Switch checked={state.enabled} disabled={busy} onChange={(next) => void toggle(next)} labelledBy="texts-title" />}
+    >
+      <div role="radiogroup" aria-label="Your phone" className="mt-4 inline-flex rounded-lg border border-line p-0.5">
+        {(["android", "iphone"] as const).map((p) => (
+          <button
+            key={p}
+            type="button"
+            role="radio"
+            aria-checked={phone === p}
+            onClick={() => setPhone(p)}
+            className={`rounded-md px-3 py-1.5 text-[14px] ${phone === p ? "bg-zinc-200 font-medium text-fg dark:bg-zinc-700" : "text-fg-muted"}`}
+          >
+            {p === "android" ? "Android" : "iPhone"}
+          </button>
+        ))}
+      </div>
+
+      {phone === "iphone" ? (
+        <p className="mt-4 text-[14px] text-fg-muted">
+          Texts on an iPhone are coming soon. They need a small app on your Mac, since an iPhone&apos;s texts can&apos;t be
+          reached from Chrome.
+        </p>
+      ) : ready ? (
+        <p className="mt-4 text-[14px] text-fg-muted">
+          On, through Google Messages in Chrome
+          {state.conversations > 0 ? `, ${state.conversations} conversation${state.conversations === 1 ? "" : "s"} so far` : ""}.
+          Keep Chrome open for new texts.
+        </p>
+      ) : (
+        <ol className="mt-3 divide-y divide-line">
+          <Step done={extension} n={1} title="Open Executive for Chrome">
+            {extension ? (
+              "On in this browser."
+            ) : browser?.store_url ? (
+              <a href={browser.store_url} target="_blank" rel="noreferrer" className={`${buttonClass("primary", "sm")} mt-1`}>
+                Add to Chrome
+              </a>
+            ) : (
+              <Link href={BROWSER_SETTINGS_HREF} className="underline">
+                Set it up in Settings → Browser
+              </Link>
+            )}
+          </Step>
+          <Step done={state.enabled} n={2} title="Turn on Texts">
+            {state.enabled ? "On." : "With the switch above."}
+          </Step>
+          <Step done={state.paired} n={3} title="Pair Google Messages with your phone">
+            {state.paired ? (
+              "Paired."
+            ) : (
+              <>
+                <a href={GOOGLE_MESSAGES} target="_blank" rel="noreferrer" className="underline">
+                  Open Google Messages
+                </a>{" "}
+                in Chrome. On your phone: Messages › your picture › Device pairing › QR code scanner.
+              </>
+            )}
+          </Step>
+        </ol>
+      )}
+      <p className="mt-4 text-[13px] text-fg-muted">
+        Texts go from your phone, so it needs to be on and online, and Chrome open on your computer.
+      </p>
+      {error && <p className="mt-2 text-[14px] text-red-500">{error}</p>}
+    </SettingsCard>
+  );
+}

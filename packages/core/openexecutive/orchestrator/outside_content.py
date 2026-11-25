@@ -129,6 +129,9 @@ QUOTED = "quoted"
 # read (``check_mail_read``), but it decides the Act as me lockdown
 # (``delegation.lockdown.mail_lock_holds``), never ``TurnOutside.sources``.
 MAIL = "mail"
+# The person's own texts (``orchestrator.text_tools.read_texts``): other
+# people's words, like the mail they quote.
+TEXTS = "texts"
 
 # Shut on such a turn on top of the outside-content hold: a person's own turn
 # keeps these after reading outside content because the person is the one
@@ -194,15 +197,18 @@ _HELD: dict[str, tuple[Any, ...]] = {}
 _FETCH_TOOLS: dict[str, str] = {
     "read_document": DOCUMENT,
     "run_executive_research": WEB,
+    "read_texts": TEXTS,
 }
 
 # How an attachment shows up in the message text (``delegation.settings``
 # ``_ATTACHMENT_MARK``): an inlined document's label or a note naming a file.
 _ATTACHMENT_MARK = re.compile(r"\[Attached: |\((?:Attached|Skipped|Could not)\b")
 
-# What the owner's own mail quotes or forwards, as the email poller labels it.
+# Someone else's words the turn quotes: what the owner's own mail quotes or
+# forwards, as the email poller labels it, and the person's new texts
+# (``delegation.texts_watch``).
 _QUOTED_BLOCK = re.compile(
-    r'<untrusted_content source="email_quoted"[^>]*>(.*?)</untrusted_content>', re.DOTALL
+    r'<untrusted_content source="(?:email_quoted|text_message)"[^>]*>(.*?)</untrusted_content>', re.DOTALL
 )
 
 # A Google or Microsoft 365 tool whose own name (after the server prefix)
@@ -571,6 +577,7 @@ _SOURCE_WORDS: dict[str, str] = {
     APP: "Something I read in a connected app",
     MAIL: "An email I read",
     SENDER: "The email I'm answering",
+    TEXTS: "A text I read",
 }
 
 # Put before a read's result under Hands-off when the check couldn't read it:

@@ -10,6 +10,7 @@ import AsMeCard, { useTakeTheLead } from "@/components/settings/AsMeCard";
 import BeforeAnythingCard from "@/components/settings/BeforeAnythingCard";
 import SentCard from "@/components/settings/SentCard";
 import SettingsCard from "@/components/settings/SettingsCard";
+import TextsCard from "@/components/delegate/TextsCard";
 import { useDelegation } from "@/components/settings/useDelegation";
 import { getOutsideContent, type OutsideContentSetting } from "@/lib/api";
 import { approvalsTitle, onApprovalsChanged } from "@/lib/approvalsLevel";
@@ -132,6 +133,11 @@ export default function DelegatePage() {
                     </>
                   }
                 />
+              )}
+              {settings && (
+                <div className="mt-4">
+                  <TextsCard />
+                </div>
               )}
             </Panel>
 

@@ -174,6 +174,7 @@ test("an Open Executive page opens in the tab they are working in, never the ext
 
 function fakeBrowser() {
   const store = {};
+  const local = {};
   const wins = new Map([[1, { id: 1, state: "normal", left: 0, top: 0, width: 1000, height: 800, focused: true, tabs: [{ id: 11, active: true, windowId: 1 }] }]]);
   const removed = [];
   let next = 2;
@@ -188,7 +189,10 @@ function fakeBrowser() {
         get: async (keys) => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).map((k) => [k, store[k]])),
         set: async (vals) => void Object.assign(store, vals),
       },
-      local: { get: async () => ({}), set: async () => {} },
+      local: {
+        get: async (keys) => Object.fromEntries((Array.isArray(keys) ? keys : [keys]).map((k) => [k, local[k]])),
+        set: async (vals) => void Object.assign(local, vals),
+      },
       onChanged: any,
     },
     windows: {
@@ -232,8 +236,22 @@ function fakeBrowser() {
     for (const fn of removed) fn(id);
     for (let i = 0; i < 20; i++) await tick();
   };
-  return { bg: sandbox, wins, store, close };
+  return { bg: sandbox, wins, store, local, close };
 }
+
+test("texts: one site on and another off keeps Texts on, and a disconnected site's answer is dropped", async () => {
+  const { bg, local } = fakeBrowser();
+  const both = ["https://a.example.com", "https://b.example.com"];
+  await bg.setTextsOn("https://a.example.com", true, both);
+  await bg.setTextsOn("https://b.example.com", false, both);
+  await bg.setTextsOn("https://a.example.com", true, both);
+  await bg.setTextsOn("https://b.example.com", false, both);
+  assert.equal(local.textsOn, true);
+  // Only b is connected now: a's old "on" goes, and so does Texts.
+  await bg.setTextsOn("https://b.example.com", false, ["https://b.example.com"]);
+  assert.equal(local.textsOn, false);
+  assert.deepEqual({ ...local.textsOnBy }, { "https://b.example.com": false });
+});
 
 test("two pages asked for at once open one window beside the chat, and closing it puts theirs back", async () => {
   const { bg, wins, store, close } = fakeBrowser();
@@ -337,4 +355,201 @@ test("every step answers in time, even one stuck in Chrome, so the tab goes on a
   const snap = content.slice(content.indexOf('if (msg.type === "snap")'), content.indexOf('if (msg.type === "view")'));
   assert.ok(snap.includes("requestAnimationFrame(() => setTimeout(answer, 30))"));
   assert.ok(snap.includes("setTimeout(answer, 300)"));
+});
+
+// ---- Texts: the script on Google Messages (packages/extension/texts.js) ----
+
+function textsHelpers() {
+  const box = {};
+  box.globalThis = box;
+  box.window = box;
+  box.top = box;
+  vm.createContext(box);
+  vm.runInContext(readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8"), box);
+  return box.OE_TEXTS;
+}
+
+test("texts: the first look only counts unread texts from others, later looks count what changed", () => {
+  const T = textsHelpers();
+  const rows = [
+    { key: "1", title: "Sam Lee", snippet: "Running late", unread: true, time: "Now" },
+    { key: "2", title: "+1 (555) 010-2000", snippet: "Old news", unread: false },
+    { key: "3", title: "Ana", snippet: "You: see you there", unread: true },
+  ];
+  const first = T.changes(rows, null, 0);
+  assert.deepEqual([...first.items.map((i) => i.conversation)], ["1"]);
+  assert.equal(first.items[0].sender, "Sam Lee");
+  assert.equal(first.items[0].outgoing, false);
+  // Nothing changed: nothing new.
+  assert.equal(T.changes(rows, first.seen, 1).items.length, 0);
+  // A new text in a read conversation, and their own reply, both count once.
+  const later = T.changes(
+    [
+      { key: "2", title: "+1 (555) 010-2000", snippet: "Are you in?", unread: false },
+      { key: "3", title: "Ana", snippet: "You: on my way", unread: false },
+    ],
+    first.seen,
+    2,
+  );
+  const [fromNumber, mine] = later.items;
+  assert.equal(fromNumber.number, "+1 (555) 010-2000");
+  assert.equal(fromNumber.text, "Are you in?");
+  // Only a hint: the words stay as shown, and who it is with stays named.
+  assert.equal(mine.outgoing, true);
+  assert.equal(mine.text, "You: on my way");
+  assert.equal(mine.sender, "Ana");
+});
+
+test("texts: a first look answers no old unread texts, and each text carries the time the list shows", () => {
+  const T = textsHelpers();
+  const now = Date.parse("2026-11-25T15:00:00");
+  const rows = [
+    { key: "old", title: "Sam Lee", snippet: "Can you cover Friday?", unread: true, time: "Nov 10" },
+    { key: "wk", title: "Ana", snippet: "Lunch?", unread: true, time: "Mon" },
+    { key: "odd", title: "Bo", snippet: "?", unread: true, time: "il y a longtemps" },
+    { key: "kai", title: "Kai", snippet: "Here", unread: true, time: "5 min" },
+  ];
+  const first = T.changes(rows, null, now);
+  assert.deepEqual([...first.items.map((i) => i.conversation)], ["kai"]);
+  assert.equal(first.items[0].at, new Date(now - 5 * 60000).toISOString());
+  // Later, a change the list can't date is taken as just now.
+  const later = T.changes([{ key: "odd", title: "Bo", snippet: "Still there?", unread: true, time: "" }], first.seen, now);
+  assert.equal(later.items[0].at, new Date(now).toISOString());
+  // The list's times.
+  assert.equal(T.timeOf("Now", now), now);
+  assert.equal(T.timeOf("2 hr", now), now - 2 * 3600000);
+  assert.equal(T.timeOf("2:15 PM", now), Date.parse("2026-11-25T14:15:00"));
+  assert.equal(T.timeOf("11:50 PM", now), Date.parse("2026-11-24T23:50:00"));
+  assert.equal(T.timeOf("Yesterday", now), now - 86400000);
+  assert.equal(T.timeOf("Dec 20", now), Date.parse("2025-12-20T00:00:00"));
+  assert.equal(T.timeOf("", now), null);
+});
+
+test("texts: a group's sender is left blank, and the new-conversation link is not a conversation", () => {
+  const T = textsHelpers();
+  const out = T.changes([{ key: "g", title: "Sam, Ana", snippet: "Pizza?", unread: true, group: true, time: "2 min" }, { key: "s", title: "Smith, John", snippet: "Hi", unread: true, time: "Now" }, { key: "new", title: "x", snippet: "y", unread: true }], null, 0);
+  assert.equal(out.items.length, 2);
+  assert.equal(out.items[0].is_group, true);
+  assert.equal(out.items[0].sender, "");
+  // A comma in a name is still one person.
+  assert.equal(out.items[1].is_group, false);
+  assert.equal(out.items[1].sender, "Smith, John");
+  assert.equal(T.keyOf("https://messages.google.com/web/conversations/new"), "");
+  assert.equal(T.keyOf("https://messages.google.com/web/conversations/abc%3D1?x=1"), "abc=1");
+});
+
+test("texts: the script runs on Google Messages only and ships in the build", () => {
+  const manifest = JSON.parse(readFileSync(new URL("../../extension/manifest.json", import.meta.url), "utf8"));
+  const entry = manifest.content_scripts.find((c) => c.js.includes("texts.js"));
+  assert.deepEqual(entry.matches, ["https://messages.google.com/*"]);
+  assert.ok(manifest.description.length <= 132);
+  const build = readFileSync(new URL("../../extension/build.mjs", import.meta.url), "utf8");
+  assert.match(build, /"texts\.js"/);
+  // The background takes texts only from Google Messages, and a send only from a connected Open Executive tab.
+  const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
+  const seen = bg.slice(bg.indexOf('msg.type === "texts_seen"'));
+  assert.ok(seen.slice(0, 400).includes("onMessages"));
+});
+
+test("texts: one send at a time, and only into the conversation it is for", () => {
+  const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
+  assert.match(bg, /textQueue = run\.catch/);
+  const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
+  assert.ok(texts.includes("T.keyOf(location.href) !== String(msg.conversation)"));
+});
+
+test("texts: the same change reported again keeps its ref", () => {
+  const T = textsHelpers();
+  const rows = (snippet) => [{ key: "1", title: "Sam Lee", snippet, unread: true, time: "Now" }];
+  const a = T.changes(rows("ok"), null, 1000);
+  const b1 = T.changes(rows("Running late"), a.seen, 2000);
+  // Its answer never came back, so seen wasn't saved: the retry is the same text.
+  const b2 = T.changes(rows("Running late"), a.seen, 17000);
+  assert.equal(b1.items[0].ref, b2.items[0].ref);
+});
+
+test("texts: texts go only to sites with Texts on, and to each of them", () => {
+  const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
+  const pass = bg.slice(bg.indexOf("async function passOnTexts"), bg.indexOf("let textQueue"));
+  assert.ok(pass.includes("textsOnBy[o] === true"));
+  assert.ok(pass.includes("took.size === on.size"));
+});
+
+test("texts: the same words again later are a new text", () => {
+  const T = textsHelpers();
+  const rows = (snippet) => [{ key: "1", title: "Sam Lee", snippet, unread: true, time: "Now" }];
+  const a = T.changes(rows("ok"), null, 1000);
+  const b = T.changes(rows("You: sure"), a.seen, 2000);
+  const c = T.changes(rows("ok"), b.seen, 3000);
+  assert.equal(c.items.length, 1);
+  assert.notEqual(c.items[0].ref, a.items[0].ref);
+});
+
+test("texts: off forgets what was seen, so on again only counts unread texts", () => {
+  const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
+  assert.ok(texts.includes("await chrome.storage.local.remove(SEEN_KEY);"));
+  const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
+  assert.ok(bg.includes('await chrome.storage.local.remove("textsSeen");'));
+});
+
+test("texts: once Send is pressed a missing answer is unsure, and a new number picks only its Send-to choice", () => {
+  const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
+  assert.match(texts, /if \(!went\) return \{ ok: false, unsure: true/);
+  assert.ok(!texts.includes("mw-contact-row button"));
+  const content = readFileSync(new URL("../../extension/content.js", import.meta.url), "utf8");
+  assert.ok(content.includes('ok ? "sent" : unsure ? "unsure" : "failed"'));
+});
+
+test("texts: new texts count as seen only once the site took them", () => {
+  const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
+  const report = texts.slice(texts.indexOf("async function report"), texts.indexOf("let timer = null"));
+  const send = report.indexOf('type: "texts_seen"');
+  const save = report.lastIndexOf("chrome.storage.local.set({ [SEEN_KEY]: seen })");
+  assert.ok(send > 0 && save > send);
+  assert.ok(report.includes("(answer && answer.ok === true) || !items.length"));
+  assert.ok(!report.includes("[SEEN_KEY]: out.seen"));
+});
+
+test("texts: a send never takes the person's own tab from under a half-typed text", () => {
+  const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
+  const one = bg.slice(bg.indexOf("async function sendOneText"), bg.indexOf("function waitLoaded"));
+  assert.ok(one.indexOf('{ type: "texts_busy" }') > 0 && one.indexOf('{ type: "texts_busy" }') < one.indexOf("chrome.tabs.update(tab.id, { url })"));
+  const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
+  assert.ok(texts.includes('msg.type === "texts_busy"'));
+});
+
+test("texts: Google Messages never reopens a window the person closed", () => {
+  const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
+  const keep = bg.slice(bg.indexOf("async function keepTexts"), bg.indexOf("const TEXTS_ALARM"));
+  const guard = keep.indexOf("if (stayConnected === false || ownClosed === true || !(await chrome.tabs.query({})).length) return null;");
+  assert.ok(guard > 0 && guard < keep.indexOf("makeOwnWindow(MESSAGES)"));
+});
+
+test("texts: the conversation is checked again right before Send", () => {
+  const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
+  const body = texts.slice(texts.indexOf("async function send(msg)"), texts.indexOf("chrome.runtime.onMessage.addListener((msg, sender, reply)"));
+  const check = body.indexOf("if (!key || T.keyOf(location.href) !== key || !box.isConnected)");
+  assert.ok(check > body.indexOf("setValue(box, text)") && check < body.indexOf("button.click()"));
+});
+
+test("texts: a Google Messages page that never answered fails the send, never unsure", () => {
+  const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
+  assert.ok(bg.includes('if (!ready) return { ok: false, error: "Google Messages didn\'t load. Nothing went." };'));
+});
+
+test("texts: a new number is sent to only through its own Send-to choice, never Enter", () => {
+  const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
+  const start = texts.slice(texts.indexOf("async function startConversation"), texts.indexOf("async function send("));
+  assert.ok(!start.includes("pressEnter"));
+  assert.ok(start.includes("T.sameNumber(textOf(el), number)"));
+  assert.ok(!start.includes("mw-contact-selector-button"));
+});
+
+test("texts: the Send-to choice must show the same number, not one containing it", () => {
+  const T = textsHelpers();
+  assert.equal(T.sameNumber("Send to +1 (555) 010-0123", "5550100123"), true);
+  assert.equal(T.sameNumber("Send to 0555 010 0123", "+1 555 010 0123"), true);
+  assert.equal(T.sameNumber("Send to +1 555 010 01234", "555 010 0123"), false);
+  assert.equal(T.sameNumber("Send to 12", "12"), false);
+  assert.equal(T.sameNumber("", ""), false);
 });

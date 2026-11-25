@@ -1772,11 +1772,15 @@ def test_every_needed_argument_is_one_its_tool_requires() -> None:
         calendar_tools,
         open_loop_tools,
         people_tools,
+        text_tools,
         workflow_run_tools,
     )
 
     defs = [
-        v for mod in (schedule_tools, broadcast_tools, calendar_tools, open_loop_tools, people_tools, workflow_run_tools)
+        v for mod in (
+            schedule_tools, broadcast_tools, calendar_tools, open_loop_tools, people_tools, text_tools,
+            workflow_run_tools,
+        )
         for v in vars(mod).values() if isinstance(v, dict) and v.get("name") in ttl.ACTING_TOOLS and "input_schema" in v
     ]
     required = {d["name"]: set(d["input_schema"].get("required", [])) for d in defs}
