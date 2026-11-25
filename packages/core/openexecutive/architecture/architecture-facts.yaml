@@ -5212,8 +5212,10 @@ scheduler:
     for was dropped as "already handled"). The teammate path
     (_run_teammate_followup) applies the same block and sends what it wrote
     (without the marker); when the row goes to someone else and they wrote
-    since, the run's closing line to them is delivered to them
-    (deliver_to_person), so a hold there is never silent. The principal
+    since, their words only decide whether it goes (never quoted to the
+    recipient), and a hold or drop is told to them in the run's line
+    (runner._tell_setter, after the run and outside its retry), so a hold
+    there is never silent. The principal
     path does the same for a row to someone else (runner._tell_setter_block). Only the person's own words are quoted, never replies, so
     mail a reply quoted cannot reach an unattended run this way. In chat:
     every turn by a verified speaker carries <pending_followups> in the user

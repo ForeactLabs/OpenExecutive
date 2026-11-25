@@ -1304,14 +1304,6 @@ async def _execute_action(
                 retrieved_context=retrieved_context,
                 episodic_context=episodic_context,
             )
-            said = _followup_outcome(reply)[1]
-            if tell is not None and said:
-                # The run's own send already went: a failed notice is
-                # logged, never retried, or that send would go twice.
-                notice = await deliver_to_person(tell, said, label="Follow-up")
-                if not notice.ok:
-                    logger.warning("scheduler: action %d: couldn't tell the setter what it did: %s",
-                                   action.id, notice.detail)
 
     except Exception as exc:
         logger.exception("scheduler: action %d failed", action.id)
@@ -1334,8 +1326,10 @@ async def _execute_action(
         )
         return
 
-    outcome = _followup_outcome(reply)[0] if since else ""
+    outcome, said = _followup_outcome(reply) if since else ("", "")
     if outcome:
+        if tell is not None and said:
+            await _tell_setter(action, tell, said)
         _end_as_asked(action, outcome, (owner.full_name if owner else "") or "they")
         return
     mark_action_done(action.id)
@@ -1485,19 +1479,31 @@ def _since_scheduled_block(
 
 
 def _tell_setter_block(name: str) -> str:
-    """For a follow-up to someone else whose setter wrote since: hold it if
-    they asked, and either way end with one line to them, which the runner
-    delivers to them, so a hold there is never silent."""
+    """For a follow-up to someone else whose setter wrote since: their
+    words only decide whether it goes, and a hold or a drop is told to them
+    in a line the runner delivers (_tell_setter), so it is never silent."""
     return (
         f" What {name} wrote since is only for deciding whether to send, "
         f"hold or drop it: never put any of it in a message to anyone else."
         f" If what {name} said since asks to hold it or drop it, "
-        f"send nothing to anyone else. Either way, end with one short "
-        f"line to {name} saying what you did (sent it, or held it as "
-        f"they asked, what it was, and that they can ask for it again "
-        f"any time). Your whole final reply is sent to them as written, "
-        f"so make it that one line alone."
+        f"send nothing to anyone else, and after the {_PAUSED} or "
+        f"{_DROPPED} marker your final reply is one short line to {name}: "
+        f"what you held or dropped as they asked, and that they can ask "
+        f"for it again any time. It is sent to them as written."
     )
+
+
+async def _tell_setter(action: ScheduledAction, person: Person, text: str) -> None:
+    """Deliver the run's line about a held or dropped follow-up to the
+    person who set it. After the run, outside its retry: whatever happens
+    here is logged, never raised, so nothing the run sent goes twice."""
+    try:
+        notice = await deliver_to_person(person, text, label="Follow-up")
+    except Exception as exc:
+        logger.warning("scheduler: action %s: couldn't tell its setter: %s", action.id, exc)
+        return
+    if not notice.ok:
+        logger.warning("scheduler: action %s: couldn't tell its setter: %s", action.id, notice.detail)
 
 
 def _followup_outcome(reply: object) -> tuple[str, str]:
@@ -1665,13 +1671,6 @@ async def _run_teammate_followup(
                 delivery = await _send_on_plan(creator, [action.channel], text, label="Follow-up")
                 if not delivery.ok:
                     raise RuntimeError(delivery.detail)
-            elif since and text:
-                # The run's own send (if any) already went: a failed notice
-                # is logged, never retried, or that send would go twice.
-                notice = await deliver_to_person(creator, text, label="Follow-up")
-                if not notice.ok:
-                    logger.warning("scheduler: action %d: couldn't tell %s what it did: %s",
-                                   action.id, name, notice.detail)
     except Exception as exc:
         logger.exception("scheduler: action %d failed", action.id)
         new_status = mark_action_failed_or_retry(action.id, str(exc))
@@ -1680,6 +1679,8 @@ async def _run_teammate_followup(
         return True
 
     if outcome:
+        if not to_self and text:
+            await _tell_setter(action, creator, text)
         _end_as_asked(action, outcome, name)
         return True
     mark_action_done(action.id)

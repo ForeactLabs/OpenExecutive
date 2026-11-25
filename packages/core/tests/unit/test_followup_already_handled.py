@@ -214,8 +214,8 @@ def test_a_teammates_held_note_to_someone_else_tells_them_it_was_held(
         tell.return_value = SimpleNamespace(ok=True, detail="")
         _, prompt = _fire(action_id, f"PAUSED: {line}")
     assert "Hold the vendor email for now" in prompt
-    assert "send nothing to anyone else" in prompt and "end with one short line to Ben" in prompt
-    assert "that one line alone" in prompt and "send it" not in prompt
+    assert "send nothing to anyone else" in prompt and "one short line to Ben" in prompt
+    assert "It is sent to them as written" in prompt and "send it" not in prompt
     tell.assert_called_once()
     assert tell.call_args.args[0].id == ben and tell.call_args.args[1] == line
     row = episodic.get_scheduled_action(action_id)
@@ -299,3 +299,27 @@ def test_a_teammates_held_reminder_to_themself_gets_the_line_without_the_marker(
         _fire(action_id, "PAUSED: Held the vendor call reminder as you asked; ask again any time.")
     assert send.call_args.args[2] == "Held the vendor call reminder as you asked; ask again any time."
     assert episodic.get_scheduled_action(action_id).status == "cancelled"  # type: ignore[union-attr]
+
+
+def test_a_note_to_someone_else_after_unrelated_chat_just_goes(
+    db: Path, roster: SimpleNamespace
+) -> None:
+    me = roster.principal.id
+    create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
+    action_id = _followup("tg-1", ref="999", created_by=me)
+    _message(db, "web-2", me, "user", "What's on my calendar tomorrow?", -timedelta(hours=2), sender=me)
+    with patch.object(runner, "deliver_to_person", new_callable=AsyncMock) as tell:
+        _fire(action_id, "Sent Dana the lease comparison.")
+    tell.assert_not_called()  # nothing held: no extra message to them
+    assert episodic.get_scheduled_action(action_id).status == "done"  # type: ignore[union-attr]
+
+
+def test_a_failed_notice_never_reruns_the_send(db: Path, roster: SimpleNamespace) -> None:
+    me = roster.principal.id
+    create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
+    action_id = _followup("tg-1", ref="999", created_by=me)
+    _message(db, "web-2", me, "user", "Drop the note to Dana", -timedelta(hours=2), sender=me)
+    with patch.object(runner, "deliver_to_person", new_callable=AsyncMock, side_effect=RuntimeError("down")):
+        _fire(action_id, "DROPPED: Dropped the note to Dana as you asked.")
+    row = episodic.get_scheduled_action(action_id)
+    assert row is not None and row.status == "cancelled"  # not retried: nothing goes twice
