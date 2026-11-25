@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import threading
+from datetime import timedelta
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -1705,3 +1706,16 @@ def get_settings() -> Settings:
     with _settings_lock:
         _settings_cache = (key, mcp_config_file_present(settings.mcp_servers_config_path), settings)
     return settings.model_copy(deep=True)
+
+
+# Past its whole-turn deadline (``chat_stream_timeout_s``), what a background
+# turn still does: save the reply, name the chat, tell whoever started it.
+BACKGROUND_WRAP_UP_S = 120.0
+
+
+def background_turn_limit() -> timedelta:
+    """The longest a background turn (``api.routes.chat.start_background_turn``)
+    runs, start to end: its deadline plus the wrap-up. Whoever started it hears
+    how it went by then, so a record still saying "working" after this long
+    lost its turn (a restart) and reads as stopped."""
+    return timedelta(seconds=get_settings().chat_stream_timeout_s + BACKGROUND_WRAP_UP_S)

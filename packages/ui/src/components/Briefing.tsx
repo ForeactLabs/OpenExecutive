@@ -46,6 +46,7 @@ import { REPLIES_WAITING_TIP, ReplyCardItem, useReplyCards } from "./RepliesWait
 import Icon from "./Icon";
 import { MonitoringPanelBody } from "./briefing/AwarenessPanels";
 import DoneForYou from "./briefing/DoneForYou";
+import TakeOn from "./briefing/TakeOn";
 import { anyWorking } from "@/lib/doneForYou";
 import FirstWeekCard from "./briefing/FirstWeekCard";
 import { RightNowItem } from "./briefing/RightNow";
@@ -875,6 +876,9 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
                 people={today.people ?? []}
                 onOpen={() => setOpenPanel("team")}
               />
+
+              {/* Real steps it can take next (briefing/take_on.py). */}
+              <TakeOn onOpenChat={onOpenChat ? (id) => onOpenChat(id) : undefined} onFinished={refreshToday} />
 
               <DoneForYou
                 rows={doneRows}

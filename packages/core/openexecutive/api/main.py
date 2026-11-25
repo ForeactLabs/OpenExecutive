@@ -57,6 +57,7 @@ from openexecutive.api.routes import (
     sessions,
     setup_status,
     skills,
+    take_on,
     take_the_lead,
     today,
     version,
@@ -985,6 +986,7 @@ def create_app() -> FastAPI:
     app.include_router(contacts.router, tags=["people"])
     app.include_router(chat_directory.router, tags=["people"])
     app.include_router(today.router, tags=["today"])
+    app.include_router(take_on.router, tags=["today"])
     app.include_router(scheduled.router, tags=["scheduled"])
     app.include_router(schedule.router, tags=["schedule"])
     app.include_router(executive.router, tags=["executive"])
