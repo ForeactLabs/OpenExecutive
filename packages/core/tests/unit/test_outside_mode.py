@@ -397,7 +397,13 @@ def test_dont_ask_lifts_the_hold_after_reading_their_own_mail(monkeypatch: pytes
         monkeypatch.setattr(delegation_settings, "turn_delegation", lambda session: SimpleNamespace(**kw))
 
     def waits() -> bool:
-        return bool(_turn(Session(caller_person_id=1), lambda state: app_control._turn_read_outside(Session())))
+        from openexecutive.orchestrator import levels
+
+        def decide(state: Any) -> bool:
+            noticed = app_control._noticed(Session())
+            return noticed is not None and levels.decide(noticed) == levels.CARD
+
+        return bool(_turn(Session(caller_person_id=1), decide))
 
     # This turn read their mail, and the check hasn't cleared it.
     pin(touched_mail=True, read_mail=True, mail_vetted=False, mail_held=False)

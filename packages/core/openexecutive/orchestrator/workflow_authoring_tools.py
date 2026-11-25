@@ -309,6 +309,10 @@ async def handle_draft_workflow(tool_input: dict[str, Any]) -> str:
 
     defn, error = await _build_def(tool_input.get("definition"))
     existing = get_definition(defn.name) if error is None else None
+    if error is None and workflow_change.someone_else_as_creator(existing, defn):
+        from openexecutive.delegation.workflow_email import NOT_THE_CREATOR
+
+        error = NOT_THE_CREATOR
     on_card = error is None and workflow_change.needs_card(existing, defn, asked=_asked_by_its_owner(existing, defn.name))
     if on_card:
         error = workflow_change.may_read(defn.name)
@@ -394,6 +398,10 @@ async def handle_save_workflow(tool_input: dict[str, Any]) -> str:
                 "overwrite=true to replace it."
             )
         })
+    if workflow_change.someone_else_as_creator(existing, defn):
+        from openexecutive.delegation.workflow_email import NOT_THE_CREATOR
+
+        return json.dumps({"error": NOT_THE_CREATOR})
     if workflow_change.needs_card(existing, defn, asked=_asked_by_its_owner(existing, defn.name)):
         # A person approved its tools, or it sends or reads email as its
         # creator, whom chat can't verify: the change waits on a card that

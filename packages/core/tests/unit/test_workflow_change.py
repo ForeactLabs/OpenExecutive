@@ -240,13 +240,14 @@ def _needs_you_card(decision_id: int) -> Any:
     )
 
 
-def test_no_card_without_a_verified_speaker_or_in_a_channel_others_read(owner: Any) -> None:
+def test_no_card_without_a_verified_speaker_and_a_channel_others_read_still_gets_one(owner: Any) -> None:
     _stored()
     assert "know who is asking" in _save_fix(None)["error"]
+    assert decision_ledger.list_instances("app_action") == []
+    # Privacy hides; it never stops work: the card is the speaker's own.
     channel = Session(session_id="slack:channel:C1:U1", origin_channel="slack", origin_channel_ref="U1",
                       caller_person_id=owner.id)
-    assert "error" in _save_fix(channel)
-    assert decision_ledger.list_instances("app_action") == []
+    assert _save_fix(channel).get("status") == "waiting_for_approval"
 
 
 def test_where_the_chat_cant_show_it_the_card_goes_on_needs_you(owner: Any) -> None:
@@ -404,7 +405,7 @@ def test_after_reading_mail_or_a_page_the_creators_ask_still_waits_on_a_card(
     assert out.get("status") != "waiting_for_approval" and "error" not in out, out
 
 
-def test_someone_elses_ask_to_make_it_work_as_its_creator_waits_on_a_card(
+def test_someone_elses_ask_to_make_it_work_as_its_creator_is_answered_now(
     owner: Any, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ben_id = people_store.upsert_person(full_name="Ben Teammate", email="ben@co.example")
@@ -414,7 +415,10 @@ def test_someone_elses_ask_to_make_it_work_as_its_creator_waits_on_a_card(
     mine = _prep(tools=["oe__my_calendar"])
     out = _call(wat.handle_save_workflow, {"definition": mine, "confirm_token": wat._canonical_token(mine),
                                            "overwrite": True}, _web(owner))
-    assert out["status"] == "waiting_for_approval"
+    # Only its creator's own signed request saves one that works as them, so
+    # the owner hears that now instead of getting a card they can't approve.
+    assert out["error"].startswith("Only the person who created this workflow"), out
+    assert decision_ledger.list_instances("app_action") == []
     stored = dynamic_store.get_definition("meeting_prep")
     assert stored is not None and stored.steps[0].tools == [GATEWAY_READ]  # type: ignore[union-attr]
 
