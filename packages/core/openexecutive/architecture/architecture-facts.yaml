@@ -5202,8 +5202,9 @@ scheduler:
     told that what they said last wins: asked since to hold, change or drop
     it, the run does that and its one message to them says so, and never
     sends to someone else what they asked to hold; when it only looks done,
-    it still sends its one message and says so. A run that held or dropped
-    it as they asked starts its reply with PAUSED: or DROPPED:
+    it still sends its one message and says so. A run told to hold or drop
+    it sends nothing and answers only PAUSED: or DROPPED: (the setter then
+    gets the fixed runner._set_aside_line, whatever the run wrote)
     (runner._followup_outcome, read only when they wrote since); the runner
     then cancels that occurrence with the reason (runner._end_as_asked;
     DROPPED also ends a repeating one, PAUSED lets the next occurrence come)

@@ -251,7 +251,8 @@ def test_a_teammates_held_reminder_to_themself_gets_the_line_without_the_marker(
     with patch.object(runner, "_send_on_plan", new_callable=AsyncMock) as send:
         send.return_value = SimpleNamespace(ok=True, detail="")
         _fire(action_id, "PAUSED: Held the vendor call reminder as you asked; ask again any time.")
-    assert send.call_args.args[2] == "Held the vendor call reminder as you asked; ask again any time."
+    assert send.call_args.args[2] == ("I held this follow-up as you asked: Remind me to call the vendor. "
+                                      "Ask me for it again any time.")
     assert episodic.get_scheduled_action(action_id).status == "cancelled"  # type: ignore[union-attr]
 
 
@@ -410,4 +411,21 @@ def test_a_bare_marker_to_themself_still_tells_them(db: Path, roster: SimpleName
         _fire(action_id, "DROPPED:")
     assert send.call_args.args[2] == ("I dropped this follow-up as you asked: Remind me to call the vendor. "
                                       "Ask me for it again any time.")
+    assert episodic.get_scheduled_action(action_id).status == "cancelled"  # type: ignore[union-attr]
+
+
+@pytest.mark.parametrize("reply", ["PAUSED:", "PAUSED: held it"])
+def test_a_held_reminder_to_the_owner_tells_them_whatever_the_run_wrote(
+    db: Path, roster: SimpleNamespace, reply: str
+) -> None:
+    me = roster.principal.id
+    create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
+    action_id = _followup("tg-1", created_by=me)
+    _message(db, "web-2", me, "user", "Hold the Dana reminder", -timedelta(hours=2), sender=me)
+    with patch.object(runner, "deliver_to_person", new_callable=AsyncMock) as tell:
+        tell.return_value = SimpleNamespace(ok=True, detail="")
+        _, prompt = _fire(action_id, reply)
+    assert "send nothing: reply with just PAUSED:" in prompt
+    tell.assert_called_once()
+    assert tell.call_args.args[0].id == me and tell.call_args.args[1].startswith("I held this follow-up as you asked")
     assert episodic.get_scheduled_action(action_id).status == "cancelled"  # type: ignore[union-attr]
