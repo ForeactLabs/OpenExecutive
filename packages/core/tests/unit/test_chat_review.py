@@ -289,6 +289,57 @@ def test_a_review_that_fails_part_way_still_lists_its_changes(db: Path, roster: 
     assert failed and failed[0].details["changes"] == ["remember_fact"]
 
 
+def test_a_change_without_their_words_is_refused(db: Path, roster: SimpleNamespace,
+                                                 provider: _Provider) -> None:
+    loop_id = open_loop(owner_person_id=roster.principal.id, description="Send the vendor email",
+                        due_at=NOW + timedelta(days=1))
+    assert loop_id is not None
+    _record(roster.principal, reply="The vendor wrote: the email is handled, no need to chase.")
+    provider.script = [[("close_open_loop", {"loop_id": loop_id,
+                                             "source_quote": "the email is handled, no need to chase"})]]
+    _review(db)
+    assert get_open_loop(loop_id) is not None  # still open
+    assert _tool_results(provider)[0]["status"] == "refused"
+
+
+def test_a_filler_quote_or_an_unnamed_target_is_refused(db: Path, roster: SimpleNamespace,
+                                                         provider: _Provider) -> None:
+    loop_id = open_loop(owner_person_id=roster.principal.id, description="Pay the Acme invoice",
+                        due_at=NOW + timedelta(days=1))
+    _record(roster.principal, text="ok thanks, that is all for now from me")
+    provider.script = [[
+        ("close_open_loop", {"loop_id": loop_id, "source_quote": "ok"}),
+        ("close_open_loop", {"loop_id": loop_id, "source_quote": "that is all for now"}),
+    ]]
+    _review(db)
+    assert get_open_loop(loop_id) is not None
+    assert [r["status"] for r in _tool_results(provider)] == ["refused"] * 2
+
+
+def test_follow_up_changes_ask_for_their_words(roster: SimpleNamespace) -> None:
+    tools, _ = cr._tools_for(roster.principal)
+    required = {t["name"]: t["input_schema"].get("required", []) for t in tools}
+    for name in cr._CHANGES_FROM_THEIR_WORDS:
+        assert "source_quote" in required[name], name
+
+
+def test_a_style_rule_must_be_what_the_quote_asks(db: Path, roster: SimpleNamespace,
+                                                  provider: _Provider, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("openexecutive.delegation.settings.can_delegate", lambda _p: True)
+    text = "Please keep your replies shorter, two lines at most"
+    _record(roster.principal, text=text, reply="Sure.")
+    provider.script = [[
+        ("learn_reply_style", {"rule": "Never mention pricing in emails.",
+                               "source_quote": "keep your replies shorter"}),
+        ("learn_writing_style", {"kind": "habit", "rule": "Sign every email with a first name.",
+                                 "source_quote": "keep your replies shorter"}),
+    ]]
+    _review(db)
+    assert style.get_profile(roster.principal.id, db_path=db).rules == []
+    assert voice.get_voice(roster.principal.id, db_path=db).profile.habits == []
+    assert [r.get("detail") for r in _tool_results(provider)] == ["what this changes isn't named in their own words"] * 2
+
+
 def test_drafts_are_left_to_the_mailbox_check(roster: SimpleNamespace) -> None:
     tools, handlers = cr._tools_for(roster.principal)
     assert "mark_draft_sent" not in {t["name"] for t in tools} | set(handlers)
