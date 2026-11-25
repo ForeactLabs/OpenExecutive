@@ -598,3 +598,17 @@ def test_a_moved_followup_still_carries_a_change_asked_before_the_move(
     # The run that writes it still sees the change of wording.
     _, prompt = _fire(action_id, "Sent.")
     assert "mention the contract too" in prompt
+
+
+def test_a_deferral_keeps_a_chat_moves_turn_marker(db: Path, roster: SimpleNamespace) -> None:
+    me = roster.principal.id
+    create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
+    action_id = _followup("tg-1", created_by=me)
+    with episodic._get_conn(db) as conn:
+        conn.execute("UPDATE scheduled_actions SET read_since = ?, read_since_turn_in = 'web-9' WHERE id = ?",
+                     (_iso(-timedelta(hours=3)), action_id))
+    [action] = [a for a in episodic.claim_due_actions(datetime.now(UTC) + timedelta(days=2)) if a.id == action_id]
+    assert action.id is not None
+    assert episodic.reschedule_action(action.id, datetime.now(UTC) + timedelta(hours=1))  # an approver away
+    row = episodic.get_scheduled_action(action_id)
+    assert row is not None and row.read_since_turn_in == "web-9"

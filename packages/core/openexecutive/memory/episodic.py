@@ -1786,13 +1786,16 @@ def reschedule_action(
     ``read_since``: a follow-up moved as its setter asked counts their words
     from then on (``ScheduledAction.read_since``).
     """
+    stamp = read_since.isoformat() if read_since else None
     with _get_conn(_resolve_db_path(db_path)) as conn:
         cursor = conn.execute(
             "UPDATE scheduled_actions "
             "SET status = 'pending', run_at = ?, attempts = MAX(0, attempts - 1), "
-            "read_since = COALESCE(?, read_since), read_since_turn_in = NULL "
+            # A deferral (no read_since) keeps a chat move's turn marker.
+            "read_since = COALESCE(?, read_since), "
+            "read_since_turn_in = CASE WHEN ? IS NULL THEN read_since_turn_in ELSE NULL END "
             "WHERE id = ? AND status = 'running'",
-            (new_run_at.isoformat(), read_since.isoformat() if read_since else None, action_id),
+            (new_run_at.isoformat(), stamp, stamp, action_id),
         )
         return cursor.rowcount > 0
 
