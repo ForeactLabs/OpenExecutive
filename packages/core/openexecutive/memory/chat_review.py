@@ -1703,6 +1703,9 @@ async def _run_loop(
     facts_saved: set[str] = set()
     # One follow-up per what and when a pass, for the same reason.
     followups_set: set[tuple[str, str]] = set()
+    # The words of each change that went through, so a put-right line can
+    # name what was actually done.
+    made: list[str] = []
 
     def _read(response: Any, _round: int) -> None:
         if notes is not None:
@@ -1724,10 +1727,14 @@ async def _run_loop(
                     str(tool_input.get("run_at") or "").strip())
         if name == "schedule_followup" and followup in followups_set:
             return json.dumps({"status": "noop", "detail": "this follow-up was already set in this review"})
+        target = _target_text(name, tool_input) if name in _CHANGES_FROM_THEIR_WORDS else ""
         out = await _apply(name, tool_input, person, session, words, handlers,
-                           turns=turns, db_path=db_path, changed=bool(done))
+                           turns=turns, db_path=db_path, made=" ".join(made))
         if _went_through(out):
             done.append(name)
+            if name != "raise_in_brief":
+                made.append(" ".join([target, *(str(v) for k, v in tool_input.items()
+                                                 if isinstance(v, str) and k != "source_quote")]))
             if name == "remember_fact":
                 facts_saved.add(_fact_key(tool_input))
             if name == "schedule_followup":
@@ -1910,10 +1917,10 @@ async def _apply(
     *,
     turns: list[sqlite3.Row] | None = None,
     db_path: Path | None = None,
-    changed: bool = False,
+    made: str = "",
 ) -> str:
-    """Make one change. ``changed``: a change already went through in this
-    pass, so a line saying what was put right has something behind it."""
+    """Make one change. ``made``: the words of the changes that already went
+    through in this pass, which a line saying what was put right names."""
     quote = str(tool_input.get("source_quote") or "")
     if name == "learn_lesson":
         from openexecutive.memory import lessons
@@ -1953,9 +1960,11 @@ async def _apply(
 
         kind = brief_requests.KIND_FIXED if tool_input.get("put_right") is True else brief_requests.KIND_RAISE
         # A line rests on their own words and is about them, or (put right)
-        # tells a change this pass made: never only what a reply or mail said.
-        unbacked = None if kind == brief_requests.KIND_FIXED and changed else (
-            _not_their_words(quote, words) or _not_named(str(tool_input.get("line") or ""), quote)
+        # names a change this pass made: never only what a reply or mail said.
+        line_text = str(tool_input.get("line") or "")
+        tells_a_change = kind == brief_requests.KIND_FIXED and bool(made) and _not_named(line_text, made) is None
+        unbacked = None if tells_a_change else (
+            _not_their_words(quote, words) or _not_named(line_text, quote)
         )
         if unbacked:
             return json.dumps({"status": "not_raised", "detail": unbacked})
