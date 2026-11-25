@@ -396,6 +396,7 @@ def _requeue_scheduled_action(alert: Alert, approval: approvals.AlertApproval, a
         channel=action.channel,
         channel_ref=action.channel_ref,
         intent_text=action.intent_text,
+        title=action.title,
         originating_session_id=action.originating_session_id,
         kind=action.kind,
         assigned_to_person_id=action.assigned_to_person_id,

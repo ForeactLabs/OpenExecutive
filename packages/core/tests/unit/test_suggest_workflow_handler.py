@@ -73,6 +73,11 @@ def test_happy_path_with_prefilled_inputs(
     )
     assert payload["status"] == "scheduled"
     assert payload["workflow_name"] == "board_prep"
+    from openexecutive.memory.episodic import get_scheduled_action
+    from openexecutive.workflows import WORKFLOW_REGISTRY
+
+    row = get_scheduled_action(payload["id"])
+    assert row is not None and row.title == f"Suggest the {WORKFLOW_REGISTRY['board_prep'].title} workflow"
     assert "deep_link" in payload
     assert payload["deep_link"].endswith(
         # base64url of {"quarter_label":"Q2 2026"} sorted, no padding

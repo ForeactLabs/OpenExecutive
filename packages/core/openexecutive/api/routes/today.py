@@ -3450,7 +3450,9 @@ def _watching(request: Request, caller: int | None, *, limit: int = _WATCHING_MA
             items.append(WatchingItem(
                 key=f"action:{action.id}",
                 kind="follow_up",
-                title=_cut_at_word(action.intent_text, 200),
+                # Its short plain title; the instruction it runs on is for the
+                # run, not for the person.
+                title=action.title or _cut_at_word(action.intent_text, 200),
                 detail=detail,
                 at=action.run_at,
             ))

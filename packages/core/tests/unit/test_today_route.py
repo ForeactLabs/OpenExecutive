@@ -3424,6 +3424,7 @@ def test_watching_next_lists_follow_ups_and_standing_jobs_and_stop_ends_one(
     ]
     assert client.post("/today/watching/stop", json={"key": f"action:{sams}"}, headers=owner).status_code == 404
     assert lines[0]["detail"] == "I'll follow up with Priya Nair" and lines[0]["at"] == soon
+    assert lines[0]["title"] == "Ask Priya about the partners' pre-read"
     assert lines[1]["title"] == "Chase overdue tasks every morning"
 
     teammate = {"x-caller-email": "sam@example.com"}
@@ -3449,6 +3450,23 @@ def test_watching_next_lists_follow_ups_and_standing_jobs_and_stop_ends_one(
         "stopped": True,
     }
     assert [w["key"] for w in client.get("/today", headers=owner).json()["watching"]] == [f"action:{owners}"]
+
+
+def test_coming_up_shows_a_follow_ups_short_title_not_its_instruction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db = tmp_path / "titles.db"
+    _setup_isolated_db(db, monkeypatch)
+    monkeypatch.setenv("OE_LOCAL_LOGIN", "1")
+    jordan = people_store.upsert_person(full_name="Jordan", is_principal=True, email="jordan@example.com", db_path=db)
+    people_registry.invalidate()
+    episodic.insert_scheduled_action(
+        run_at=(datetime.now(UTC) + timedelta(hours=18)).isoformat(), channel="slack_dm", channel_ref="U1",
+        intent_text="Check whether Alex Cohen replied to the Nov 25 message on the launch email: (1) can m",
+        title="See if Alex replied about the launch email", created_by_person_id=jordan,
+    )
+    lines = _make_client().get("/today", headers={"x-caller-email": "jordan@example.com"}).json()["watching"]
+    assert [w["title"] for w in lines] == ["See if Alex replied about the launch email"]
 
 
 def test_today_says_why_a_booking_waits_and_who_waits_on_a_held_ask(

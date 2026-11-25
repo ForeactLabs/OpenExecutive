@@ -522,6 +522,7 @@ async def _schedule_post_meeting_followup(
         intent_text=intent,
         kind="ad_hoc",
         scope_key=scope_key,
+        title=f"Ask {target_name} for a recap of {title}",
     )
     logger.info(
         "calendar_tools: scheduled post-meeting recap follow-up via %s at %s "

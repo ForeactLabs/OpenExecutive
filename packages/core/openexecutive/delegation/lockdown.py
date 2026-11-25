@@ -397,11 +397,13 @@ def mail_touched_withholds(tool_name: str, tool_input: Any) -> bool:
 
 
 def mail_lock_holds(pinned: Any, *, reading_now: bool = False) -> bool:
-    """Whether the whole lockdown (``mail_touched_withholds``) holds for the
-    turn ``pinned`` is for, by the owner's safety level: Careful after any
-    mail read, Balanced only once a read was flagged or too big to check or
-    while one waits for its check (``reading_now``: this round reads mail),
-    Hands-off never on the principal's own turn. A turn with no safety state
+    """Whether the whole lockdown (``mail_touched_withholds``) is noticed for
+    the turn ``pinned`` is for, by the owner's safety level: Careful after any
+    mail read, Balanced once a read was flagged or too big to check or while
+    one waits for its check (``reading_now``: this round reads mail),
+    Hands-off never on the principal's own turn. It only notices: the reason
+    (``levels.mail_reason``) and ``levels.decide`` say whether a step waits,
+    and on Balanced a step asked in the reading round runs. A turn with no safety state
     (a workflow, a script outside chat) holds it after any read. Never
     raises; fails closed."""
     from openexecutive.orchestrator import outside_content, outside_mode
@@ -460,6 +462,19 @@ def _page_open_waits(pinned: Any) -> bool:
         return True
 
 
+def spreads_mail(tool_name: str, tool_input: Any) -> bool:
+    """Whether ``tool_name`` posts to everyone or changes who is on People
+    (``MAIL_PRIVATE_WITHHELD_TOOLS``, or an ``upsert_person`` the speaker
+    didn't ask for): after a mail read, sharing and people topics the
+    level decides on (``levels.MAIL_SHARED``). Only looks. Never raises."""
+    try:
+        if tool_name == "upsert_person":
+            return not speaker_named_contact(tool_input)
+        return tool_name in MAIL_PRIVATE_WITHHELD_TOOLS
+    except Exception:
+        return True
+
+
 def mail_turn_withholds(
     tool_name: str, tool_input: Any, *, reading_now: bool = False, pinned: Any = None,
 ) -> bool:
@@ -512,7 +527,7 @@ def outside_reach_refusal(label: str, tool_input: Any = None, tool_name: str = "
         return None
     from openexecutive.orchestrator import levels, outside_content
 
-    mail = reason in (levels.OWN_MAIL, levels.MAIL_FLAGGED)
+    mail = reason in (levels.OWN_MAIL, levels.MAIL_FLAGGED, levels.MAIL_UNCHECKED, levels.MAIL_SHARED)
     error = mail_touched_withheld_error(label) if mail else outside_content.outside_withheld_error(label)
     return _card_or(error, name, tool_input, reason)
 
@@ -523,19 +538,27 @@ def outside_reach_reason(name: str, tool_input: Any = None) -> str | None:
     holds nothing and remembers nothing. Never raises; fails closed."""
     from openexecutive.orchestrator import levels, outside_content
 
+    reason: str | None
     try:
-        if mail_turn_withholds(name, tool_input):
-            return levels.mail_reason()
+        reason = levels.mail_reason(tool=name, tool_input=tool_input) if mail_turn_withholds(name, tool_input) else None
     except Exception:
-        return levels.OWN_MAIL
+        reason = levels.MAIL_UNCHECKED
     # The same holds, with contact writes and gateway writes added, once the
-    # turn has read anything from outside the team (outside_content).
+    # turn has read anything from outside the team (outside_content). Both
+    # are looked at, and the one that waits on more levels is kept
+    # (levels.stronger), as in the chat loop.
+    outside: str | None = None
     try:
         if outside_content.read_outside() and outside_content.outside_withholds(name, tool_input):
-            return levels.STRANGER if outside_content.answers_off_team_mail() else levels.outside_reason()
-        return None
+            outside = levels.STRANGER if outside_content.answers_off_team_mail() else levels.outside_reason()
     except Exception:
-        return levels.OUTSIDE
+        outside = levels.OUTSIDE
+    if outside is not None:
+        reason = levels.stronger(reason, outside)
+    # A reason only noticed: the level decides whether it waits.
+    if reason is None or levels.decide(reason) == levels.RUN:
+        return None
+    return reason
 
 
 def _card_or(error: str, name: str, tool_input: Any, reason: str) -> str:

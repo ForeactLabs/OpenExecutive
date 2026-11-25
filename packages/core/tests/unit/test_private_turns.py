@@ -57,7 +57,12 @@ def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     monkeypatch.setattr(people_store, "DB_PATH", path)
     monkeypatch.setattr(episodic, "DB_PATH", path)
     monkeypatch.setattr(dept_store, "DB_PATH", path)
+    # The open cards a new alert checks against (alerts.one_card) too.
+    from openexecutive.alerts import store as alerts_store
+
+    monkeypatch.setattr(alerts_store, "DB_PATH", path)
     episodic.initialize_db(path)
+    alerts_store.initialize_db(path)
     people_store.initialize_db()
     dept_store.initialize_db()
     people_registry.invalidate()
@@ -1465,6 +1470,24 @@ def test_hands_off_runs_a_private_turns_send(roster: SimpleNamespace, mode: str)
     ):
         _run_loop(_private_turn(roster), [tool_use])
     handler.assert_awaited_once()
+
+
+def test_balanced_puts_a_private_turns_post_on_an_approve_card(roster: SimpleNamespace) -> None:
+    """A private turn answers mail from a contact (or a forward): its words
+    are not a team member asking, so on Balanced a post through a connected
+    app waits on a card, as a broadcast does."""
+    from openexecutive.orchestrator import outside_mode
+
+    gateway = _gateway()
+    gateway.call_tool = AsyncMock(return_value=json.dumps({"ok": True}))
+    tool_use = SimpleNamespace(
+        type="tool_use", id="tu-1", name="call_tool",
+        input={"name": "slack__post_message", "arguments": {"channel": "#general", "text": "the thread"}},
+    )
+    with patch.object(outside_mode, "get_mode", lambda **_: outside_mode.OUTSIDERS):
+        provider = _run_loop(_private_turn(roster), [tool_use], gateway=gateway)
+    gateway.call_tool.assert_not_awaited()
+    assert _held(provider.calls[1]["messages"][-1]["content"][0]["content"])
 
 
 def test_load_mcp_server_on_a_private_turn_is_told_not_dropped(roster: SimpleNamespace) -> None:

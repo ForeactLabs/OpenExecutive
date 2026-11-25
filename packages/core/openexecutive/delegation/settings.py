@@ -110,6 +110,13 @@ class TurnDelegation:
     # leaves ``mail_vetted`` false, so the whole lockdown holds.
     mail_vetted: bool = False
     mail_held: bool = False
+    # Set by the chat loop while it dispatches a round that reads mail, until
+    # that round's reads are checked: a step in the same round was asked for
+    # before anyone saw that mail, so only mail an earlier round left
+    # unchecked (``unvetted_before_round``) makes it wait
+    # (``orchestrator.levels.mail_reason``).
+    round_reading: bool = False
+    unvetted_before_round: bool = False
     # A file from their mailbox reached a tool whose output the mail check
     # never reads (``file_refs`` mail: handles in a Python job or
     # ``read_document``): the whole lockdown holds for the rest of the turn,

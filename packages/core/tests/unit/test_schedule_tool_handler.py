@@ -11,6 +11,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -231,7 +232,7 @@ def test_a_repeating_follow_up_comes_back_until_cancelled(session_with_telegram_
 
 
 def test_an_occurrence_that_stands_down_keeps_the_repeat(session_with_telegram_ref: Session) -> None:
-    """A run that finds it was already handled skips only that time."""
+    """A run its setter asked to hold skips only that time."""
     from openexecutive.memory import episodic
     from openexecutive.scheduler import runner
 
@@ -241,7 +242,8 @@ def test_an_occurrence_that_stands_down_keeps_the_repeat(session_with_telegram_r
     })
     first = episodic.get_scheduled_action(payload["id"])
     assert first is not None
-    runner._skip_already_handled(first, "they talked about it this week")
+    with patch("openexecutive.audit.log_event"):  # its audit row, not this test's DB
+        runner._end_as_asked(first, "paused", "Olivia")
     pending = episodic.list_scheduled_actions(status="pending")
     assert len(pending) == 1 and pending[0].id != first.id and pending[0].repeat == "weekly@mon@09:00"
 
@@ -339,3 +341,38 @@ def test_a_time_of_day_that_doesnt_exist_is_sent_back(session_with_telegram_ref:
         "run_at": _future_iso(), "channel": "telegram", "channel_ref": "42", "intent": "x", "repeat": spec,
     })
     assert "can't be read" in payload["error"]
+
+
+def test_a_follow_up_keeps_its_short_title_and_a_repeat_carries_it(
+    session_with_telegram_ref: Session,
+) -> None:
+    """Home shows the short title, not the instruction the run reads."""
+    from openexecutive.memory import episodic
+
+    payload = _call({
+        "run_at": _future_iso(), "channel": "telegram", "channel_ref": "42",
+        "intent": "Check whether Alex Cohen replied to the Nov 25 message on the launch email: (1) can m",
+        "title": "  See if Alex replied about\nthe launch email ",
+        "repeat": "daily@09:00",
+    })
+    first = episodic.get_scheduled_action(payload["id"])
+    assert first is not None and first.title == "See if Alex replied about the launch email"
+    assert episodic.mark_action_done(first.id)
+    [nxt] = [a for a in episodic.list_scheduled_actions(status="pending") if a.id != first.id]
+    assert nxt.title == first.title
+
+
+def test_a_follow_up_with_no_title_is_still_scheduled(session_with_telegram_ref: Session) -> None:
+    payload = _call({
+        "run_at": _future_iso(), "channel": "telegram", "channel_ref": "42", "intent": "Remind about board prep.",
+    })
+    assert payload["status"] == "scheduled"
+
+
+def test_a_long_title_is_cut_at_a_word() -> None:
+    from openexecutive.memory.episodic import SCHEDULED_TITLE_MAX, short_title
+
+    long = "word " * 40
+    cut = short_title(long)
+    assert cut is not None and len(cut) <= SCHEDULED_TITLE_MAX and cut.endswith("word…")
+    assert short_title("   ") is None and short_title(None) is None
