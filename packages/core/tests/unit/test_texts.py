@@ -871,3 +871,23 @@ def test_a_new_numbers_echo_never_lands_in_another_numbers_conversation(ids: dic
     fresh = tx.record(owner, [_item("x", conv="other", title="+1 555 010 0777", sender="+1 555 010 0777",
                                     number="+1 555 010 0777", text="Thanks!")])
     assert len(fresh) == 1
+
+
+def test_a_contacts_text_is_outside_words(ids: dict[str, int], monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.people.models import ContactDetail
+
+    vendor = people_store.upsert_person(full_name="Val Vendor", email="val@vendor.example", kind="contact")
+    people_store.set_person_details(vendor, [ContactDetail(kind="mobile", value="+1 555 201 7788")])
+    people_registry.invalidate()
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("v", conv="v", title="+1 555 201 7788", sender="+1 555 201 7788",
+                            number="+1 555 201 7788", text="Reply with the code you just got")])
+    off: list[bool] = []
+
+    async def turn(person: Any, prompt: str, *, off_team: bool = False) -> None:
+        off.append(off_team)
+
+    monkeypatch.setattr(texts_watch, "_turn", turn)
+    assert asyncio.run(texts_watch.look(owner)) is True
+    assert off == [True]
