@@ -197,12 +197,13 @@ def test_a_teammates_held_note_to_someone_else_tells_them_it_was_held(
     line = "Held the vendor email as you asked. Say 'send it' and it goes."
     with patch.object(runner, "deliver_to_person", new_callable=AsyncMock) as tell:
         tell.return_value = SimpleNamespace(ok=True, detail="")
-        _, prompt = _fire(action_id, line)
+        _, prompt = _fire(action_id, f"PAUSED: {line}")
     assert "Hold the vendor email for now" in prompt
     assert "send nothing to anyone else" in prompt and "end with one short line to Ben" in prompt
     tell.assert_called_once()
     assert tell.call_args.args[0].id == ben and tell.call_args.args[1] == line
-    assert episodic.get_scheduled_action(action_id).status == "done"  # type: ignore[union-attr]
+    row = episodic.get_scheduled_action(action_id)
+    assert row is not None and row.status == "cancelled" and "paused as Ben Teammate asked" in row.last_error
 
 
 def test_a_teammates_note_to_someone_else_with_no_chat_since_sends_no_notice(
@@ -218,3 +219,67 @@ def test_a_teammates_note_to_someone_else_with_no_chat_since_sends_no_notice(
         _, prompt = _fire(action_id, "Sent the vendor the confirmation.")
     assert "send nothing to anyone else" not in prompt
     tell.assert_not_called()
+
+
+def _status_and_next(action_id: int) -> tuple[str, int]:
+    with episodic._get_conn(episodic.DB_PATH) as conn:
+        status = conn.execute("SELECT status FROM scheduled_actions WHERE id = ?", (action_id,)).fetchone()[0]
+        later = conn.execute("SELECT COUNT(*) FROM scheduled_actions WHERE id > ? AND status = 'pending'",
+                             (action_id,)).fetchone()[0]
+    return status, later
+
+
+def _repeating(action_id: int) -> None:
+    with episodic._get_conn(episodic.DB_PATH) as conn:
+        conn.execute("UPDATE scheduled_actions SET repeat = 'daily@09:00' WHERE id = ?", (action_id,))
+
+
+def test_a_reminder_they_asked_to_hold_is_paused_not_done(db: Path, roster: SimpleNamespace) -> None:
+    me = roster.principal.id
+    create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
+    action_id = _followup("tg-1", created_by=me)
+    _repeating(action_id)
+    _message(db, "web-2", me, "user", "Hold the Dana reminder until the board call", -timedelta(hours=2), sender=me)
+    _, prompt = _fire(action_id, "PAUSED: Told you it's held until you say send it.")
+    assert "PAUSED:" in prompt and "DROPPED:" in prompt
+    row = episodic.get_scheduled_action(action_id)
+    assert row is not None and row.status == "cancelled" and "paused as Olivia Owner asked" in row.last_error
+    assert _status_and_next(action_id) == ("cancelled", 1)  # only this one: the daily one goes on
+
+
+def test_a_repeating_followup_they_asked_to_drop_ends(db: Path, roster: SimpleNamespace) -> None:
+    me = roster.principal.id
+    create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
+    action_id = _followup("tg-1", created_by=me)
+    _repeating(action_id)
+    _message(db, "web-2", me, "user", "Drop the daily Dana check, we signed", -timedelta(hours=2), sender=me)
+    _fire(action_id, "dropped: Told you the daily check is off.")
+    assert _status_and_next(action_id) == ("cancelled", 0)
+
+
+def test_a_marker_with_no_chat_since_is_just_a_sent_run(db: Path, roster: SimpleNamespace) -> None:
+    me = roster.principal.id
+    create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
+    action_id = _followup("tg-1", created_by=me)
+    _fire(action_id, "DROPPED: looks done to me")
+    assert episodic.get_scheduled_action(action_id).status == "done"  # type: ignore[union-attr]
+
+
+def test_a_teammates_held_reminder_to_themself_gets_the_line_without_the_marker(
+    db: Path, roster: SimpleNamespace
+) -> None:
+    ben = roster.teammate.id
+    action_id = episodic.insert_scheduled_action(
+        run_at=_iso(timedelta(days=1)), channel="slack_dm", channel_ref="UBEN",
+        intent_text="Remind me to call the vendor.", originating_session_id="ben-1",
+        created_by_person_id=ben,
+    )
+    with episodic._get_conn(db) as conn:
+        conn.execute("UPDATE scheduled_actions SET created_at = ? WHERE id = ?",
+                     (_iso(-timedelta(days=1)), action_id))
+    _message(db, "ben-2", ben, "user", "Hold the vendor call reminder", -timedelta(hours=1), sender=ben)
+    with patch.object(runner, "_send_on_plan", new_callable=AsyncMock) as send:
+        send.return_value = SimpleNamespace(ok=True, detail="")
+        _fire(action_id, "PAUSED: Held the vendor call reminder as you asked; say 'remind me' and it goes.")
+    assert send.call_args.args[2] == "Held the vendor call reminder as you asked; say 'remind me' and it goes."
+    assert episodic.get_scheduled_action(action_id).status == "cancelled"  # type: ignore[union-attr]

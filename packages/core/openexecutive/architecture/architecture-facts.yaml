@@ -5202,11 +5202,18 @@ scheduler:
     told that what they said last wins: asked since to hold, change or drop
     it, the run does that and its one message to them says so, and never
     sends to someone else what they asked to hold; when it only looks done,
-    it still sends its one message and says so. The runner never cancels
-    the row on the run's own judgement (a reminder someone asked for was
-    dropped as "already handled"); only the person cancels one. The
-    teammate path (_run_teammate_followup) applies the same block and sends
-    what it wrote. Only the person's own words are quoted, never replies, so
+    it still sends its one message and says so. A run that held or dropped
+    it as they asked starts its reply with PAUSED: or DROPPED:
+    (runner._followup_outcome, read only when they wrote since); the runner
+    then cancels that occurrence with the reason (runner._end_as_asked;
+    DROPPED also ends a repeating one, PAUSED lets the next occurrence come)
+    and audits phase paused or dropped, not delivered. The runner never
+    cancels the row on the run's own judgement (a reminder someone asked
+    for was dropped as "already handled"). The teammate path
+    (_run_teammate_followup) applies the same block and sends what it wrote
+    (without the marker); when the row goes to someone else and they wrote
+    since, the run's closing line to them is delivered to them
+    (deliver_to_person), so a hold there is never silent. Only the person's own words are quoted, never replies, so
     mail a reply quoted cannot reach an unattended run this way. In chat:
     every turn by a verified speaker carries <pending_followups> in the user
     turn (correction_tools.pending_followups_block, list_followups' ownership
