@@ -490,7 +490,9 @@ def _watch(person_id: int | None, principal: bool) -> list[Offer]:
         preview.append(("Tells you", "when something big changes"))
         out.append(Offer(
             key=f"watch:{item.slug}", origin="watch", kind="watch",
-            title=line(f"I can watch {what[0].lower() + what[1:] if named else what or item.target}", TITLE_MAX),
+            # As written: a note can start with a name ("Stripe changelog",
+            # "AWS status page").
+            title=line(f"I can watch {what or item.target}", TITLE_MAX),
             source="News I watch",
             source_detail="I found it while checking for you",
             preview=preview,

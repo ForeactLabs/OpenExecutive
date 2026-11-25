@@ -1233,7 +1233,10 @@ def test_a_suggested_watch_is_an_offer_and_one_routed_to_a_head_is_theirs(monkey
     assert [o.key for o in WATCH(1, True)] == ["watch:eia"]
     assert [o.key for o in WATCH(7, False)] == ["watch:ports"]
     assert WATCH(3, False) == []
-    assert WATCH(1, True)[0].title == "I can watch diesel prices"
+    assert WATCH(1, True)[0].title == "I can watch Diesel prices"
+    # A name keeps its letters.
+    item.notes = "AWS status page"
+    assert WATCH(1, True)[0].title == "I can watch AWS status page"
     # A note that is a sentence: the title names the page, the note is Why.
     item.notes = "Stripe Apple Pay errors on Nov 17 went unseen by uptime checks. Payments need a watch."
     (o,) = WATCH(1, True)
