@@ -767,19 +767,25 @@ async def _do_drive_files(stored: dict[str, Any], *, tapped: bool = False) -> di
     Run on its own (not ``tapped``), each change goes through the gateway's
     usual checks, so a file the company doesn't own meets the level as any
     other Drive change does."""
-    from openexecutive.orchestrator.mcp_gateway import ensure_active_gateway
+    from openexecutive.orchestrator.mcp_gateway import DRIVE_CHANGE_WAITS, ensure_active_gateway
 
     gateway = await ensure_active_gateway()
     if gateway is None:
         return {"status": "failed", "detail": "Google Drive isn't connected right now."}
     failed: list[str] = []
+    waiting: list[str] = []
     files = stored["files"]
     for f in files:
         error = await gateway.tapped_drive_change(
             f["file_id"], name=f["name"], move_to=stored["move_to"], tapped=tapped,
         )
-        if error is not None:
+        if error == DRIVE_CHANGE_WAITS:
+            waiting.append(f["name"] or f["file_id"])
+        elif error is not None:
             failed.append(f"{f['name'] or f['file_id']}: {error}")
+    if waiting and not failed:
+        return {"status": "waiting", "detail": ("Waiting for your approval on its own card: " + ", ".join(waiting[:3]))[:300]}
+    failed += [f"{name}: {DRIVE_CHANGE_WAITS}" for name in waiting]
     if not failed:
         return {"status": "done", "detail": f"Done for {len(files)} file" + ("" if len(files) == 1 else "s") + "."}
     detail = f"{len(files) - len(failed)} of {len(files)} done. " + "; ".join(failed[:3])
