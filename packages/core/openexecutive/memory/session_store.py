@@ -606,27 +606,41 @@ def own_messages_since(
     limit: int = 30,
     max_chars: int = 300,
     db_path: Path = DB_PATH,
+    after_turn_in: str | None = None,
 ) -> list[dict[str, str]]:
     """What ``person_id`` wrote in chat after ``since`` (ISO 8601), oldest
     first: the newest ``limit`` of their own messages, each as one line of at
     most ``max_chars``. Only their words, never a reply or what someone else
     wrote in a chat they share; a message from before senders were recorded
     counts when the conversation is theirs. Never a line a host origin's page
-    sent (``sender_surface``): a script there may have written it."""
+    sent (``sender_surface``): a script there may have written it.
+
+    ``after_turn_in``: the conversation whose turn ``since`` fell in. A turn
+    saves its message when it ends, after anything it did, so that
+    conversation's first message after ``since`` is the one that turn
+    answered, not a later word, and is left out."""
     if not db_path.exists():
         return []
     with _get_conn(db_path) as conn:
+        turn_id = -1
+        if after_turn_in:
+            first = conn.execute(
+                "SELECT id FROM chat_messages WHERE session_id = ? AND role = 'user' "
+                "AND created_at > ? ORDER BY created_at, id LIMIT 1",
+                (after_turn_in, since),
+            ).fetchone()
+            turn_id = int(first["id"]) if first else -1
         rows = conn.execute(
             "SELECT m.created_at, m.content FROM chat_messages m "
             "JOIN sessions s ON s.session_id = m.session_id "
             # Nor any line of a conversation a host's page wrote in: a host
             # line taken back and sent again (Try again) is saved as theirs.
             "WHERE m.role = 'user' AND m.created_at > ? AND m.sender_surface IS NULL "
-            "AND s.host_wrote = 0 "
+            "AND s.host_wrote = 0 AND m.id != ? "
             "AND (m.sender_person_id = ? "
             "OR (m.sender_person_id IS NULL AND s.caller_person_id = ?)) "
             "ORDER BY m.created_at DESC, m.id DESC LIMIT ?",
-            (since, person_id, person_id, limit),
+            (since, turn_id, person_id, person_id, limit),
         ).fetchall()
     out: list[dict[str, str]] = []
     for row in reversed(rows):

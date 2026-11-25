@@ -105,7 +105,7 @@ def _fire(action_id: int, reply: object) -> tuple[AsyncMock, str]:
         return_value=MagicMock(is_empty=lambda: True),
     ), patch("openexecutive.knowledge.retriever.retrieve", return_value=""), patch(
         "openexecutive.memory.episodic.format_for_prompt", return_value="",
-    ), patch.object(runner, "_setter_decision", new_callable=AsyncMock, return_value=""):
+    ), patch.object(runner, "_setter_decision", new_callable=AsyncMock, return_value=("", None)):
         asyncio.run(runner._execute_action(action, gateway=None))
     return chat, str(chat.call_args.kwargs["user_message"])
 
@@ -205,7 +205,9 @@ def _repeating(action_id: int) -> None:
         conn.execute("UPDATE scheduled_actions SET repeat = 'daily@09:00' WHERE id = ?", (action_id,))
 
 
-def _fire_decided(action_id: int, decided: str, reply: object = "Sent.") -> tuple[AsyncMock, AsyncMock, AsyncMock]:
+def _fire_decided(
+    action_id: int, decided: str, reply: object = "Sent.", when: datetime | None = None
+) -> tuple[AsyncMock, AsyncMock, AsyncMock]:
     """Fire a follow-up with the setter's since-chat read as ``decided``:
     (the run's chat, the decision call, the line to the setter)."""
     [action] = [a for a in episodic.claim_due_actions(datetime.now(UTC) + timedelta(days=2))
@@ -216,7 +218,8 @@ def _fire_decided(action_id: int, decided: str, reply: object = "Sent.") -> tupl
         return_value=MagicMock(is_empty=lambda: True),
     ), patch("openexecutive.knowledge.retriever.retrieve", return_value=""), patch(
         "openexecutive.memory.episodic.format_for_prompt", return_value="",
-    ), patch.object(runner, "_setter_decision", new_callable=AsyncMock, return_value=decided) as decide, \
+    ), patch.object(runner, "_setter_decision", new_callable=AsyncMock,
+                         return_value=(decided, when)) as decide, \
             patch.object(runner, "deliver_to_person", new_callable=AsyncMock) as tell:
         tell.return_value = SimpleNamespace(ok=True, detail="")
         asyncio.run(runner._execute_action(action, gateway=None))
@@ -338,7 +341,7 @@ def test_a_line_that_cant_reach_them_is_tried_again(db: Path, roster: SimpleName
     action_id = _followup("tg-1", ref="999", created_by=me)
     [action] = [a for a in episodic.claim_due_actions(datetime.now(UTC) + timedelta(days=2))
                 if a.id == action_id]
-    with patch.object(runner, "_setter_decision", new_callable=AsyncMock, return_value="dropped"), \
+    with patch.object(runner, "_setter_decision", new_callable=AsyncMock, return_value=("dropped", None)), \
             patch.object(runner, "deliver_to_person", new_callable=AsyncMock, side_effect=RuntimeError("down")):
         asyncio.run(runner._execute_action(action, gateway=None))
     row = episodic.get_scheduled_action(action_id)
@@ -346,9 +349,49 @@ def test_a_line_that_cant_reach_them_is_tried_again(db: Path, roster: SimpleName
     assert row is not None and row.status == "pending" and "couldn't tell its setter" in row.last_error
 
 
-def _decision_response(decision: str) -> SimpleNamespace:
+def _decision_response(decision: str, **more: str) -> SimpleNamespace:
     return SimpleNamespace(content=[SimpleNamespace(type="tool_use", name="record_followup_decision",
-                                                    input={"decision": decision})])
+                                                    input={"decision": decision, **more})])
+
+
+def test_a_hold_until_a_time_moves_it_and_never_loses_it(db: Path, roster: SimpleNamespace) -> None:
+    me = roster.principal.id
+    create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
+    action_id = _followup("tg-1", created_by=me)
+    _message(db, "web-2", me, "user", "Hold that reminder until Friday", -timedelta(hours=2), sender=me)
+    action = episodic.get_scheduled_action(action_id)
+    assert action is not None
+    friday = (datetime.now(UTC) + timedelta(days=3)).replace(microsecond=0)
+    provider = MagicMock()
+    provider.messages_create = AsyncMock(
+        return_value=_decision_response("moved", run_at=friday.isoformat()))
+    with patch("openexecutive.providers.get_provider", return_value=provider), \
+            patch("openexecutive.audit.usage.log_model_usage"):
+        assert asyncio.run(runner._setter_decision(action, roster.principal)) == ("moved", friday)
+        # A time that has passed, or none, is no move: it goes as set.
+        provider.messages_create = AsyncMock(
+            return_value=_decision_response("moved", run_at=_iso(-timedelta(hours=1))))
+        assert asyncio.run(runner._setter_decision(action, roster.principal)) == ("", None)
+    chat, _, tell = _fire_decided(action_id, "moved", when=friday)
+    chat.assert_not_called()
+    assert tell.call_args.args[1].startswith("I moved this follow-up to ")
+    row = episodic.get_scheduled_action(action_id)
+    assert row is not None and row.status == "pending" and row.run_at == friday.isoformat()
+
+
+def test_the_message_that_set_it_is_not_said_since(db: Path, roster: SimpleNamespace) -> None:
+    me = roster.principal.id
+    create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
+    action_id = _followup("tg-1", created_by=me)
+    action = episodic.get_scheduled_action(action_id)
+    assert action is not None
+    # Saved when its turn ended, just after the row: the plan, not a later word.
+    _message(db, "tg-1", me, "user", "Remind me Thursday to chase Bob. If he answers first, hold it.",
+             -timedelta(days=1) + timedelta(seconds=5), sender=me)
+    assert runner._since_lines(action, roster.principal) == ""
+    _message(db, "tg-1", me, "user", "Bob answered, hold it", -timedelta(hours=1), sender=me)
+    lines = runner._since_lines(action, roster.principal)
+    assert "Bob answered, hold it" in lines and "Remind me Thursday" not in lines
 
 
 @pytest.mark.parametrize(("decision", "expected"), [("paused", "paused"), ("dropped", "dropped"), ("send", "")])
@@ -365,10 +408,10 @@ def test_the_setters_words_are_read_apart_from_the_run(
     with patch("openexecutive.providers.get_provider", return_value=provider), \
             patch("openexecutive.audit.usage.log_model_usage"):
         # Nothing said since: no call at all.
-        assert asyncio.run(runner._setter_decision(action, roster.principal)) == ""
+        assert asyncio.run(runner._setter_decision(action, roster.principal)) == ("", None)
         provider.messages_create.assert_not_called()
         _message(db, "web-2", me, "user", "Hold the note to Dana", -timedelta(hours=2), sender=me)
-        assert asyncio.run(runner._setter_decision(action, roster.principal)) == expected
+        assert asyncio.run(runner._setter_decision(action, roster.principal)) == (expected, None)
     kwargs = provider.messages_create.call_args.kwargs
     assert "tools" in kwargs and kwargs["tools"][0]["name"] == "record_followup_decision"
     assert "Hold the note to Dana" in kwargs["messages"][0]["content"]
@@ -382,7 +425,7 @@ def test_a_failed_read_sends_it_as_set(db: Path, roster: SimpleNamespace) -> Non
     action = episodic.get_scheduled_action(action_id)
     assert action is not None
     with patch("openexecutive.providers.get_provider", side_effect=RuntimeError("no model")):
-        assert asyncio.run(runner._setter_decision(action, roster.principal)) == ""
+        assert asyncio.run(runner._setter_decision(action, roster.principal)) == ("", None)
 
 
 def test_a_drop_read_apart_never_ends_a_repeating_series(db: Path, roster: SimpleNamespace) -> None:
