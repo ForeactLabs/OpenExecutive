@@ -176,10 +176,8 @@ def _speaker() -> Any:
 
 def may_read(name: str) -> str | None:
     """Why this turn may not read or change workflow ``name``, or None: it
-    needs a verified speaker, in a conversation only they read, who is the
-    account owner or the workflow's creator."""
-    from openexecutive.orchestrator.app_control import _NOT_PRIVATE
-    from openexecutive.orchestrator.speaker import own_private_speaker
+    needs a verified speaker who is the account owner or the workflow's
+    creator. A chat others read stops nothing: privacy hides."""
     from openexecutive.workflows.dynamic_store import get_owner
 
     person = _speaker()
@@ -188,8 +186,6 @@ def may_read(name: str) -> str | None:
             "I can only do this with a saved workflow when I know who is asking: in the web "
             "app signed in, a call with me, or your own chat app."
         )
-    if own_private_speaker() is None:
-        return _NOT_PRIVATE
     if not getattr(person, "is_principal", False) and get_owner(name) != person.id:
         return "Only the account owner or the person who created this workflow can do that."
     return None

@@ -2261,13 +2261,14 @@ def get_scheduled(action_id: int) -> Any:
     return get_scheduled_action(action_id)
 
 
-def test_a_standing_job_from_chat_waits_for_a_tap() -> None:
-    """A job is replayed into every look, so adding one from chat is a card."""
+def test_a_standing_job_from_chat_goes_by_the_level() -> None:
+    """Adding a job from chat is no topic: the one gate decides it like any
+    step someone asked for (Your rules, the level, In training)."""
     from openexecutive.orchestrator import app_control, app_control_catalog  # noqa: F401
 
     action = app_control.CATALOG.actions["add_standing_job"]
-    assert action.confirm and action.card is not None
-    assert not app_control.CATALOG.actions["stop_standing_job"].confirm
+    assert action.topic is None and action.card
+    assert app_control.CATALOG.actions["stop_standing_job"].topic is None
 
 
 def test_a_failed_check_is_looked_at_again(monkeypatch: pytest.MonkeyPatch, watched: None) -> None:

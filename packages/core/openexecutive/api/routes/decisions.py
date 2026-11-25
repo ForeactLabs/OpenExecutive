@@ -1147,7 +1147,23 @@ async def _carry_out_app_action(
     finish_execution(instance.id, STATUS_APPROVED_UNCHANGED, final_payload={**payload, "did": did})
     _clear_decision_alert(instance.id, "ack")
     log_event("app_action_done", did[:200], actor="user", details=details)
+    _keep_app_allowed(payload, instance.id, request, resolver)
     return _refresh(instance.id)
+
+
+def _keep_app_allowed(payload: dict[str, Any], decision_id: int, request: Request, resolver: int | None) -> None:
+    """A card In training held (``take_the_lead.in_app``) is that action's
+    one card: approved by the owner from a signed-in session, the action
+    goes by the level from then on. Best effort."""
+    grant = payload.get("allow")
+    if not isinstance(grant, dict) or not isinstance(grant.get("key"), str):
+        return
+    try:
+        if not (_approver_is_principal(request) and _provably_principal(request)):
+            return
+    except Exception:
+        return
+    _keep_allowed({"key": grant["key"], "label": str(grant.get("label") or "")}, decision_id, resolver, None)
 
 
 # Something asked for in chat that waits for its person's tap
