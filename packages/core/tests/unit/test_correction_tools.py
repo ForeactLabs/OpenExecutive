@@ -341,17 +341,20 @@ def test_a_teammates_raised_line_shows_on_a_quiet_board(
 
     monkeypatch.setattr(today_route, "_with_due_soon", lambda data, *_a: data)
     monkeypatch.setattr(today_route, "_narrative_activity", lambda *_a: [])
-    viewer = SimpleNamespace(id=roster.teammate.id)
+    other = people_store.upsert_person(full_name="Ana Teammate", email="ana@co.example")
 
-    def context() -> str:
+    def context(person_id: int = roster.teammate.id) -> str:
         return today_route._narrative_context(
-            {}, viewer, {"name": "Ben", "role": ""}, "team", f"person:{roster.teammate.id}", reader=None,  # type: ignore[arg-type]
+            {}, SimpleNamespace(id=person_id), {"name": "Ben", "role": ""}, "team",  # type: ignore[arg-type]
+            f"person:{person_id}", reader=None,
         )[0]
 
     assert context() == narrative_cache.QUIET_CONTEXT
     brief_requests.add(brief_requests.KIND_FIXED, "I set the reminder to call Jamie.", source_quote="q",
                        person_id=roster.teammate.id, db_path=db)
     assert "I set the reminder to call Jamie." in context()
+    # Another teammate's header holds none of Ben's lines.
+    assert context(other) == narrative_cache.QUIET_CONTEXT
 
 
 def test_the_owners_right_now_tells_what_was_put_right(
