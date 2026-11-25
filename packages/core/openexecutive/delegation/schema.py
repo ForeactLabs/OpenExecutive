@@ -298,31 +298,6 @@ def _add_handle_it_mode(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def _move_training_off_the_dial(conn: sqlite3.Connection) -> None:
-    """In training was once a step on Handle it for me's dial (mode
-    ``training``); it is now a switch per Act as me setting. Such a row moves
-    to Balanced, the limits its allowed senders had, with Replies and
-    Follow-ups in training (follow-ups always waited there), so nothing more
-    goes on its own than before."""
-    rows = conn.execute(
-        f"SELECT person_id FROM {HANDLE_IT_TABLE} WHERE mode = 'training'"  # noqa: S608 — constant table name
-    ).fetchall()
-    if not rows:
-        return
-    for (person_id,) in rows:
-        for setting in ("replies", "follow_ups", "training"):
-            conn.execute(
-                f"INSERT INTO {TRAINING_TABLE} (person_id, setting, enabled, updated_by) "  # noqa: S608
-                "VALUES (?, ?, 1, 'migration') ON CONFLICT(person_id, setting) DO UPDATE SET enabled = 1",
-                (person_id, setting),
-            )
-        conn.execute(
-            f"UPDATE {HANDLE_IT_TABLE} SET mode = 'balanced' WHERE person_id = ?",  # noqa: S608
-            (person_id,),
-        )
-    conn.commit()
-
-
 def _add_mailbox_drafts(conn: sqlite3.Connection) -> None:
     """Give a watch table made before ``mailbox_drafts`` existed the column,
     off: replies wait on their cards and no longer fill the person's Drafts."""
@@ -374,4 +349,3 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     _add_draft_session_id(conn)
     _add_draft_replaced_by(conn)
     _add_draft_from_executive(conn)
-    _move_training_off_the_dial(conn)
