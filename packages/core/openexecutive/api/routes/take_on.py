@@ -146,9 +146,19 @@ def _settle_cards(me: Me, offers: list[take_on.Offer]) -> None:
         return
     for o in on_card:
         card = cards.get(int(o.decision_id or 0))
-        if card is None:
+        if card is None or card.status in _CARD_OPEN:
             continue
-        if card.status in _CARD_DONE:
+        # One run can put up more than one card: the offer follows the next
+        # one still waiting, and settles on the last.
+        try:
+            waiting = [i for i in dl.open_for_session(o.session_id or "") if i != o.decision_id]
+        except Exception:
+            logger.warning("take_on: couldn't read the run's other cards", exc_info=True)
+            waiting = []
+        if waiting:
+            o.decision_id = waiting[0]
+            take_on.finish(me.email, o.key, "card", outcome=o.outcome, done=o.done, decision_id=o.decision_id)
+        elif card.status in _CARD_DONE:
             o.status, o.outcome = "done", "You approved it, and it's done."
             take_on.finish(me.email, o.key, "done", outcome=o.outcome, done=o.done, decision_id=o.decision_id)
         elif card.status == dl.STATUS_REJECTED:
@@ -157,7 +167,7 @@ def _settle_cards(me: Me, offers: list[take_on.Offer]) -> None:
         elif card.status == dl.STATUS_FAILED:
             o.status, o.outcome = "failed", "It didn't go through after you approved it."
             take_on.finish(me.email, o.key, "failed", outcome=o.outcome, decision_id=o.decision_id)
-        elif card.status not in _CARD_OPEN:
+        else:
             # Closed another way (no answer in time, handled elsewhere, undone).
             o.status, o.outcome = "failed", "The card closed before it was done."
             take_on.finish(me.email, o.key, "failed", outcome=o.outcome, decision_id=o.decision_id)
@@ -170,20 +180,30 @@ def _offers(me: Me) -> list[take_on.Offer]:
     return [o for o in offers if o.status not in ("skipped", "done")]
 
 
+def _read_list(me: Me) -> tuple[list[take_on.Offer], list[str]] | None:
+    """The list and what already runs on its own (blocking reads)."""
+    from openexecutive.briefing import take_on_maker
+
+    if not take_on.who(me.email):
+        return None
+    offers = _offers(me)
+    return offers, take_on_maker.on_its_own(take_on_maker.person_for(me.person_id, me.principal)).lines()
+
+
 @router.get("/take-on", response_model=OffersOut)
 async def get_offers(request: Request) -> OffersOut:
-    me = _me(request)
-    if not take_on.who(me.email):
+    me = await asyncio.to_thread(_me, request)
+    read = await asyncio.to_thread(_read_list, me)
+    if read is None:
         return OffersOut(offers=[])
-    offers = _offers(me)
+    offers, own = read
     from openexecutive.briefing import take_on_maker
 
     # Fewer than Home's few left to offer: top the list up.
     short = sum(1 for o in offers if not o.status) < HOME_MAX
     started = take_on_maker.schedule(me.email, me.person_id, principal=me.principal, short=short)
-    own = take_on_maker.on_its_own(take_on_maker.person_for(me.person_id, me.principal))
     return OffersOut(
-        offers=[_out(o) for o in offers], making=started or take_on_maker.making(me.email), on_its_own=own.lines(),
+        offers=[_out(o) for o in offers], making=started or take_on_maker.making(me.email), on_its_own=own,
     )
 
 
@@ -217,6 +237,17 @@ def _taken_up(me: Me, offer: take_on.Offer) -> None:
             repeat_asks.answer_offer(int(offer.key.removeprefix("repeat:")), me.person_id, accept=True)
         except Exception:
             logger.warning("take_on: couldn't retire the repeat-ask offer", exc_info=True)
+    if offer.origin == "watch":
+        # The run made the watch (or put it on a card): the suggestion it
+        # came from goes, so the Watch list can't make it a second time.
+        from openexecutive.monitoring import store as ms
+
+        try:
+            item = ms.get_watchlist_item_by_slug(offer.key.removeprefix("watch:"))
+            if item is not None and item.id is not None:
+                ms.delete_pending_suggestion(item.id)
+        except Exception:
+            logger.warning("take_on: couldn't retire the watch suggestion", exc_info=True)
     _tell_source(offer.key, taken=True)
 
 
@@ -258,9 +289,9 @@ def _what_came_of_it(me: Me, key: str, session_id: str, answered: bool) -> str:
 
 @router.post("/take-on/{key}/do", status_code=202, response_model=OfferOut)
 async def do_it(key: str, request: Request) -> OfferOut:
-    me = _me(request)
-    offer = _find(me, key)
-    if not take_on.start(me.email, offer):
+    me = await asyncio.to_thread(_me, request)
+    offer = await asyncio.to_thread(_find, me, key)
+    if not await asyncio.to_thread(take_on.start, me.email, offer):
         raise HTTPException(status_code=409, detail="I'm already on it.")
     run: dict[str, str] = {}
 
@@ -330,8 +361,8 @@ async def say(key: str, body: SayIn, request: Request) -> OfferOut:
     must be connected, addresses must be ones they or the offer named)."""
     from openexecutive.briefing import take_on_maker
 
-    me = _me(request)
-    offer = _find(me, key)
+    me = await asyncio.to_thread(_me, request)
+    offer = await asyncio.to_thread(_find, me, key)
     if offer.status in ("working", "card", "done"):
         raise HTTPException(status_code=409, detail="I've already started on this one.")
     said = take_on.line(body.text, 600)
@@ -346,8 +377,8 @@ async def say(key: str, body: SayIn, request: Request) -> OfferOut:
     if not checked:
         raise HTTPException(status_code=422, detail="I couldn't turn that into one step. Try saying it another way.")
     new = checked[0]
-    take_on.change(me.email, offer, new.title, new.preview, said, kind=new.kind)
-    return _out(_find(me, key))
+    await asyncio.to_thread(take_on.change, me.email, offer, new.title, new.preview, said, kind=new.kind)
+    return _out(await asyncio.to_thread(_find, me, key))
 
 
 @router.post("/take-on/{key}/undo", response_model=OfferOut)

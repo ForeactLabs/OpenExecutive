@@ -375,6 +375,39 @@ def test_an_approved_card_counts_as_done(client: TestClient, monkeypatch: pytest
     assert [f.key for f in take_on.finished(ME, datetime.now(UTC) - timedelta(hours=1))] == [o.key]
 
 
+def test_an_offer_that_put_up_two_cards_waits_for_both(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.memory import decision_ledger
+
+    o = _offer()
+    take_on.put_made(ME, [o])
+    take_on.start(ME, o)
+    take_on.set_session(ME, o.key, "sess-9")
+    take_on.finish(ME, o.key, "card", decision_id=7)
+    status = {7: decision_ledger.STATUS_EXECUTED, 8: decision_ledger.STATUS_PROPOSED}
+    monkeypatch.setattr(decision_ledger, "get_decision_instances",
+                        lambda ids: {i: SimpleNamespace(status=status[i]) for i in ids})
+    monkeypatch.setattr(decision_ledger, "open_for_session",
+                        lambda s: [i for i, v in status.items() if v == decision_ledger.STATUS_PROPOSED and s == "sess-9"])
+    (got,) = client.get("/take-on").json()["offers"]
+    assert got["status"] == "card" and got["decision_id"] == 8
+    status[8] = decision_ledger.STATUS_EXECUTED
+    assert client.get("/take-on").json()["offers"] == []
+    assert [f.key for f in take_on.finished(ME, datetime.now(UTC) - timedelta(hours=1))] == [o.key]
+
+
+def test_a_watch_taken_up_leaves_the_suggestions(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.api.routes import take_on as route
+    from openexecutive.monitoring import store as ms
+
+    gone: list[int] = []
+    monkeypatch.setattr(ms, "get_watchlist_item_by_slug", lambda slug: SimpleNamespace(id=5) if slug == "eia" else None)
+    monkeypatch.setattr(ms, "delete_pending_suggestion", lambda i: gone.append(i) or True)
+    offer = take_on.Offer(key="watch:eia", origin="watch", kind="watch", title="I can watch diesel prices",
+                          source="News I watch")
+    route._taken_up(route.Me(ME, 1, True), offer)
+    assert gone == [5]
+
+
 def test_a_skipped_card_takes_the_offer_away(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     from openexecutive.memory import decision_ledger
 
