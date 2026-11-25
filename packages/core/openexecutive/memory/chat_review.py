@@ -851,21 +851,30 @@ _SINCE_SAYS = 240
 
 
 def _chat_followups(session_id: str, person_id: int) -> list[sqlite3.Row]:
-    """The follow-ups this chat set for ``person_id`` (or with no one
-    recorded), whatever became of them, oldest first: never another
-    speaker's in a shared thread."""
+    """The follow-ups this chat set for ``person_id``, whatever became of
+    them, oldest first: never another speaker's in a shared thread. One with
+    no one recorded is shown only when this person is the chat's one
+    speaker, since in a shared thread it could be anyone's."""
     from openexecutive.memory.episodic import _get_conn, _resolve_db_path
 
     path = _resolve_db_path(None)
     if not path.exists():
         return []
+    conn = _connect(None)
+    try:
+        shared = conn.execute(
+            f"SELECT 1 FROM {TURNS_TABLE} WHERE session_id = ? AND person_id != ? LIMIT 1",  # noqa: S608
+            (session_id, person_id),
+        ).fetchone() is not None
+    finally:
+        conn.close()
     with _get_conn(path) as conn:
         rows = conn.execute(
             "SELECT id, run_at, status, last_error, intent_text FROM scheduled_actions "
             "WHERE originating_session_id = ? AND channel != '__internal__' "
-            "AND (created_by_person_id = ? OR created_by_person_id IS NULL) "
+            "AND (created_by_person_id = ? OR (created_by_person_id IS NULL AND ? = 0)) "
             "ORDER BY run_at DESC, id DESC LIMIT 20",
-            (session_id, person_id),
+            (session_id, person_id, 1 if shared else 0),
         ).fetchall()
     return list(reversed(rows))
 

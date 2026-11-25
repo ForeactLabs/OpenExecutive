@@ -378,6 +378,19 @@ def test_the_block_lists_this_chats_follow_ups_and_never_another_speakers(
     assert f"#{theirs}," not in block and "offsite" not in block
 
 
+def test_a_follow_up_with_no_one_recorded_shows_only_to_the_chats_one_speaker(
+    roster: SimpleNamespace,
+) -> None:
+    episodic.insert_scheduled_action(
+        run_at=(NOW + timedelta(hours=2)).isoformat(), channel="email", channel_ref="olivia@co.example",
+        intent_text="Send the board deck", originating_session_id="s-1", status="pending",
+    )
+    _record(roster.principal, text="Please send the board deck tomorrow morning")
+    assert "Send the board deck" in cr._since_block("s-1", roster.principal, [])
+    assert _record(roster.teammate, text="And remind me about the offsite next week") is not None
+    assert "Send the board deck" not in cr._since_block("s-1", roster.principal, [])
+
+
 def test_it_sets_a_reminder_the_reply_claimed_through_the_chat_tool(
     db: Path, roster: SimpleNamespace, provider: _Provider, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
