@@ -6,12 +6,13 @@ training), plus links to screens.
 Each action calls the route its button calls (see ``app_control``), so this
 file is wiring: which route, what to send it, what to say after. An action
 whose route checks nothing about the caller (its page is the principal's) is
-``principal_only``. What waits for a tap: deletes, shares, turning on
-something that sends as the person or lets more happen on its own, and
-approving a workflow's waiting step. A change to the checks that holds more
-(a lower level, a Waits rule, In training on) is done in the turn; one that
-lets more go on its own (a higher level, a Goes rule, removing a Waits rule,
-leaving training) waits for a tap, whatever the level.
+``principal_only``. The one gate decides what waits
+(``take_the_lead.in_app``); an action only names its topic, a delete or a
+share (``topic``). A change to the checks that holds more (a lower level, a
+Waits rule, In training on) is done in the turn; a route that lets more go on
+its own (a higher level, a Goes rule, removing a Waits rule, leaving
+training) wants the person's own signed request, so it leaves the card their
+tap answers.
 
 Not here on purpose: the person's notes ("Keep track of what happens") are
 private and read only through ``recall_history``, which marks the chat
@@ -70,7 +71,10 @@ async def _find_chats(request: Any) -> list[Item]:
 
     rows = await _call(sessions.get_sessions, request)
     return [
-        Item(id=s.session_id, title=s.title or "Untitled chat", detail="pinned" if s.pinned_at else "")
+        Item(
+            id=s.session_id, title=s.title or "Untitled chat", detail="pinned" if s.pinned_at else "",
+            private=True,
+        )
         for s in rows
     ]
 
@@ -171,7 +175,7 @@ async def _find_topics(request: Any) -> list[Item]:
     return [
         Item(id=str(t.id), title=t.name, detail=", ".join(
             x for x in ((f"in {t.area}" if t.area else ""), ("pinned" if t.pinned_at else "")) if x
-        ))
+        ), private=True)
         for t in await _topics(request)
     ]
 
@@ -228,7 +232,7 @@ async def _remove_topic(request: Any, topic_id: str, value: str) -> str:
 
 async def _find_areas(request: Any) -> list[Item]:
     areas = sorted({t.area for t in await _topics(request) if t.area})
-    return [Item(id=a, title=a) for a in areas]
+    return [Item(id=a, title=a, private=True) for a in areas]
 
 
 async def _rename_area(request: Any, area: str, value: str) -> str:
@@ -512,17 +516,23 @@ async def _delete_run(request: Any, run_id: str, value: str) -> str:
 
 async def _find_memories(request: Any) -> list[Item]:
     from openexecutive.api.routes import episodic
+    from openexecutive.api.routes.today import _Owners
 
     items = [
-        Item(id=f"decision:{d.id}", title=d.summary[:120], detail="decision")
+        Item(id=f"decision:{d.id}", title=d.summary[:120], detail="decision", private=bool(d.private))
         for d in await _call(episodic.get_decisions, request)
     ]
     items += [
         Item(id=f"initiative:{i.id}", title=i.title[:120], detail=f"initiative, {i.status}")
         for i in await _call(episodic.get_initiatives)
     ]
+    # Advice from someone's own chat is theirs (``api.own_rows``): only they see it.
+    owners = _Owners()
     items += [
-        Item(id=f"advice:{a.id}", title=(a.query_summary or a.advice_summary)[:120], detail="advice")
+        Item(
+            id=f"advice:{a.id}", title=(a.query_summary or a.advice_summary)[:120], detail="advice",
+            private=owners.of_session(a.session_id or None, department=a.department or None) is not None,
+        )
         for a in await _call(episodic.get_advice_list, request)
     ]
     return items
@@ -569,6 +579,7 @@ async def _find_decisions(request: Any) -> list[Item]:
         Item(
             id=str(d.id), title=d.summary[:120],
             detail="private to you" if d.private else "shared with the team",
+            private=bool(d.private),
         )
         for d in await _call(episodic.get_decisions, request)
         if d.can_share or d.can_make_private
@@ -677,11 +688,6 @@ _SETTINGS: dict[str, str] = {
     "inbox_drafts": "Draft replies to your inbox",
     "as_me_training": "In training",
 }
-# Turning these on lets the Executive write as the person, or (inbox
-# replies, where Approvals lets them go) send as them.
-_WIDENING = frozenset({"act_as_me", "inbox_drafts"})
-# Turning these off lets more go on its own: In training holds everything.
-_TRAINING = frozenset({"as_me_training"})
 
 
 async def _find_settings(request: Any) -> list[Item]:
@@ -767,17 +773,6 @@ async def _change_setting(request: Any, setting: str, value: str) -> str:
     return f"Turned {label} {'on' if on else 'off'}"
 
 
-def _setting_needs_tap(setting: str, value: str) -> bool:
-    if setting not in _WIDENING and setting not in _TRAINING:
-        return False
-    try:
-        on = _on(value)
-    except Refused:
-        return True
-    # Turning As you on widens; turning In training off does.
-    return on if setting in _WIDENING else not on
-
-
 async def _signed(fn: Callable[..., Any], *args: Any) -> Any:
     """Call a route that lets more go only for a signed request. From a chat
     turn it refuses (``verified.from_chat``); say so in the words
@@ -843,21 +838,6 @@ async def _set_level(request: Any, item_id: str, value: str) -> str:
         raise HTTPException(status_code=409, detail={"code": SIGNING_REQUIRED, "message": "Raising Approvals takes your tap."})
     await _call(executive.set_outside_content, request, executive.OutsideContentIn.model_validate({"mode": mode}))
     return f"Set Approvals to {_LEVELS[mode]}"
-
-
-def _level_needs_tap(item_id: str, value: str) -> bool:
-    """A level that holds less than today's lets more go: it waits for a tap."""
-    from openexecutive.orchestrator import outside_mode
-
-    try:
-        new = _level_of(value)
-    except Refused:
-        return True
-    order = list(_LEVELS)
-    try:
-        return order.index(new) > order.index(outside_mode.stored_mode())
-    except Exception:
-        return True
 
 
 _RULE_KINDS = {"person": "person", "domain": "domain", "words": "words", "amount": "amount", "topic": "topic"}
@@ -936,18 +916,6 @@ async def _remove_rule(request: Any, rule_id: str, value: str) -> str:
     return "Removed the rule"
 
 
-def _removing_needs_tap(rule_id: str, value: str) -> bool:
-    """Removing a Waits rule lets more go; removing a Goes rule holds more."""
-    from openexecutive.orchestrator import take_the_lead
-
-    try:
-        rules = take_the_lead.list_rules([take_the_lead.SCOPE_COMPANY])
-    except Exception:
-        return True
-    found = next((r for r in rules if str(r.id) == rule_id), None)
-    return found is None or found.effect != take_the_lead.EFFECT_GO
-
-
 async def _check_inbox(request: Any, item_id: str, value: str) -> str:
     from openexecutive.api.routes import delegation
 
@@ -964,7 +932,8 @@ async def _find_jobs(request: Any) -> list[Item]:
     from openexecutive.api.routes import take_the_lead as lead_route
 
     out = await _call(lead_route.get_take_the_lead, request)
-    return [Item(id=str(j.id), title=j.text, detail=j.this_week) for j in out.jobs]
+    # A person's standing jobs are theirs alone.
+    return [Item(id=str(j.id), title=j.text, detail=j.this_week, private=True) for j in out.jobs]
 
 
 async def _add_job(request: Any, item_id: str, value: str) -> str:
@@ -1037,10 +1006,10 @@ _ACTIONS = (
     Action("unpin_chat", "chat", "Unpin a chat", _fixed(_pin_chat, False)),
     Action("rename_chat", "chat", "Rename a chat", _rename_chat, value="the new name"),
     Action("move_chat_to_topic", "chat", "File a chat under a topic (made if new)", _file_chat, value="the topic's name"),
-    Action("delete_chat", "chat", "Delete a chat for good", _delete_chat, confirm=True,
+    Action("delete_chat", "chat", "Delete a chat for good", _delete_chat, topic="delete",
            card="Delete the chat {title}"),
     Action("share_chat", "chat", "Share a chat with a team member, who can then read and write in it",
-           _share_chat, confirm=True, value="the person's name", card="Share the chat {title} with {value}"),
+           _share_chat, topic="share", value="the person's name", card="Share the chat {title} with {value}"),
     Action("unshare_chat", "chat", "Stop sharing a chat with someone", _unshare_chat, value="the person's name"),
     # Topics
     Action("rename_topic", "topic", "Rename a chat topic", _rename_topic, value="the new name"),
@@ -1055,42 +1024,42 @@ _ACTIONS = (
     # Documents and files
     Action("archive_document", "document", "Archive a document (it can be restored)", _archive_document),
     Action("restore_document", "document", "Restore an archived document", _restore_document),
-    Action("delete_document", "document", "Delete a document for good", _delete_document, confirm=True,
+    Action("delete_document", "document", "Delete a document for good", _delete_document, topic="delete",
            card="Delete the document {title}"),
     Action("delete_file", "file", "Delete an uploaded file and what was learned from it", _delete_file,
-           confirm=True, card="Delete the uploaded file {title}"),
+           topic="delete", card="Delete the uploaded file {title}"),
     Action("sync_source", "source", "Sync a connected source now", _sync_source),
     # Alerts
     Action("snooze_alert", "alert", "Hide a card on Today until a time, when it comes back", _snooze_alert,
            value="when it comes back, in the company's time zone (2026-10-20T09:00), at most 30 days out"),
-    Action("clear_all_alerts", "alert_board", "Clear every card shown on Today", _clear_alerts, confirm=True,
+    Action("clear_all_alerts", "alert_board", "Clear every card shown on Today", _clear_alerts, topic="delete",
            card="Clear every card on Today", prepare=_prepare_clear_all),
     # Watch suggestions
     Action("approve_watch", "watch_suggestion", "Start a suggested watch", _approve_watch),
     Action("decline_watch", "watch_suggestion", "Decline a suggested watch", _decline_watch),
     # Workflows
     Action("turn_on_workflow", "workflow", "Turn a workflow on so it runs on its schedule",
-           _fixed(_turn_workflow, True), confirm=True, card="Turn on the workflow {title}"),
+           _fixed(_turn_workflow, True), card="Turn on the workflow {title}"),
     Action("turn_off_workflow", "workflow", "Turn a workflow off", _fixed(_turn_workflow, False)),
-    Action("delete_workflow", "workflow", "Delete a workflow for good", _delete_workflow, confirm=True,
+    Action("delete_workflow", "workflow", "Delete a workflow for good", _delete_workflow, topic="delete",
            card="Delete the workflow {title}", prepare=_prepare_delete_workflow),
     # Only a card save_workflow stages runs it (orchestrator.workflow_change).
-    Action("change_workflow", "workflow", "Save a change to a workflow", _change_workflow, confirm=True,
+    Action("change_workflow", "workflow", "Save a change to a workflow", _change_workflow,
            card="Change the workflow {title}", hidden=True),
     Action("rerun_workflow_run", "workflow_run", "Run a failed scheduled run again", _rerun),
     Action("approve_workflow_step", "workflow_run", "Approve a run's step that is waiting for a yes",
-           _fixed(_decide_run, "approve"), confirm=True, card="Approve the waiting step in {title}"),
+           _fixed(_decide_run, "approve"), card="Approve the waiting step in {title}"),
     Action("reject_workflow_step", "workflow_run", "Turn down a run's step that is waiting for a yes",
            _fixed(_decide_run, "reject")),
-    Action("delete_workflow_run", "workflow_run", "Delete a run and what it made", _delete_run, confirm=True,
+    Action("delete_workflow_run", "workflow_run", "Delete a run and what it made", _delete_run, topic="delete",
            card="Delete the run {title}"),
     # Memory
     Action("edit_memory", "memory", "Change what a past decision, initiative or advice says", _edit_memory,
            value="what it should say now"),
     Action("delete_memory", "memory", "Delete a past decision, initiative or advice from memory", _delete_memory,
-           confirm=True, card="Delete from memory: {title}"),
+           topic="delete", card="Delete from memory: {title}"),
     Action("share_decision", "decision", "Share a decision that is private to the speaker with the team",
-           _fixed(_share_decision, True), confirm=True, card="Share with the team: {title}"),
+           _fixed(_share_decision, True), topic="share", card="Share with the team: {title}"),
     Action("unshare_decision", "decision", "Make a decision the speaker shared private to them again",
            _fixed(_share_decision, False)),
     Action("approve_fact", "suggested_fact", "Approve a fact a teammate suggested", _fixed(_review_fact, True)),
@@ -1099,22 +1068,22 @@ _ACTIONS = (
     Action("add_department", "new_department", "Add a department (use id \"new\")", _add_department,
            value="its name"),
     Action("rename_department", "department", "Rename a department", _rename_department, value="the new name"),
-    Action("delete_department", "department", "Delete a department", _delete_department, confirm=True,
+    Action("delete_department", "department", "Delete a department", _delete_department, topic="delete",
            card="Delete the department {title}"),
     # Skills
     Action("delete_skill", "skill", "Delete a company skill, undo a change to one, or hide a built-in one",
-           _delete_skill, confirm=True, card="Remove the skill {title}"),
+           _delete_skill, topic="delete", card="Remove the skill {title}"),
     Action("restore_skill", "skill", "Bring back a hidden built-in skill", _restore_skill),
     # Settings
     Action("change_setting", "setting",
            "Change one of the person's own settings: quiet_hours (start-end or off), delivery "
            "(instant or digest), urgent_through, act_as_me, inbox_drafts, "
            "as_me_training (In training, on or off)",
-           _change_setting, confirm=_setting_needs_tap, value="the new value", card="Set {title} to {value}"),
+           _change_setting, value="the new value", card="Set {title} to {value}"),
     # Approvals and Your rules: holding more is done now, letting more go waits.
     Action("set_approvals_level", "approvals",
            "Set Approvals, the one level for what goes on its own (use id \"approvals\")",
-           _set_level, confirm=_level_needs_tap, value="Careful, Balanced or Hands-off",
+           _set_level, value="Careful, Balanced or Hands-off",
            card="Set {title} to {value}", prepare=_prepare_level),
     Action("add_waits_rule", "new_rule",
            "Add a rule in Your rules that always waits for the person (use id \"new\")",
@@ -1125,18 +1094,18 @@ _ACTIONS = (
            )),
     Action("add_goes_rule", "new_rule",
            "Add a rule in Your rules that lets something go on its own (use id \"new\"; not for words)",
-           partial(_add_rule, effect="go"), confirm=True, prepare=_prepare_goes_rule,
+           partial(_add_rule, effect="go"), prepare=_prepare_goes_rule,
            value=(
                "person: <name or email>, domain: <example.com>, amount: <number> "
                "or topic: <money, contracts, people_decisions, delete, share, someone_new or big_send>"
            ),
            card="Add a rule that goes on its own: {value}"),
-    Action("remove_rule", "rule", "Remove a rule from Your rules", _remove_rule, confirm=_removing_needs_tap,
+    Action("remove_rule", "rule", "Remove a rule from Your rules", _remove_rule,
            card="Remove the rule {title}"),
     # Standing jobs: each step for one still goes through Approvals.
     Action("add_standing_job", "new_standing_job",
            "Give As me standing work, something to keep doing in its own name (use id \"new\")",
-           _add_job, confirm=True, value="what to keep doing, in the person's words",
+           _add_job, value="what to keep doing, in the person's words",
            card="Give As me this standing work: {value}"),
     Action("stop_standing_job", "standing_job", "Stop some standing work", _stop_job),
     Action("check_inbox_now", "inbox", "Check the person's inbox for emails to draft replies to now (use id \"inbox\")",

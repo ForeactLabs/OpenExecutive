@@ -166,6 +166,14 @@ def chosen_recipients(defn: Any) -> set[str]:
     return own | {a.lower() for text in written for a in _EMAIL_RE.findall(text)}
 
 
+# Who may save one that runs as its creator: that person alone, by their own
+# signed request (``save_refusal``).
+NOT_THE_CREATOR = (
+    "Only the person who created this workflow can save or switch on a workflow "
+    "that reads their email, sends email as them or uses their browser."
+)
+
+
 def save_refusal(defn: Any, caller: Any, owner_id: int | None, *, check_tools: bool = True) -> str | None:
     """Why ``caller`` may not save or switch on ``defn`` with its creator
     ``owner_id``, or None. Only a workflow that sends as its creator or reads
@@ -197,10 +205,7 @@ def save_refusal(defn: Any, caller: Any, owner_id: int | None, *, check_tools: b
     if refused is None:
         return None
     if refused == NOT_YOURS:
-        return (
-            "Only the person who created this workflow can save or switch on a workflow "
-            "that reads their email, sends email as them or uses their browser."
-        )
+        return NOT_THE_CREATOR
     if not sends(defn):
         return (
             "A workflow that reads your email or uses your browser needs signed sign-ins on this server, so "

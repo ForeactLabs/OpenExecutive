@@ -45,7 +45,8 @@ def needs_card(existing: Any, defn: Any, *, asked: bool = False) -> bool:
 
     - A workflow that reads or sends email as its creator or uses their
       browser (before or after the change) runs as that person: only their
-      own ask saves it, at every level; anyone else's waits on a card.
+      own signed request saves it: their verified ask in chat, else their
+      tap on the card (someone else is told so, ``someone_else_as_creator``).
     - Below Hands-off, a switched-on workflow with action steps waits when
       nobody asked for the change this turn."""
     from openexecutive.delegation.workflow_email import as_creator
@@ -57,6 +58,22 @@ def needs_card(existing: Any, defn: Any, *, asked: bool = False) -> bool:
         return not (asked and _asked_by_creator(existing.name))
     approved = existing.is_active and any(isinstance(s, ActionStepSpec) for s in existing.steps)
     return bool(approved) and not asked and not hands_off()
+
+
+def someone_else_as_creator(existing: Any, defn: Any) -> bool:
+    """Whether a verified speaker who isn't its creator changes a workflow
+    that reads or sends email as its creator or uses their browser. Only the
+    creator's own signed request saves one (``workflow_email.save_refusal``,
+    the sign-in check), so they are told that straight away rather than left
+    a card their tap could never approve."""
+    from openexecutive.delegation.workflow_email import as_creator
+
+    if existing is None or not (as_creator(existing) or as_creator(defn)):
+        return False
+    person = _speaker()
+    if person is None or getattr(person, "id", None) is None:
+        return False
+    return not _asked_by_creator(existing.name)
 
 
 def _asked_by_creator(name: str) -> bool:
@@ -176,10 +193,8 @@ def _speaker() -> Any:
 
 def may_read(name: str) -> str | None:
     """Why this turn may not read or change workflow ``name``, or None: it
-    needs a verified speaker, in a conversation only they read, who is the
-    account owner or the workflow's creator."""
-    from openexecutive.orchestrator.app_control import _NOT_PRIVATE
-    from openexecutive.orchestrator.speaker import own_private_speaker
+    needs a verified speaker who is the account owner or the workflow's
+    creator. A chat others read stops nothing: privacy hides."""
     from openexecutive.workflows.dynamic_store import get_owner
 
     person = _speaker()
@@ -188,8 +203,6 @@ def may_read(name: str) -> str | None:
             "I can only do this with a saved workflow when I know who is asking: in the web "
             "app signed in, a call with me, or your own chat app."
         )
-    if own_private_speaker() is None:
-        return _NOT_PRIVATE
     if not getattr(person, "is_principal", False) and get_owner(name) != person.id:
         return "Only the account owner or the person who created this workflow can do that."
     return None

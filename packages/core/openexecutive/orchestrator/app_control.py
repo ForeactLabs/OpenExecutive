@@ -17,17 +17,18 @@ none (an email, an unattended run) gets a refusal. Some routes check nothing
 about the caller because their page is the principal's; those actions are
 ``principal_only``.
 
-**What waits for a tap.** Approvals decides (``orchestrator.levels``). On
-Hands-off the action is done in the turn. Below it, an action marked
-``confirm`` (a delete, a share, turning on something that sends as the
-person, anything that lets more go on its own) becomes a card in the chat
+**What waits for a tap.** The one gate decides (``take_the_lead.in_app``):
+Your rules, the level, In training, then what this turn noticed (text from
+outside the team or the speaker's own mail, ``levels``), then on Balanced
+an action's topic (a delete or a share, ``Action.topic``). Hands-off runs
+everything but a Waits rule. A step that waits becomes a card in the chat
 (decision class ``app_action``, ``api.routes.decisions``) that only the
 speaker can see and answer, with the action spelled out. Their tap runs it
 with their own request to ``/decisions/{id}/approve``, so a route that needs
-a signed sign-in gets one, and the route checks them again then. After a turn
-has read text from outside the team (``outside_content``) or the speaker's
-own mail, every action waits for a tap below Hands-off: planted text
-("delete the Q3 chat") can't act on its own. A card left a day goes stale.
+a signed sign-in gets one, and the route checks them again then; a route
+that wants that signed request (raising the level, a Goes rule, removing a
+Waits rule, leaving In training) leaves the card too. A card In training held allows that
+action from then on when it is approved. A card left a day goes stale.
 
 **Adding to it.** ``register_kind`` / ``register_action`` / ``register_screen``
 add to the catalog (``app_control_catalog`` holds this repo's), at startup
@@ -76,6 +77,9 @@ class Item:
     id: str
     title: str
     detail: str = ""
+    # Only the speaker sees it (their own chats and topics, a decision they
+    # kept to themselves): left out of a list in a conversation others read.
+    private: bool = False
 
 
 # (request) → everything of the kind the caller may act on.
@@ -106,8 +110,9 @@ class Action:
     # What it does, for the tool description: "Pin a chat to the top of the list".
     does: str
     run: Runner
-    # Whether it waits for a tap: always, or per (item id, value).
-    confirm: bool | Callable[[str, str], bool] = False
+    # The Balanced topic it is (``take_the_lead.DELETE`` / ``SHARE``), for
+    # the one gate (``take_the_lead.in_app``) to weigh.
+    topic: str | None = None
     # What ``value`` is, when the action takes one.
     value: str | None = None
     # The card's line, with {title} (quoted) and {value}: "Delete the chat {title}".
@@ -117,9 +122,6 @@ class Action:
     # Not offered to do_in_app: only a card another tool leaves runs it (a
     # workflow change ``save_workflow`` stages, ``workflow_change``).
     hidden: bool = False
-
-    def needs_tap(self, item_id: str, value: str) -> bool:
-        return self.confirm(item_id, value) if callable(self.confirm) else bool(self.confirm)
 
 
 @dataclass
@@ -171,9 +173,10 @@ def _rebuild() -> None:
             "Do something in Open Executive that the person asked for, as its own "
             "button would: pin, rename, delete, share, turn a setting on or off. "
             f"id comes from find_in_app; for the chat you are in, use id \"{THIS}\". "
-            "Below Hands-off, some actions (deletes, shares, anything that sends as them "
-            "or lets more happen on its own) leave a card for them to confirm instead: "
-            "if the result says waiting_for_approval, say it is waiting for their OK, "
+            "Approvals decides whether it is done now or leaves a card for them to confirm "
+            "(a delete or a share waits on Balanced; raising the level or adding a Goes rule "
+            "takes their tap): if the result says waiting_for_approval, say it "
+            "is waiting for their OK, "
             "never that it is done. If it is refused, say why "
             "in their words; don't retry.\n" + "\n".join(lines)
         ),
@@ -322,33 +325,28 @@ def _clean_value(raw: Any) -> str:
     return " ".join(str(raw or "").split())[:_VALUE_MAX]
 
 
-def _turn_read_outside(session: Any) -> bool:
-    """Whether this turn read text from outside the team or the speaker's own
-    mail: from then on every action waits for a tap."""
-    from openexecutive.delegation.settings import turn_delegation
-    from openexecutive.orchestrator import outside_content
+def _noticed(session: Any) -> str | None:
+    """What this turn read that the gate weighs (a ``levels`` reason): text
+    from outside the team (``levels.outside_reason``), or mail whose read
+    the safety check notices (``levels.mail_reason``). None when neither.
+    It only notices; ``take_the_lead.in_app`` decides. Never raises: an
+    error is mail it couldn't check."""
+    from openexecutive.orchestrator import levels
 
     try:
+        from openexecutive.delegation.lockdown import mail_lock_holds
+        from openexecutive.delegation.settings import turn_delegation
+        from openexecutive.orchestrator import outside_content
+
         if outside_content.read_outside():
-            return True
+            return levels.outside_reason()
+        pinned = turn_delegation(session)
+        if pinned is not None and (getattr(pinned, "touched_mail", False) is True or mail_lock_holds(pinned)):
+            return levels.mail_reason(pinned)
+        return None
     except Exception:
-        return True
-    pinned = turn_delegation(session)
-    if pinned is None:
-        return False
-    from openexecutive.delegation.lockdown import mail_lock_holds
-    from openexecutive.orchestrator import outside_mode
-
-    # The mail it read holds as the safety level says (Careful: a
-    # conversation that read it; Balanced: a read the check flagged or
-    # hasn't checked yet; Hands-off: nothing).
-    try:
-        state = outside_content.current()
-        if getattr(pinned, "touched_mail", False) is True and (state is None or state.mode == outside_mode.ASK):
-            return True
-        return mail_lock_holds(pinned)
-    except Exception:
-        return True
+        logger.warning("app_control: couldn't tell what the turn read", exc_info=True)
+        return levels.MAIL_UNCHECKED
 
 
 # --------------------------------------------------------------------------- #
@@ -373,23 +371,10 @@ def _matches(item: Item, query: str) -> bool:
     return all(w in text for w in words)
 
 
-def _private_here() -> bool:
-    """Whether only the speaker reads this conversation: their list of chats,
-    settings and rules isn't for a shared chat or a channel."""
-    from openexecutive.delegation.settings import private_conversation
-
-    return private_conversation(_session())
-
-
-_NOT_PRIVATE = "Others can read this conversation, so do that in your own chat with me or on the screen."
-
-
 async def handle_find_in_app(tool_input: dict[str, Any]) -> str:
     person = _speaker()
     if person is None:
         return _error("I can only do this when I know who is asking: in the web app signed in, or your own chat app.")
-    if not _private_here():
-        return _error(_NOT_PRIVATE)
     kind = CATALOG.kinds.get(str(tool_input.get("kind") or ""))
     if kind is None:
         return _error(f"kind must be one of {', '.join(sorted(CATALOG.kinds))}")
@@ -404,14 +389,35 @@ async def handle_find_in_app(tool_input: dict[str, Any]) -> str:
         return _error("Couldn't read that list just now.")
     query = _clean_value(tool_input.get("query"))
     found = [i for i in items if _matches(i, query)] if query else items
+    shown, hidden = _hide_private(found)
     return json.dumps({
         "kind": kind.name,
         "items": [
             {"id": i.id, "title": i.title, **({"detail": i.detail} if i.detail else {})}
-            for i in found[:_FIND_MAX]
+            for i in shown[:_FIND_MAX]
         ],
-        **({"more": len(found) - _FIND_MAX} if len(found) > _FIND_MAX else {}),
+        **({"more": len(shown) - _FIND_MAX} if len(shown) > _FIND_MAX else {}),
+        **({"private_left_out": hidden, "private_note": _PRIVATE_NOTE} if hidden else {}),
     })
+
+
+_PRIVATE_NOTE = (
+    "Others read this conversation, so what is private to the speaker is left out of this "
+    "list. They see it in a chat only they read, or on its screen."
+)
+
+
+def _hide_private(items: list[Item]) -> tuple[list[Item], int]:
+    """Privacy hides: in a conversation others read, leave out what only the
+    speaker sees (the chat itself stays, everyone in it reads it already)."""
+    from openexecutive.delegation.settings import private_conversation
+
+    session = _session()
+    if private_conversation(session):
+        return items, 0
+    here = str(getattr(session, "session_id", "") or "")
+    shown = [i for i in items if not i.private or (here and i.id == here)]
+    return shown, len(items) - len(shown)
 
 
 def card_text(action: Action, title: str, value: str) -> str:
@@ -454,8 +460,6 @@ async def handle_do_in_app(tool_input: dict[str, Any]) -> str:
     person = _speaker()
     if person is None or getattr(person, "id", None) is None:
         return _error("I can only do this when I know who is asking: in the web app signed in, or your own chat app.")
-    if not _private_here():
-        return _error(_NOT_PRIVATE)
     action = CATALOG.actions.get(str(tool_input.get("action") or ""))
     if action is None or action.hidden:
         return _error("Unknown action. Pick one from the list.")
@@ -487,9 +491,12 @@ async def handle_do_in_app(tool_input: dict[str, Any]) -> str:
         return _error("Couldn't check that just now. Try again in a moment.")
 
     details = {"action": action.name, "kind": kind.name, "id": item_id, "person_id": person.id}
-    held = action.needs_tap(item_id, value) or _turn_read_outside(session)
-    if held and not _hands_off():
-        return _card_result(person.id, session, action, item_id, value, title or "", details)
+    hit = _asks_the_engine(action, card_text(action, title or "", value), session)
+    if hit is not None:
+        return _card_result(
+            person.id, session, action, item_id, value, title or "", details,
+            why=hit.reason, allow=_training_grant(action) if _in_training(hit) else None,
+        )
 
     try:
         with from_chat():
@@ -498,8 +505,8 @@ async def handle_do_in_app(tool_input: dict[str, Any]) -> str:
         return _error(str(exc))
     except HTTPException as exc:
         if exc.status_code == 409 and "caller_signing_required" in str(exc.detail):
-            # The route wants the person's own signed request (turning on
-            # something that sends as them, changing Your rules), which a
+            # The route wants the person's own signed request (raising the
+            # level, loosening Your rules, leaving In training), which a
             # chat turn never is: their tap on a card is that request.
             return _card_result(person.id, session, action, item_id, value, title or "", details)
         _audit("app_action_refused", f"{action.name} refused", {**details, "status": exc.status_code})
@@ -513,11 +520,12 @@ async def handle_do_in_app(tool_input: dict[str, Any]) -> str:
 
 def _card_result(
     person_id: int, session: Any, action: Action, item_id: str, value: str, title: str, details: dict[str, Any],
+    *, why: str = "", allow: dict[str, str] | None = None,
 ) -> str:
     """Leave the action on a card for the speaker's tap, and say so."""
     card = card_text(action, title, value)
     try:
-        decision_id = _leave_card(person_id, session, action, item_id, value, title, card)
+        decision_id = _leave_card(person_id, session, action, item_id, value, title, card, allow=allow)
     except Exception:
         logger.exception("do_in_app: couldn't leave the card for %s", action.name)
         return _error("Couldn't leave the card just now. Try again in a moment.")
@@ -526,21 +534,33 @@ def _card_result(
         "status": "waiting_for_approval",
         "decision_id": decision_id,
         "card": card,
+        **({"why": why} if why else {}),
         "note": waiting_note(session),
     })
 
 
-def _hands_off() -> bool:
-    """Whether Approvals lets a confirm action run in the turn: Hands-off
-    (``levels.relaxed``; never on a turn answering mail from someone not in
-    People). Never raises: an error leaves the card."""
-    try:
-        from openexecutive.orchestrator import levels
+def _asks_the_engine(action: Action, does: str, session: Any) -> Any:
+    """Ask the one gate (``take_the_lead.in_app``) whether ``action`` runs
+    now, passing on what this turn noticed (``_noticed``). Its ``Hit`` when
+    it waits, else None."""
+    from openexecutive.orchestrator import take_the_lead
 
-        return levels.relaxed()
-    except Exception:
-        logger.warning("app_control: couldn't read the level — leaving a card", exc_info=True)
-        return False
+    return take_the_lead.in_app(action.name, action.does, does, topic=action.topic, noticed=_noticed(session))
+
+
+def _in_training(hit: Any) -> bool:
+    from openexecutive.orchestrator import take_the_lead
+
+    return getattr(hit, "kind", None) == take_the_lead.TRAINING
+
+
+def _training_grant(action: Action) -> dict[str, str] | None:
+    """What approving a card In training held allows from then on: this
+    action, as ``take_the_lead.allowance`` names it."""
+    from openexecutive.orchestrator import take_the_lead
+
+    found = take_the_lead.allowance(f"{take_the_lead.APP_STEP}{action.name}", {"label": action.does})
+    return {"key": found[0], "label": found[1]} if found is not None else None
 
 
 async def handle_open_in_app(tool_input: dict[str, Any]) -> str:
@@ -585,6 +605,7 @@ def waiting_note(session: Any = None) -> str:
 
 def _leave_card(
     person_id: int, session: Any, action: Action, item_id: str, value: str, title: str, card: str,
+    *, allow: dict[str, str] | None = None,
 ) -> int:
     """Leave the card for ``person_id``, theirs alone. Where the chat can't
     show it (a call, mail, a chat app without buttons) it also goes on their
@@ -603,6 +624,7 @@ def _leave_card(
         originating_session_id=getattr(session, "session_id", None),
         proposed_payload={
             "action": action.name, "id": item_id, "value": value, "title": title, "card": card,
+            **({"allow": allow} if allow else {}),
         },
         idempotency_key=None,
         gate_mode="propose",

@@ -186,6 +186,8 @@ ACTING_TOOLS: frozenset[str] = frozenset({
     "send_telegram_message",
 })
 _DELETE_TOOLS = frozenset({"archive_person", "cancel_calendar_event"})
+# The name ``in_app`` gives a change to the app asked for in chat.
+APP_STEP = "do_in_app:"
 _BROADCAST_TOOLS = frozenset({"send_company_broadcast", "send_department_message"})
 # A connected (MCP) tool passes ungated only when its name says it reads and
 # nothing in it says it acts. Any other name goes through the gate.
@@ -1454,8 +1456,10 @@ def _topics(
 ) -> list[tuple[str, str]]:
     """Every topic (``KINDS``) a step is about, in order, with the reason a
     card shows: the one place a step's topics are decided."""
-    removes = tool in _DELETE_TOOLS or (mcp and _mcp_removes(tool, tool_input))
-    shares = (mcp and _mcp_shares(tool, tool_input)) or bool(_CREDENTIALS_RE.search(about))
+    # A change to the app asked for in chat (``in_app``) names its own topic.
+    app_topic = tool_input.get("topic") if not mcp and str(tool or "").startswith(APP_STEP) else None
+    removes = tool in _DELETE_TOOLS or (mcp and _mcp_removes(tool, tool_input)) or app_topic == DELETE
+    shares = (mcp and _mcp_shares(tool, tool_input)) or bool(_CREDENTIALS_RE.search(about)) or app_topic == SHARE
     found: list[tuple[str, str]] = []
     if removes:
         found.append((DELETE, "it deletes or cancels something"))
@@ -1572,6 +1576,12 @@ def allowance(tool: str, tool_input: dict[str, Any], *, mcp: bool = False) -> tu
     with no tool name."""
     if not mcp and tool in _DIRECT_MESSAGE_TOOLS:
         return f"{FEATURE}|message", "Send messages and emails"
+    if not mcp and str(tool or "").startswith(APP_STEP):
+        # A change to the app asked for in chat (``in_app``): each action
+        # is its own kind of step.
+        action = str(tool)[len(APP_STEP):]
+        label = str(tool_input.get("label") or action.replace("_", " ").capitalize())
+        return (f"{FEATURE}|app|{action}", label[:200]) if action else None
     if mcp:
         from openexecutive.orchestrator.mcp_gateway import _normalize_tool_name
 
@@ -4437,6 +4447,42 @@ def as_you(
     except Exception:
         logger.warning("take_the_lead: couldn't decide what goes as a person — holding", exc_info=True)
         return "rule"
+
+
+def in_app(action: str, label: str, does: str, *, topic: str | None = None, noticed: str | None = None) -> Hit | None:
+    """The one gate for a change to the app someone asked for in chat
+    (``app_control.do_in_app``: pin, rename, delete, share, turn a setting
+    on or off): why it waits on its person's card, or None when it runs.
+    As ``_asked_hit`` for a step someone asked for:
+
+    1. **Your rules**: a Waits rule matching ``does`` (or ``topic``) holds it.
+    2. **The level**: Careful holds it.
+    3. **In training**: an action nobody has allowed yet holds, once.
+    4. What the feature noticed (``noticed``, a ``levels`` reason such as
+       a read from outside the company) waits as ``levels.decide`` says.
+    5. Balanced: ``topic`` (``DELETE`` or ``SHARE``) waits unless a Goes
+       rule lets it go. Hands-off runs it.
+
+    ``label`` is what the action does ("Delete a chat for good"), the kind
+    of step In training allows. Never raises: an error holds."""
+    name = f"{APP_STEP}{action}"
+    hit = _asked_hit(name, {"does": does, "label": label, **({"topic": topic} if topic else {})}, mcp=False)
+    if hit is not None:
+        return hit
+    try:
+        from openexecutive.orchestrator import levels, outside_mode
+
+        if noticed and levels.decide(noticed) == levels.CARD:
+            return Hit(noticed, levels._WHY.get(noticed, "of something it read this turn"))
+        if topic not in KINDS or levels.turn_level() == outside_mode.TRUST:
+            return None
+        released, _ = _released(list_rules([SCOPE_COMPANY]), does, [])
+        if topic in released:
+            return None
+        return Hit(topic, "it deletes something" if topic == DELETE else "it shares something")
+    except Exception:
+        logger.warning("take_the_lead: couldn't decide a change to the app — holding it", exc_info=True)
+        return Hit("rule", "its rules couldn't be read")
 
 
 def held_topic(rules: list[Rule], text: str, recipients: Iterable[str], *, words_text: str | None = None) -> str | None:
