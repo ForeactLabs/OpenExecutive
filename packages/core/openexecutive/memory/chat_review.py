@@ -1936,7 +1936,15 @@ def _went_through(out: str) -> bool:
         return False
     if not isinstance(data, dict) or "error" in data:
         return False
-    return str(data.get("status", "ok")) not in ("refused", "not_found", "not_open", "rejected", "noop", "not_raised")
+    # A step that waits on a card, or was held, has not happened yet.
+    return str(data.get("status", "ok")) not in _NOT_THROUGH
+
+
+_NOT_THROUGH = frozenset({
+    "refused", "not_found", "not_open", "rejected", "noop", "not_raised",
+    "waiting_for_approval", "waiting", "awaiting_confirmation", "awaiting_human",
+    "proposed", "held", "suppressed",
+})
 
 
 def _not_their_words(quote: str, words: str) -> str | None:

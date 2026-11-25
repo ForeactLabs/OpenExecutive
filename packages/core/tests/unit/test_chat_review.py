@@ -1072,6 +1072,35 @@ def test_a_put_right_line_never_tells_a_change_that_did_not_go_through(
     assert brief_requests.active(db_path=db) == []
 
 
+def test_a_step_waiting_on_a_card_is_not_told_as_put_right(
+    db: Path, roster: SimpleNamespace, provider: _Provider, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.orchestrator import levels
+
+    real = cr._chat_tools
+
+    def held_tools() -> Any:
+        by_name, handlers = real()
+
+        async def waits(_args: dict[str, Any]) -> str:
+            return levels.waiting_result(1, "a reply quoted mail")
+
+        return by_name, {**handlers, "schedule_followup": waits}
+
+    monkeypatch.setattr(cr, "_chat_tools", held_tools)
+    _record(roster.principal, text="remind me to call Jamie at 3:20 please", reply="Done, I'll remind you at 3:20.")
+    provider.script = [[("schedule_followup", {
+        "run_at": (datetime.now(UTC) + timedelta(days=1)).isoformat(), "channel": "email",
+        "channel_ref": "olivia@co.example", "intent": "Remind them to call Jamie at 3:20.",
+        "source_quote": "remind me to call Jamie",
+    })], [("raise_in_brief", {"line": "From your chat: I set the 3:20 reminder to call Jamie.", "put_right": True,
+                              "source_quote": "remind me to call Jamie at 3:20"})]]
+    _review(db)
+    assert _tool_results(provider)[0]["status"] == "waiting_for_approval"
+    assert _tool_results(provider, 2)[0]["status"] == "not_raised"
+    assert brief_requests.active(db_path=db) == []
+
+
 def test_a_put_right_line_must_name_the_change(db: Path, roster: SimpleNamespace,
                                               provider: _Provider) -> None:
     loop_id = open_loop(owner_person_id=roster.principal.id, description="Send the vendor email",
