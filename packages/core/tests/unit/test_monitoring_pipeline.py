@@ -2233,3 +2233,15 @@ def test_a_card_from_someones_own_watch_shows_only_to_them(db: Path) -> None:
     # Their own brief, built with no viewer for them, keeps it.
     assert visible_alert(card(4), None, chat_reader=4)
     assert visible_alert(card(None), drew)
+
+
+def test_an_own_watchs_findings_stay_out_of_the_companys_recent_signals(db: Path) -> None:
+    """The reflection reads recent signals for the whole company: what
+    someone's own watch found is theirs, like its card."""
+    from openexecutive.monitoring import mailbox
+
+    own_id = _insert_feed(db, slug="eggs", config=mailbox.own_config({}, 4), route_to_person_id=4)
+    company_id = _insert_feed(db, slug="flour")
+    ms.insert_signal(_make_signal(dedup_key="eggs:1").model_copy(update={"watchlist_id": own_id}), db_path=db)
+    ms.insert_signal(_make_signal(dedup_key="flour:1").model_copy(update={"watchlist_id": company_id}), db_path=db)
+    assert [s["watchlist_id"] for s in ms.list_recent_signals(db_path=db)] == [company_id]

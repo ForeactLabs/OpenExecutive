@@ -1247,7 +1247,8 @@ def list_recent_signals(
 ) -> list[dict[str, Any]]:
     """Read recent signals — used by the reflection context extension in PR-C
     and by the audit/debug endpoints. The company's only: an email watch's
-    signals are its owner's (``monitoring.mailbox``)."""
+    signals are its owner's, and an own watch's its setter's
+    (``monitoring.mailbox.set_by``)."""
     resolved = _resolve_db_path(db_path)
     if not resolved.exists():
         return []
@@ -1268,7 +1269,12 @@ def list_recent_signals(
             f"ORDER BY captured_at DESC LIMIT ?",
             params,
         ).fetchall()
-    return [_row_to_signal_dict(row) for row in rows]
+    from openexecutive.monitoring import mailbox
+
+    signals = [_row_to_signal_dict(row) for row in rows]
+    watches = {int(s["watchlist_id"]) for s in signals if s.get("watchlist_id") is not None}
+    own = {i for i in watches if (item := get_watchlist_item(i, db_path=db_path)) is not None and mailbox.set_by(item) is not None}
+    return [s for s in signals if s.get("watchlist_id") not in own]
 
 
 def last_told_by_watch(db_path: Path | None = None) -> dict[int, dict[str, Any]]:
