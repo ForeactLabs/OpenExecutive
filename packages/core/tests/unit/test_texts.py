@@ -263,6 +263,24 @@ def test_the_executives_words_come_back_once_then_the_same_words_are_a_reply(ids
     assert [t.outgoing for t in tx.texts(conv.id)][-2:] == [True, False]
 
 
+def test_a_sent_text_and_its_echo_are_one_text(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("a", text="Lunch?")])
+    (conv,) = tx.conversations(owner)
+    send = tx.queue_send(owner, "Sounds good", conversation_id=conv.id)
+    tx.take_send(owner)
+    tx.settle_send(owner, send.id, status=tx.SENT)
+    tx.record(owner, [_item("b", text="You: Sounds good")])
+    assert [(t.text, t.outgoing) for t in tx.texts(conv.id)] == [("Lunch?", False), ("Sounds good", True)]
+    # The echo first, then the settle: still one.
+    send2 = tx.queue_send(owner, "See you there", conversation_id=conv.id)
+    tx.take_send(owner)
+    tx.record(owner, [_item("c", text="You: See you there")])
+    tx.settle_send(owner, send2.id, status=tx.SENT)
+    assert [t.text for t in tx.texts(conv.id)].count("See you there") == 1
+
+
 # --- the routes ------------------------------------------------------------
 
 

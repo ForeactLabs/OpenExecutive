@@ -295,15 +295,18 @@ def record(person_id: int, items: list[Incoming], *, db_path: Path | None = None
             # never makes a text theirs (the turn is told what it may mean).
             echo = _echo_of(conn, person_id, conversation_id, item.text, now)
             outgoing = echo is not None
+            ref, sender, words = _clip(item.ref, 300), _clip(item.sender, 200), _clip(item.text, MAX_TEXT)
             if echo is not None:
                 conn.execute(f"UPDATE {TEXT_SENDS_TABLE} SET echoed=1 WHERE id=?", (echo,))
+                # One row per send: the one its settle writes (``send:<id>``),
+                # whichever comes first, in the words it sent.
+                ref, sender = f"send:{echo}", ""
+                sent = conn.execute(f"SELECT text FROM {TEXT_SENDS_TABLE} WHERE id=?", (echo,)).fetchone()
+                words = str(sent["text"]) if sent is not None else words
             cur = conn.execute(
                 f"INSERT OR IGNORE INTO {TEXTS_TABLE} "
                 "(person_id, conversation_id, ref, sender, text, outgoing, at, handled) VALUES (?,?,?,?,?,?,?,?)",
-                (
-                    person_id, conversation_id, _clip(item.ref, 300), _clip(item.sender, 200),
-                    _clip(item.text, MAX_TEXT), int(outgoing), _iso(min(item.at, now)), int(outgoing),
-                ),
+                (person_id, conversation_id, ref, sender, words, int(outgoing), _iso(min(item.at, now)), int(outgoing)),
             )
             if cur.rowcount and cur.lastrowid is not None and not outgoing:
                 fresh.append(int(cur.lastrowid))
