@@ -63,7 +63,8 @@
       snippet,
       unread: Boolean(row.unread),
       outgoing,
-      group: Boolean(row.group) || /,\s/.test(title),
+      // Only the page's own mark: "Smith, John" is one person.
+      group: Boolean(row.group),
     };
   };
 

@@ -309,21 +309,31 @@ def record(person_id: int, items: list[Incoming], *, db_path: Path | None = None
     return fresh
 
 
+# A list preview's "You: " in a language the browser didn't know.
+_LEADING_WHO = re.compile(r"^\s*[^\s:：]{1,12}\s*[:：]\s*")
+# How long after a send its own words can come back as the list's preview.
+_ECHO_WITHIN = timedelta(minutes=10)
+
+
 def _same_words(a: str, b: str) -> bool:
     return " ".join((a or "").split()).casefold() == " ".join((b or "").split()).casefold()
 
 
 def _just_sent(conn: sqlite3.Connection, person_id: int, conversation_id: str, text: str, now: datetime) -> bool:
     """Whether these words are a text the Executive sent in this conversation
-    (or to a new number) in the last day, settled or still going."""
+    (or to a new number) in the last few minutes, settled or still going."""
     if not (text or "").strip():
         return False
+    # Only a send of the last few minutes, in this conversation, or one to a
+    # new number still on its way: a reply an hour later in the same words is
+    # someone's reply.
     rows = conn.execute(
         f"SELECT text FROM {TEXT_SENDS_TABLE} WHERE person_id=? AND status<>? AND created_at >= ? "
-        "AND (conversation_id=? OR conversation_id IS NULL)",
-        (person_id, FAILED, _iso(now - LOOK_WITHIN), conversation_id),
+        "AND (conversation_id=? OR (conversation_id IS NULL AND status IN (?, ?)))",
+        (person_id, FAILED, _iso(now - _ECHO_WITHIN), conversation_id, PENDING, HANDED),
     ).fetchall()
-    return any(_same_words(r["text"], text) for r in rows)
+    bare = _LEADING_WHO.sub("", text, count=1)
+    return any(_same_words(r["text"], text) or _same_words(r["text"], bare) for r in rows)
 
 
 def _upsert_conversation(conn: sqlite3.Connection, person_id: int, item: Incoming, now: datetime) -> str:

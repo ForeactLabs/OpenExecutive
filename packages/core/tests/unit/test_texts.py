@@ -583,8 +583,14 @@ def test_its_own_text_coming_back_in_another_language_is_never_a_new_text(ids: d
     # Google Messages in Polish shows "Ty: Friday works", which isn't read as theirs.
     assert tx.record(owner, [_item("b", text="Friday  works")]) == []
     assert tx.texts(conv.id)[-1].outgoing is True
+    # Hindi: "आप: Friday works", with a "You:" the browser didn't know.
+    assert tx.record(owner, [_item("b2", text="आप: Friday works")]) == []
     tx.settle_send(owner, send.id, status=tx.SENT)
     assert tx.record(owner, [_item("c", text="Friday works?")]) != []  # someone else's words
+    # The same words long after the send are someone's reply.
+    with tx._connect() as conn:
+        conn.execute(f"UPDATE {tx.TEXT_SENDS_TABLE} SET created_at=?", (tx._iso(NOW - timedelta(hours=1)),))
+    assert tx.record(owner, [_item("d", text="Friday works")]) != []
 
 
 def test_an_overdue_send_fails_on_time_with_no_browser_asking(ids: dict[str, int]) -> None:

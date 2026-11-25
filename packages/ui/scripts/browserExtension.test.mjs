@@ -383,10 +383,13 @@ test("texts: the first look only counts unread texts from others, later looks co
 
 test("texts: a group's sender is left blank, and the new-conversation link is not a conversation", () => {
   const T = textsHelpers();
-  const out = T.changes([{ key: "g", title: "Sam, Ana", snippet: "Pizza?", unread: true }, { key: "new", title: "x", snippet: "y", unread: true }], null, 0);
-  assert.equal(out.items.length, 1);
+  const out = T.changes([{ key: "g", title: "Sam, Ana", snippet: "Pizza?", unread: true, group: true }, { key: "s", title: "Smith, John", snippet: "Hi", unread: true }, { key: "new", title: "x", snippet: "y", unread: true }], null, 0);
+  assert.equal(out.items.length, 2);
   assert.equal(out.items[0].is_group, true);
   assert.equal(out.items[0].sender, "");
+  // A comma in a name is still one person.
+  assert.equal(out.items[1].is_group, false);
+  assert.equal(out.items[1].sender, "Smith, John");
   assert.equal(T.keyOf("https://messages.google.com/web/conversations/new"), "");
   assert.equal(T.keyOf("https://messages.google.com/web/conversations/abc%3D1?x=1"), "abc=1");
 });
