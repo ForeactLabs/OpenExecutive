@@ -418,6 +418,9 @@ def test_the_setters_words_are_read_apart_from_the_run(
     kwargs = provider.messages_create.call_args.kwargs
     assert "tools" in kwargs and kwargs["tools"][0]["name"] == "record_followup_decision"
     assert "Hold the note to Dana" in kwargs["messages"][0]["content"]
+    # A hold until something happens is a hold: a note to someone else never
+    # reaches them on the setter's "until the board call".
+    assert "paused if they asked to hold or pause it with no time, including a hold until something happens" in kwargs["system"]
 
 
 def test_a_failed_read_sends_it_as_set(db: Path, roster: SimpleNamespace) -> None:

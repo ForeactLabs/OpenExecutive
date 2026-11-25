@@ -5206,12 +5206,11 @@ scheduler:
     message and says so. Whether it goes at all is settled before any run,
     for every follow-up whoever it is addressed to: runner._setter_decision
     (the routing model, one forced tool, writes nothing) reads what the
-    setter wrote since and answers send, paused (a hold with no time or
-    condition), dropped, or moved with a new time (a hold until a date or
+    setter wrote since and answers send, paused (a hold with no time, or
+    until something happens), dropped, or moved with a new time (a hold until a date or
     time). Moved, nothing runs: the row waits for its new time
     (episodic.reschedule_action) and the setter gets a line saying when; a
-    time that has passed or is past the horizon sends it as set. A hold
-    until something happens is send. The message that set the follow-up
+    time that has passed or is past the horizon sends it as set. The message that set the follow-up
     is never read as said since: a turn saves its message when it ends,
     after the row, with any it folded in and then its reply, so the
     originating conversation's messages before its first reply within 15
