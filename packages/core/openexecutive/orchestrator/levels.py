@@ -63,6 +63,10 @@ MAIL_FLAGGED = "mail_flagged"
 # Mail read this turn that the content check couldn't check (too big, or a
 # script read it beside the loop's check): Balanced waits, as for a flag.
 MAIL_UNCHECKED = "mail_unchecked"
+# A post to everyone or a change to who is on People, on a turn that read
+# someone's own mail (delegation.lockdown.spreads_mail): sharing and people
+# are two of the topics Balanced waits on.
+MAIL_SHARED = "mail_shared"
 PRIVATE = "private_turn"
 SHARED = "shared_chat"
 # A turn that may only read and advise (``schedule_tools.read_only_turn``):
@@ -86,10 +90,10 @@ SEND_SITE = "send_site"
 # topics). Every other reason a feature notices runs on Balanced and waits
 # on Careful.
 BALANCED_WAITS: frozenset[str] = frozenset({
-    OUTSIDE, OUTSIDE_READ, MAIL_FLAGGED, MAIL_UNCHECKED, NEW_PERSON, FILE_PLACE, UNATTENDED,
+    OUTSIDE, OUTSIDE_READ, MAIL_FLAGGED, MAIL_UNCHECKED, MAIL_SHARED, NEW_PERSON, FILE_PLACE, UNATTENDED,
 })
 REASONS: frozenset[str] = frozenset({
-    OUTSIDE, OUTSIDE_READ, OWN_MAIL, MAIL_FLAGGED, MAIL_UNCHECKED, PRIVATE, SHARED, READ_ONLY, NOT_OWNER, UNATTENDED, STRANGER,
+    OUTSIDE, OUTSIDE_READ, OWN_MAIL, MAIL_FLAGGED, MAIL_UNCHECKED, MAIL_SHARED, PRIVATE, SHARED, READ_ONLY, NOT_OWNER, UNATTENDED, STRANGER,
     NEW_PERSON, FILE_PLACE, URL_FETCH, SCRIPT, SEND_SITE,
 })
 
@@ -100,6 +104,7 @@ _WHY: dict[str, str] = {
     OWN_MAIL: "it read your own mail first",
     MAIL_FLAGGED: "something it read looked like it was trying to give it instructions",
     MAIL_UNCHECKED: "it read mail it couldn't check for planted instructions first",
+    MAIL_SHARED: "it posts to everyone or changes People right after reading your own mail",
     PRIVATE: "it came from mail that's private to you",
     SHARED: "someone else wrote in this shared chat",
     READ_ONLY: "it was asked from a page in another app or a run queued for someone else",
@@ -209,13 +214,16 @@ def turn_level(session: Any = None) -> str:
     return outside_mode.for_turn(session)
 
 
-def mail_reason(pinned: Any = None) -> str:
+def mail_reason(pinned: Any = None, tool: str = "", tool_input: Any = None) -> str:
     """Why a step waits after someone's own mail was read this turn:
     ``MAIL_FLAGGED`` when the content check flagged some of what it read,
     ``MAIL_UNCHECKED`` when a read from an earlier round went unchecked (too
-    big, or a script ran beside it), else ``OWN_MAIL``. The pin is read
-    before this round's own reads run, so a read in this very round isn't
-    counted: the step was asked for before anyone saw what that mail says.
+    big, or a script ran beside it), ``MAIL_SHARED`` when ``tool`` posts to
+    everyone or changes People (``delegation.lockdown.spreads_mail``), else
+    ``OWN_MAIL``. A read in the round
+    being dispatched (``round_reading``, set by the chat loop until that
+    round's reads are checked) isn't counted: the step was asked for before
+    anyone saw what that mail says.
     ``pinned`` is the turn's ``TurnDelegation``, else the bound session's.
     Never raises: an error is ``MAIL_UNCHECKED``."""
     try:
@@ -238,7 +246,15 @@ def mail_reason(pinned: Any = None) -> str:
             pinned is not None and getattr(pinned, "read_mail", False) is True
             and getattr(pinned, "mail_vetted", False) is not True
         ):
-            return MAIL_UNCHECKED
+            if getattr(pinned, "round_reading", False) is not True:
+                return MAIL_UNCHECKED
+            if getattr(pinned, "unvetted_before_round", False) is True:
+                return MAIL_UNCHECKED
+        if tool:
+            from openexecutive.delegation.lockdown import spreads_mail
+
+            if spreads_mail(tool, tool_input):
+                return MAIL_SHARED
     except Exception:
         logger.debug("levels: couldn't tell whether a mail read was checked", exc_info=True)
         return MAIL_UNCHECKED

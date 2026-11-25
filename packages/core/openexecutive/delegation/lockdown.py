@@ -460,6 +460,19 @@ def _page_open_waits(pinned: Any) -> bool:
         return True
 
 
+def spreads_mail(tool_name: str, tool_input: Any) -> bool:
+    """Whether ``tool_name`` posts to everyone or changes who is on People
+    (``MAIL_PRIVATE_WITHHELD_TOOLS``, or an ``upsert_person`` the speaker
+    didn't ask for): after a mail read, sharing and people topics the
+    level decides on (``levels.MAIL_SHARED``). Only looks. Never raises."""
+    try:
+        if tool_name == "upsert_person":
+            return not speaker_named_contact(tool_input)
+        return tool_name in MAIL_PRIVATE_WITHHELD_TOOLS
+    except Exception:
+        return True
+
+
 def mail_turn_withholds(
     tool_name: str, tool_input: Any, *, reading_now: bool = False, pinned: Any = None,
 ) -> bool:
@@ -512,7 +525,7 @@ def outside_reach_refusal(label: str, tool_input: Any = None, tool_name: str = "
         return None
     from openexecutive.orchestrator import levels, outside_content
 
-    mail = reason in (levels.OWN_MAIL, levels.MAIL_FLAGGED, levels.MAIL_UNCHECKED)
+    mail = reason in (levels.OWN_MAIL, levels.MAIL_FLAGGED, levels.MAIL_UNCHECKED, levels.MAIL_SHARED)
     error = mail_touched_withheld_error(label) if mail else outside_content.outside_withheld_error(label)
     return _card_or(error, name, tool_input, reason)
 
@@ -525,7 +538,7 @@ def outside_reach_reason(name: str, tool_input: Any = None) -> str | None:
 
     reason: str | None
     try:
-        reason = levels.mail_reason() if mail_turn_withholds(name, tool_input) else None
+        reason = levels.mail_reason(tool=name, tool_input=tool_input) if mail_turn_withholds(name, tool_input) else None
     except Exception:
         reason = levels.MAIL_UNCHECKED
     if reason is None:

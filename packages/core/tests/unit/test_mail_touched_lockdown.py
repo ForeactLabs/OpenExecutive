@@ -1339,3 +1339,79 @@ def test_a_skill_a_handler_stops_waits_on_a_card(monkeypatch: pytest.MonkeyPatch
         assert "was not run" in json.loads(lockdown.outside_reach_refusal("run_workflow") or "{}")["error"]
     finally:
         current_session.reset(token)
+
+
+@pytest.mark.parametrize(("unvetted_before", "waits"), [(False, False), (True, True)])
+def test_a_gateway_call_in_the_reading_round_follows_balanced(
+    monkeypatch: pytest.MonkeyPatch, unvetted_before: bool, waits: bool,
+) -> None:
+    """Through the real gateway: a call in the same round as a mail read
+    (the read already marked the pin, its check not in yet) runs on
+    Balanced, because it was asked for before anyone saw that mail. If an
+    earlier round left mail unchecked (a script beside it), it waits."""
+    from openexecutive.orchestrator import content_scan, outside_mode
+    from openexecutive.orchestrator.mcp_gateway import MCPGateway
+
+    _level(monkeypatch, outside_mode.OUTSIDERS, content_scan.CLEAN)
+    cards = _cards(monkeypatch)
+    gateway = MCPGateway.__new__(MCPGateway)
+    session = Session()
+    session.turn_delegation = TurnDelegation(  # type: ignore[attr-defined]
+        enabled=True, offered=True, touched_mail=True, read_mail=True, mail_vetted=False,
+        round_reading=True, unvetted_before_round=unvetted_before, session_id=session.session_id,
+    )
+    reached: list[str] = []
+
+    def server() -> None:
+        reached.append("server")
+        raise RuntimeError("stop here")
+
+    token = current_session.set(session)
+    try:
+        with patch.object(MCPGateway, "_require_session", side_effect=server):
+            out = asyncio.run(gateway.call_tool({"name": "fetch__fetch_url", "arguments": {"url": "https://x.example/"}}))
+    except RuntimeError:
+        out = ""
+    finally:
+        current_session.reset(token)
+    if waits:
+        assert json.loads(out)["status"] == "waiting_for_approval" and reached == []
+        assert cards == [("fetch__fetch_url", [{"url": "https://x.example/"}], "mail_unchecked")]
+    else:
+        assert reached == ["server"] and cards == []
+
+
+@pytest.mark.parametrize(
+    ("tool", "tool_input"),
+    [
+        ("send_company_broadcast", {"message": "Heads up"}),
+        ("archive_person", {"person_id": 7}),
+    ],
+)
+def test_a_post_to_everyone_after_a_clean_read_waits_on_balanced(
+    monkeypatch: pytest.MonkeyPatch, tool: str, tool_input: dict[str, object],
+) -> None:
+    """A read the check cleared still makes a post to everyone or a People
+    change wait on Balanced (sharing and people are its topics), and run on
+    Hands-off."""
+    from openexecutive.orchestrator import content_scan, levels, outside_mode
+
+    _level(monkeypatch, outside_mode.OUTSIDERS, content_scan.CLEAN)
+    cards = _cards(monkeypatch)
+    session = Session()
+    session.turn_delegation = TurnDelegation(  # type: ignore[attr-defined]
+        enabled=True, offered=True, touched_mail=True, read_mail=True, mail_vetted=True,
+        session_id=session.session_id,
+    )
+    token = current_session.set(session)
+    try:
+        assert lockdown.outside_reach_reason(tool, tool_input) == levels.MAIL_SHARED
+        held = lockdown.outside_reach_refusal(tool, tool_input)
+        assert held is not None and json.loads(held)["status"] == "waiting_for_approval"
+        assert cards == [(tool, [tool_input], "mail_shared")]
+        # A step that shares nothing runs after the same clean read.
+        assert lockdown.outside_reach_reason("schedule_followup", {"intent": "chase Kyle"}) is None
+        _level(monkeypatch, outside_mode.TRUST, content_scan.CLEAN)
+        assert lockdown.outside_reach_reason(tool, tool_input) is None
+    finally:
+        current_session.reset(token)

@@ -370,3 +370,8 @@ def test_mail_an_earlier_round_left_unchecked_waits_on_balanced_even_beside_a_ne
     cleared = TurnDelegation(read_mail=True, mail_vetted=True)
     assert levels.mail_reason(cleared) == levels.OWN_MAIL
     assert levels.decide(levels.mail_reason(cleared), mode=outside_mode.OUTSIDERS) == levels.RUN
+    # Posting to everyone or changing People after it is sharing or people.
+    shared = levels.mail_reason(cleared, tool="send_company_broadcast", tool_input={"message": "hi"})
+    assert shared == levels.MAIL_SHARED
+    assert levels.decide(shared, mode=outside_mode.OUTSIDERS) == levels.CARD
+    assert levels.decide(shared, mode=outside_mode.TRUST) == levels.RUN

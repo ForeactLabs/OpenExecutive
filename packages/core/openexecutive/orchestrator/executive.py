@@ -3109,6 +3109,15 @@ class Executive:
             reads_mail_now = any(
                 tu["name"] in MAILBOX_TOOL_NAMES or tu["name"] in _OWN_RECALL_TOOL_NAMES for tu in dispatch_uses
             )
+            if pinned_delegation is not None:
+                # Until this round's reads are checked, only mail an earlier
+                # round left unchecked makes this round's steps wait
+                # (levels.mail_reason), in the loop and in every handler.
+                pinned_delegation.unvetted_before_round = bool(
+                    getattr(pinned_delegation, "read_mail", False)
+                    and getattr(pinned_delegation, "mail_vetted", False) is not True
+                )
+                pinned_delegation.round_reading = reads_mail_now
             if pinned_delegation is not None and (pinned_delegation.read_mail or reads_mail_now):
                 mail_touched_uses = [
                     tu for tu in [*skill_tool_uses, *mcp_tool_uses, *script_tool_uses]
@@ -3152,12 +3161,10 @@ class Executive:
                 for tu in [*skill_tool_uses, *mcp_tool_uses, *script_tool_uses]
                 if tu["id"] in gate_reasons
             }
-            mail_why = (
-                levels.mail_reason(pinned_delegation)
-                if mail_touched_uses else levels.OWN_MAIL
-            )
             for tu in mail_touched_uses:
-                noticed.setdefault(tu["id"], (tu, mail_why))
+                noticed.setdefault(
+                    tu["id"], (tu, levels.mail_reason(pinned_delegation, tool=tu["name"], tool_input=tu["input"])),
+                )
             for tu in outside_uses:
                 noticed.setdefault(tu["id"], (tu, levels.STRANGER if stranger else levels.outside_reason()))
             held_uses = [
@@ -3324,7 +3331,7 @@ class Executive:
                     },
                     private=private_turn or bool(
                         pinned_delegation is not None and pinned_delegation.touched_mail
-                    ) or reason in (levels.OWN_MAIL, levels.MAIL_FLAGGED, levels.MAIL_UNCHECKED, levels.PRIVATE),
+                    ) or reason in (levels.OWN_MAIL, levels.MAIL_FLAGGED, levels.MAIL_UNCHECKED, levels.MAIL_SHARED, levels.PRIVATE),
                 )
                 if not can_card:
                     results_by_id[tu["id"]] = levels.not_carriable_error(label, reason)
@@ -3766,7 +3773,7 @@ class Executive:
                     elif pinned_delegation is not None and mail_turn_withholds(
                         probe_name, probe_input, pinned=pinned_delegation
                     ):
-                        script_reason = levels.mail_reason(pinned_delegation)
+                        script_reason = levels.mail_reason(pinned_delegation, tool=probe_name, tool_input=probe_input)
                     if (
                         script_reason is not None
                         and levels.decide(script_reason) == levels.CARD
@@ -4082,6 +4089,7 @@ class Executive:
                 )
                 if not ran_script:
                     outside_content.check_mail_reads_done(pinned_delegation)
+                pinned_delegation.round_reading = False
 
             current_messages.append({"role": "assistant", "content": response_content})
             # Cap here, at the single point every result reaches the model,
