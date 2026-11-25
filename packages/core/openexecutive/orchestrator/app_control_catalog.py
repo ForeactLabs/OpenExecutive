@@ -932,7 +932,8 @@ async def _find_jobs(request: Any) -> list[Item]:
     from openexecutive.api.routes import take_the_lead as lead_route
 
     out = await _call(lead_route.get_take_the_lead, request)
-    return [Item(id=str(j.id), title=j.text, detail=j.this_week) for j in out.jobs]
+    # A person's standing jobs are theirs alone.
+    return [Item(id=str(j.id), title=j.text, detail=j.this_week, private=True) for j in out.jobs]
 
 
 async def _add_job(request: Any, item_id: str, value: str) -> str:

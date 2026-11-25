@@ -492,6 +492,18 @@ def test_a_private_memory_is_left_out_where_others_read(roster: dict[str, Any]) 
     assert {i["title"] for i in own["items"]} == {"Raise prices 5%", "Layoff plan for Q1"}
 
 
+def test_standing_jobs_are_left_out_where_others_read(roster: dict[str, Any]) -> None:
+    from openexecutive.orchestrator import take_the_lead
+
+    take_the_lead.add_job("Chase late invoices every Friday", created_by=f"person:{roster['owner'].id}")
+    shared = _web(roster["owner"], "s-shared-j")
+    shared.shared_chat = True
+    out = _run(app_control.handle_find_in_app, {"kind": "standing_job"}, shared)
+    assert out["items"] == [] and out["private_left_out"] == 1
+    own = _run(app_control.handle_find_in_app, {"kind": "standing_job"}, _web(roster["owner"], "s-own-j"))
+    assert [i["title"] for i in own["items"]] == ["Chase late invoices every Friday"]
+
+
 @pytest.mark.parametrize("kind", sorted(k for k, v in app_control.CATALOG.kinds.items() if not v.no_item))
 def test_every_list_reads(kind: str, roster: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
     from openexecutive.knowledge import store as knowledge_store
