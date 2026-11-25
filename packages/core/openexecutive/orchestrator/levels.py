@@ -265,10 +265,15 @@ def mail_reason(pinned: Any = None, tool: str = "", tool_input: Any = None) -> s
             from openexecutive.orchestrator.schedule_tools import current_session
 
             pinned = turn_delegation(current_session.get())
-        if pinned is not None and (
-            getattr(pinned, "mail_held", False) is True or getattr(pinned, "unchecked_mail", False) is True
-        ):
+        if pinned is not None and getattr(pinned, "unchecked_mail", False) is True:
             return MAIL_UNCHECKED
+        # Careful marks every read held, checked or not: only below it does
+        # a held read mean one the check couldn't clear.
+        if pinned is not None and getattr(pinned, "mail_held", False) is True:
+            from openexecutive.orchestrator import outside_mode
+
+            if turn_level() != outside_mode.ASK:
+                return MAIL_UNCHECKED
         if (
             pinned is not None and getattr(pinned, "read_mail", False) is True
             and getattr(pinned, "mail_vetted", False) is not True

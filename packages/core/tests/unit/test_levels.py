@@ -393,3 +393,17 @@ def test_a_round_with_a_script_is_not_asked_before_its_mail_was_seen() -> None:
     assert levels.mail_reason(pin) == levels.MAIL_UNCHECKED
     assert levels.decide(levels.mail_reason(pin), mode=outside_mode.OUTSIDERS) == levels.CARD
     levels.mark_round(None, reads_mail=True, script=False)
+
+
+def test_a_clean_read_held_on_careful_is_not_called_unchecked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Careful holds every read, checked or not: its card says the mail was
+    read, not that it couldn't be checked. Below Careful a held read is one
+    the check couldn't clear."""
+    from openexecutive.delegation.settings import TurnDelegation
+
+    pin = TurnDelegation(read_mail=True, mail_vetted=True, mail_held=True)
+    monkeypatch.setattr(levels, "turn_level", lambda: outside_mode.ASK)
+    assert levels.mail_reason(pin) == levels.OWN_MAIL
+    assert levels.decide(levels.mail_reason(pin), mode=outside_mode.ASK) == levels.CARD
+    monkeypatch.setattr(levels, "turn_level", lambda: outside_mode.OUTSIDERS)
+    assert levels.mail_reason(pin) == levels.MAIL_UNCHECKED
