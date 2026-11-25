@@ -541,10 +541,48 @@ def test_settings(roster: dict[str, Any], client: TestClient) -> None:
     assert out == {"status": "done", "did": "Set How messages arrive (instant or digest) to digest"}, out
     out = _run(app_control.handle_do_in_app, {"action": "change_setting", "id": "act_as_me", "value": "off"}, session)
     assert out["status"] == "done", out
-    # Turning As you on is no topic: it runs on Balanced, and the route's own
-    # checks answer (here, no mailbox connected).
+    # Why turning As you on couldn't work is said at once (here, no mailbox
+    # connected), so no card is left that can only fail.
     out = _run(app_control.handle_do_in_app, {"action": "change_setting", "id": "act_as_me", "value": "on"}, session)
     assert "mailbox isn't connected" in out["error"], out
+    out = _run(app_control.handle_do_in_app, {"action": "change_setting", "id": "inbox_drafts", "value": "on"}, session)
+    assert "Turn As you on first" in out["error"], out
+
+
+def test_turning_on_as_you_from_chat_takes_the_persons_tap(
+    roster: dict[str, Any], client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.api.routes import delegation as delegation_route
+    from openexecutive.delegation import inbox
+    from openexecutive.delegation.settings import is_enabled
+
+    async def connected(_email: Any) -> str:
+        return "connected"
+
+    monkeypatch.setattr(delegation_route, "gmail_status", connected)
+    monkeypatch.setenv("OE_LOCAL_LOGIN", "1")
+    owner = roster["owner"]
+    session = _web(owner, "s-as-you")
+    # Turning As you on lets it write as them: from chat that's a card for
+    # their own tap, as raising Approvals is.
+    held = _run(app_control.handle_do_in_app, {"action": "change_setting", "id": "act_as_me", "value": "on"}, session)
+    assert held.get("status") == "waiting_for_approval", held
+    assert not is_enabled(owner.id)
+    res = client.post(f"/decisions/{held['decision_id']}/approve", json={}, headers=OWNER)
+    assert res.status_code == 200, res.text
+    assert is_enabled(owner.id)
+    out = _run(app_control.handle_do_in_app, {"action": "change_setting", "id": "act_as_me", "value": "on"}, session)
+    assert out == {"status": "done", "did": "As you is already on"}, out
+    held = _run(app_control.handle_do_in_app, {"action": "change_setting", "id": "inbox_drafts", "value": "on"}, session)
+    assert held.get("status") == "waiting_for_approval", held
+    assert not inbox.get_watch(owner.id).enabled
+    res = client.post(f"/decisions/{held['decision_id']}/approve", json={}, headers=OWNER)
+    assert res.status_code == 200, res.text
+    assert inbox.get_watch(owner.id).enabled
+    # Turning it off is done in the turn.
+    out = _run(app_control.handle_do_in_app, {"action": "change_setting", "id": "act_as_me", "value": "off"}, session)
+    assert out["status"] == "done", out
+    assert not is_enabled(owner.id)
 
 
 def test_every_card_names_what_it_changes() -> None:
