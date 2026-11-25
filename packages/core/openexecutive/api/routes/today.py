@@ -1092,6 +1092,10 @@ class ActivityItem(BaseModel):
     # It sent something to someone (an email, a message), for Done for
     # you's "Sent as …" (``_as_tag``). Never served.
     sent: bool = Field(default=False, exclude=True)
+    # The chat a step ran in and the card it went through, so Done for you
+    # leaves out a step a take-on row already shows. Never served.
+    session_id: str = Field(default="", exclude=True)
+    decision_id: int | None = Field(default=None, exclude=True)
 
 
 class ActivityResponse(BaseModel):
@@ -2099,6 +2103,8 @@ def _build_activity(
             mail_to=row.mail_to,
             lead_line=_lead_line(row, jobs, answers),
             sent=mailed or take_the_lead.is_message_send(row.tool),
+            session_id=row.session_id,
+            decision_id=row.decision_id,
         ))
 
     # Operational alerts the Executive raised. For the rail, all statuses are
@@ -3161,13 +3167,21 @@ def _done_for_you(request: Request, caller: int | None, now: datetime) -> list[D
         except Exception:
             logger.warning("today: reading approvals for Done for you failed", exc_info=True)
     # Steps they started from "I can also take on" that finished. They leave
-    # that list when done and show here, the caller's own.
+    # that list when done and show here, the caller's own: what each run
+    # did (in its chat, or once a card it put up was approved) is that row,
+    # never a second one.
+    ran_in: set[str] = set()
+    ran_cards: set[int] = set()
     try:
         from openexecutive.api.routes import take_on as take_on_route
         from openexecutive.briefing import take_on
+        from openexecutive.memory import decision_ledger
 
         email = take_on_route.reader(request).email
         for o in take_on.finished(email, since) if email else []:
+            if o.session_id:
+                ran_in.add(o.session_id)
+                ran_cards.update(decision_ledger.cards_for_session(o.session_id))
             title = o.title[6:] if o.title.startswith("I can ") else o.title
             artifact = next((u for _, u in o.done if u.startswith("/artifacts/")), "")
             rows.append(DoneRow(
@@ -3206,6 +3220,8 @@ def _done_for_you(request: Request, caller: int | None, now: datetime) -> list[D
     for item in activity:
         at = _parse_aware(item.at)
         if item.kind in _DONE_SKIP_KINDS or at is None or at < since:
+            continue
+        if (item.session_id and item.session_id in ran_in) or (item.decision_id in ran_cards):
             continue
         if reader and " ".join((item.target or "").split()).casefold() == reader:
             continue
