@@ -484,17 +484,20 @@ def test_an_offer_that_put_up_two_cards_waits_for_both(client: TestClient, monke
     assert [f.key for f in take_on.finished(ME, datetime.now(UTC) - timedelta(hours=1))] == [o.key]
 
 
-def test_a_watch_taken_up_leaves_the_suggestions(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_watch_taken_up_leaves_the_suggestions_as_a_yes(monkeypatch: pytest.MonkeyPatch) -> None:
     from openexecutive.api.routes import take_on as route
     from openexecutive.monitoring import store as ms
+    from openexecutive.monitoring.research import watch_policy
 
     gone: list[int] = []
+    outcomes: list[str] = []
     monkeypatch.setattr(ms, "get_watchlist_item_by_slug", lambda slug: SimpleNamespace(id=5) if slug == "eia" else None)
     monkeypatch.setattr(ms, "delete_pending_suggestion", lambda i: gone.append(i) or True)
+    monkeypatch.setattr(watch_policy, "record_outcome_for", lambda _item, outcome, **_k: outcomes.append(outcome))
     offer = take_on.Offer(key="watch:eia", origin="watch", kind="watch", title="I can watch diesel prices",
                           source="News I watch")
     route._taken_up(route.Me(ME, 1, True), offer)
-    assert gone == [5]
+    assert gone == [5] and outcomes == [watch_policy.OUTCOME_APPROVED]
 
 
 async def test_a_finished_run_settles_off_the_event_loop(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -537,22 +540,25 @@ def test_the_source_hears_only_once_the_card_is_done(
     assert heard == ([o.key] if heard_it else [])
 
 
-def test_hiding_a_watch_as_not_useful_retires_the_suggestion(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(("reason", "why"), [("not_useful", "not_relevant"), ("already_done", "wrong_source")])
+def test_hiding_a_watch_declines_the_suggestion_as_the_watch_list_does(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, reason: str, why: str,
 ) -> None:
     from openexecutive.monitoring import store as ms
+    from openexecutive.monitoring.research import watch_policy
 
     item = SimpleNamespace(id=5, slug="eia", target="https://www.eia.gov/petroleum/", notes="Diesel prices",
                            route_to_person_id=None)
     monkeypatch.setattr(take_on, "_watch", lambda _pid, _p: WATCH_REAL(_pid, _p))
     monkeypatch.setattr(ms, "list_pending_suggestions", lambda: [item])
     monkeypatch.setattr(ms, "get_watchlist_item_by_slug", lambda slug: item if slug == "eia" else None)
-    gone: list[int] = []
-    monkeypatch.setattr(ms, "delete_pending_suggestion", lambda i: gone.append(i) or True)
+    declined: list[tuple[int, str, str]] = []
+    monkeypatch.setattr(watch_policy, "decline_suggestion",
+                        lambda it, r, *, actor: declined.append((it.id, r, actor)) or True)
     assert client.post("/take-on/watch:eia/hide", json={"reason": "later"}).status_code == 204
-    assert gone == []
-    assert client.post("/take-on/watch:eia/hide", json={"reason": "not_useful"}).status_code == 204
-    assert gone == [5]
+    assert declined == []
+    assert client.post("/take-on/watch:eia/hide", json={"reason": reason}).status_code == 204
+    assert declined == [(5, why, ME)]
 
 
 def test_a_skipped_card_takes_the_offer_away(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

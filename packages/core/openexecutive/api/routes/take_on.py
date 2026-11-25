@@ -258,21 +258,33 @@ def _taken_up(me: Me, offer: take_on.Offer) -> None:
     if offer.origin == "watch":
         # The run made the watch: the suggestion it came from goes, so the
         # Watch list can't make it a second time.
-        _retire_watch_suggestion(offer.key)
+        _answer_watch_suggestion(offer.key, me, taken=True)
     _tell_source(offer.key, taken=True)
 
 
-def _retire_watch_suggestion(key: str) -> None:
-    """The research suggestion a ``watch:`` offer came from leaves the Watch
-    list (only while it is still a pending suggestion). Never raises."""
+def _answer_watch_suggestion(key: str, me: Me, *, taken: bool, reason: str = "") -> None:
+    """Answer the research suggestion a ``watch:`` offer came from, as the
+    Watch list's Approve and Decline do. Taken up: the run made the watch,
+    so the pending row goes and the yes counts for the research pass's
+    calibration. Hidden as not useful or already done: declined
+    (``watch_policy.decline_suggestion``), so the no is remembered and the
+    source isn't suggested again under another name. Never raises."""
+    from openexecutive.monitoring import models as mm
     from openexecutive.monitoring import store as ms
+    from openexecutive.monitoring.research import watch_policy
 
     try:
         item = ms.get_watchlist_item_by_slug(key.removeprefix("watch:"))
-        if item is not None and item.id is not None:
-            ms.delete_pending_suggestion(item.id)
+        if item is None or item.id is None:
+            return
+        if taken:
+            if ms.delete_pending_suggestion(item.id):
+                watch_policy.record_outcome_for(item, watch_policy.OUTCOME_APPROVED)
+            return
+        why = mm.DECLINE_REASON_WRONG_SOURCE if reason == "already_done" else mm.DECLINE_REASON_NOT_RELEVANT
+        watch_policy.decline_suggestion(item, why, actor=me.email or "principal")
     except Exception:
-        logger.warning("take_on: couldn't retire the watch suggestion", exc_info=True)
+        logger.warning("take_on: couldn't answer the watch suggestion", exc_info=True)
 
 
 _QUESTION_END = re.compile(r"([^.!?\n]{1,300}\?)[\s*_\"')]*$")
@@ -468,7 +480,7 @@ def hide(key: str, body: HideIn, request: Request) -> None:
 
             repeat_asks.answer_offer(int(key.removeprefix("repeat:")), me.person_id, accept=False)
         elif key.startswith("watch:"):
-            _retire_watch_suggestion(key)
+            _answer_watch_suggestion(key, me, taken=False, reason=body.reason)
         else:
             _tell_source(key, taken=False)
     except HTTPException:
