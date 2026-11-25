@@ -157,6 +157,7 @@ def test_a_note_to_someone_else_they_asked_to_hold_tells_them(
     assert "Hold the note to Dana" in prompt and "send nothing to anyone else" in prompt
     # Their words are for deciding, never for the message to someone else.
     assert "never put any of it in a message to anyone else" in prompt
+    assert "looks handled" not in prompt and "Make the one message to them" not in prompt
     tell.assert_called_once()
     assert tell.call_args.args[0].id == me
     assert tell.call_args.args[1] == "Held the note to Dana as you asked; ask again any time."
