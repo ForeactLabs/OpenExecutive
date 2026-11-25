@@ -146,21 +146,28 @@ async def look(person_id: int) -> bool:
     counts: dict[str, int] = {}
     for t in new:
         counts[t.conversation_id] = counts.get(t.conversation_id, 0) + 1
-    prompt = await asyncio.to_thread(prompt_for, person, items, counts)
-    # A text from someone not on People (or a group) is outside words, like
-    # mail from a stranger: the turn says so, and Approvals weighs it.
-    known = await asyncio.gather(*(asyncio.to_thread(texts.known_person, conv) for conv, _ in items))
-    off_team = any(k is None for k in known)
-    before = await asyncio.to_thread(texts.last_send_id, person_id)
-    try:
-        await _turn(person, prompt, off_team=off_team)
-    except Exception:
-        # A failed turn (the model busy, the gateway down) leaves them new,
-        # unless it already texted back: then a second look would answer
-        # them again.
-        if await asyncio.to_thread(texts.last_send_id, person_id) == before:
-            await asyncio.to_thread(texts.mark_handled, person_id, [t.id for t in new], handled=False)
-        raise
+    # One turn per conversation: a stranger's texts never share a turn (or
+    # its context) with the person's other conversations, a code from their
+    # bank included.
+    failed: Exception | None = None
+    for conv, t in items:
+        mine = [x.id for x in new if x.conversation_id == conv.id]
+        prompt = await asyncio.to_thread(prompt_for, person, [(conv, t)], counts)
+        # A text from someone not on People (or a group) is outside words,
+        # like mail from a stranger: the turn says so, and Approvals weighs it.
+        off_team = await asyncio.to_thread(texts.known_person, conv) is None
+        before = await asyncio.to_thread(texts.last_send_id, person_id)
+        try:
+            await _turn(person, prompt, off_team=off_team)
+        except Exception as exc:
+            # A failed turn (the model busy, the gateway down) leaves them
+            # new, unless it already texted back: then a second look would
+            # answer them again.
+            if await asyncio.to_thread(texts.last_send_id, person_id) == before:
+                await asyncio.to_thread(texts.mark_handled, person_id, mine, handled=False)
+            failed = failed or exc
+    if failed is not None:
+        raise failed
     return True
 
 

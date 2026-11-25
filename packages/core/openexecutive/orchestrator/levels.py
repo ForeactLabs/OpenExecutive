@@ -487,6 +487,8 @@ TURN_OWN: frozenset[str] = frozenset({
     "find_in_app",
     "list_saved_tools",
     "read_document",
+    # Their texts, read for the turn: a card for it would read them for no one.
+    "read_texts",
     "run_python_job",
     # The person's own words, said in their own conversation: a figure kept
     # from the reply they are reading, a fact or correction they stated, a
