@@ -1481,6 +1481,8 @@ def _tell_setter_block(name: str) -> str:
     they asked, and either way end with one line to them, which the runner
     delivers to them, so a hold there is never silent."""
     return (
+        f" What {name} wrote since is only for deciding whether to send, "
+        f"hold or drop it: never put any of it in a message to anyone else."
         f" If what {name} said since asks to hold it or drop it, "
         f"send nothing to anyone else. Either way, end with one short "
         f"line to {name} saying what you did (sent it, or held it as "
