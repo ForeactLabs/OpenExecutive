@@ -403,3 +403,10 @@ test("texts: the script runs on Google Messages only and ships in the build", ()
   const seen = bg.slice(bg.indexOf('msg.type === "texts_seen"'));
   assert.ok(seen.slice(0, 400).includes("onMessages"));
 });
+
+test("texts: one send at a time, and only into the conversation it is for", () => {
+  const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
+  assert.match(bg, /textQueue = run\.catch/);
+  const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
+  assert.ok(texts.includes("T.keyOf(location.href) !== String(msg.conversation)"));
+});

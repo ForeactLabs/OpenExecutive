@@ -304,7 +304,16 @@ async function passOnTexts(body) {
 
 // Send one text in Google Messages: open its conversation (or a new one) in
 // the Google Messages tab and have texts.js type and send it there.
-async function sendText(send) {
+// One text at a time: every send drives the same Google Messages tab, so a
+// second one waits until the first has gone (or failed).
+let textQueue = Promise.resolve();
+function sendText(send) {
+  const run = textQueue.then(() => sendOneText(send));
+  textQueue = run.catch(() => undefined);
+  return run;
+}
+
+async function sendOneText(send) {
   const text = typeof send.text === "string" ? send.text : "";
   const key = typeof send.conversation === "string" ? send.conversation : "";
   const number = typeof send.number === "string" ? send.number : "";

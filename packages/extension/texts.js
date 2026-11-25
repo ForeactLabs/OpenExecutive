@@ -267,6 +267,9 @@
     if (!msg.conversation) {
       const problem = await startConversation(String(msg.number || ""));
       if (problem) return { ok: false, error: problem };
+    } else if (T.keyOf(location.href) !== String(msg.conversation)) {
+      // Only ever type into the conversation this text is for.
+      return { ok: false, error: "Google Messages showed a different conversation." };
     }
     const box = await waitFor(() => first(document, COMPOSE), 15000);
     if (!box) return { ok: false, error: "Google Messages didn't show the box to type in." };
