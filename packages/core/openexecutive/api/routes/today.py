@@ -2062,8 +2062,11 @@ def _build_activity(
         ))
 
     # Take the lead as the Executive: what it did on its own, and what it
-    # did once someone approved it (orchestrator.take_the_lead). Named, never
-    # quoted: this feed is the whole team's.
+    # did once someone approved it (orchestrator.take_the_lead). A step a
+    # teammate asked for (``asked_by``) is theirs and reaches no one else:
+    # not the owner's Activity, Home header or brief, or what the Executive
+    # tells them it did. The rest (the owner's, the company's) is the team's, named,
+    # never quoted.
     from openexecutive.orchestrator import take_the_lead
 
     try:
@@ -2079,6 +2082,8 @@ def _build_activity(
     answers = _answers([(r.to_person_id, r.at) for r in led if r.to_person_id is not None])
     for row in led:
         if row.status not in ("done", "approved"):
+            continue
+        if not _theirs(None if row.asked_by == owners.principal_id else row.asked_by):
             continue
         if "__" in row.tool and not take_the_lead.mcp_tool_acts(row.tool):
             # A connected-app read logged before reads stopped being gated

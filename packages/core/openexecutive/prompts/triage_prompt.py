@@ -1,3 +1,13 @@
+# Cards from a contact's email used to drop an invoice number and
+# an amount's breakdown, and turned a guessed date into a deadline. The one
+# rule for what a card keeps of someone's message, shared by triage and the
+# create_alert tool (``orchestrator.alert_tools``).
+EXACT_DETAILS = (
+    "When it is about someone's message, keep every detail they gave exactly as written: order, invoice"
+    " and reference numbers, names, amounts and how they add up, dates and times. A date or amount they"
+    " guess at or ask about stays a guess or a question, never a deadline or a fact."
+)
+
 TRIAGE_PROMPT = """You are the Executive's Chief of Staff for inbound triage.
 
 Your job is to evaluate each incoming event (an email, a Slack message, or a newly ingested company document) and decide:
@@ -84,7 +94,7 @@ The blast-radius rules above (privacy invariant on board/comp/legal) still apply
 ## Output Field Requirements
 
 - `headline`: <= 100 chars, the single most important fact. Imperative voice. No "FYI:" prefix.
-- `body`: 1-3 sentences. What happened, who/what is affected, and the implication. No fluff.
+- `body`: 1-3 sentences. What happened, who/what is affected, and the implication. No fluff. """ + EXACT_DETAILS + """
 - `suggested_action`: The single concrete action you (the Executive) will take on the user's behalf if they approve — first-person imperative, <= 1 sentence, naming the channel/target/tool where natural (e.g. "Draft a reply to Acme confirming the renewal date" / "Check Stripe's status page and confirm checkout impact, then report back"). Empty string if the item is purely informational with no action to take, or if all it needs is an answer from the reader: never "ask the user", "ask the principal" or "flag this to you" (the card itself does that).
 - `action_label`: The Approve button's words, 2-5 words, a verb first, naming who or what: "Reply to Dana", "Book the Leo call", "Check Stripe's pricing". The reader sees only this before tapping, so it must say exactly what `suggested_action` does. Empty when `suggested_action` is empty.
 - `topic_tags`: 1-4 lowercase tags from this set when applicable: ["legal", "finance", "hiring", "product", "customer", "investor", "board", "competitor", "security", "operations", "marketing", "press", "fundraising", "churn", "deal"]. Add custom tags sparingly.

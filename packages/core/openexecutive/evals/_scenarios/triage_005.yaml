@@ -1,0 +1,29 @@
+id: triage_005
+domain: triage
+description: "A contact's invoice question keeps its exact number, amounts and guessed date"
+event:
+  source: email
+  external_id: msg-invoice-timing-1
+  subject: "Invoice HD-2026-1147, quick question on timing"
+  from: "sam@riverside-shelving.example"
+  body: |
+    Hi there,
+
+    This is Sam Rivera. I'm looking at invoice HD-2026-1147 for $340, which I
+    think is the $280 for the two oak bracket sets plus $60 for delivery.
+    I'm guessing it's due around Nov 30, but could you tell me when you plan
+    to pay it?
+
+    Thanks,
+    Sam
+context:
+  recent_alerts: []
+  muted_topics: []
+  active_initiatives: []
+expected_decision:
+  alert: true
+  channels_must_include: [persisted]
+quality_criteria:
+  body_keeps_invoice_number_hd_2026_1147: true
+  body_keeps_340_as_280_plus_60: true
+  nov_30_stays_sams_guess_not_a_deadline: true

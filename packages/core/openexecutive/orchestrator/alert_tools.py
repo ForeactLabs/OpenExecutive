@@ -10,6 +10,7 @@ from collections.abc import Iterator
 from typing import Any
 
 from openexecutive.people.models import Person
+from openexecutive.prompts.triage_prompt import EXACT_DETAILS
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ CREATE_ALERT_TOOL: dict[str, Any] = {
             },
             "body": {
                 "type": "string",
-                "description": "Full description of what needs attention",
+                "description": "Full description of what needs attention. " + EXACT_DETAILS,
             },
             "source": {
                 "type": "string",
