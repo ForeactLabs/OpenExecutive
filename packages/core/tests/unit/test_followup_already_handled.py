@@ -210,8 +210,11 @@ def test_a_reminder_they_asked_to_hold_is_paused_not_done(db: Path, roster: Simp
     action_id = _followup("tg-1", created_by=me)
     _repeating(action_id)
     _message(db, "web-2", me, "user", "Hold the Dana reminder until the board call", -timedelta(hours=2), sender=me)
-    _, prompt = _fire(action_id, "PAUSED: Held the Dana reminder as you asked; ask again any time.")
+    with patch.object(runner, "deliver_to_person", new_callable=AsyncMock) as tell:
+        tell.return_value = SimpleNamespace(ok=True, detail="")
+        _, prompt = _fire(action_id, "PAUSED: Held the Dana reminder as you asked; ask again any time.")
     assert "PAUSED:" in prompt and "DROPPED:" in prompt
+    assert "It still repeats" in tell.call_args.args[1]  # held this time: the series goes on
     row = episodic.get_scheduled_action(action_id)
     assert row is not None and row.status == "cancelled" and "paused as Olivia Owner asked" in row.last_error
     assert _status_and_next(action_id) == ("cancelled", 1)  # only this one: the daily one goes on

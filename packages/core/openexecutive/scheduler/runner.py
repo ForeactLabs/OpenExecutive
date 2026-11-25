@@ -1533,10 +1533,12 @@ async def _setter_decision(action: ScheduledAction, person: Person) -> str:
     return ""
 
 
-def _set_aside_line(action: ScheduledAction, outcome: str, *, repeats_on: bool = False) -> str:
+def _set_aside_line(action: ScheduledAction, outcome: str, *, repeats_on: bool | None = None) -> str:
     """The fixed line that tells a setter their follow-up was held or
     dropped as they asked (``repeats_on``: this time only, its series goes
-    on)."""
+    on; by default a held repeating one goes on, a dropped one ends)."""
+    if repeats_on is None:
+        repeats_on = bool((action.repeat or "").strip()) and outcome == "paused"
     what = " ".join(str(action.intent_text or "").split())[:200].rstrip(".!? ")
     verb = "held" if outcome == "paused" else "dropped"
     if repeats_on:
