@@ -294,6 +294,17 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     return TestClient(app)
 
 
+def test_someone_not_on_people_gets_no_list_and_no_pass(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.api.routes import take_on as route
+    from openexecutive.briefing import take_on_maker
+
+    passes: list[str] = []
+    monkeypatch.setattr(route, "_me", lambda _r: route.Me("guest@else.example", None, False))
+    monkeypatch.setattr(take_on_maker, "schedule", lambda email, *a, **k: passes.append(email) or True)
+    assert client.get("/take-on").json()["offers"] == []
+    assert passes == []
+
+
 def test_an_unsigned_principal_reads_their_own_list(monkeypatch: pytest.MonkeyPatch) -> None:
     """On a local install the caller names no email: the list is keyed by
     the principal's People email."""

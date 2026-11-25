@@ -196,7 +196,9 @@ def _read_list(me: Me) -> tuple[list[take_on.Offer], list[str], bool, bool] | No
     few, and whether a pass may be due (all blocking reads)."""
     from openexecutive.briefing import take_on_maker
 
-    if not take_on.who(me.email):
+    # Someone signed in who isn't on People has nothing of theirs to read:
+    # no list, and no pass over the company's goals and team for them.
+    if me.person_id is None or not take_on.who(me.email):
         return None
     offers = _offers(me)
     own = take_on_maker.on_its_own(take_on_maker.person_for(me.person_id, me.principal)).lines()
