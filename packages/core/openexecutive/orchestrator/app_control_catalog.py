@@ -9,8 +9,8 @@ whose route checks nothing about the caller (its page is the principal's) is
 ``principal_only``. The one gate decides what waits
 (``take_the_lead.in_app``); an action only names its topic, a delete or a
 share (``topic``). A change to the checks that holds more (a lower level, a
-Waits rule, In training on) is done in the turn; a route that lets more go on
-its own (a higher level, a Goes rule, removing a Waits rule, leaving
+Waits rule, In training on) goes by the gate like any action, so Careful or In
+training holds it too; a route that lets more go on its own (a higher level, a Goes rule, removing a Waits rule, leaving
 training) wants the person's own signed request, so it leaves the card their
 tap answers.
 
