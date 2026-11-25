@@ -2500,7 +2500,8 @@ def _narrative_context(
         today_data=today_data,
         activity=activity,
         mode=mode,
-        brief_requests=False,
+        # Their own brief lines: what they asked of it in a chat.
+        requests_of=getattr(viewer, "id", None),
         reader=resolved,  # type: ignore[arg-type]
     )
     return context, activity

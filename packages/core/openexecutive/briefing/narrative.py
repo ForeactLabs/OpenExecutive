@@ -505,7 +505,7 @@ def render_briefing_context(
     owner_notes: str = "",
     getting_started: str = "",
     reader: Reader | None = None,
-    brief_requests: bool = True,
+    requests_of: int | None = None,
 ) -> str:
     """Pack the structured /today + activity inputs into a single user-turn block.
 
@@ -552,10 +552,10 @@ def render_briefing_context(
     reader" and adds THE READER line under NOW, so no input names the person
     the brief is written for; None leaves the context as it was.
 
-    ``brief_requests`` adds what the principal asked of their brief in
-    conversation (``briefing.brief_requests``): the FROM YOUR CHATS lines
-    count against a quiet day, the leave-out list comes last. False (a
-    teammate's header) leaves both out: they are the principal's own words.
+    ``requests_of`` is the reader's person id: it adds what that person
+    asked of their own brief in conversation (``briefing.brief_requests``):
+    the FROM YOUR CHATS lines count against a quiet day, the leave-out list
+    comes last. None adds neither.
     """
     parts: list[str] = [f"PERIOD: {period_label}\n"]
     now = datetime.now(UTC)
@@ -761,11 +761,10 @@ def render_briefing_context(
     if owner_notes:
         parts.extend(["", owner_notes])
     leave_out_block = ""
-    if brief_requests:
-        from openexecutive.api.routes.today import principal_id
+    if requests_of is not None:
         from openexecutive.briefing.brief_requests import render_parts
 
-        raise_block, leave_out_block = render_parts(principal_id())
+        raise_block, leave_out_block = render_parts(requests_of)
         if raise_block:
             parts.extend(["", raise_block])
 
@@ -876,7 +875,7 @@ async def synthesize_briefing_narrative(
         pending_watch_suggestions=pending_watch_suggestions,
         mode=mode, live=live, live_window=live_window, now_label=now_label,
         reflection_flags=reflection_flags, standing_facts=standing_facts,
-        brief_requests=not viewer, reader=reader,
+        reader=reader,
     )
     if owner_lessons and not viewer:
         # The principal's lessons that bear on this brief (memory.lessons),

@@ -152,6 +152,9 @@ def test_brief_lines_are_capped(db: Path) -> None:
                                   person_id=1, db_path=db)
     assert brief_requests.add(brief_requests.KIND_LEAVE_OUT, "one more", source_quote="q",
                               person_id=1, db_path=db) is None
+    # One person's full list never fills another's, and the same words are theirs to add.
+    assert brief_requests.add(brief_requests.KIND_LEAVE_OUT, "item 0", source_quote="q",
+                              person_id=2, db_path=db) is not None
 
 
 def test_the_brief_context_carries_the_lines(db: Path, roster: SimpleNamespace) -> None:
@@ -162,11 +165,12 @@ def test_the_brief_context_carries_the_lines(db: Path, roster: SimpleNamespace) 
                        person_id=pid, db_path=db)
     brief_requests.add(brief_requests.KIND_RAISE, "You said the invoice was paid. Close it?",
                        source_quote="q", person_id=pid, db_path=db)
-    text = render_briefing_context(period_label="p", today_data={}, activity=[], standing_facts="")
+    text = render_briefing_context(period_label="p", today_data={}, activity=[], standing_facts="",
+                                   requests_of=pid)
     assert brief_requests.RAISE_HEADER in text and "Close it?" in text
     assert text.rstrip().endswith("- Halcyon renewal")
     teammate = render_briefing_context(period_label="p", today_data={}, activity=[], standing_facts="",
-                                       brief_requests=False)
+                                       requests_of=roster.teammate.id)
     assert "Halcyon" not in teammate and "Close it?" not in teammate
 
 
@@ -176,7 +180,8 @@ def test_a_raise_line_alone_is_not_a_quiet_day(db: Path, roster: SimpleNamespace
     quiet = render_briefing_context(period_label="p", today_data={}, activity=[], standing_facts="")
     brief_requests.add(brief_requests.KIND_RAISE, "You said the invoice was paid. Close it?",
                        source_quote="q", person_id=roster.principal.id, db_path=db)
-    raised = render_briefing_context(period_label="p", today_data={}, activity=[], standing_facts="")
+    raised = render_briefing_context(period_label="p", today_data={}, activity=[], standing_facts="",
+                                     requests_of=roster.principal.id)
     assert "Close it?" in raised and raised != quiet
 
 
@@ -294,3 +299,25 @@ def test_mark_draft_sent_settles_the_latest(db: Path, roster: SimpleNamespace) -
 def test_mark_draft_sent_with_nothing_waiting(roster: SimpleNamespace) -> None:
     out = _call(ct.handle_mark_draft_sent, {}, _web(roster.principal), said="I sent it")
     assert out["status"] == "noop"
+
+
+def test_a_teammates_today_header_follows_their_own_leave_out(
+    db: Path, roster: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.api.routes import today as today_route
+
+    brief_requests.add(brief_requests.KIND_LEAVE_OUT, "Halcyon renewal", source_quote="q",
+                       person_id=roster.teammate.id, db_path=db)
+    brief_requests.add(brief_requests.KIND_LEAVE_OUT, "Maple House lease", source_quote="q",
+                       person_id=roster.principal.id, db_path=db)
+    monkeypatch.setattr(today_route, "_with_due_soon", lambda data, *_a: data)
+    monkeypatch.setattr(today_route, "_nothing_needs_attention", lambda *_a: False)
+    monkeypatch.setattr(today_route, "_narrative_activity", lambda *_a: [])
+    viewer = SimpleNamespace(id=roster.teammate.id)
+    # Something new for them today, so Right now is written at all.
+    data = {"proposals": [{"alert_id": 1, "headline": "Vendor quote", "created_at": datetime.now(UTC).isoformat()}]}
+    context, _ = today_route._narrative_context(
+        data, viewer, {"name": "Ben", "role": ""}, "team", f"person:{roster.teammate.id}", reader=None,  # type: ignore[arg-type]
+    )
+    assert context.rstrip().endswith("- Halcyon renewal")
+    assert "Maple House" not in context

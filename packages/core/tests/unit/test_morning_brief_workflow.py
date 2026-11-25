@@ -623,14 +623,15 @@ async def test_brief_lines_only_on_the_delivery_to_the_principal(
     asked: list[object] = []
 
     def _render(**kw: object) -> str:
-        asked.append(kw.get("brief_requests"))
+        asked.append(kw.get("requests_of"))
         return real(**kw)  # type: ignore[arg-type]
 
     monkeypatch.setattr(briefing_narrative, "render_briefing_context", _render)
+    monkeypatch.setattr(today_route, "principal_id", lambda: 7)
     _ = [e async for e in MorningBriefWorkflow().run(MorningBriefInput(), MagicMock())]
     token = PRINCIPAL_DELIVERY.set(True)
     try:
         _ = [e async for e in MorningBriefWorkflow().run(MorningBriefInput(), MagicMock())]
     finally:
         PRINCIPAL_DELIVERY.reset(token)
-    assert asked == [False, True]
+    assert asked == [None, 7]
