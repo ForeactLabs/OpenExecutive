@@ -135,8 +135,12 @@ async def look(person_id: int) -> bool:
     if not items:
         return False
     prompt = await asyncio.to_thread(prompt_for, person, items)
+    # A text from someone not on People (or a group) is outside words, like
+    # mail from a stranger: the turn says so, and Approvals weighs it.
+    known = await asyncio.gather(*(asyncio.to_thread(texts.known_person, conv) for conv, _ in items))
+    off_team = any(k is None for k in known)
     try:
-        await _turn(person, prompt)
+        await _turn(person, prompt, off_team=off_team)
     except Exception:
         # A failed turn (the model busy, the gateway down) leaves them new.
         await asyncio.to_thread(texts.mark_handled, person_id, [t.id for t in new], handled=False)
@@ -144,7 +148,7 @@ async def look(person_id: int) -> bool:
     return True
 
 
-async def _turn(person: Any, prompt: str) -> None:
+async def _turn(person: Any, prompt: str, *, off_team: bool = False) -> None:
     """The person's Executive, unattended, for them alone."""
     from openexecutive.audit.context import rows_for_person
     from openexecutive.onboarding.profile_builder import load_or_create_profile
@@ -158,6 +162,7 @@ async def _turn(person: Any, prompt: str) -> None:
         unattended=True,
         caller_person_id=person.id,
         run_for_person_id=None if person.is_principal else person.id,
+        sender_off_team=off_team,
     )
     executive = Executive(mcp_gateway=await ensure_active_gateway())
     # Their texts and what came of them are in their activity alone.

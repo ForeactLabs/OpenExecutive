@@ -2796,8 +2796,13 @@ def hold(
     # The same action still waiting from an earlier pass is that card, not a
     # new one. Keys are unique for good, so once one is answered the next
     # identical hold takes the next numbered key.
+    # A step on someone's own device is theirs: the same text from two
+    # people's phones is two cards.
+    device = own_device_for(tool, tool_input)
     base = "take_the_lead:" + hashlib.sha256(
-        json.dumps([tool, tool_input, mcp], sort_keys=True, default=str).encode()
+        json.dumps(
+            [tool, tool_input, mcp, *([device.get("acting_for")] if device else [])], sort_keys=True, default=str,
+        ).encode()
     ).hexdigest()[:32]
     idem: str | None = None
     for attempt in range(_HOLD_KEY_TRIES):
@@ -2835,7 +2840,7 @@ def hold(
         # A step that runs on the person's own device (a text from their
         # phone): whose it is, and who it reaches in words, since its input
         # names them by an id only the system reads (``card_details.served``).
-        **own_device_for(tool, tool_input),
+        **device,
         "details": card_details(tool, tool_input, mcp=mcp),
         "fields": editable_fields(tool, tool_input, mcp=mcp),
         **({"allow": {"key": grant[0], "label": grant[1]}} if grant is not None else {}),

@@ -507,6 +507,15 @@ def settle_send(
             return None
         if row["status"] not in (PENDING, HANDED):
             return _send(row)
+        # Claimed once: a second answer for the same send (two tabs, a retry)
+        # changes nothing and tells no one again.
+        claimed = conn.execute(
+            f"UPDATE {TEXT_SENDS_TABLE} SET status=?, error=?, done_at=? WHERE id=? AND status IN (?, ?)",
+            (status, _clip(error, 300), _iso(now), send_id, PENDING, HANDED),
+        )
+        if claimed.rowcount != 1:
+            row = conn.execute(f"SELECT * FROM {TEXT_SENDS_TABLE} WHERE id=?", (send_id,)).fetchone()
+            return _send(row)
         conversation_id = row["conversation_id"]
         if status == SENT and not conversation_id and conversation_key.strip():
             conversation_id = _upsert_conversation(
@@ -516,10 +525,6 @@ def settle_send(
                 now,
             )
             conn.execute(f"UPDATE {TEXT_SENDS_TABLE} SET conversation_id=? WHERE id=?", (conversation_id, send_id))
-        conn.execute(
-            f"UPDATE {TEXT_SENDS_TABLE} SET status=?, error=?, done_at=? WHERE id=?",
-            (status, _clip(error, 300), _iso(now), send_id),
-        )
         if status == SENT and conversation_id:
             conn.execute(
                 f"INSERT OR IGNORE INTO {TEXTS_TABLE} "
@@ -597,8 +602,8 @@ def known_person(conv: Conversation) -> Any | None:
     """The person on People (contacts included) this conversation is with,
     or None (a group, someone not on People). By phone number; else by the
     name Google Messages shows, which comes from the contacts on the person's
-    own phone (a texter can't set it), when exactly one person on People has
-    that full name. Never raises."""
+    own phone, when exactly one person on People has that full name. A group,
+    whose members can name it, is never a person. Never raises."""
     if conv.is_group:
         return None
     try:
