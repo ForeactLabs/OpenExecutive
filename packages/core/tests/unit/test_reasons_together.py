@@ -22,8 +22,8 @@ from tests.unit.test_unrostered_speaker import db  # noqa: F401  (the roster)
 
 
 def test_stronger_keeps_the_reason_that_waits() -> None:
-    assert levels.stronger(levels.SHARED, levels.OUTSIDE) == levels.OUTSIDE
-    assert levels.stronger(levels.OUTSIDE, levels.SHARED) == levels.OUTSIDE
+    assert levels.stronger(levels.OWN_MAIL, levels.OUTSIDE) == levels.OUTSIDE
+    assert levels.stronger(levels.OUTSIDE, levels.OWN_MAIL) == levels.OUTSIDE
     assert levels.stronger(levels.MAIL_FLAGGED, levels.STRANGER) == levels.STRANGER
     assert levels.stronger(None, levels.OWN_MAIL) == levels.OWN_MAIL
     assert levels.stronger(levels.OUTSIDE, levels.MAIL_FLAGGED) == levels.OUTSIDE
@@ -61,8 +61,5 @@ def test_a_shared_chat_message_after_a_flagged_read_waits_on_balanced(
     finally:
         current_session.reset(token)
     result = json.loads(_tool_results(provider, 1)["tu-msg"])
-    if flagged:
-        assert sent == [] and result["status"] == "waiting_for_approval"
-    else:
-        # A teammate's own request in a shared chat runs at their level.
-        assert sent and result["status"] == "sent"
+    # Someone else's line in a shared chat waits on Balanced, flagged read or not.
+    assert sent == [] and result["status"] == "waiting_for_approval"

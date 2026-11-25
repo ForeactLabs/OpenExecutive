@@ -17,6 +17,7 @@ it says:
   ``BALANCED_WAITS`` (words that tried to give orders, mail or outside text
   the check couldn't check, a post to everyone or a People change after a
   mail read, a turn answering mail from a contact or someone unproven,
+  a shared chat someone else wrote in,
   someone new, a share outside the company, unattended work);
   every other noticed step runs.
 - **Careful**: every noticed step comes as an Approve card. Careful also
@@ -91,12 +92,14 @@ SEND_SITE = "send_site"
 # give it instructions, outside text or mail the check couldn't check (on
 # Balanced a clean outside read never marks the turn, so OUTSIDE_READ there
 # is only one too big to check), a turn answering mail from a contact, someone unproven or a forward
-# (PRIVATE: its words are not a team member asking), someone new, a share outside the company,
+# (PRIVATE: its words are not a team member asking), a shared chat or call
+# someone else spoke in (whose turn it is stays as it was; a later change),
+# someone new, a share outside the company,
 # and work nobody is watching (which take_the_lead.gate then checks against the seven
 # topics). Every other reason a feature notices runs on Balanced and waits
 # on Careful.
 BALANCED_WAITS: frozenset[str] = frozenset({
-    OUTSIDE, OUTSIDE_READ, MAIL_FLAGGED, MAIL_UNCHECKED, MAIL_SHARED, PRIVATE, NEW_PERSON, FILE_PLACE, UNATTENDED,
+    OUTSIDE, OUTSIDE_READ, MAIL_FLAGGED, MAIL_UNCHECKED, MAIL_SHARED, PRIVATE, SHARED, NEW_PERSON, FILE_PLACE, UNATTENDED,
 })
 REASONS: frozenset[str] = frozenset({
     OUTSIDE, OUTSIDE_READ, OWN_MAIL, MAIL_FLAGGED, MAIL_UNCHECKED, MAIL_SHARED, PRIVATE, SHARED, READ_ONLY, NOT_OWNER, UNATTENDED, STRANGER,
