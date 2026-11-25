@@ -112,6 +112,10 @@ class ScheduledAction(BaseModel):
     # follow-up is moved as they asked, so words already acted on are not
     # read again. None: from created_at, the turn that set it.
     read_since: str | None = None
+    # The conversation whose turn set read_since (a move in chat): that
+    # turn's own message, saved when it ends, is not a later word. None
+    # when no turn set it (a repeat's next occurrence, the runner's move).
+    read_since_turn_in: str | None = None
 
 
 class OutboundContext(BaseModel):
@@ -365,8 +369,9 @@ def initialize_db(db_path: Path | None = None) -> None:
             ("private_to_person_id", "INTEGER"),
             # ScheduledAction.repeat.
             ("repeat", "TEXT"),
-            # ScheduledAction.read_since.
+            # ScheduledAction.read_since / read_since_turn_in.
             ("read_since", "TEXT"),
+            ("read_since_turn_in", "TEXT"),
         ):
             if col not in _sa_existing:
                 try:
@@ -1785,7 +1790,7 @@ def reschedule_action(
         cursor = conn.execute(
             "UPDATE scheduled_actions "
             "SET status = 'pending', run_at = ?, attempts = MAX(0, attempts - 1), "
-            "read_since = COALESCE(?, read_since) "
+            "read_since = COALESCE(?, read_since), read_since_turn_in = NULL "
             "WHERE id = ? AND status = 'running'",
             (new_run_at.isoformat(), read_since.isoformat() if read_since else None, action_id),
         )

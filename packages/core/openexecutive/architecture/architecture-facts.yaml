@@ -5215,7 +5215,8 @@ scheduler:
     15 minutes after created_at is left out (own_messages_since(after_turn_in=)).
     A repeat's next occurrence and a moved one (here or by move_followup)
     count words only from when
-    they were queued or moved (scheduled_actions.read_since), so a word
+    they were queued or moved (scheduled_actions.read_since; a move in chat
+    also leaves out its own turn's message, read_since_turn_in), so a word
     already acted on ("hold it until tomorrow") is never read again. Paused or
     dropped, nothing runs: the setter gets one fixed line
     (runner._set_aside_line; a repeating one says it still repeats and how

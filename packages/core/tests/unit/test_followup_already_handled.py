@@ -509,3 +509,20 @@ def test_a_moved_followup_never_reads_the_same_hold_again(db: Path, roster: Simp
     assert row is not None and row.status == "pending" and row.read_since is not None
     # When it comes due, "until tomorrow" was already acted on: nothing to read.
     assert runner._since_lines(row, roster.principal) == ""
+
+
+def test_a_followup_moved_in_chat_never_reads_the_ask_that_moved_it(db: Path, roster: SimpleNamespace) -> None:
+    me = roster.principal.id
+    create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
+    action_id = _followup("tg-1", created_by=me)
+    moved_at = datetime.now(UTC) - timedelta(hours=3)
+    with episodic._get_conn(db) as conn:  # as move_followup leaves it, mid-turn in web-9
+        conn.execute("UPDATE scheduled_actions SET read_since = ?, read_since_turn_in = 'web-9' WHERE id = ?",
+                     (moved_at.isoformat(), action_id))
+    # The moving turn saves its message when it ends, just after.
+    _message(db, "web-9", me, "user", "Hold the Bob follow-up until Friday",
+             -timedelta(hours=3) + timedelta(seconds=20), sender=me)
+    row = episodic.get_scheduled_action(action_id)
+    assert row is not None and runner._since_lines(row, roster.principal) == ""
+    _message(db, "web-9", me, "user", "Actually drop the Bob one", -timedelta(hours=1), sender=me)
+    assert "Actually drop the Bob one" in runner._since_lines(row, roster.principal)

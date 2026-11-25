@@ -1434,12 +1434,13 @@ def _since_lines(action: ScheduledAction, person: Person | None) -> str:
         return ""
     try:
         # From the turn that set it, without that turn's own message; or,
-        # for a repeat's next occurrence or a moved one, from then on.
+        # for a repeat's next occurrence or a moved one, from then on (a move
+        # in chat leaves out that turn's own message too).
         rows = own_messages_since(
             person.id, action.read_since or action.created_at,
             limit=_SINCE_MAX_MESSAGES, max_chars=_SINCE_MAX_CHARS,
             db_path=_resolve_db_path(None),
-            after_turn_in=None if action.read_since else action.originating_session_id,
+            after_turn_in=action.read_since_turn_in if action.read_since else action.originating_session_id,
         )
     except Exception:
         logger.warning("scheduler: couldn't read chat since action %s", action.id, exc_info=True)
