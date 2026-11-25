@@ -387,6 +387,10 @@ def test_the_message_that_set_it_is_not_said_since(db: Path, roster: SimpleNames
     # Saved when its turn ended, just after the row: the plan, not a later word.
     _message(db, "tg-1", me, "user", "Remind me Thursday to chase Bob. If he answers first, hold it.",
              -timedelta(days=1) + timedelta(seconds=5), sender=me)
+    # A message folded into that turn while it worked, then its reply.
+    _message(db, "tg-1", me, "user", "and hold it till Friday if he's out",
+             -timedelta(days=1) + timedelta(seconds=5), sender=me)
+    _message(db, "tg-1", me, "assistant", "Done: Thursday.", -timedelta(days=1) + timedelta(seconds=6))
     assert runner._since_lines(action, roster.principal) == ""
     _message(db, "tg-1", me, "user", "Bob answered, hold it", -timedelta(hours=1), sender=me)
     lines = runner._since_lines(action, roster.principal)
@@ -522,6 +526,7 @@ def test_a_followup_moved_in_chat_never_reads_the_ask_that_moved_it(db: Path, ro
     # The moving turn saves its message when it ends, just after.
     _message(db, "web-9", me, "user", "Hold the Bob follow-up until Friday",
              -timedelta(hours=3) + timedelta(seconds=20), sender=me)
+    _message(db, "web-9", me, "assistant", "Moved to Friday.", -timedelta(hours=3) + timedelta(seconds=21))
     row = episodic.get_scheduled_action(action_id)
     assert row is not None and runner._since_lines(row, roster.principal) == ""
     _message(db, "web-9", me, "user", "Actually drop the Bob one", -timedelta(hours=1), sender=me)
@@ -562,3 +567,16 @@ def test_a_since_line_is_in_company_time_near_midnight(
     assert action is not None
     assert runner._since_lines(action, roster.principal) == (
         "- 2026-11-24 18:30 (Tuesday): Hold it until tomorrow at 9")
+
+
+def test_a_turn_that_saved_no_reply_leaves_nothing_out(db: Path, roster: SimpleNamespace) -> None:
+    """A setting turn that saved nothing (deleted while it streamed): the
+    next thing they wrote there is a later word, and counts."""
+    me = roster.principal.id
+    create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
+    action_id = _followup("tg-1", created_by=me)
+    action = episodic.get_scheduled_action(action_id)
+    assert action is not None
+    _message(db, "tg-1", me, "user", "Actually hold that reminder", -timedelta(days=1) + timedelta(minutes=2),
+             sender=me)
+    assert "Actually hold that reminder" in runner._since_lines(action, roster.principal)

@@ -5213,8 +5213,11 @@ scheduler:
     time that has passed or is past the horizon sends it as set. A hold
     until something happens is send. The message that set the follow-up
     is never read as said since: a turn saves its message when it ends,
-    after the row, so the originating conversation's first message within
-    15 minutes after created_at is left out (own_messages_since(after_turn_in=)).
+    after the row, with any it folded in and then its reply, so the
+    originating conversation's messages before its first reply within 15
+    minutes after created_at are left out (own_messages_since(after_turn_in=));
+    with no such reply nothing is. The decision answers paused, dropped or
+    moved only for a message clearly about this follow-up.
     A repeat's next occurrence and a moved one (here or by move_followup)
     count words only from when
     they were queued or moved (scheduled_actions.read_since; a move in chat

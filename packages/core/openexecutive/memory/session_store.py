@@ -621,35 +621,36 @@ def own_messages_since(
     sent (``sender_surface``): a script there may have written it.
 
     ``after_turn_in``: the conversation whose turn ``since`` fell in. A turn
-    saves its message when it ends, after anything it did, so that
-    conversation's first message within a few minutes after ``since`` is
-    the one that turn answered, not a later word, and is left out."""
+    saves its message, then any it folded in, then its reply, when it ends,
+    after anything it did. So that conversation's messages before its first
+    reply within a few minutes after ``since`` are what that turn answered,
+    not later words, and are left out. With no such reply nothing is."""
     if not db_path.exists():
         return []
     with _get_conn(db_path) as conn:
-        turn_id = -1
+        turn_reply = -1
         if after_turn_in:
             try:
                 turn_end = (datetime.fromisoformat(since) + timedelta(minutes=_TURN_MINUTES)).isoformat()
             except ValueError:
                 turn_end = since
-            first = conn.execute(
-                "SELECT id FROM chat_messages WHERE session_id = ? AND role = 'user' "
+            reply = conn.execute(
+                "SELECT id FROM chat_messages WHERE session_id = ? AND role = 'assistant' "
                 "AND created_at > ? AND created_at <= ? ORDER BY created_at, id LIMIT 1",
                 (after_turn_in, since, turn_end),
             ).fetchone()
-            turn_id = int(first["id"]) if first else -1
+            turn_reply = int(reply["id"]) if reply else -1
         rows = conn.execute(
             "SELECT m.created_at, m.content FROM chat_messages m "
             "JOIN sessions s ON s.session_id = m.session_id "
             # Nor any line of a conversation a host's page wrote in: a host
             # line taken back and sent again (Try again) is saved as theirs.
             "WHERE m.role = 'user' AND m.created_at > ? AND m.sender_surface IS NULL "
-            "AND s.host_wrote = 0 AND m.id != ? "
+            "AND s.host_wrote = 0 AND NOT (m.session_id = ? AND m.id < ?) "
             "AND (m.sender_person_id = ? "
             "OR (m.sender_person_id IS NULL AND s.caller_person_id = ?)) "
             "ORDER BY m.created_at DESC, m.id DESC LIMIT ?",
-            (since, turn_id, person_id, person_id, limit),
+            (since, after_turn_in or "", turn_reply, person_id, person_id, limit),
         ).fetchall()
     out: list[dict[str, str]] = []
     for row in reversed(rows):
