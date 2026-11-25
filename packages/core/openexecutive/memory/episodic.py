@@ -107,6 +107,10 @@ class ScheduledAction(BaseModel):
     # occurrence finishes the next is queued (``_queue_next``), until it is
     # cancelled. None runs once.
     repeat: str | None = None
+    # What the person reads for it on Home and the Schedule page: a short
+    # plain line ("See if Alex replied about the launch email"), never the
+    # instruction in ``intent_text``. Set by whatever queues a row people see.
+    title: str | None = None
 
 
 class OutboundContext(BaseModel):
@@ -360,6 +364,8 @@ def initialize_db(db_path: Path | None = None) -> None:
             ("private_to_person_id", "INTEGER"),
             # ScheduledAction.repeat.
             ("repeat", "TEXT"),
+            # ScheduledAction.title.
+            ("title", "TEXT"),
         ):
             if col not in _sa_existing:
                 try:
@@ -1275,6 +1281,21 @@ _MAX_OUTBOUND_CONTEXT_CHARS = 2000
 _VALID_INSERT_STATUSES = {"pending", "done"}
 
 
+SCHEDULED_TITLE_MAX = 80
+
+
+def short_title(text: str | None) -> str | None:
+    """A scheduled row's title as stored: one line, at most
+    ``SCHEDULED_TITLE_MAX`` characters, cut at a word. None when empty."""
+    line = " ".join(str(text or "").split())
+    if not line:
+        return None
+    if len(line) <= SCHEDULED_TITLE_MAX:
+        return line
+    cut = line[: SCHEDULED_TITLE_MAX - 1].rsplit(" ", 1)[0].rstrip(" ,;:-")
+    return f"{cut or line[: SCHEDULED_TITLE_MAX - 1]}…"
+
+
 def insert_scheduled_action(
     *,
     run_at: str,
@@ -1292,6 +1313,7 @@ def insert_scheduled_action(
     created_by_person_id: int | None = None,
     repeat: str | None = None,
     private_to_person_id: int | None = None,
+    title: str | None = None,
     db_path: Path | None = None,
 ) -> int:
     if channel not in _VALID_SCHEDULED_CHANNELS:
@@ -1314,12 +1336,13 @@ def insert_scheduled_action(
             "INSERT INTO scheduled_actions "
             "(created_at, run_at, channel, channel_ref, intent_text, originating_session_id, "
             "department, kind, assigned_to_person_id, awaiting_response_since, scope_key, "
-            "required_scope, status, created_by_person_id, repeat, private_to_person_id) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "required_scope, status, created_by_person_id, repeat, private_to_person_id, title) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 now, run_at, channel, channel_ref, intent_text, originating_session_id,
                 department, kind, assigned_to_person_id, awaiting_str, scope_key,
                 required_scope, status, created_by_person_id, repeat or None, private_to_person_id,
+                short_title(title),
             ),
         )
         return int(cursor.lastrowid or 0)
@@ -1815,10 +1838,10 @@ def _queue_next(conn: sqlite3.Connection, action_id: int) -> int | None:
         "INSERT INTO scheduled_actions "
         "(created_at, run_at, channel, channel_ref, intent_text, originating_session_id, "
         "department, kind, assigned_to_person_id, scope_key, required_scope, status, "
-        "created_by_person_id, repeat) "
+        "created_by_person_id, repeat, title) "
         "SELECT ?, ?, channel, channel_ref, intent_text, originating_session_id, department, kind, "
         "assigned_to_person_id, scope_key, required_scope, 'pending', created_by_person_id, "
-        "repeat FROM scheduled_actions WHERE id = ?",
+        "repeat, title FROM scheduled_actions WHERE id = ?",
         (datetime.now(UTC).isoformat(), run_at.isoformat(), action_id),
     )
     return int(cursor.lastrowid or 0) or None

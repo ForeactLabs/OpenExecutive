@@ -225,6 +225,23 @@ class TestStaleCommitmentCandidates:
         assert len(out) == 1
         assert out[0].source == "commitment"
         assert out[0].person_id == pid
+        # Home reads a plain line for the chase, not its instruction.
+        assert out[0].title == 'Chase a reply on "Please confirm Q3 close"'
+
+    def test_a_chase_names_the_follow_up_by_its_title(self) -> None:
+        now = _now()
+        pid = _make_person()
+        episodic.insert_scheduled_action(
+            run_at=now.isoformat(),
+            channel="slack_dm",
+            channel_ref="U_BOB",
+            intent_text="Ask Bob (1) whether the Q3 close is done and (2) the numbers",
+            title="Ask Bob about the Q3 close",
+            assigned_to_person_id=pid,
+            awaiting_response_since=now - timedelta(days=4),
+        )
+        [cand] = nudge_engine._select_stale_commitment_candidates(now, stale_days=3, cooldown_hours=48)
+        assert cand.title == 'Chase a reply on "Ask Bob about the Q3 close"'
 
     def test_recent_awaiting_excluded(self) -> None:
         now = _now()
