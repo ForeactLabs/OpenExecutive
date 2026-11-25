@@ -372,7 +372,7 @@ function textsHelpers() {
 test("texts: the first look only counts unread texts from others, later looks count what changed", () => {
   const T = textsHelpers();
   const rows = [
-    { key: "1", title: "Sam Lee", snippet: "Running late", unread: true },
+    { key: "1", title: "Sam Lee", snippet: "Running late", unread: true, time: "Now" },
     { key: "2", title: "+1 (555) 010-2000", snippet: "Old news", unread: false },
     { key: "3", title: "Ana", snippet: "You: see you there", unread: true },
   ];
@@ -400,9 +400,34 @@ test("texts: the first look only counts unread texts from others, later looks co
   assert.equal(mine.sender, "Ana");
 });
 
+test("texts: a first look answers no old unread texts, and each text carries the time the list shows", () => {
+  const T = textsHelpers();
+  const now = Date.parse("2026-11-25T15:00:00");
+  const rows = [
+    { key: "old", title: "Sam Lee", snippet: "Can you cover Friday?", unread: true, time: "Nov 10" },
+    { key: "wk", title: "Ana", snippet: "Lunch?", unread: true, time: "Mon" },
+    { key: "odd", title: "Bo", snippet: "?", unread: true, time: "il y a longtemps" },
+    { key: "kai", title: "Kai", snippet: "Here", unread: true, time: "5 min" },
+  ];
+  const first = T.changes(rows, null, now);
+  assert.deepEqual([...first.items.map((i) => i.conversation)], ["kai"]);
+  assert.equal(first.items[0].at, new Date(now - 5 * 60000).toISOString());
+  // Later, a change the list can't date is taken as just now.
+  const later = T.changes([{ key: "odd", title: "Bo", snippet: "Still there?", unread: true, time: "" }], first.seen, now);
+  assert.equal(later.items[0].at, new Date(now).toISOString());
+  // The list's times.
+  assert.equal(T.timeOf("Now", now), now);
+  assert.equal(T.timeOf("2 hr", now), now - 2 * 3600000);
+  assert.equal(T.timeOf("2:15 PM", now), Date.parse("2026-11-25T14:15:00"));
+  assert.equal(T.timeOf("11:50 PM", now), Date.parse("2026-11-24T23:50:00"));
+  assert.equal(T.timeOf("Yesterday", now), now - 86400000);
+  assert.equal(T.timeOf("Dec 20", now), Date.parse("2025-12-20T00:00:00"));
+  assert.equal(T.timeOf("", now), null);
+});
+
 test("texts: a group's sender is left blank, and the new-conversation link is not a conversation", () => {
   const T = textsHelpers();
-  const out = T.changes([{ key: "g", title: "Sam, Ana", snippet: "Pizza?", unread: true, group: true }, { key: "s", title: "Smith, John", snippet: "Hi", unread: true }, { key: "new", title: "x", snippet: "y", unread: true }], null, 0);
+  const out = T.changes([{ key: "g", title: "Sam, Ana", snippet: "Pizza?", unread: true, group: true, time: "2 min" }, { key: "s", title: "Smith, John", snippet: "Hi", unread: true, time: "Now" }, { key: "new", title: "x", snippet: "y", unread: true }], null, 0);
   assert.equal(out.items.length, 2);
   assert.equal(out.items[0].is_group, true);
   assert.equal(out.items[0].sender, "");
@@ -435,7 +460,7 @@ test("texts: one send at a time, and only into the conversation it is for", () =
 
 test("texts: the same change reported again keeps its ref", () => {
   const T = textsHelpers();
-  const rows = (snippet) => [{ key: "1", title: "Sam Lee", snippet, unread: true }];
+  const rows = (snippet) => [{ key: "1", title: "Sam Lee", snippet, unread: true, time: "Now" }];
   const a = T.changes(rows("ok"), null, 1000);
   const b1 = T.changes(rows("Running late"), a.seen, 2000);
   // Its answer never came back, so seen wasn't saved: the retry is the same text.
@@ -452,7 +477,7 @@ test("texts: texts go only to sites with Texts on, and to each of them", () => {
 
 test("texts: the same words again later are a new text", () => {
   const T = textsHelpers();
-  const rows = (snippet) => [{ key: "1", title: "Sam Lee", snippet, unread: true }];
+  const rows = (snippet) => [{ key: "1", title: "Sam Lee", snippet, unread: true, time: "Now" }];
   const a = T.changes(rows("ok"), null, 1000);
   const b = T.changes(rows("You: sure"), a.seen, 2000);
   const c = T.changes(rows("ok"), b.seen, 3000);

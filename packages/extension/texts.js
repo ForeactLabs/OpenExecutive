@@ -57,7 +57,7 @@
 
   /**
    * A conversation in the list as plain data, or null:
-   * { key, title, snippet, unread, outgoing, group }.
+   * { key, title, snippet, unread, outgoing, group, time }.
    */
   T.fromRow = function (row) {
     if (!row || typeof row.key !== "string" || !row.key || row.key === "new") return null;
@@ -74,14 +74,56 @@
       outgoing,
       // Only the page's own mark: "Smith, John" is one person.
       group: Boolean(row.group),
+      time: T.squeeze(row.time, 80),
     };
+  };
+
+  const DAY = 24 * 60 * 60 * 1000;
+  const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+
+  /**
+   * When the latest text in a row came, in ms, from the time the list shows
+   * ("Now", "5 min", "2:15 PM", "Yesterday", "Mon", "Nov 10"), or null when
+   * it can't be read (another language, a new layout).
+   */
+  T.timeOf = function (shown, now) {
+    const s = T.squeeze(shown, 80).toLowerCase().replace(/\u202f/g, " ");
+    if (!s) return null;
+    if (/^(just )?now$/.test(s)) return now;
+    let m = /^(\d+)\s*(m|min|mins|minutes?)$/.exec(s);
+    if (m) return now - Number(m[1]) * 60000;
+    m = /^(\d+)\s*(h|hr|hrs|hours?)$/.exec(s);
+    if (m) return now - Number(m[1]) * 3600000;
+    if (s === "yesterday") return now - DAY;
+    m = /^(\d{1,2}):(\d{2})\s*(am|pm)?$/.exec(s);
+    if (m) {
+      let h = Number(m[1]) % (m[3] ? 12 : 24);
+      if (m[3] === "pm") h += 12;
+      const d = new Date(now);
+      d.setHours(h, Number(m[2]), 0, 0);
+      const t = d.getTime();
+      return t > now + 60000 ? t - DAY : t;
+    }
+    const day = WEEKDAYS.indexOf(s.slice(0, 3));
+    if (day >= 0 && /^[a-z]+\.?$/.test(s)) {
+      const back = (new Date(now).getDay() - day + 7) % 7 || 7;
+      return now - back * DAY;
+    }
+    // A date without a year ("Nov 10") is this year's, or last year's when
+    // that would be ahead of now.
+    const withYear = /\d{4}/.test(s) ? s : `${s} ${new Date(now).getFullYear()}`;
+    const t = Date.parse(withYear);
+    if (Number.isNaN(t)) return null;
+    return t > now + DAY ? Date.parse(`${s} ${new Date(now).getFullYear() - 1}`) : t;
   };
 
   /**
    * What to tell Open Executive about the list, given what it said before
    * (`seen`: key -> fingerprint of the latest text). The first time (`seen`
-   * is null) only unread conversations count as new, so texts from before
-   * Texts was on aren't taken as new. Returns { items, seen }.
+   * is null) only unread conversations from the last day count as new, by
+   * the time the list shows, so old texts aren't answered as if they just
+   * came. Each text carries that time, or now when the list's time can't be
+   * read (it changed while the page was watching). Returns { items, seen }.
    */
   T.changes = function (rows, seen, now) {
     const first = seen === null || typeof seen !== "object";
@@ -97,7 +139,8 @@
       if (beforePrint === print) continue;
       const count = (parseInt(beforeCount, 10) || 0) + 1;
       next[row.key] = `${print}.${count}`;
-      if (first && (!row.unread || row.outgoing)) continue;
+      const shown = T.timeOf(row.time, now);
+      if (first && (!row.unread || row.outgoing || shown === null || now - shown > DAY)) continue;
       items.push({
         // The same change, reported again (an answer that never came back),
         // is the same ref, so it is kept once.
@@ -106,7 +149,7 @@
         title: row.title,
         sender: row.group ? "" : row.title,
         text: row.snippet,
-        at: new Date(now).toISOString(),
+        at: new Date(shown === null ? now : Math.min(shown, now)).toISOString(),
         number: T.looksLikeNumber(row.title) ? row.title.slice(0, 40) : "",
         is_group: row.group,
         outgoing: row.outgoing,
@@ -156,6 +199,10 @@
           item.getAttribute("data-e2e-is-unread") === "true" ||
           a.getAttribute("data-e2e-is-unread") === "true",
         group: item.getAttribute("data-e2e-is-group") === "true",
+        time: (() => {
+          const el = first(item, ["mws-relative-timestamp", "[data-e2e-conversation-timestamp]", ".timestamp"]);
+          return el ? el.getAttribute("aria-label") || el.getAttribute("title") || textOf(el) : "";
+        })(),
       });
     }
     return rows;
