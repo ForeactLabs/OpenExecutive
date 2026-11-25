@@ -164,12 +164,15 @@ def _settle_cards(me: Me, offers: list[take_on.Offer]) -> None:
         if status in _CARD_OPEN:
             continue
         # One run can put up more than one card: the offer follows the next
-        # one still waiting, and settles on the last.
+        # one still waiting, and settles on the last, as done when any of
+        # them went through.
         try:
-            waiting = [i for i in dl.open_for_session(o.session_id or "") if i != o.decision_id]
+            others = {i: s for i, s in dl.cards_for_session(o.session_id or "").items() if i != o.decision_id}
         except Exception:
             logger.warning("take_on: couldn't read the run's other cards", exc_info=True)
-            waiting = []
+            others = {}
+        waiting = [i for i, s in others.items() if s == dl.STATUS_PROPOSED]
+        part_done = any(s in _CARD_DONE for s in others.values())
         # Each write holds only while the row is still on this card: of two
         # readers settling it at once, one writes and tells the source.
         was = int(o.decision_id or 0)
@@ -177,8 +180,9 @@ def _settle_cards(me: Me, offers: list[take_on.Offer]) -> None:
             o.decision_id = waiting[0]
             take_on.finish(me.email, o.key, "card", outcome=o.outcome, done=o.done, decision_id=o.decision_id,
                            from_card=was)
-        elif status in _CARD_DONE:
-            o.status, o.outcome = "done", "You approved it, and it's done."
+        elif status in _CARD_DONE or (part_done and status != dl.STATUS_FAILED):
+            o.status = "done"
+            o.outcome = "You approved it, and it's done." if status in _CARD_DONE else "You approved part of it, and that's done."
             if take_on.finish(me.email, o.key, "done", outcome=o.outcome, done=o.done, decision_id=o.decision_id,
                               from_card=was):
                 _taken_up(me, o)

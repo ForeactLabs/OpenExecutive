@@ -12,6 +12,7 @@ from openexecutive.memory.decision_ledger import (
     STATUS_REJECTED,
     STATUS_REVERSED,
     aggregate_reliability,
+    cards_for_session,
     create_decision_instance,
     get_class_mode,
     get_decision_instance,
@@ -62,6 +63,9 @@ def test_open_for_session_lists_only_that_chats_unanswered_cards(db: Path) -> No
     later = _create(db, idem="d")
     assert open_for_session("sess-1", db_path=db) == [open_card, later]
     assert open_for_session("", db_path=db) == []
+    assert cards_for_session("sess-1", db_path=db) == {
+        open_card: "proposed", answered: STATUS_APPROVED_UNCHANGED, later: "proposed",
+    }
 
 def test_create_and_get(db: Path) -> None:
     iid = _create(db)

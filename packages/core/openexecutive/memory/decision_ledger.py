@@ -263,17 +263,22 @@ def get_decision_instances(
     return out
 
 
+def cards_for_session(session_id: str, db_path: Path | None = None) -> dict[int, str]:
+    """Each card a chat put up, oldest first, with its status."""
+    if not session_id:
+        return {}
+    with _get_conn(db_path or _db_path()) as conn:
+        rows = conn.execute(
+            "SELECT id, status FROM decision_instances WHERE originating_session_id = ? ORDER BY id",
+            (session_id,),
+        ).fetchall()
+    return {int(r[0]): str(r[1]) for r in rows}
+
+
 def open_for_session(session_id: str, db_path: Path | None = None) -> list[int]:
     """The ids of cards a chat put up that nobody has answered yet, oldest
     first."""
-    if not session_id:
-        return []
-    with _get_conn(db_path or _db_path()) as conn:
-        rows = conn.execute(
-            "SELECT id FROM decision_instances WHERE originating_session_id = ? AND status = ? ORDER BY id",
-            (session_id, STATUS_PROPOSED),
-        ).fetchall()
-    return [int(r[0]) for r in rows]
+    return [i for i, status in cards_for_session(session_id, db_path).items() if status == STATUS_PROPOSED]
 
 
 def get_live_by_idem(

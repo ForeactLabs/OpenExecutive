@@ -607,13 +607,34 @@ def test_an_offer_that_put_up_two_cards_waits_for_both(client: TestClient, monke
     status = {7: decision_ledger.STATUS_EXECUTED, 8: decision_ledger.STATUS_PROPOSED}
     monkeypatch.setattr(decision_ledger, "get_decision_instances",
                         lambda ids: {i: SimpleNamespace(status=status[i]) for i in ids})
-    monkeypatch.setattr(decision_ledger, "open_for_session",
-                        lambda s: [i for i, v in status.items() if v == decision_ledger.STATUS_PROPOSED and s == "sess-9"])
+    monkeypatch.setattr(decision_ledger, "cards_for_session", lambda s: dict(status) if s == "sess-9" else {})
     (got,) = client.get("/take-on").json()["offers"]
     assert got["status"] == "card" and got["decision_id"] == 8
     status[8] = decision_ledger.STATUS_EXECUTED
     assert client.get("/take-on").json()["offers"] == []
     assert [f.key for f in take_on.finished(ME, datetime.now(UTC) - timedelta(hours=1))] == [o.key]
+
+
+def test_skipping_the_last_card_after_one_went_through_is_done(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.api.routes import take_on as route
+    from openexecutive.memory import decision_ledger
+
+    o = _offer()
+    take_on.put_made(ME, [o])
+    take_on.start(ME, o)
+    take_on.set_session(ME, o.key, "sess-9")
+    take_on.finish(ME, o.key, "card", decision_id=8)
+    status = {7: decision_ledger.STATUS_EXECUTED, 8: decision_ledger.STATUS_REJECTED}
+    monkeypatch.setattr(decision_ledger, "get_decision_instances",
+                        lambda ids: {i: SimpleNamespace(status=status[i]) for i in ids})
+    monkeypatch.setattr(decision_ledger, "cards_for_session", lambda s: dict(status) if s == "sess-9" else {})
+    told: list[str] = []
+    monkeypatch.setattr(route, "_taken_up", lambda _me, off: told.append(off.key))
+    assert client.get("/take-on").json()["offers"] == []
+    (done,) = take_on.finished(ME, datetime.now(UTC) - timedelta(hours=1))
+    assert (done.key, done.outcome) == (o.key, "You approved part of it, and that's done.") and told == [o.key]
 
 
 def test_a_watch_taken_up_leaves_the_suggestions_as_a_yes(monkeypatch: pytest.MonkeyPatch) -> None:
