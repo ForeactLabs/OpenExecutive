@@ -268,15 +268,19 @@ def record(person_id: int, items: list[Incoming], *, db_path: Path | None = None
             if item.at < cutoff:
                 continue
             conversation_id = _upsert_conversation(conn, person_id, item, now)
+            # Which way a text went comes from the page's words ("You: …"), in
+            # the page's language. A text the Executive itself just sent is
+            # theirs whatever the language says, so it never answers itself.
+            outgoing = item.outgoing or _just_sent(conn, person_id, conversation_id, item.text, now)
             cur = conn.execute(
                 f"INSERT OR IGNORE INTO {TEXTS_TABLE} "
                 "(person_id, conversation_id, ref, sender, text, outgoing, at, handled) VALUES (?,?,?,?,?,?,?,?)",
                 (
                     person_id, conversation_id, _clip(item.ref, 300), _clip(item.sender, 200),
-                    _clip(item.text, MAX_TEXT), int(item.outgoing), _iso(min(item.at, now)), int(item.outgoing),
+                    _clip(item.text, MAX_TEXT), int(outgoing), _iso(min(item.at, now)), int(outgoing),
                 ),
             )
-            if cur.rowcount and cur.lastrowid is not None and not item.outgoing:
+            if cur.rowcount and cur.lastrowid is not None and not outgoing:
                 fresh.append(int(cur.lastrowid))
         conn.execute(
             f"DELETE FROM {TEXTS_TABLE} WHERE person_id=? AND id NOT IN "
@@ -284,6 +288,23 @@ def record(person_id: int, items: list[Incoming], *, db_path: Path | None = None
             (person_id, person_id, MAX_KEPT),
         )
     return fresh
+
+
+def _same_words(a: str, b: str) -> bool:
+    return " ".join((a or "").split()).casefold() == " ".join((b or "").split()).casefold()
+
+
+def _just_sent(conn: sqlite3.Connection, person_id: int, conversation_id: str, text: str, now: datetime) -> bool:
+    """Whether these words are a text the Executive sent in this conversation
+    (or to a new number) in the last day, settled or still going."""
+    if not (text or "").strip():
+        return False
+    rows = conn.execute(
+        f"SELECT text FROM {TEXT_SENDS_TABLE} WHERE person_id=? AND status<>? AND created_at >= ? "
+        "AND (conversation_id=? OR conversation_id IS NULL)",
+        (person_id, FAILED, _iso(now - LOOK_WITHIN), conversation_id),
+    ).fetchall()
+    return any(_same_words(r["text"], text) for r in rows)
 
 
 def _upsert_conversation(conn: sqlite3.Connection, person_id: int, item: Incoming, now: datetime) -> str:

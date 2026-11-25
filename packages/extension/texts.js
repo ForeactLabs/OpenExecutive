@@ -44,7 +44,8 @@
   };
 
   // The person's own last text starts with this in the list.
-  const YOU = /^(You|Vous|Tú|Du|Tu|Jij|Você)\s*:\s*/i;
+  // The server also knows its own sends by their words, whatever the language.
+  const YOU = /^(You|Vous|Tú|Tu|Du|Jij|Je|U|Você|Ty|Ви|Вы|Ти|Sen|Siz|Anda|Kamu|Bạn|Eu|Io|Jeg|Jag|Minä|Sinä|자신|나|あなた|自分|我|你)\s*[:：]\s*/i;
 
   /**
    * A conversation in the list as plain data, or null:

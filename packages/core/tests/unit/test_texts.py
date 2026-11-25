@@ -570,3 +570,18 @@ def test_the_turn_sees_every_new_text_in_a_burst(ids: dict[str, int], monkeypatc
     monkeypatch.setattr(texts_watch, "_turn", turn)
     assert asyncio.run(texts_watch.look(owner)) is True
     assert all(f"part {i}<" in prompts[0] for i in range(12))
+
+
+def test_its_own_text_coming_back_in_another_language_is_never_a_new_text(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("a", text="Friday?")])
+    (conv,) = tx.conversations(owner)
+    tx.mark_handled(owner, [t.id for t in tx.unhandled(owner)])
+    send = tx.queue_send(owner, "Friday works", conversation_id=conv.id)
+    tx.take_send(owner)
+    # Google Messages in Polish shows "Ty: Friday works", which isn't read as theirs.
+    assert tx.record(owner, [_item("b", text="Friday  works")]) == []
+    assert tx.texts(conv.id)[-1].outgoing is True
+    tx.settle_send(owner, send.id, status=tx.SENT)
+    assert tx.record(owner, [_item("c", text="Friday works?")]) != []  # someone else's words
