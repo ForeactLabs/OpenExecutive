@@ -42,6 +42,8 @@ KIND_FIXED = "fixed"
 _KINDS = frozenset({KIND_LEAVE_OUT, KIND_RAISE, KIND_FIXED})
 LEAVE_OUT_DAYS = 14
 RAISE_DAYS = 2
+# A line saying what was put right is told once: the next brief, then gone.
+FIXED_DAYS = 1
 TEXT_MAX = 200
 MAX_ACTIVE = 20
 # A line is a short description, never a way to steer the brief: no links,
@@ -170,7 +172,7 @@ def place(
     if rejected:
         return None, rejected
     current = now or _now()
-    days = LEAVE_OUT_DAYS if kind == KIND_LEAVE_OUT else RAISE_DAYS
+    days = {KIND_LEAVE_OUT: LEAVE_OUT_DAYS, KIND_FIXED: FIXED_DAYS}.get(kind, RAISE_DAYS)
     expires = current + timedelta(days=days)
     conn = _connect(db_path)
     try:

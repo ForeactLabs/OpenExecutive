@@ -386,6 +386,27 @@ def test_it_sets_a_reminder_the_reply_claimed_through_the_chat_tool(
     assert len(rows) == 1
 
 
+def test_a_reminder_is_set_once_a_pass(db: Path, roster: SimpleNamespace, provider: _Provider,
+                                       monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.orchestrator import content_scan, outside_mode
+
+    async def clean(content: Any, *, model: str | None = None) -> content_scan.Verdict:
+        return content_scan.CLEAN
+
+    monkeypatch.setattr(content_scan, "scan", clean)
+    monkeypatch.setattr(outside_mode, "get_mode", lambda **_: outside_mode.OUTSIDERS)
+    _record(roster.principal, text="Remind me to call Jamie at 5pm today please",
+            reply="Done, I'll remind you to call Jamie at 5pm.")
+    args = {"run_at": (datetime.now(UTC) + timedelta(days=1)).isoformat(), "channel": "email",
+            "channel_ref": "olivia@co.example", "intent": "Remind Olivia to call Jamie.",
+            "source_quote": "Remind me to call Jamie"}
+    provider.script = [[("schedule_followup", args)], [("schedule_followup", {**args, "intent": " remind olivia to  call Jamie."})]]
+    _review(db)
+    assert _tool_results(provider, 2)[0]["status"] == "noop"
+    with episodic._get_conn(db) as conn:
+        assert conn.execute("SELECT COUNT(*) FROM scheduled_actions WHERE intent_text LIKE '%Jamie%'").fetchone()[0] == 1
+
+
 def test_a_reminder_needs_their_words_naming_it(db: Path, roster: SimpleNamespace,
                                                 provider: _Provider) -> None:
     _record(roster.principal, text="ok thanks, that is all for now from me",

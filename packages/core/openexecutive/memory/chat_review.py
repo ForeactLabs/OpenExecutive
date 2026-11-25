@@ -1701,6 +1701,8 @@ async def _run_loop(
     # One fact per subject a pass: the model tends to save a correction again
     # in other words, and each save replaces the last.
     facts_saved: set[str] = set()
+    # One follow-up per what and when a pass, for the same reason.
+    followups_set: set[tuple[str, str]] = set()
 
     def _read(response: Any, _round: int) -> None:
         if notes is not None:
@@ -1718,12 +1720,18 @@ async def _run_loop(
             return await handlers[name](tool_input)
         if name == "remember_fact" and _fact_key(tool_input) and _fact_key(tool_input) in facts_saved:
             return json.dumps({"status": "noop", "detail": "a fact under this subject was already saved in this review; a different fact needs its own subject"})
+        followup = (" ".join(str(tool_input.get("intent") or "").casefold().split()),
+                    str(tool_input.get("run_at") or "").strip())
+        if name == "schedule_followup" and followup in followups_set:
+            return json.dumps({"status": "noop", "detail": "this follow-up was already set in this review"})
         out = await _apply(name, tool_input, person, session, words, handlers,
                            turns=turns, db_path=db_path)
         if _went_through(out):
             done.append(name)
             if name == "remember_fact":
                 facts_saved.add(_fact_key(tool_input))
+            if name == "schedule_followup":
+                followups_set.add(followup)
             if name == "learn_lesson":
                 _note_lesson(notes, tool_input, "", kept=True)
         elif name in _LEARN_TOOLS:
