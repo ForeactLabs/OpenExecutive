@@ -267,6 +267,22 @@ def test_a_fact_is_saved_once_a_review(db: Path, roster: SimpleNamespace, provid
     assert second["status"] == "noop" and "already saved" in second["detail"]
 
 
+def test_the_review_ends_once_it_has_made_its_changes(db: Path, roster: SimpleNamespace,
+                                                     provider: _Provider) -> None:
+    _record(roster.principal)
+    fact = {"statement": "The vendor email was sent already.", "source_quote": "I sent the vendor email already"}
+    provider.script = [
+        [("remember_fact", {**fact, "subject": f"Vendor email {word}"})
+         for word in ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india", "juliet"][:cr.MAX_CHANGES + 1]],
+        [("remember_fact", {**fact, "subject": "One more"})],
+    ]
+    _review(db)
+    assert len(provider.calls) == 1
+    events = audit_logger.get_audit_logger().query(event_type="chat_review", all_owners=True)
+    review = next(e for e in events if e.details.get("op") == "chat_review")
+    assert len(review.details["changes"]) == cr.MAX_CHANGES
+
+
 def test_a_review_that_fails_part_way_still_lists_its_changes(db: Path, roster: SimpleNamespace,
                                                               provider: _Provider) -> None:
     _record(roster.principal)

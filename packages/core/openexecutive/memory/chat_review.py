@@ -90,6 +90,8 @@ logger = logging.getLogger(__name__)
 # The most rounds of tool calls a chat review runs (the owner's choice,
 # 11-18: background passes keep their old counts).
 MAX_ITERATIONS = 5
+# The most changes one pass makes: the review ends once it has made them.
+MAX_CHANGES = 8
 
 CHAT_REVIEW_KIND = "chat_review"
 TURNS_TABLE = "chat_review_turns"
@@ -1723,6 +1725,8 @@ async def _run_loop(
             return await handlers[name](tool_input)
         if name == "remember_fact" and _fact_key(tool_input) and _fact_key(tool_input) in facts_saved:
             return json.dumps({"status": "noop", "detail": "a fact under this subject was already saved in this review; a different fact needs its own subject"})
+        if len(done) >= MAX_CHANGES:
+            return json.dumps({"status": "noop", "detail": f"this review already made {MAX_CHANGES} changes"})
         followup = (" ".join(str(tool_input.get("intent") or "").casefold().split()),
                     str(tool_input.get("run_at") or "").strip())
         if name == "schedule_followup" and followup in followups_set:
@@ -1764,6 +1768,8 @@ async def _run_loop(
             get_provider(model), model=model, max_tokens=_MAX_TOKENS, system=_SYSTEM,
             tools=tools, messages=messages, run_call=_run, actor="chat_review", max_rounds=MAX_ITERATIONS,
             on_response=_read,
+            # It ends once it has made MAX_CHANGES, as before.
+            enough=lambda: "" if len(done) >= MAX_CHANGES else None,
         )
     finally:
         outside_content.end_turn(turn)
