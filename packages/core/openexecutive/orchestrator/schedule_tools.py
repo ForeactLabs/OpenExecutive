@@ -518,6 +518,14 @@ SCHEDULE_FOLLOWUP_TOOL: dict[str, Any] = {
                     "(topic, decision, key facts): that run will not see this conversation."
                 ),
             },
+            "title": {
+                "type": "string",
+                "description": (
+                    "What the person sees for it on Home: a short plain line in their words, "
+                    "under 60 characters, like 'See if Alex replied about the launch email' "
+                    "or 'Remind Dana about the Q3 budget'. No numbering, ids or abbreviations."
+                ),
+            },
             "repeat": {
                 "type": "string",
                 "description": (
@@ -547,7 +555,7 @@ SCHEDULE_FOLLOWUP_TOOL: dict[str, Any] = {
                 ),
             },
         },
-        "required": ["run_at", "channel", "channel_ref", "intent"],
+        "required": ["run_at", "channel", "channel_ref", "intent", "title"],
     },
 }
 
@@ -876,6 +884,8 @@ async def handle_schedule_followup(tool_input: dict[str, Any]) -> str:
         intent = str(tool_input["intent"]).strip()
     except (KeyError, TypeError) as exc:
         return json.dumps({"error": f"missing field: {exc}"})
+    # The schema asks for a title; one left out never stops the follow-up.
+    title = " ".join(str(tool_input.get("title") or "").split()) or None
 
     department = str(tool_input["department"]).strip() if tool_input.get("department") else ""
     assigned_to_person_id: int | None = None
@@ -964,6 +974,7 @@ async def handle_schedule_followup(tool_input: dict[str, Any]) -> str:
             required_scope=required_scope,
             created_by_person_id=_turn_speaker_id(session),
             repeat=repeat,
+            title=title,
         )
     except Exception as exc:
         logger.exception("schedule_followup: insert failed")
@@ -2719,6 +2730,7 @@ async def handle_suggest_workflow(tool_input: dict[str, Any]) -> str:
             intent_text=intent,
             originating_session_id=session_id,
             created_by_person_id=_turn_speaker_id(session),
+            title=f"Suggest the {workflow.title} workflow",
         )
     except Exception as exc:
         logger.exception("suggest_workflow: insert failed")
