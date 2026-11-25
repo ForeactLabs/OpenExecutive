@@ -637,6 +637,31 @@ def test_skipping_the_last_card_after_one_went_through_is_done(
     assert (done.key, done.outcome) == (o.key, "You approved part of it, and that's done.") and told == [o.key]
 
 
+def test_skipping_a_card_while_another_is_being_sent_follows_that_one(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.api.routes import take_on as route
+    from openexecutive.memory import decision_ledger
+
+    o = _offer()
+    take_on.put_made(ME, [o])
+    take_on.start(ME, o)
+    take_on.set_session(ME, o.key, "sess-9")
+    take_on.finish(ME, o.key, "card", decision_id=10)
+    status = {10: decision_ledger.STATUS_REJECTED, 11: decision_ledger.STATUS_EXECUTING}
+    monkeypatch.setattr(decision_ledger, "get_decision_instances",
+                        lambda ids: {i: SimpleNamespace(status=status[i]) for i in ids})
+    monkeypatch.setattr(decision_ledger, "cards_for_session", lambda s: dict(status) if s == "sess-9" else {})
+    told: list[str] = []
+    monkeypatch.setattr(route, "_taken_up", lambda _me, off: told.append(off.key))
+    (still,) = client.get("/take-on").json()["offers"]
+    assert still["status"] == "card"
+    status[11] = decision_ledger.STATUS_EXECUTED
+    assert client.get("/take-on").json()["offers"] == []
+    (done,) = take_on.finished(ME, datetime.now(UTC) - timedelta(hours=1))
+    assert done.key == o.key and told == [o.key]
+
+
 def test_a_watch_taken_up_leaves_the_suggestions_as_a_yes(monkeypatch: pytest.MonkeyPatch) -> None:
     from openexecutive.api.routes import take_on as route
     from openexecutive.monitoring import store as ms

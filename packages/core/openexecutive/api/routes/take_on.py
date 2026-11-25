@@ -171,7 +171,8 @@ def _settle_cards(me: Me, offers: list[take_on.Offer]) -> None:
         except Exception:
             logger.warning("take_on: couldn't read the run's other cards", exc_info=True)
             others = {}
-        waiting = [i for i, s in others.items() if s == dl.STATUS_PROPOSED]
+        # A card approved and still being sent counts as waiting too.
+        waiting = [i for i, s in others.items() if s in dl.OPEN_STATUSES]
         part_done = any(s in _CARD_DONE for s in others.values())
         # Each write holds only while the row is still on this card: of two
         # readers settling it at once, one writes and tells the source.
