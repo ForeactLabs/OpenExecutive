@@ -567,9 +567,10 @@ def _approver(requester: Any, reason: str, tool: str, tool_input: dict[str, Any]
     from openexecutive.orchestrator import take_the_lead
 
     # A step on someone's own device (a text from their phone) is theirs
-    # to approve, as on take_the_lead's cards (``card_of``).
+    # to approve, as on take_the_lead's cards (``card_of``), unless it waits
+    # because of their role: that stays with the owner.
     acting = take_the_lead.own_device_for(tool, tool_input).get("acting_for")
-    if isinstance(acting, int) and not isinstance(acting, bool):
+    if reason not in (NOT_OWNER, READ_ONLY) and isinstance(acting, int) and not isinstance(acting, bool):
         return acting
     try:
         if (

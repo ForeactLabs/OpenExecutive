@@ -742,6 +742,20 @@ def test_a_teammates_text_held_by_levels_is_on_their_card(ids: dict[str, int], a
     assert json.loads(decision.proposed_payload_json)["acting_for"] == mate
 
 
+def test_a_teammates_text_held_for_their_role_stays_with_the_owner(ids: dict[str, int], as_turn_for: Any) -> None:
+    from openexecutive.memory.decision_ledger import get_decision_instance
+    from openexecutive.orchestrator import levels
+
+    mate = ids["teammate"]
+    _on(mate)
+    tx.record(mate, [_item("m", conv="mate-conv")])
+    (conv,) = tx.conversations(mate)
+    as_turn_for(mate)
+    out = json.loads(levels.hold("send_text", {"conversation_id": conv.id, "text": "hi"}, mcp=False, reason=levels.READ_ONLY))
+    decision = get_decision_instance(int(out["decision_instance_id"]))
+    assert decision is not None and decision.approver_person_id == ids["principal"]
+
+
 def test_only_the_phones_owner_tap_sends_their_text(
     ids: dict[str, int], monkeypatch: pytest.MonkeyPatch,
 ) -> None:

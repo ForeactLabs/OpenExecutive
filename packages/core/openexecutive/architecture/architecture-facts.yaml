@@ -12812,7 +12812,8 @@ delegation:
     (acting_for, to_words) so a tap carries it out as that person
     (take_the_lead._asker). A held text is always on its phone owner's own
     card, whatever held it (In training, Careful, a Waits rule, someone
-    outside the team): take_the_lead.card_of and levels._approver both
+    outside the team; a hold for the asker's role, NOT_OWNER or READ_ONLY,
+    stays with the owner): take_the_lead.card_of and levels._approver both
     route _OWN_DEVICE_TOOLS to acting_for, and only that person's tap
     relaxes the gate for it (carry_out own_ok); anyone else's Approve runs
     as nobody, so no phone sends and the card says nothing went. A turn
