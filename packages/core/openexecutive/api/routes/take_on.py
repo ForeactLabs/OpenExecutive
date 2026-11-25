@@ -154,7 +154,9 @@ def _settle_cards(me: Me, offers: list[take_on.Offer]) -> None:
         return
     for o in on_card:
         card = cards.get(int(o.decision_id or 0))
-        if card is None or card.status in _CARD_OPEN:
+        # A card that is gone closed another way, like one that lapsed.
+        status = card.status if card is not None else ""
+        if status in _CARD_OPEN:
             continue
         # One run can put up more than one card: the offer follows the next
         # one still waiting, and settles on the last.
@@ -166,14 +168,14 @@ def _settle_cards(me: Me, offers: list[take_on.Offer]) -> None:
         if waiting:
             o.decision_id = waiting[0]
             take_on.finish(me.email, o.key, "card", outcome=o.outcome, done=o.done, decision_id=o.decision_id)
-        elif card.status in _CARD_DONE:
+        elif status in _CARD_DONE:
             o.status, o.outcome = "done", "You approved it, and it's done."
             take_on.finish(me.email, o.key, "done", outcome=o.outcome, done=o.done, decision_id=o.decision_id)
             _taken_up(me, o)
-        elif card.status == dl.STATUS_REJECTED:
+        elif status == dl.STATUS_REJECTED:
             take_on.hide(me.email, o, "skipped")
             o.status = "skipped"  # type: ignore[assignment]
-        elif card.status == dl.STATUS_FAILED:
+        elif status == dl.STATUS_FAILED:
             o.status, o.outcome = "failed", "It didn't go through after you approved it."
             take_on.finish(me.email, o.key, "failed", outcome=o.outcome, decision_id=o.decision_id)
         else:
@@ -361,14 +363,14 @@ async def do_it(key: str, request: Request) -> OfferOut:
             request, message=DO_PREFIX + take_on.ask_text(offer), memory_text=offer.title, on_finished=_finished,
         )
     except HTTPException as exc:
-        take_on.finish(me.email, key, "failed", outcome=str(exc.detail))
+        await asyncio.to_thread(take_on.finish, me.email, key, "failed", outcome=str(exc.detail))
         raise
     except Exception:
         logger.exception("take_on: couldn't start %s", key)
-        take_on.finish(me.email, key, "failed", outcome="It couldn't be started.")
+        await asyncio.to_thread(take_on.finish, me.email, key, "failed", outcome="It couldn't be started.")
         raise HTTPException(status_code=500, detail="It couldn't be started. Try again.") from None
     run["session_id"] = session_id
-    take_on.set_session(me.email, key, session_id)
+    await asyncio.to_thread(take_on.set_session, me.email, key, session_id)
     offer.status, offer.session_id = "working", session_id
     return _out(offer)
 

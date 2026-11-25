@@ -132,6 +132,8 @@ def test_a_run_left_working_reads_as_failed_after_a_while() -> None:
     later = datetime.now(UTC) + background_turn_limit() + timedelta(minutes=1)
     got = _list(now=later)[0]
     assert got.status == "failed" and got.outcome == take_on.STALE_OUTCOME
+    # It never finished, so it ages out from when it began.
+    assert _list(now=datetime.now(UTC) + timedelta(days=take_on.DONE_DAYS, hours=1)) == []
 
 
 def test_or_tell_me_changes_the_offer_and_undo_puts_it_back() -> None:
@@ -740,6 +742,18 @@ def test_a_card_closed_another_way_ends_the_offer(client: TestClient, monkeypatc
     got = client.get("/take-on").json()["offers"][0]
     assert got["status"] == "failed"
     assert client.post(f"/take-on/{o.key}/do").status_code != 409
+
+
+def test_a_card_that_is_gone_ends_the_offer(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.memory import decision_ledger
+
+    o = _offer()
+    take_on.put_made(ME, [o])
+    take_on.start(ME, o)
+    take_on.finish(ME, o.key, "card", decision_id=8)
+    monkeypatch.setattr(decision_ledger, "get_decision_instances", lambda ids: {})
+    (got,) = client.get("/take-on").json()["offers"]
+    assert got["status"] == "failed" and got["outcome"] == "The card closed before it was done."
 
 
 def test_a_repeat_offer_shows_what_came_of_it_and_is_taken_up_only_when_done(

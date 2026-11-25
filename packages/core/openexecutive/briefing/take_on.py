@@ -679,7 +679,8 @@ def _apply(offer: Offer, state: sqlite3.Row | None, now: datetime) -> Offer | No
         if began and now - began > background_turn_limit():
             status, offer.outcome = "failed", STALE_OUTCOME
     if status in ("done", "failed", "asked"):
-        ended = _parse(state["finished_at"])
+        # A run that went stale never finished: it ages from when it began.
+        ended = _parse(state["finished_at"]) or _parse(state["started_at"])
         if ended and now - ended > timedelta(days=DONE_DAYS):
             return None
     offer.status = status  # type: ignore[assignment]
