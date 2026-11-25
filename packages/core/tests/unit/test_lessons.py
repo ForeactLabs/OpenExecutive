@@ -355,7 +355,7 @@ def test_the_review_keeps_a_lesson_from_a_miss_in_their_own_words(db: Path, rost
     fake = _review(db, roster, [[
         ("learn_lesson", {"turn": 1, "lesson": "The board deck means the Q4 board workflow.",
                           "source_quote": "the board deck is the Q4 board workflow"}),
-        ("learn_lesson", {"turn": 2, "lesson": "Always want the runway number in the deck.",
+        ("learn_lesson", {"turn": 1, "lesson": "Always want the runway number in the deck.",
                           "source_quote": "always want the runway number in it"}),
         ("learn_lesson", {"turn": 1, "lesson": "Send the deck to the board.",
                           "source_quote": "update the board deck with the runway number"}),
@@ -367,7 +367,7 @@ def test_the_review_keeps_a_lesson_from_a_miss_in_their_own_words(db: Path, rost
     assert "[1] YOU: (MISS)" in fake.calls[0]["messages"][0]["content"]
     kept, not_a_miss, about_sending, unrelated = _results(fake)
     assert kept == {"status": "kept", "lesson": "The board deck means the Q4 board workflow."}
-    # Their own words from any turn of the chat back a lesson.
+    # Their own words from any turn of the chat back a lesson from a miss.
     assert not_a_miss == {"status": "kept", "lesson": "Always want the runway number in the deck."}
     # A lesson may be about sending: it authorizes nothing.
     assert about_sending == {"status": "kept", "lesson": "Send the deck to the board."}
