@@ -1080,6 +1080,11 @@ _CODE_BUILT_TOOLS = frozenset({
     "microsoft_365__create-onedrive-folder",
     "microsoft_365__upload-file-content",
     "microsoft_365__share-drive-item",
+    # The mail poller marking a message it has answered as read in the
+    # Executive's own inbox (integrations.workspace): housekeeping, never a
+    # step anyone asked for, so it never waits on a card.
+    "google_workspace__modify_gmail_message_labels",
+    "microsoft_365__update-mail-message",
 })
 _code_built: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
     "code_built_call", default=None

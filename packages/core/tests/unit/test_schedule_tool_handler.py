@@ -11,6 +11,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -231,7 +232,7 @@ def test_a_repeating_follow_up_comes_back_until_cancelled(session_with_telegram_
 
 
 def test_an_occurrence_that_stands_down_keeps_the_repeat(session_with_telegram_ref: Session) -> None:
-    """A run that finds it was already handled skips only that time."""
+    """A run its setter asked to hold skips only that time."""
     from openexecutive.memory import episodic
     from openexecutive.scheduler import runner
 
@@ -241,7 +242,8 @@ def test_an_occurrence_that_stands_down_keeps_the_repeat(session_with_telegram_r
     })
     first = episodic.get_scheduled_action(payload["id"])
     assert first is not None
-    runner._skip_already_handled(first, "they talked about it this week")
+    with patch("openexecutive.audit.log_event"):  # its audit row, not this test's DB
+        runner._end_as_asked(first, "paused", "Olivia")
     pending = episodic.list_scheduled_actions(status="pending")
     assert len(pending) == 1 and pending[0].id != first.id and pending[0].repeat == "weekly@mon@09:00"
 

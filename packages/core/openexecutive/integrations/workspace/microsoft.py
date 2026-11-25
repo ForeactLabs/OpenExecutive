@@ -247,10 +247,14 @@ class MicrosoftMail:
 
     async def mark_read(self, gateway: Any, ref: MessageRef, mailbox: str) -> None:
         try:
-            raw = await gateway.call_tool({
+            from openexecutive.orchestrator.mcp_gateway import code_built_call
+
+            call = {
                 "name": _PREFIX + "update-mail-message",
                 "arguments": {"messageId": ref.message_id, "body": {"isRead": True}},
-            })
+            }
+            with code_built_call(call):
+                raw = await gateway.call_tool(call)
             err = _error_of(_parse_json(raw))
             if err is not None:
                 logger.warning("failed to mark message=%s as read: %s", ref.message_id, err[:300])

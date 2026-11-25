@@ -38,10 +38,24 @@ def test_hands_off_runs_every_noticed_step(reason: str) -> None:
     assert levels.decide(reason, mode=outside_mode.TRUST) == levels.RUN
 
 
-@pytest.mark.parametrize("mode", [outside_mode.ASK, outside_mode.OUTSIDERS])
 @pytest.mark.parametrize("reason", sorted(levels.REASONS))
-def test_below_hands_off_every_noticed_step_is_a_card(mode: str, reason: str) -> None:
-    assert levels.decide(reason, mode=mode) == levels.CARD
+def test_careful_makes_every_noticed_step_a_card(reason: str) -> None:
+    assert levels.decide(reason, mode=outside_mode.ASK) == levels.CARD
+
+
+@pytest.mark.parametrize("reason", sorted(levels.BALANCED_WAITS | {levels.STRANGER, levels.NOT_OWNER, levels.READ_ONLY}))
+def test_balanced_waits_for_planted_words_someone_new_a_share_and_unwatched_work(reason: str) -> None:
+    assert levels.decide(reason, mode=outside_mode.OUTSIDERS) == levels.CARD
+
+
+@pytest.mark.parametrize(
+    "reason", sorted(levels.REASONS - levels.BALANCED_WAITS - {levels.STRANGER, levels.NOT_OWNER, levels.READ_ONLY}),
+)
+def test_balanced_runs_every_other_noticed_step(reason: str) -> None:
+    """Reading someone's own mail, a script, a
+    click on a site: none of them is one of the seven topics, so Balanced
+    runs it."""
+    assert levels.decide(reason, mode=outside_mode.OUTSIDERS) == levels.RUN
 
 
 @pytest.mark.parametrize("mode", sorted(outside_mode.MODES))
@@ -65,14 +79,16 @@ def test_hands_off_is_not_for_anyone_outside_people(monkeypatch: pytest.MonkeyPa
 
 def test_the_level_belongs_to_whoever_asks(monkeypatch: pytest.MonkeyPatch) -> None:
     """A teammate's turn runs at their level like the owner's, and a shared
-    chat someone else wrote in follows that person's level too."""
+    chat a teammate wrote in follows that person's level too."""
     owner = people_store.upsert_person(full_name="Olivia Owner", is_principal=True, email=OWNER)
     mate = people_store.upsert_person(full_name="Ben Teammate", email="ben@co.example")
     people_registry.invalidate()
     monkeypatch.setattr(outside_mode, "get_mode", lambda **_: outside_mode.TRUST)
     assert outside_mode.for_turn(Session(from_web_chat=True, caller_person_id=mate)) == outside_mode.TRUST
     assert outside_mode.for_turn(Session(session_id="email:t", caller_person_id=owner)) == outside_mode.TRUST
-    assert outside_mode.for_turn(Session(shared_chat=True, others_spoke_last=True)) == outside_mode.TRUST
+    assert outside_mode.for_turn(Session(shared_chat=True)) == outside_mode.TRUST
+    # Someone not in People may have written last: never Hands-off.
+    assert outside_mode.for_turn(Session(shared_chat=True, others_spoke_last=True)) == outside_mode.OUTSIDERS
 
 
 def test_a_shared_chat_follows_the_level(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -336,3 +352,78 @@ def test_a_card_someone_else_approves_says_whose(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(speaker_mod, "speaker", lambda session=None: SimpleNamespace(id=owner))
     message = json.loads(levels.waiting_result(card, "it's new"))["message"]
     assert "for them (in this chat" in message and "waiting for their tap" in message
+
+
+def test_balanced_waits_after_outside_text_too_big_to_check() -> None:
+    """On Balanced a clean outside read never marks the turn, so a marked
+    turn with no flag read something too big to check: it waits."""
+    assert levels.decide(levels.OUTSIDE_READ, mode=outside_mode.OUTSIDERS) == levels.CARD
+
+
+def test_mail_an_earlier_round_left_unchecked_waits_on_balanced_even_beside_a_new_read() -> None:
+    """A script ran beside a mail read, so that round's mail was never
+    checked: every later step waits on Balanced, whatever the next round
+    reads. Mail the check cleared doesn't."""
+    from openexecutive.delegation.settings import TurnDelegation
+
+    unvetted = TurnDelegation(read_mail=True, mail_vetted=False)
+    assert levels.mail_reason(unvetted) == levels.MAIL_UNCHECKED
+    assert levels.decide(levels.mail_reason(unvetted), mode=outside_mode.OUTSIDERS) == levels.CARD
+    cleared = TurnDelegation(read_mail=True, mail_vetted=True)
+    assert levels.mail_reason(cleared) == levels.OWN_MAIL
+    assert levels.decide(levels.mail_reason(cleared), mode=outside_mode.OUTSIDERS) == levels.RUN
+    # Posting to everyone or changing People after it is sharing or people.
+    shared = levels.mail_reason(cleared, tool="send_company_broadcast", tool_input={"message": "hi"})
+    assert shared == levels.MAIL_SHARED
+    assert levels.decide(shared, mode=outside_mode.OUTSIDERS) == levels.CARD
+    assert levels.decide(shared, mode=outside_mode.TRUST) == levels.RUN
+
+
+async def test_a_scripts_own_calls_are_not_asked_before_its_mail_was_seen() -> None:
+    """A step asked with this round's mail read runs on Balanced, a script's
+    sibling steps included. The script's own calls come after what it read:
+    inside them that round's mail counts as unchecked."""
+    from openexecutive.delegation.settings import TurnDelegation
+
+    pin = TurnDelegation()
+    levels.mark_round(pin, reads_mail=True)
+    pin.read_mail, pin.mail_vetted = True, False
+    assert levels.mail_reason(pin) == levels.OWN_MAIL
+
+    async def _call(tool: str) -> str:
+        return levels.mail_reason(pin, tool=tool)
+
+    inside = await levels.in_script_call(_call)("message_person")
+    assert inside == levels.MAIL_UNCHECKED
+    assert levels.decide(inside, mode=outside_mode.OUTSIDERS) == levels.CARD
+    # Back outside the script, the sibling steps still run.
+    assert levels.mail_reason(pin) == levels.OWN_MAIL
+    levels.mark_round(None, reads_mail=True)
+
+
+def test_a_clean_read_held_on_careful_is_not_called_unchecked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Careful holds every read, checked or not: its card says the mail was
+    read, not that it couldn't be checked. Below Careful a held read is one
+    the check couldn't clear."""
+    from openexecutive.delegation.settings import TurnDelegation
+
+    pin = TurnDelegation(read_mail=True, mail_vetted=True, mail_held=True)
+    monkeypatch.setattr(levels, "turn_level", lambda: outside_mode.ASK)
+    assert levels.mail_reason(pin) == levels.OWN_MAIL
+    assert levels.decide(levels.mail_reason(pin), mode=outside_mode.ASK) == levels.CARD
+    monkeypatch.setattr(levels, "turn_level", lambda: outside_mode.OUTSIDERS)
+    assert levels.mail_reason(pin) == levels.MAIL_UNCHECKED
+
+
+def test_a_round_that_never_finished_leaves_its_mail_unchecked() -> None:
+    """A turn stopped mid-round: once the round ends, its mail read counts
+    as unchecked, never as read after the steps were asked."""
+    from openexecutive.delegation.settings import TurnDelegation
+
+    pin = TurnDelegation()
+    levels.mark_round(pin, reads_mail=True)
+    pin.read_mail, pin.mail_vetted = True, False
+    assert levels.mail_reason(pin) == levels.OWN_MAIL
+    levels.end_round(pin)
+    assert levels.mail_reason(pin) == levels.MAIL_UNCHECKED
+    levels.end_round(None)

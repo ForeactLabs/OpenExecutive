@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -599,6 +599,11 @@ def get_session_owner(session_id: str, db_path: Path = DB_PATH) -> tuple[bool, i
     return True, (int(owner) if owner is not None else None)
 
 
+# How long a turn can run past something it did before it saves its
+# message (own_messages_since's after_turn_in).
+_TURN_MINUTES = 15
+
+
 def own_messages_since(
     person_id: int,
     since: str,
@@ -606,27 +611,46 @@ def own_messages_since(
     limit: int = 30,
     max_chars: int = 300,
     db_path: Path = DB_PATH,
+    after_turn_in: str | None = None,
 ) -> list[dict[str, str]]:
     """What ``person_id`` wrote in chat after ``since`` (ISO 8601), oldest
     first: the newest ``limit`` of their own messages, each as one line of at
     most ``max_chars``. Only their words, never a reply or what someone else
     wrote in a chat they share; a message from before senders were recorded
     counts when the conversation is theirs. Never a line a host origin's page
-    sent (``sender_surface``): a script there may have written it."""
+    sent (``sender_surface``): a script there may have written it.
+
+    ``after_turn_in``: the conversation whose turn ``since`` fell in. A turn
+    saves its message, then any it folded in, then its reply, when it ends,
+    after anything it did. So that conversation's messages before its first
+    reply within a few minutes after ``since`` are what that turn answered,
+    not later words, and are left out. With no such reply nothing is."""
     if not db_path.exists():
         return []
     with _get_conn(db_path) as conn:
+        turn_reply = -1
+        if after_turn_in:
+            try:
+                turn_end = (datetime.fromisoformat(since) + timedelta(minutes=_TURN_MINUTES)).isoformat()
+            except ValueError:
+                turn_end = since
+            reply = conn.execute(
+                "SELECT id FROM chat_messages WHERE session_id = ? AND role = 'assistant' "
+                "AND created_at > ? AND created_at <= ? ORDER BY created_at, id LIMIT 1",
+                (after_turn_in, since, turn_end),
+            ).fetchone()
+            turn_reply = int(reply["id"]) if reply else -1
         rows = conn.execute(
             "SELECT m.created_at, m.content FROM chat_messages m "
             "JOIN sessions s ON s.session_id = m.session_id "
             # Nor any line of a conversation a host's page wrote in: a host
             # line taken back and sent again (Try again) is saved as theirs.
             "WHERE m.role = 'user' AND m.created_at > ? AND m.sender_surface IS NULL "
-            "AND s.host_wrote = 0 "
+            "AND s.host_wrote = 0 AND NOT (m.session_id = ? AND m.id < ?) "
             "AND (m.sender_person_id = ? "
             "OR (m.sender_person_id IS NULL AND s.caller_person_id = ?)) "
             "ORDER BY m.created_at DESC, m.id DESC LIMIT ?",
-            (since, person_id, person_id, limit),
+            (since, after_turn_in or "", turn_reply, person_id, person_id, limit),
         ).fetchall()
     out: list[dict[str, str]] = []
     for row in reversed(rows):
