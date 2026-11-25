@@ -1746,6 +1746,8 @@ async def _run_loop(
         # A line telling what was put right still goes once the pass has made
         # its changes, so the passes that changed most still say so.
         tells = name == "raise_in_brief" and tool_input.get("put_right") is True
+        if name == "learn_lesson" and _turn_number(tool_input) not in misses:
+            return json.dumps({"status": "refused", "detail": "a lesson comes from a turn marked MISS"})
         if _changes(done) >= MAX_CHANGES and not tells:
             return json.dumps({"status": "noop", "detail": f"this review already made {MAX_CHANGES} changes"})
         followup = (" ".join(str(tool_input.get("intent") or "").casefold().split()),
@@ -1802,6 +1804,14 @@ async def _run_loop(
     finally:
         outside_content.end_turn(turn)
     return done
+
+
+def _turn_number(tool_input: dict[str, Any]) -> int:
+    """The ``turn`` a lesson names, or 0 when it isn't a number."""
+    try:
+        return int(tool_input.get("turn") or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _changes(done: list[str]) -> int:
@@ -1982,10 +1992,7 @@ async def _apply(
     if name == "learn_lesson":
         from openexecutive.memory import lessons
 
-        try:
-            number = int(tool_input.get("turn") or 0)
-        except (TypeError, ValueError):
-            number = 0
+        number = _turn_number(tool_input)
         if not turns or not 0 < number <= len(turns):
             return json.dumps({"status": "refused", "detail": "turn must be the number of a turn shown"})
         row_id = int(turns[number - 1]["id"])

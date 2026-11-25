@@ -1149,6 +1149,19 @@ def test_a_lesson_with_a_bad_turn_number_is_refused_not_a_crash(db: Path, roster
     assert third["status"] == "kept"
 
 
+def test_a_lesson_comes_only_from_a_turn_marked_miss(db: Path, roster: SimpleNamespace,
+                                                     provider: _Provider) -> None:
+    provider.grades = [{"turn": 1, "verdict": "miss", "kind": "company", "cause": "fact",
+                        "wanted": "The right opening time.", "quote": "no we open at ten"},
+                       {"turn": 2, "verdict": "fine"}]
+    _record(roster.principal, "no we open at ten on Saturdays", "Noted.")
+    _record(roster.principal, "and we close at four on Sundays", "Noted.", at=NOW + timedelta(minutes=1))
+    provider.script = [[("learn_lesson", {"lesson": "We close at four on Sundays.",
+                                          "source_quote": "we close at four on Sundays", "turn": 2})]]
+    _review(db)
+    assert _tool_results(provider)[0] == {"status": "refused", "detail": "a lesson comes from a turn marked MISS"}
+
+
 def test_the_grader_is_asked_whether_anything_was_left_undone() -> None:
     schema = cr.GRADE_TOOL["input_schema"]
     assert "left_undone" in schema["required"]
