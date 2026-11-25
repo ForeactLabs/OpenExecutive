@@ -144,26 +144,6 @@ def test_no_chat_since_shows_nothing(db: Path, roster: SimpleNamespace) -> None:
     tell.assert_not_called()
 
 
-def test_a_note_to_someone_else_they_asked_to_hold_tells_them(
-    db: Path, roster: SimpleNamespace
-) -> None:
-    me = roster.principal.id
-    create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
-    action_id = _followup("tg-1", ref="999", created_by=me)
-    _message(db, "web-2", me, "user", "Hold the note to Dana, terms changed", -timedelta(hours=2), sender=me)
-    with patch.object(runner, "deliver_to_person", new_callable=AsyncMock) as tell:
-        tell.return_value = SimpleNamespace(ok=True, detail="")
-        _, prompt = _fire(action_id, "PAUSED: Held the note to Dana as you asked; ask again any time.")
-    assert "Hold the note to Dana" in prompt and "send nothing to anyone else" in prompt
-    # Their words are for deciding, never for the message to someone else.
-    assert "never put any of it in a message to anyone else" in prompt
-    assert "looks handled" not in prompt and "Make the one message to them" not in prompt
-    tell.assert_called_once()
-    assert tell.call_args.args[0].id == me
-    assert tell.call_args.args[1] == "Held the note to Dana as you asked; ask again any time."
-    assert episodic.get_scheduled_action(action_id).status == "cancelled"  # type: ignore[union-attr]
-
-
 def test_the_turn_shows_the_speakers_pending_followups(db: Path, roster: SimpleNamespace) -> None:
     mine = _followup("s-1")
     _followup("someone-else")
@@ -194,32 +174,6 @@ def test_a_teammates_followup_that_looks_handled_is_still_sent(db: Path, roster:
     assert send.call_args.args[2] == "Looks sorted: the vendor answered."
     assert "The vendor answered, all sorted" in prompt
     assert episodic.get_scheduled_action(action_id).status == "done"  # type: ignore[union-attr]
-
-
-def test_a_teammates_held_note_to_someone_else_tells_them_it_was_held(
-    db: Path, roster: SimpleNamespace
-) -> None:
-    ben = roster.teammate.id
-    action_id = episodic.insert_scheduled_action(
-        run_at=_iso(timedelta(days=1)), channel="slack_dm", channel_ref="UVENDOR",
-        intent_text="Email the vendor to confirm the order.", originating_session_id="ben-1",
-        created_by_person_id=ben,
-    )
-    with episodic._get_conn(db) as conn:
-        conn.execute("UPDATE scheduled_actions SET created_at = ? WHERE id = ?",
-                     (_iso(-timedelta(days=1)), action_id))
-    _message(db, "ben-2", ben, "user", "Hold the vendor email for now", -timedelta(hours=1), sender=ben)
-    line = "Held the vendor email as you asked; ask again any time."
-    with patch.object(runner, "deliver_to_person", new_callable=AsyncMock) as tell:
-        tell.return_value = SimpleNamespace(ok=True, detail="")
-        _, prompt = _fire(action_id, f"PAUSED: {line}")
-    assert "Hold the vendor email for now" in prompt
-    assert "send nothing to anyone else" in prompt and "one short line to Ben" in prompt
-    assert "It is sent to them as written" in prompt and "send it" not in prompt
-    tell.assert_called_once()
-    assert tell.call_args.args[0].id == ben and tell.call_args.args[1] == line
-    row = episodic.get_scheduled_action(action_id)
-    assert row is not None and row.status == "cancelled" and "paused as Ben Teammate asked" in row.last_error
 
 
 def test_a_teammates_note_to_someone_else_with_no_chat_since_sends_no_notice(
@@ -301,25 +255,140 @@ def test_a_teammates_held_reminder_to_themself_gets_the_line_without_the_marker(
     assert episodic.get_scheduled_action(action_id).status == "cancelled"  # type: ignore[union-attr]
 
 
+def _fire_decided(action_id: int, decided: str, reply: object = "Sent.") -> tuple[AsyncMock, AsyncMock, AsyncMock]:
+    """Fire a follow-up to someone else with the setter's since-chat read as
+    ``decided``: (the run's chat, the decision call, the line to the setter)."""
+    [action] = [a for a in episodic.claim_due_actions(datetime.now(UTC) + timedelta(days=2))
+                if a.id == action_id]
+    with patch("openexecutive.orchestrator.executive.Executive.chat",
+               new_callable=AsyncMock, return_value=reply) as chat, patch(
+        "openexecutive.onboarding.profile_builder.load_or_create_profile",
+        return_value=MagicMock(is_empty=lambda: True),
+    ), patch("openexecutive.knowledge.retriever.retrieve", return_value=""), patch(
+        "openexecutive.memory.episodic.format_for_prompt", return_value="",
+    ), patch.object(runner, "_setter_decision", new_callable=AsyncMock, return_value=decided) as decide, \
+            patch.object(runner, "deliver_to_person", new_callable=AsyncMock) as tell:
+        tell.return_value = SimpleNamespace(ok=True, detail="")
+        asyncio.run(runner._execute_action(action, gateway=None))
+    return chat, decide, tell
+
+
+def _to_vendor(db: Path, ben: int) -> int:
+    action_id = episodic.insert_scheduled_action(
+        run_at=_iso(timedelta(days=1)), channel="slack_dm", channel_ref="UVENDOR",
+        intent_text="Message the vendor to confirm the order.", originating_session_id="ben-1",
+        created_by_person_id=ben,
+    )
+    with episodic._get_conn(db) as conn:
+        conn.execute("UPDATE scheduled_actions SET created_at = ? WHERE id = ?",
+                     (_iso(-timedelta(days=1)), action_id))
+    return action_id
+
+
+@pytest.mark.parametrize("decided", ["paused", "dropped"])
+def test_a_note_to_someone_else_they_asked_to_hold_never_runs(
+    db: Path, roster: SimpleNamespace, decided: str
+) -> None:
+    me = roster.principal.id
+    create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
+    action_id = _followup("tg-1", ref="999", created_by=me)
+    _message(db, "web-2", me, "user", "Hold the note to Dana, terms changed", -timedelta(hours=2), sender=me)
+    chat, decide, tell = _fire_decided(action_id, decided)
+    chat.assert_not_called()  # nothing is written to Dana, and their chat reaches no run
+    decide.assert_called_once()
+    tell.assert_called_once()
+    assert tell.call_args.args[0].id == me
+    line = tell.call_args.args[1]
+    assert line.startswith("I held" if decided == "paused" else "I dropped")
+    assert "Dana replied about the lease" in line and "Hold the note" not in line
+    row = episodic.get_scheduled_action(action_id)
+    assert row is not None and row.status == "cancelled" and f"{decided} as Olivia Owner asked" in row.last_error
+
+
 def test_a_note_to_someone_else_after_unrelated_chat_just_goes(
     db: Path, roster: SimpleNamespace
 ) -> None:
     me = roster.principal.id
     create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
     action_id = _followup("tg-1", ref="999", created_by=me)
-    _message(db, "web-2", me, "user", "What's on my calendar tomorrow?", -timedelta(hours=2), sender=me)
-    with patch.object(runner, "deliver_to_person", new_callable=AsyncMock) as tell:
-        _fire(action_id, "Sent Dana the lease comparison.")
-    tell.assert_not_called()  # nothing held: no extra message to them
+    _message(db, "web-2", me, "user", "We're letting Dana go, keep it quiet", -timedelta(hours=2), sender=me)
+    chat, _, tell = _fire_decided(action_id, "")
+    prompt = str(chat.call_args.kwargs["user_message"])
+    # The run writing to someone else never sees the setter's chat.
+    assert "letting Dana go" not in prompt and "<since_scheduled>" not in prompt
+    tell.assert_not_called()
     assert episodic.get_scheduled_action(action_id).status == "done"  # type: ignore[union-attr]
 
 
-def test_a_failed_notice_never_reruns_the_send(db: Path, roster: SimpleNamespace) -> None:
+def test_a_teammates_note_to_someone_else_they_asked_to_hold_never_runs(
+    db: Path, roster: SimpleNamespace
+) -> None:
+    ben = roster.teammate.id
+    action_id = _to_vendor(db, ben)
+    _message(db, "ben-2", ben, "user", "Hold the vendor message for now", -timedelta(hours=1), sender=ben)
+    chat, _, tell = _fire_decided(action_id, "paused")
+    chat.assert_not_called()
+    assert tell.call_args.args[0].id == ben and "confirm the order" in tell.call_args.args[1]
+    assert episodic.get_scheduled_action(action_id).status == "cancelled"  # type: ignore[union-attr]
+
+
+def test_a_teammates_note_to_someone_else_never_sees_their_chat(
+    db: Path, roster: SimpleNamespace
+) -> None:
+    ben = roster.teammate.id
+    action_id = _to_vendor(db, ben)
+    _message(db, "ben-2", ben, "user", "The vendor is on thin ice with us", -timedelta(hours=1), sender=ben)
+    chat, _, tell = _fire_decided(action_id, "")
+    assert "thin ice" not in str(chat.call_args.kwargs["user_message"])
+    tell.assert_not_called()
+
+
+def test_a_failed_notice_never_reruns_anything(db: Path, roster: SimpleNamespace) -> None:
     me = roster.principal.id
     create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
     action_id = _followup("tg-1", ref="999", created_by=me)
-    _message(db, "web-2", me, "user", "Drop the note to Dana", -timedelta(hours=2), sender=me)
-    with patch.object(runner, "deliver_to_person", new_callable=AsyncMock, side_effect=RuntimeError("down")):
-        _fire(action_id, "DROPPED: Dropped the note to Dana as you asked.")
-    row = episodic.get_scheduled_action(action_id)
-    assert row is not None and row.status == "cancelled"  # not retried: nothing goes twice
+    [action] = [a for a in episodic.claim_due_actions(datetime.now(UTC) + timedelta(days=2))
+                if a.id == action_id]
+    with patch.object(runner, "_setter_decision", new_callable=AsyncMock, return_value="dropped"), \
+            patch.object(runner, "deliver_to_person", new_callable=AsyncMock, side_effect=RuntimeError("down")):
+        asyncio.run(runner._execute_action(action, gateway=None))
+    assert episodic.get_scheduled_action(action_id).status == "cancelled"  # type: ignore[union-attr]
+
+
+def _decision_response(decision: str) -> SimpleNamespace:
+    return SimpleNamespace(content=[SimpleNamespace(type="tool_use", name="record_followup_decision",
+                                                    input={"decision": decision})])
+
+
+@pytest.mark.parametrize(("decision", "expected"), [("paused", "paused"), ("dropped", "dropped"), ("send", "")])
+def test_the_setters_words_are_read_apart_from_the_run(
+    db: Path, roster: SimpleNamespace, decision: str, expected: str
+) -> None:
+    me = roster.principal.id
+    create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
+    action_id = _followup("tg-1", ref="999", created_by=me)
+    action = episodic.get_scheduled_action(action_id)
+    assert action is not None
+    provider = MagicMock()
+    provider.messages_create = AsyncMock(return_value=_decision_response(decision))
+    with patch("openexecutive.providers.get_provider", return_value=provider), \
+            patch("openexecutive.audit.usage.log_model_usage"):
+        # Nothing said since: no call at all.
+        assert asyncio.run(runner._setter_decision(action, roster.principal)) == ""
+        provider.messages_create.assert_not_called()
+        _message(db, "web-2", me, "user", "Hold the note to Dana", -timedelta(hours=2), sender=me)
+        assert asyncio.run(runner._setter_decision(action, roster.principal)) == expected
+    kwargs = provider.messages_create.call_args.kwargs
+    assert "tools" in kwargs and kwargs["tools"][0]["name"] == "record_followup_decision"
+    assert "Hold the note to Dana" in kwargs["messages"][0]["content"]
+
+
+def test_a_failed_read_sends_it_as_set(db: Path, roster: SimpleNamespace) -> None:
+    me = roster.principal.id
+    create_session("tg-1", "t", _iso(-timedelta(days=2)), caller_person_id=me, db_path=db)
+    action_id = _followup("tg-1", ref="999", created_by=me)
+    _message(db, "web-2", me, "user", "Hold the note to Dana", -timedelta(hours=2), sender=me)
+    action = episodic.get_scheduled_action(action_id)
+    assert action is not None
+    with patch("openexecutive.providers.get_provider", side_effect=RuntimeError("no model")):
+        assert asyncio.run(runner._setter_decision(action, roster.principal)) == ""

@@ -5194,8 +5194,8 @@ scheduler:
     the person deals with it in another chat). Two checks keep it current.
     At fire time (runner._since_scheduled_block): an ad hoc row back to the
     person who set it (runner._followup_owner: created_by_person_id, else
-    the originating session's owner, the principal when it has none; to
-    them or to someone else) gets their own chat
+    the originating session's owner, the principal when it has none; only
+    a row back to them, runner._own_ref) gets their own chat
     messages since created_at (session_store.own_messages_since: role user,
     sent by them or in their own conversation from before senders were
     recorded; newest 30, 300 chars each) in <since_scheduled> tags, and is
@@ -5211,12 +5211,13 @@ scheduler:
     cancels the row on the run's own judgement (a reminder someone asked
     for was dropped as "already handled"). The teammate path
     (_run_teammate_followup) applies the same block and sends what it wrote
-    (without the marker); when the row goes to someone else and they wrote
-    since, their words only decide whether it goes (never quoted to the
-    recipient), and a hold or drop is told to them in the run's line
-    (runner._tell_setter, after the run and outside its retry), so a hold
-    there is never silent. The principal
-    path does the same for a row to someone else (runner._tell_setter_block). Only the person's own words are quoted, never replies, so
+    (without the marker). A row to someone else, on either path, never
+    shows the setter's chat to the run that writes to that someone:
+    runner._setter_decision (the routing model, no tools, writes nothing)
+    reads it and answers send, paused or dropped; paused or dropped,
+    nothing runs, the setter gets one fixed line saying so (_tell_setter,
+    logged on failure, never retried) and the occurrence is cancelled
+    with the reason (_as_setter_said); a failed read sends it as set. Only the person's own words are quoted, never replies, so
     mail a reply quoted cannot reach an unattended run this way. In chat:
     every turn by a verified speaker carries <pending_followups> in the user
     turn (correction_tools.pending_followups_block, list_followups' ownership
