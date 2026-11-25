@@ -655,8 +655,12 @@ def _asks_someone_else(title: str, to: str, team: list[tuple[str, str]]) -> bool
     names = {part for n, _ in team for part in n.split()}
     for name, ask in _ASKED_RE.findall(title):
         word = name.casefold()
-        if word in _NOT_NAMES or re.search(rf"\b{re.escape(word)}\b", to):
+        if word in _NOT_NAMES:
             continue
+        # The first person asked is who the message is for; later asks
+        # ("ask Sam to remind Casey") are what that person passes on.
+        if re.search(rf"\b{re.escape(word)}\b", to):
+            return False
         if word in names or (ask and ask != "know"):
             return True
     return False

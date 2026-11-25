@@ -344,6 +344,10 @@ def test_a_message_goes_to_the_person_its_title_names() -> None:
          "preview": [{"label": "To", "value": "Sam Lee"}]},
         {"kind": "message", "title": "I can ask Casey Jones to send the invoice", "source": "x",
          "preview": [{"label": "To", "value": "Sam Lee"}]},
+        {"kind": "message", "title": "I can ask Sam to remind Casey about the Friday invoice", "source": "x",
+         "preview": [{"label": "To", "value": "Sam Lee"}]},
+        {"kind": "message", "title": "I can ask Sam to tell Dana about the delay", "source": "x",
+         "preview": [{"label": "To", "value": "Sam Lee"}]},
         {"kind": "message", "title": "I can get Sam's sign-off on the budget", "source": "x",
          "preview": [{"label": "To", "value": "Sam Lee"}]},
         {"kind": "message", "title": "I can let Finance know the PO is in", "source": "x",
@@ -354,6 +358,8 @@ def test_a_message_goes_to_the_person_its_title_names() -> None:
     kept = maker.check(items, _inputs(), set(), dropped)
     assert [o.title for o in kept] == [
         "I can ask Sam to pass the sticky notes to Casey",
+        "I can ask Sam to remind Casey about the Friday invoice",
+        "I can ask Sam to tell Dana about the delay",
         "I can get Sam's sign-off on the budget",
         "I can let Finance know the PO is in",
         "Get Q3 numbers from Sam",
