@@ -300,14 +300,14 @@ def _asked_back(replies: list[dict[str, Any]]) -> str:
     return take_on.line(re.sub(r"[*_`]+", "", found.group(1)).strip(" -"), 300) if found else ""
 
 
-def _what_came_of_it(me: Me, key: str, session_id: str, answered: bool) -> str:
+def _what_came_of_it(me: Me, offer: take_on.Offer, session_id: str, answered: bool) -> str:
     """Read the run's own record: the card it went to, what it did, or why
-    it stopped. Returns the status it left the offer in, or ``said`` for a
-    ``done`` that only answered in words."""
+    it stopped. Returns the status it left the offer in."""
     from openexecutive.memory import decision_ledger as dl
     from openexecutive.memory.session_store import load_messages
     from openexecutive.workflows.run_outcome import first_sentence
 
+    key = offer.key
     try:
         replies = [m for m in load_messages(session_id) if m.get("role") == "assistant"]
     except Exception:
@@ -331,17 +331,17 @@ def _what_came_of_it(me: Me, key: str, session_id: str, answered: bool) -> str:
         # What it did shows, even from a turn cut off at its deadline.
         take_on.finish(me.email, key, "done", outcome=said, done=done)
         return "done"
-    if answered and (question := _asked_back(replies)):
-        # It did nothing and asked one thing back: the offer stays, with the
-        # question, until they answer in the chat or start it again.
-        take_on.finish(me.email, key, "asked", outcome=question)
-        return "asked"
-    if answered:
-        # Answered in words (a doc in the chat): what it said shows, and
-        # See how opens the chat. Nothing was set up, so only a doc counts
-        # as taken up (``_settle``).
+    if answered and offer.kind == "doc" and not _asked_back(replies):
+        # A doc answered in words is the doc: what it said shows, and See
+        # how opens the chat.
         take_on.finish(me.email, key, "done", outcome=said)
-        return "said"
+        return "done"
+    if answered:
+        # It did nothing: asked one thing back, or said why not (nothing
+        # sent, nothing set up). The offer stays, with that, until they
+        # answer in the chat or start it again.
+        take_on.finish(me.email, key, "asked", outcome=_asked_back(replies) or said or "It answered in the chat.")
+        return "asked"
     take_on.finish(me.email, key, "failed", outcome=said or "It stopped before it finished.")
     return "failed"
 
@@ -356,11 +356,9 @@ async def do_it(key: str, request: Request) -> OfferOut:
 
     def _settle(answered: bool) -> None:
         # The place it came from hears it was taken up once it was done: a
-        # run that failed or asked back keeps it, one on a card waits for
-        # the card (``_settle_cards``), and one that only answered in words
-        # set nothing up unless the offer was a doc.
-        came = _what_came_of_it(me, key, run.get("session_id", ""), answered)
-        if came == "done" or (came == "said" and offer.kind == "doc"):
+        # run that failed or asked back keeps it, and one on a card waits
+        # for the card (``_settle_cards``).
+        if _what_came_of_it(me, offer, run.get("session_id", ""), answered) == "done":
             _taken_up(me, offer)
 
     def _finished(answered: bool) -> None:
