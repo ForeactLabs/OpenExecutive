@@ -13,10 +13,14 @@ the install) only *detect*. This module decides, in one place
 it says:
 
 - **Hands-off**: the step runs. Nothing waits.
-- **Balanced** and **Careful**: the step comes to the owner as an Approve
-  card (``hold``). Careful detects more (any outside read), Balanced less
-  (only a read the check flagged): the outside-content check is the
-  level's.
+- **Balanced**: the step comes as an Approve card (``hold``) only for
+  ``BALANCED_WAITS`` (words that tried to give orders, mail or outside text
+  the check couldn't check, a post to everyone or a People change after a
+  mail read, someone new, a share outside the company, unattended work);
+  every other noticed step runs.
+- **Careful**: every noticed step comes as an Approve card. Careful also
+  detects more (any outside read, where Balanced notices only a read the
+  check flagged): the outside-content check is the level's.
 - **Whose level**: the level belongs to whoever is asking. The owner's
   turns and a teammate's turns (a shared chat they wrote in included, and
   an AI app they signed in to, which is them) run at the company's level.
