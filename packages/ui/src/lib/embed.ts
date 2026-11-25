@@ -92,6 +92,7 @@ export const APP_ROUTES = [
   "shared",
   "signin",
   "skills",
+  "take-on",
   "tasks",
   "today",
   "watchlist",
