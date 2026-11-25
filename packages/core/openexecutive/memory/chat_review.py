@@ -1776,9 +1776,15 @@ async def _run_loop(
     # follow-ups listed above came from outside this pass: checked like any
     # read, so a step it takes waits or runs where the chat's own would
     # (``levels``), never on the review's word alone.
+    # Its own conversation key, so the live chat's held steps and flags are
+    # never read, replaced or released by the review.
+    import copy
+
     from openexecutive.orchestrator import outside_content
 
-    turn = outside_content.begin_turn(session, own_words=words)
+    own = copy.copy(session)
+    own.session_id = f"chat-review:{session.session_id}"
+    turn = outside_content.begin_turn(own, own_words=words)
     try:
         read = "\n\n".join(str(r["reply"] or "") for r in turns)
         outside_content.mark_pending(outside_content.QUOTED, f"{intro}\n{read}")

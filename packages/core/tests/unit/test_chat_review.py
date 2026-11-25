@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -1175,3 +1176,24 @@ def test_the_look_back_checks_what_the_chat_quoted_like_any_read(
     assert states and states[0] is not None
     assert states[0].flags, "the quoted email was checked and flagged before any tool ran"
     assert any("x@evil.example" in text for text in scanned)
+
+
+def test_the_look_back_leaves_the_chats_held_steps_alone(db: Path, roster: SimpleNamespace,
+                                                        provider: _Provider) -> None:
+    """A step the live chat holds waits for the person's yes there: the
+    review never pops it, replaces it or releases it."""
+    from openexecutive.orchestrator import outside_content
+
+    _record(roster.principal)
+    key = f"s-1|{roster.principal.id}"
+    held = (("Send an email",), time.monotonic(), frozenset())
+    outside_content._HELD[key] = held
+    flags_key = outside_content._flags_key("s-1", roster.principal.id)
+    outside_content._FLAGS[flags_key] = (("planted instructions",), time.monotonic())
+    try:
+        _review(db)
+        assert outside_content._HELD.get(key) == held
+        assert outside_content._FLAGS.get(flags_key) is not None
+    finally:
+        outside_content._HELD.pop(key, None)
+        outside_content._FLAGS.pop(flags_key, None)
