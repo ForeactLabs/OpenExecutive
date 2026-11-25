@@ -131,6 +131,14 @@ def test_one_back_from_later_and_done_is_not_offered_again(monkeypatch: pytest.M
     assert [f.key for f in take_on.finished(ME, back - timedelta(hours=1))] == [o.key]
 
 
+def test_the_places_offers_come_from_take_turns_at_the_top(monkeypatch: pytest.MonkeyPatch) -> None:
+    take_on.put_made(ME, [_apart(i) for i in range(3)])
+    watch = take_on.Offer(key="watch:eia", origin="watch", kind="watch", title="I can watch diesel prices",
+                          source="News I watch")
+    monkeypatch.setattr(take_on, "_watch", lambda _pid, _p: [watch])
+    assert [o.origin for o in _list()][:3] == ["made", "watch", "made"]
+
+
 def test_not_useful_twice_on_one_kind_stops_that_kind() -> None:
     offers = [_apart(i) for i in range(3)]
     take_on.put_made(ME, offers)
@@ -292,6 +300,21 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     app = FastAPI()
     app.include_router(route.router)
     return TestClient(app)
+
+
+def test_hiding_a_step_already_under_way_leaves_it_running(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.memory import decision_ledger
+
+    monkeypatch.setattr(decision_ledger, "get_decision_instances", lambda ids: {8: SimpleNamespace(status="proposed")})
+    o = _offer()
+    take_on.put_made(ME, [o])
+    take_on.start(ME, o)
+    take_on.finish(ME, o.key, "card", decision_id=8)
+    assert client.post(f"/take-on/{o.key}/hide", json={"reason": "not_useful"}).status_code == 204
+    states = take_on._states(take_on.who(ME), None)
+    assert states[o.key]["status"] == "card" and not states[o.key]["hidden_reason"]
 
 
 def test_someone_not_on_people_gets_no_list_and_no_pass(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:

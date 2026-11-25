@@ -771,7 +771,16 @@ def offers_for(
         except (sqlite3.Error, OSError):
             logger.warning("take_on: couldn't mark offers seen", exc_info=True)
     rank = {"working": 0, "card": 0, "asked": 0, "failed": 1, "": 2, "done": 3}
-    out.sort(key=lambda o: rank.get(o.status, 2))
+    # Within a status, the places offers come from take turns (the pass's
+    # first, then a repeat ask, then a watch suggestion, …), so Home's few
+    # show one of each that is waiting.
+    turn: dict[str, int] = {}
+    order: dict[str, int] = {}
+    for o in out:
+        group = f"{rank.get(o.status, 2)}:{o.origin}"
+        order[o.key] = turn.get(group, 0)
+        turn[group] = order[o.key] + 1
+    out.sort(key=lambda o: (rank.get(o.status, 2), order[o.key]))
     return out
 
 
