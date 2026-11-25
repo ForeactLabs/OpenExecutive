@@ -3168,20 +3168,22 @@ def _done_for_you(request: Request, caller: int | None, now: datetime) -> list[D
             logger.warning("today: reading approvals for Done for you failed", exc_info=True)
     # Steps they started from "I can also take on" that finished. They leave
     # that list when done and show here, the caller's own: what each run
-    # did (in its chat, or once a card it put up was approved) is that row,
-    # never a second one.
-    ran_in: set[str] = set()
+    # did (in its chat while it ran, or once the card it went to was
+    # approved) is that row, never a second one. A later ask in that chat is
+    # its own step and still shows.
+    ran_in: dict[str, list[tuple[datetime, datetime]]] = {}
     ran_cards: set[int] = set()
     try:
         from openexecutive.api.routes import take_on as take_on_route
         from openexecutive.briefing import take_on
-        from openexecutive.memory import decision_ledger
 
         email = take_on_route.reader(request).email
         for o in take_on.finished(email, since) if email else []:
-            if o.session_id:
-                ran_in.add(o.session_id)
-                ran_cards.update(decision_ledger.cards_for_session(o.session_id))
+            began, ended = _parse_aware(o.started_at), _parse_aware(o.finished_at)
+            if o.session_id and began and ended:
+                ran_in.setdefault(o.session_id, []).append((began, ended))
+            if o.decision_id:
+                ran_cards.add(o.decision_id)
             title = o.title[6:] if o.title.startswith("I can ") else o.title
             artifact = next((u for _, u in o.done if u.startswith("/artifacts/")), "")
             rows.append(DoneRow(
@@ -3221,7 +3223,7 @@ def _done_for_you(request: Request, caller: int | None, now: datetime) -> list[D
         at = _parse_aware(item.at)
         if item.kind in _DONE_SKIP_KINDS or at is None or at < since:
             continue
-        if (item.session_id and item.session_id in ran_in) or (item.decision_id in ran_cards):
+        if item.decision_id in ran_cards or any(a <= at <= b for a, b in ran_in.get(item.session_id, ())):
             continue
         if reader and " ".join((item.target or "").split()).casefold() == reader:
             continue

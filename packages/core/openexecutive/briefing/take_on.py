@@ -880,7 +880,7 @@ def finished(email: str, since: datetime, *, db_path: Path | None = None) -> lis
     try:
         with _connect(db_path) as conn:
             rows = conn.execute(
-                f"SELECT key, offer, changed, outcome, done, session_id, finished_at FROM {STATE_TABLE} "  # noqa: S608
+                f"SELECT key, offer, changed, outcome, done, session_id, decision_id, started_at, finished_at FROM {STATE_TABLE} "  # noqa: S608
                 "WHERE person = ? AND status = 'done' AND finished_at >= ? ORDER BY finished_at DESC",
                 (person, since.isoformat()),
             ).fetchall()
@@ -902,6 +902,8 @@ def finished(email: str, since: datetime, *, db_path: Path | None = None) -> lis
         offer.outcome = r["outcome"] or ""
         offer.done = _done_list(r["done"])
         offer.session_id = r["session_id"]
+        offer.decision_id = r["decision_id"]
+        offer.started_at = r["started_at"] or ""
         offer.finished_at = r["finished_at"] or ""
         out.append(offer)
     return out

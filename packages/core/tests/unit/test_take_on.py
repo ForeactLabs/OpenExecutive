@@ -508,33 +508,31 @@ def test_done_for_you_reads_the_same_list_as_take_on(monkeypatch: pytest.MonkeyP
 
 
 def test_done_for_you_shows_a_take_on_run_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openexecutive.api.routes import chat, today
     from openexecutive.api.routes import take_on as route
-    from openexecutive.api.routes import today
-    from openexecutive.memory import decision_ledger
 
-    now = datetime.now(UTC)
-
-    def step(summary: str, session: str = "", card: int | None = None) -> Any:
+    def step(summary: str, at: datetime, session: str = "", card: int | None = None) -> Any:
         return today.ActivityItem(kind="took_the_lead", summary=summary, actor="Executive", target=None,
-                                  department=None, at=now.isoformat(), session_id=session, decision_id=card)
-
-    from openexecutive.api.routes import chat
+                                  department=None, at=at.isoformat(), session_id=session, decision_id=card)
 
     # The owner, who sees every step that wasn't asked for by someone else.
     monkeypatch.setattr(chat, "_caller_is_principal_or_unclaimed", lambda _r: True)
     monkeypatch.setattr(route, "reader", lambda _r: route.Me(ME, None, True))
     monkeypatch.setattr(today, "_sent_as_caller", lambda _r: [])
-    monkeypatch.setattr(today, "_build_activity", lambda *a, **k: today.ActivityResponse(items=[
-        step("Emailed Dana", "sess-7"), step("Booked the review", card=12), step("Emailed Priya", "sess-other")]))
-    monkeypatch.setattr(decision_ledger, "cards_for_session", lambda s: {12: "executed"} if s == "sess-7" else {})
     o = _offer()
     take_on.put_made(ME, [o])
     take_on.start(ME, o)
     take_on.set_session(ME, o.key, "sess-7")
-    take_on.finish(ME, o.key, "done", outcome="Sent it.")
-    rows = today._done_for_you(SimpleNamespace(), 1, now)  # type: ignore[arg-type]
-    # What the run did is its own row; a step from another chat still shows.
-    assert [r.title for r in rows if r.kind != "take_on"] == ["Emailed Priya"]
+    during = datetime.now(UTC)
+    take_on.finish(ME, o.key, "done", outcome="Sent it.", decision_id=12)
+    later = datetime.now(UTC) + timedelta(minutes=5)
+    monkeypatch.setattr(today, "_build_activity", lambda *a, **k: today.ActivityResponse(items=[
+        step("Emailed Dana", during, "sess-7"), step("Booked the review", later, card=12),
+        step("Emailed Bob the pricing sheet", later, "sess-7"), step("Emailed Priya", during, "sess-other")]))
+    rows = today._done_for_you(SimpleNamespace(), 1, later)  # type: ignore[arg-type]
+    # What the run did (in its chat, or through its card) is its own row. A
+    # later ask in that chat, and a step from another chat, still show.
+    assert sorted(r.title for r in rows if r.kind != "take_on") == ["Emailed Bob the pricing sheet", "Emailed Priya"]
     assert f"take_on:{o.key}" in [r.key for r in rows]
 
 
