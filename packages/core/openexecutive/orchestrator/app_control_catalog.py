@@ -762,6 +762,11 @@ async def _change_setting(request: Any, setting: str, value: str) -> str:
         ))
         return f"Set {label} to {said}"
     on = _on(value)
+    if on and setting in _AS_YOU:
+        # Why it couldn't work is said now, so no card is left that can only fail.
+        if await _call(delegation.check_can_turn_on, request, inbox=setting == "inbox_drafts"):
+            return f"{label} is already on"
+        _own_tap(f"Turning {label} on takes your tap.")
     if setting == "act_as_me":
         await delegation.update_delegation(request, delegation.DelegationUpdate(enabled=on))
     elif setting == "inbox_drafts":
@@ -771,6 +776,23 @@ async def _change_setting(request: Any, setting: str, value: str) -> str:
 
         await _signed(lead_route.update_take_the_lead, request, lead_route.LeadUpdate(training=on))
     return f"Turned {label} {'on' if on else 'off'}"
+
+
+# Turning these on lets the Executive write, or reply, as the person.
+_AS_YOU = frozenset({"act_as_me", "inbox_drafts"})
+
+
+def _own_tap(message: str) -> None:
+    """From a chat turn, say in the words ``app_control`` reads as "leave a
+    card" that this takes the person's own signed request, as raising
+    Approvals does. Their tap on the card is that request; outside a chat
+    turn it does nothing."""
+    from fastapi import HTTPException
+
+    from openexecutive.delegation.verified import SIGNING_REQUIRED, in_chat_turn
+
+    if in_chat_turn():
+        raise HTTPException(status_code=409, detail={"code": SIGNING_REQUIRED, "message": message})
 
 
 async def _signed(fn: Callable[..., Any], *args: Any) -> Any:
@@ -823,19 +845,16 @@ async def _prepare_level(request: Any, item_id: str, value: str) -> str:
 
 
 async def _set_level(request: Any, item_id: str, value: str) -> str:
-    from fastapi import HTTPException
-
     from openexecutive.api.routes import executive
-    from openexecutive.delegation.verified import SIGNING_REQUIRED, in_chat_turn
     from openexecutive.orchestrator import outside_mode
 
     mode = _level_of(value)
     order = list(_LEVELS)
-    if in_chat_turn() and order.index(mode) > order.index(outside_mode.stored_mode()):
+    if order.index(mode) > order.index(outside_mode.stored_mode()):
         # Letting more go is the owner's tap, never the turn: a turn that
         # began on Hands-off (or a level lowered since it began) would
         # otherwise raise it again on its own.
-        raise HTTPException(status_code=409, detail={"code": SIGNING_REQUIRED, "message": "Raising Approvals takes your tap."})
+        _own_tap("Raising Approvals takes your tap.")
     await _call(executive.set_outside_content, request, executive.OutsideContentIn.model_validate({"mode": mode}))
     return f"Set Approvals to {_LEVELS[mode]}"
 
