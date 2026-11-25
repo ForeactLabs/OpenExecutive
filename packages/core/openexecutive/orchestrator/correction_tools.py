@@ -342,9 +342,14 @@ async def handle_move_followup(tool_input: dict[str, Any]) -> str:
         _audit(tool, False, f"move_followup #{action_id} refused", {"action_id": action_id})
         return _refused("only a pending follow-up you scheduled")
     with _get_conn(_resolve_db_path(None)) as conn:
+        # Their words up to this turn are what moved it: when it comes due,
+        # only what they write after counts, never this turn's own message
+        # (ScheduledAction.read_since, read_since_turn_in).
+        session = _session()
         cur = conn.execute(
-            "UPDATE scheduled_actions SET run_at = ? WHERE id = ? AND status = 'pending'",
-            (run_at.isoformat(), action_id),
+            "UPDATE scheduled_actions SET run_at = ?, read_since = ?, read_since_turn_in = ? "
+            "WHERE id = ? AND status = 'pending'",
+            (run_at.isoformat(), now.isoformat(), getattr(session, "session_id", None) or None, action_id),
         )
     if cur.rowcount == 0:
         return json.dumps({"status": "not_open", "action_id": action_id})

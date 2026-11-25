@@ -233,7 +233,7 @@ def _someone_else(session: Any) -> bool:
     """Whether the turn's words may come from someone not in People: mail
     from someone not in People or a page in another app. The level belongs to
     whoever asks, and they have none: Hands-off never covers them. Nor a
-    Google Chat space, where anyone may have written last (a speaker on no
+    shared chat someone not in People may have written in last (a speaker on no
     People entry waits on the owner's card anyway:
     ``levels.unrostered_speaker``). A teammate's turn, and a
     shared web chat a teammate wrote in, run at the company's level like the
@@ -242,11 +242,12 @@ def _someone_else(session: Any) -> bool:
         return True
     if getattr(session, "from_host", False) is True:
         return True
-    # A Google Chat space turns no one away, so its last words may be from
-    # someone not in People.
+    # A shared chat whose last words may be from someone not in People: a
+    # Google Chat space (it turns no one away), or a web chat whose latest
+    # line is from someone no longer in it or whose people or history
+    # couldn't be read.
     return (
-        getattr(session, "origin_channel", "") == "google_chat"
-        and getattr(session, "shared_chat", False) is True
+        getattr(session, "shared_chat", False) is True
         and getattr(session, "others_spoke_last", False) is True
     )
 

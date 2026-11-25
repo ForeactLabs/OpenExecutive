@@ -144,6 +144,7 @@ class TestStalledWorkflowCandidates:
         assert out[0].scope_key == "nudge:stalled:run_a"
         assert out[0].source == "stalled"
         assert out[0].person_id == pid
+        assert out[0].title == 'Ask for a decision on "Vendor renegotiation approval"'
 
     def test_recent_update_excluded(self) -> None:
         """A run touched in the last quiet-hours window is still moving."""
@@ -337,6 +338,7 @@ class TestIdleInitiativeCandidates:
         assert out[0].source == "initiative"
         assert out[0].person_id == pid
         assert out[0].department == "finance"
+        assert out[0].title == 'Ask how "Refinance Series B notes" is going'
 
     def test_recent_initiative_excluded(self) -> None:
         now = _now()

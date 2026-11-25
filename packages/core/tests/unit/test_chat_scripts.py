@@ -300,7 +300,7 @@ def test_a_turn_that_read_the_owners_mail_refuses_the_whole_script(
     _run(provider, gateway)
     assert "can't wait on a card" in json.loads(_any_result(provider, "tu-s"))["error"]
     assert gateway.calls == []
-    assert any(r["details"].get("held") == "mail_touched" for r in audit)
+    assert any(r["details"].get("held") in ("mail_touched", "mail_unchecked") for r in audit)
 
 
 def test_a_later_turn_of_a_mail_conversation_is_not_locked_once_the_mail_is_out_of_view(

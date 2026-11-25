@@ -263,14 +263,18 @@ class GoogleMail:
 
     async def mark_read(self, gateway: Any, ref: MessageRef, mailbox: str) -> None:
         try:
-            await gateway.call_tool({
+            from openexecutive.orchestrator.mcp_gateway import code_built_call
+
+            call = {
                 "name": "google_workspace__modify_gmail_message_labels",
                 "arguments": {
                     "message_id": ref.message_id,
                     "user_google_email": mailbox,
                     "remove_label_ids": ["UNREAD"],
                 },
-            })
+            }
+            with code_built_call(call):
+                await gateway.call_tool(call)
             logger.debug("marked message=%s as read", ref.message_id)
         except Exception:
             logger.warning("failed to mark message=%s as read", ref.message_id)

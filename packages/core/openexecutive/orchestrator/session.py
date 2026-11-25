@@ -239,11 +239,11 @@ class Session:
     # conversation (``delegation.settings.private_conversation``). Set per
     # turn by the chat route.
     shared_chat: bool = False
-    # True on a shared chat's turn when someone other than its owner has
-    # written since the owner's last message (the speaker included): the turn
-    # is not offered sends to people or contact writes
-    # (``schedule_tools.SHARED_CHAT_WITHHELD_TOOLS``). Set per turn by the
-    # chat route; it fails closed (True) when the history can't be read.
+    # True on a turn in a chat space that lets in people not on People (a
+    # Google Chat space) when the last line wasn't the speaker's: its sends to
+    # people and contact writes are noticed as ``levels.SHARED``
+    # (``schedule_tools.SHARED_CHAT_WITHHELD_TOOLS``). Set by the channel
+    # adapter; a shared web chat is only the team's and never sets it.
     others_spoke_last: bool = False
     # Whose documents this session reads and publishes, when that is not its
     # own speaker (``artifact_records.current_viewer``): a session a workflow

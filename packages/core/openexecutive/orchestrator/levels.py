@@ -13,10 +13,16 @@ the install) only *detect*. This module decides, in one place
 it says:
 
 - **Hands-off**: the step runs. Nothing waits.
-- **Balanced** and **Careful**: the step comes to the owner as an Approve
-  card (``hold``). Careful detects more (any outside read), Balanced less
-  (only a read the check flagged): the outside-content check is the
-  level's.
+- **Balanced**: the step comes as an Approve card (``hold``) only for
+  ``BALANCED_WAITS`` (words that tried to give orders, mail or outside text
+  the check couldn't check, a post to everyone or a People change after a
+  mail read, a turn answering mail from a contact or someone unproven,
+  a shared chat someone else wrote in,
+  someone new, a share outside the company, unattended work);
+  every other noticed step runs.
+- **Careful**: every noticed step comes as an Approve card. Careful also
+  detects more (any outside read, where Balanced notices only a read the
+  check flagged): the outside-content check is the level's.
 - **Whose level**: the level belongs to whoever is asking. The owner's
   turns and a teammate's turns (a shared chat they wrote in included, and
   an AI app they signed in to, which is them) run at the company's level.
@@ -42,10 +48,11 @@ import contextvars
 import json
 import logging
 import re
-from collections.abc import Iterator
-from typing import Any
+from collections.abc import Awaitable, Callable, Coroutine, Iterator
+from typing import Any, TypeVar
 
 logger = logging.getLogger(__name__)
+_T = TypeVar("_T")
 
 RUN = "run"
 CARD = "card"
@@ -60,6 +67,13 @@ OWN_MAIL = "mail_touched"
 # The owner's own mail was read this turn and the content check flagged some
 # of what it read: Balanced holds then too, and the card says why.
 MAIL_FLAGGED = "mail_flagged"
+# Mail read this turn that the content check couldn't check (too big, or a
+# script read it beside the loop's check): Balanced waits, as for a flag.
+MAIL_UNCHECKED = "mail_unchecked"
+# A post to everyone or a change to who is on People, on a turn that read
+# someone's own mail (delegation.lockdown.spreads_mail): sharing and people
+# are two of the topics Balanced waits on.
+MAIL_SHARED = "mail_shared"
 PRIVATE = "private_turn"
 SHARED = "shared_chat"
 # A turn that may only read and advise (``schedule_tools.read_only_turn``):
@@ -75,8 +89,20 @@ SCRIPT = "apps_script"
 # A click or typing on an email or chat site in the person's own browser
 # (``browser.tools``), where it can send a message.
 SEND_SITE = "send_site"
+# What Balanced waits for when a feature notices it: words that tried to
+# give it instructions, outside text or mail the check couldn't check (on
+# Balanced a clean outside read never marks the turn, so OUTSIDE_READ there
+# is only one too big to check), a turn answering mail from a contact, someone unproven or a forward
+# (PRIVATE: its words are not a team member asking), a chat space someone
+# not on People may have written in (SHARED), someone new, a share outside the company,
+# and work nobody is watching (which take_the_lead.gate then checks against the seven
+# topics). Every other reason a feature notices runs on Balanced and waits
+# on Careful.
+BALANCED_WAITS: frozenset[str] = frozenset({
+    OUTSIDE, OUTSIDE_READ, MAIL_FLAGGED, MAIL_UNCHECKED, MAIL_SHARED, PRIVATE, SHARED, NEW_PERSON, FILE_PLACE, UNATTENDED,
+})
 REASONS: frozenset[str] = frozenset({
-    OUTSIDE, OUTSIDE_READ, OWN_MAIL, MAIL_FLAGGED, PRIVATE, SHARED, READ_ONLY, NOT_OWNER, UNATTENDED, STRANGER,
+    OUTSIDE, OUTSIDE_READ, OWN_MAIL, MAIL_FLAGGED, MAIL_UNCHECKED, MAIL_SHARED, PRIVATE, SHARED, READ_ONLY, NOT_OWNER, UNATTENDED, STRANGER,
     NEW_PERSON, FILE_PLACE, URL_FETCH, SCRIPT, SEND_SITE,
 })
 
@@ -86,8 +112,10 @@ _WHY: dict[str, str] = {
     OUTSIDE_READ: "it read something from outside the company first",
     OWN_MAIL: "it read your own mail first",
     MAIL_FLAGGED: "something it read looked like it was trying to give it instructions",
+    MAIL_UNCHECKED: "it read mail it couldn't check for planted instructions first",
+    MAIL_SHARED: "it posts to everyone or changes People right after reading your own mail",
     PRIVATE: "it came from mail that's private to you",
-    SHARED: "someone else wrote in this shared chat",
+    SHARED: "someone who may not be on your team wrote in this chat",
     READ_ONLY: "it was asked from a page in another app or a run queued for someone else",
     NOT_OWNER: "it changes how your Executive is set up",
     UNATTENDED: "it came up while nobody was chatting",
@@ -195,10 +223,68 @@ def turn_level(session: Any = None) -> str:
     return outside_mode.for_turn(session)
 
 
-def mail_reason() -> str:
-    """Why a step waits after the owner's own mail was read this turn:
+def mark_round(pinned: Any, *, reads_mail: bool) -> None:
+    """Mark the turn's ``TurnDelegation`` for the round being dispatched:
+    whether an earlier round left mail unchecked (``unvetted_before_round``)
+    and whether this round's steps were asked before its mail was seen
+    (``round_reading``). A script's own calls come after what it reads, so
+    they don't count as asked first (``in_script_call``). Never raises."""
+    if pinned is None:
+        return
+    try:
+        pinned.unvetted_before_round = bool(
+            getattr(pinned, "read_mail", False) and getattr(pinned, "mail_vetted", False) is not True
+        )
+        pinned.round_reading = bool(reads_mail)
+    except Exception:
+        logger.debug("levels: couldn't mark the round", exc_info=True)
+
+
+_IN_SCRIPT: contextvars.ContextVar[bool] = contextvars.ContextVar("levels_in_script", default=False)
+
+
+def in_script_call(call: Callable[..., Awaitable[_T]]) -> Callable[..., Coroutine[Any, Any, _T]]:
+    """Wrap a script's per-call function: each call the script makes was
+    chosen after what the script read, so inside it a read in this round
+    isn't counted as one the step was asked before (``mail_reason``). The
+    script's sibling steps in the round are unaffected."""
+
+    async def _wrapped(*args: Any, **kwargs: Any) -> _T:
+        token = _IN_SCRIPT.set(True)
+        try:
+            return await call(*args, **kwargs)
+        finally:
+            _IN_SCRIPT.reset(token)
+
+    return _wrapped
+
+
+def end_round(pinned: Any) -> None:
+    """The round is over, finished or not: its mail no longer counts as read
+    after its steps were asked (``mark_round``), so a read nobody checked is
+    unchecked. Called at the end of every round and when a turn ends, a
+    stopped or failed one included. Never raises."""
+    if pinned is None:
+        return
+    try:
+        pinned.round_reading = False
+    except Exception:
+        logger.debug("levels: couldn't end the round", exc_info=True)
+
+
+def mail_reason(pinned: Any = None, tool: str = "", tool_input: Any = None) -> str:
+    """Why a step waits after someone's own mail was read this turn:
     ``MAIL_FLAGGED`` when the content check flagged some of what it read,
-    else ``OWN_MAIL``. Never raises."""
+    ``MAIL_UNCHECKED`` when a read from an earlier round went unchecked (too
+    big, or a script ran beside it), ``MAIL_SHARED`` when ``tool`` posts to
+    everyone or changes People (``delegation.lockdown.spreads_mail``), else
+    ``OWN_MAIL``. A read in the round
+    being dispatched (``round_reading``, set by the chat loop until that
+    round's reads are checked) isn't counted: the step was asked for before
+    anyone saw what that mail says. A script's own calls are the exception
+    (``in_script_call``): they come after what the script read.
+    ``pinned`` is the turn's ``TurnDelegation``, else the bound session's.
+    Never raises: an error is ``MAIL_UNCHECKED``."""
     try:
         from openexecutive.orchestrator import outside_content
 
@@ -206,8 +292,36 @@ def mail_reason() -> str:
         flags = getattr(state, "flags", None) or []
         if any(source == outside_content.MAIL for source, _, _ in flags):
             return MAIL_FLAGGED
+        if pinned is None:
+            from openexecutive.delegation.settings import turn_delegation
+            from openexecutive.orchestrator.schedule_tools import current_session
+
+            pinned = turn_delegation(current_session.get())
+        if pinned is not None and getattr(pinned, "unchecked_mail", False) is True:
+            return MAIL_UNCHECKED
+        # Careful marks every read held, checked or not: only below it does
+        # a held read mean one the check couldn't clear.
+        if pinned is not None and getattr(pinned, "mail_held", False) is True:
+            from openexecutive.orchestrator import outside_mode
+
+            if turn_level() != outside_mode.ASK:
+                return MAIL_UNCHECKED
+        if (
+            pinned is not None and getattr(pinned, "read_mail", False) is True
+            and getattr(pinned, "mail_vetted", False) is not True
+        ):
+            if getattr(pinned, "round_reading", False) is not True or _IN_SCRIPT.get():
+                return MAIL_UNCHECKED
+            if getattr(pinned, "unvetted_before_round", False) is True:
+                return MAIL_UNCHECKED
+        if tool:
+            from openexecutive.delegation.lockdown import spreads_mail
+
+            if spreads_mail(tool, tool_input):
+                return MAIL_SHARED
     except Exception:
-        logger.debug("levels: couldn't tell whether a mail read was flagged", exc_info=True)
+        logger.debug("levels: couldn't tell whether a mail read was checked", exc_info=True)
+        return MAIL_UNCHECKED
     return OWN_MAIL
 
 
@@ -226,9 +340,26 @@ def outside_reason() -> str:
     return OUTSIDE
 
 
+def stronger(current: str | None, new: str) -> str:
+    """Of two reasons noticed for one step, the one that waits on more
+    levels: one that cards everywhere (``STRANGER``, ``NOT_OWNER``,
+    ``READ_ONLY``), then ``BALANCED_WAITS``, then the rest. A step with a
+    reason that waits on Balanced never runs there for another reason it
+    also has. On a tie the first stays."""
+    def rank(reason: str) -> int:
+        if reason in (STRANGER, NOT_OWNER, READ_ONLY):
+            return 2
+        return 1 if reason in BALANCED_WAITS else 0
+
+    if current is None or rank(new) > rank(current):
+        return new
+    return current
+
+
 def decide(reason: str, *, mode: str | None = None) -> str:
-    """``RUN`` or ``CARD`` for a step noticed for ``reason``. Never raises:
-    an error is a card."""
+    """``RUN`` or ``CARD`` for a step noticed for ``reason``: Hands-off runs
+    it, Balanced waits only for ``BALANCED_WAITS``, Careful waits. Never
+    raises: an error is a card."""
     from openexecutive.orchestrator import outside_mode
 
     try:
@@ -238,6 +369,8 @@ def decide(reason: str, *, mode: str | None = None) -> str:
             return CARD
         current = mode if mode is not None else turn_level()
         if current == outside_mode.TRUST:
+            return RUN
+        if current == outside_mode.OUTSIDERS and reason not in BALANCED_WAITS:
             return RUN
         return CARD
     except Exception:
