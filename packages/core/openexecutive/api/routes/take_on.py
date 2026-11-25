@@ -183,7 +183,7 @@ def _settle_cards(me: Me, offers: list[take_on.Offer]) -> None:
                               from_card=was):
                 _taken_up(me, o)
         elif status == dl.STATUS_REJECTED:
-            take_on.hide(me.email, o, "skipped")
+            take_on.hide(me.email, o, "skipped", from_card=was)
             o.status = "skipped"  # type: ignore[assignment]
         elif status == dl.STATUS_FAILED:
             o.status, o.outcome = "failed", "It didn't go through after you approved it."
@@ -487,12 +487,11 @@ def hide(key: str, body: HideIn, request: Request) -> None:
     if not take_on.KEY_RE.match(key):
         raise HTTPException(status_code=404, detail="That's no longer on your list.")
     offer = next((o for o in _offers(me) if o.key == key), None)
-    if offer is not None and offer.status in ("working", "card"):
-        # Already under way (pressed on another screen): it carries on and
-        # shows what came of it, so there is nothing to put aside.
-        return
     if offer is not None:
-        take_on.hide(me.email, offer, body.reason)
+        # Already under way (pressed on another screen, even just now): it
+        # carries on and shows what came of it, so nothing is put aside.
+        if not take_on.hide(me.email, offer, body.reason):
+            return
     elif not take_on.hide(me.email, key, body.reason):
         # Off the list another way (done, skipped, aged out): the card just
         # goes, and what came of it stays as it was.

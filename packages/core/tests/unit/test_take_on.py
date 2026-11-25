@@ -328,6 +328,16 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     return TestClient(app)
 
 
+def test_hide_never_lands_on_a_step_do_it_just_started() -> None:
+    o = _offer()
+    take_on.put_made(ME, [o])
+    seen = _list()[0]  # read before Do it, as a second screen would
+    take_on.start(ME, o)
+    assert not take_on.hide(ME, seen, "not_useful")
+    (got,) = _list()
+    assert got.status == "working"
+
+
 def test_two_readers_settling_one_approved_card_tell_its_source_once(monkeypatch: pytest.MonkeyPatch) -> None:
     from openexecutive.api.routes import take_on as route
     from openexecutive.memory import decision_ledger

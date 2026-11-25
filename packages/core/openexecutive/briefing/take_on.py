@@ -917,12 +917,14 @@ def finish(
         return False
 
 
-def hide(email: str, offer: Offer | str, reason: HideReason, *, db_path: Path | None = None) -> bool:
+def hide(email: str, offer: Offer | str, reason: HideReason, *, from_card: int | None = None,
+         db_path: Path | None = None) -> bool:
     """Hide an offer. Given only a key that's already off the list: when it
     was put aside with a Hide (on another screen), its row keeps the newer
     reason, so a Later turned into Not useful doesn't come back. One that left
-    another way (done, skipped, aged out) stays as it is. Returns whether a
-    row took the reason."""
+    another way (done, skipped, aged out) stays as it is, as does one Do it
+    has started, unless it is on the card ``from_card`` (a Skip there).
+    Returns whether a row took the reason."""
     person, now = who(email), _now()
     if not person:
         return False
@@ -938,11 +940,16 @@ def hide(email: str, offer: Offer | str, reason: HideReason, *, db_path: Path | 
         _ensure(conn, person, offer.key, offer.kind, now)
         # What it was about stays with it, wherever it came from, so the same
         # thing in other words isn't offered again (``close_to``).
-        conn.execute(
+        # Not once Do it has started it (on another screen meanwhile): the
+        # step carries on and shows what came of it.
+        cur = conn.execute(
             f"UPDATE {STATE_TABLE} SET hidden_reason = ?, hidden_at = ?, kind = ?, "  # noqa: S608
-            "offer = COALESCE(offer, ?) WHERE person = ? AND key = ?",
-            (reason, now.isoformat(), offer.kind, _snapshot(offer), person, offer.key),
+            "offer = COALESCE(offer, ?) WHERE person = ? AND key = ? "
+            "AND (status NOT IN ('working', 'card', 'done') OR (status = 'card' AND decision_id = ?))",
+            (reason, now.isoformat(), offer.kind, _snapshot(offer), person, offer.key, from_card),
         )
+        if not cur.rowcount:
+            return False
         if reason == "later":
             # Later on one that failed or asked back puts it back as it was
             # first offered, so it comes back in a week like any other.
