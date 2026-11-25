@@ -3161,12 +3161,16 @@ class Executive:
                 for tu in [*skill_tool_uses, *mcp_tool_uses, *script_tool_uses]
                 if tu["id"] in gate_reasons
             }
-            for tu in mail_touched_uses:
-                noticed.setdefault(
-                    tu["id"], (tu, levels.mail_reason(pinned_delegation, tool=tu["name"], tool_input=tu["input"])),
-                )
-            for tu in outside_uses:
-                noticed.setdefault(tu["id"], (tu, levels.STRANGER if stranger else levels.outside_reason()))
+            # A step with several reasons keeps the one that waits on more
+            # levels (levels.stronger), so a shared chat never lets a
+            # flagged read's step run.
+            for tu, why in [
+                *((tu, levels.mail_reason(pinned_delegation, tool=tu["name"], tool_input=tu["input"]))
+                  for tu in mail_touched_uses),
+                *((tu, levels.STRANGER if stranger else levels.outside_reason()) for tu in outside_uses),
+            ]:
+                had = noticed.get(tu["id"])
+                noticed[tu["id"]] = (tu, levels.stronger(had[1] if had else None, why))
             held_uses = [
                 (tu, reason) for tu, reason in noticed.values()
                 # The level now, not the turn's first: a flagged read drops

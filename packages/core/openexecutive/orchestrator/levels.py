@@ -282,6 +282,22 @@ def outside_reason() -> str:
     return OUTSIDE
 
 
+def stronger(current: str | None, new: str) -> str:
+    """Of two reasons noticed for one step, the one that waits on more
+    levels: one that cards everywhere (``STRANGER``, ``NOT_OWNER``,
+    ``READ_ONLY``), then ``BALANCED_WAITS``, then the rest. A step with a
+    reason that waits on Balanced never runs there for another reason it
+    also has. On a tie the first stays."""
+    def rank(reason: str) -> int:
+        if reason in (STRANGER, NOT_OWNER, READ_ONLY):
+            return 2
+        return 1 if reason in BALANCED_WAITS else 0
+
+    if current is None or rank(new) > rank(current):
+        return new
+    return current
+
+
 def decide(reason: str, *, mode: str | None = None) -> str:
     """``RUN`` or ``CARD`` for a step noticed for ``reason``: Hands-off runs
     it, Balanced waits only for ``BALANCED_WAITS``, Careful waits. Never
