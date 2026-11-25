@@ -1136,6 +1136,10 @@ def test_a_message_step_is_never_a_note_to_the_person_themself(monkeypatch: pyte
     to_me = {"kind": "message", "title": "I can send Olivia Park a note", "preview": [{"label": "To", "value": "Olivia Park"}]}
     to_sam = {"kind": "message", "title": "I can send Sam a note", "preview": [{"label": "To", "value": "Sam Lee"}]}
     assert [o.title for o in maker.check([to_me, to_sam], inputs, set())] == ["I can send Sam a note"]
+    # A piece of a teammate's name is someone else ("Sa" from the inbox, not Sam Lee).
+    to_part = {"kind": "message", "title": "I can send Sa a note", "preview": [{"label": "To", "value": "Sa"}]}
+    to_first = {"kind": "message", "title": "I can ping Sam", "preview": [{"label": "To", "value": "Sam"}]}
+    assert [o.title for o in maker.check([to_part, to_first], inputs, set())] == ["I can ping Sam"]
 
 
 def test_a_run_left_working_can_be_started_again(monkeypatch: pytest.MonkeyPatch) -> None:

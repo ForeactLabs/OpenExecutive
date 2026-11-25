@@ -597,7 +597,7 @@ def check(
             continue
         if kind == "message":
             to = values.get("to", "").casefold()
-            if not to or not _to_any(to, team):
+            if not to or not _names_any(to, team):
                 drop("message not to a teammate")
                 continue
         key = take_on.made_key(title)
@@ -620,13 +620,6 @@ def check(
         if len(out) >= MAX_OFFERS:
             break
     return out
-
-
-def _to_any(to: str, people: list[tuple[str, str]]) -> bool:
-    """Whether a "To" names anyone in ``people`` ((casefolded name, email)),
-    by email or by name."""
-    to = to.casefold()
-    return bool(to) and any(n and (n in to or to in n) or (e and e in to) for n, e in people)
 
 
 def _addressed_to(to: str, people: list[tuple[str, str]]) -> bool:
