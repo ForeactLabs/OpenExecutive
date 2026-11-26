@@ -113,6 +113,12 @@ system:
       for the OpenAI one, or AZURE_AI_TOKEN_SCOPE for both). The model keeps its own name
       in capability checks, tracing and usage; only the request carries the
       deployment name.
+      BEDROCK_MODELS / VERTEX_MODELS (model=id pairs, Claude only) route
+      those Claude models to the company's own Amazon Bedrock or Google
+      Vertex AI (providers/cloud.py) through anthropic.AsyncAnthropicBedrock /
+      AsyncAnthropicVertex, right after Azure: caching, thinking and PDFs
+      kept, web_search stripped, redirects not followed. boto3 is a
+      dependency for Bedrock's request signing and event-stream decoding.
       GEMINI_API_KEY / XAI_API_KEY route google/* and x-ai/* models to the
       vendor's own OpenAI-compatible API (providers/vendors.py), right after
       Azure, under the vendor's id (the part after the slash). GEMINI_MODELS
@@ -157,7 +163,7 @@ system:
     - Audit writes never break a chat turn or tool call — exceptions are swallowed with a warning.
     - Provider selection is per-call by model (openexecutive.providers.get_provider(model)). A single chat turn can mix Anthropic-routed Claude calls, OpenRouter-routed non-Claude calls, and locally-routed self-hosted models — no global "current provider" state.
     - When a non-Claude or local model is selected, Anthropic-only fields (cache_control on system/tool/user blocks, adaptive thinking + output_config) are stripped by the feature gate before the request leaves the process. The web_search server tool is kept for every OpenRouter model (the translator swaps it for OpenRouter's `web` plugin, which serves any model) and stripped only for a self-hosted OpenAI-compatible backend, which has no search plugin. Callers do NOT need to know which model they're routing to.
-    - ANTHROPIC_API_KEY is optional: a Settings validator requires at least one provider (Anthropic key, OpenRouter, Azure deployments, a Google or xAI key, or local models) to be configured, so an Anthropic-free deployment is supported but a zero-provider one fails fast at startup.
+    - ANTHROPIC_API_KEY is optional: a Settings validator requires at least one provider (Anthropic key, OpenRouter, Azure deployments, a Google or xAI key, Claude on Bedrock or Vertex, or local models) to be configured, so an Anthropic-free deployment is supported but a zero-provider one fails fast at startup.
     - External-monitor adapters are read-only — they never write to upstream systems. The whole `monitoring/` subsystem is observation-only; surfacing happens through the alert pipeline, never via a direct upstream side-effect.
     - External signals never auto-execute on the principal's behalf. Every signal that surfaces is proposed via the alert pipeline (and thus subject to triage / mute / severity gates); the scheduler never dispatches an outbound message directly off a signal.
     - An external signal whose `dedup_key` already exists is dropped at ingest via the UNIQUE(dedup_key) constraint on `external_signals`. Adapter retries / re-polls cannot multiply alerts for the same upstream event.

@@ -8,6 +8,9 @@ license = {text = "Apache-2.0"}
 authors = [{name = "Open Executive Contributors"}]
 dependencies = [
     "anthropic>=0.52.0",
+    # Claude on a company's own Amazon Bedrock (providers.cloud): request
+    # signing and Bedrock's event-stream decoding come from botocore.
+    "boto3>=1.35.0",
     "fastapi>=0.111.0",
     "uvicorn[standard]>=0.30.0",
     "chromadb>=0.5.0",

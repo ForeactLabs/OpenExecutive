@@ -79,6 +79,24 @@ XAI_SPEC = FeatureSpec(
 )
 
 
+# Gemini's levels: an effort it doesn't have goes to the nearest one it does.
+_GEMINI_EFFORTS = {"none": "none", "minimal": "minimal", "low": "low", "medium": "medium",
+                   "high": "high", "xhigh": "high", "max": "high"}
+
+
+def gemini_effort(reasoning: dict[str, Any]) -> str | None:
+    """OpenRouter-style ``reasoning`` → Gemini's ``reasoning_effort``."""
+    if reasoning.get("enabled") is False:
+        return "none"
+    effort = reasoning.get("effort")
+    if isinstance(effort, str):
+        return _GEMINI_EFFORTS.get(effort, "medium")
+    budget = reasoning.get("max_tokens")
+    if isinstance(budget, int) and not isinstance(budget, bool) and budget > 0:
+        return "low" if budget <= 2048 else "medium" if budget <= 8192 else "high"
+    return None
+
+
 class _VendorProvider(OpenAICompatibleProvider):
     vendor: Vendor
     spec: FeatureSpec
@@ -114,14 +132,8 @@ class GoogleProvider(_VendorProvider):
     def _extend_body(self, slug: str, body: dict[str, Any]) -> None:
         super()._extend_body(slug, body)
         reasoning = body.pop("reasoning", None)
-        if isinstance(reasoning, dict):
-            effort = reasoning.get("effort")
-            if reasoning.get("enabled") is False:
-                body["reasoning_effort"] = "none"
-            elif isinstance(effort, str) and effort in ("low", "medium", "high"):
-                body["reasoning_effort"] = effort
-            elif "max_tokens" in reasoning or effort is not None:
-                body["reasoning_effort"] = "medium"
+        if isinstance(reasoning, dict) and (effort := gemini_effort(reasoning)) is not None:
+            body["reasoning_effort"] = effort
         for message in body.get("messages") or []:
             if not isinstance(message, dict) or message.get("role") != "assistant":
                 continue

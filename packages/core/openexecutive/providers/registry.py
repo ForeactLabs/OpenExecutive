@@ -23,7 +23,7 @@ from fastapi import HTTPException
 
 from openexecutive.config import get_settings
 from openexecutive.observability import wrap_provider
-from openexecutive.providers import azure, openrouter_catalog, vendors
+from openexecutive.providers import azure, cloud, openrouter_catalog, vendors
 from openexecutive.providers.anthropic_provider import AnthropicProvider
 from openexecutive.providers.feature_gate import (
     NON_CLAUDE_MAX_OUTPUT_TOKENS,
@@ -233,6 +233,7 @@ def allowed_models() -> list[str]:
     models.extend(_local_models(settings))
     models.extend(m for m in azure.azure_models(settings) if m not in models)
     models.extend(m for m in vendors.vendor_models(settings) if m not in models)
+    models.extend(m for m in cloud.cloud_models(settings) if m not in models)
     return models
 
 
@@ -325,7 +326,7 @@ def model_options_for(agent_id: str | None) -> list[ModelOption]:
     """
     settings = get_settings()
     local = set(_local_models(settings))
-    on_azure = set(azure.azure_models(settings))
+    on_azure = set(azure.azure_models(settings)) | set(cloud.cloud_models(settings))
     return [
         _model_option(
             m,
@@ -383,6 +384,8 @@ _azure_claude_provider: azure.AzureClaudeProvider | None = None
 _azure_openai_provider: azure.AzureOpenAIProvider | None = None
 _azure_tokens: dict[str, azure.EntraToken] = {}
 _vendor_providers: dict[str, OpenAICompatibleProvider] = {}
+_bedrock_provider: cloud.BedrockClaudeProvider | None = None
+_vertex_provider: cloud.VertexClaudeProvider | None = None
 
 
 def _anthropic() -> AnthropicProvider:
@@ -535,6 +538,35 @@ def _vendor(vendor: vendors.Vendor) -> OpenAICompatibleProvider:
     return provider
 
 
+def _bedrock() -> cloud.BedrockClaudeProvider:
+    global _bedrock_provider
+    if _bedrock_provider is None:
+        s = get_settings()
+        _bedrock_provider = cloud.BedrockClaudeProvider(
+            region=str(s.bedrock_region),
+            models=dict(s.bedrock_models),
+            api_key=s.bedrock_api_key,
+            access_key_id=s.bedrock_access_key_id,
+            secret_access_key=s.bedrock_secret_access_key,
+            timeout=s.cloud_timeout_s,
+        )
+    return _bedrock_provider
+
+
+def _vertex() -> cloud.VertexClaudeProvider:
+    global _vertex_provider
+    if _vertex_provider is None:
+        s = get_settings()
+        _vertex_provider = cloud.VertexClaudeProvider(
+            project_id=str(s.vertex_project_id),
+            region=str(s.vertex_region),
+            models=dict(s.vertex_models),
+            credentials=cloud.vertex_credentials(s.vertex_credentials_json),
+            timeout=s.cloud_timeout_s,
+        )
+    return _vertex_provider
+
+
 def sees_images(model: str) -> bool:
     """Whether ``model`` can be shown a picture (a browser screenshot,
     ``browser.tools``). Claude and OpenAI's own models can; another model
@@ -561,6 +593,8 @@ def get_provider(model: str) -> LLMProvider:
     * Models mapped to an Azure deployment (``AZURE_AI_DEPLOYMENTS``) —
       the company's own Azure resource: Claude on Foundry's Anthropic
       endpoint, every other model on its OpenAI-compatible endpoint.
+    * Claude models mapped in ``BEDROCK_MODELS`` / ``VERTEX_MODELS`` — the
+      company's own Amazon Bedrock or Google Vertex AI.
     * ``google/…`` with ``GEMINI_API_KEY``, ``x-ai/…`` with ``XAI_API_KEY``
       — that vendor's own OpenAI-compatible API.
     * Claude family (any ``claude-<family>-<version>`` id) — Anthropic
@@ -581,6 +615,10 @@ def get_provider(model: str) -> LLMProvider:
         if _is_claude(model):
             return wrap_provider(_azure_claude(), "azure")
         return wrap_provider(_azure_openai(), "azure")
+    if cloud.bedrock_id_for(model, settings) is not None:
+        return wrap_provider(_bedrock(), "bedrock")
+    if cloud.vertex_id_for(model, settings) is not None:
+        return wrap_provider(_vertex(), "vertex")
     if (vendor := vendors.vendor_for(model, settings)) is not None:
         return wrap_provider(_vendor(vendor), vendor.name)
     if _is_claude(model):
@@ -615,6 +653,8 @@ def pdf_input_supported(model: str) -> bool:
         return bool(getattr(settings, "local_pdf_input", False))
     if azure.deployment_for(model, settings) is not None:
         return _is_claude(model)  # Foundry's Anthropic endpoint reads them
+    if cloud.bedrock_id_for(model, settings) or cloud.vertex_id_for(model, settings):
+        return True  # Claude reads them on both clouds
     if vendors.vendor_for(model, settings) is not None:
         return False
     if settings.openrouter_enabled:
@@ -625,7 +665,7 @@ def pdf_input_supported(model: str) -> bool:
 def _reset_for_tests() -> None:
     """Drop cached provider singletons. Test-only — pytest fixtures call this."""
     global _anthropic_provider, _openrouter_provider, _local_provider
-    global _azure_claude_provider, _azure_openai_provider
+    global _azure_claude_provider, _azure_openai_provider, _bedrock_provider, _vertex_provider
     _anthropic_provider = None
     _openrouter_provider = None
     _local_provider = None
@@ -633,6 +673,8 @@ def _reset_for_tests() -> None:
     _azure_openai_provider = None
     _azure_tokens.clear()
     _vendor_providers.clear()
+    _bedrock_provider = None
+    _vertex_provider = None
 
 
 def reading_limits_for(model: str = "") -> ReadingLimits:

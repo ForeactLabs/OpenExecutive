@@ -253,6 +253,15 @@ async def test_ai_model_on_azure_alone_says_so() -> None:
     assert check.summary == "Using your Azure deployments instead of Anthropic. This page doesn't test that connection."
 
 
+async def test_ai_model_on_a_cloud_names_it() -> None:
+    settings = make_settings(
+        ANTHROPIC_API_KEY=None, BEDROCK_REGION="us-east-1",
+        BEDROCK_MODELS="claude-sonnet-5-5=global.anthropic.claude-sonnet-5-5-v1:0",
+    )
+    check = await check_ai_model(make_snap(settings))
+    assert check.summary.startswith("Using Amazon Bedrock instead of Anthropic.")
+
+
 async def test_ai_model_on_vendor_keys_names_them() -> None:
     settings = make_settings(ANTHROPIC_API_KEY=None, GEMINI_API_KEY="gemini-key", XAI_API_KEY="xai-key")
     check = await check_ai_model(make_snap(settings))
