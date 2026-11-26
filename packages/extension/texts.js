@@ -249,8 +249,10 @@
         items = out.items;
         seen = out.seen;
       }
-      // Nothing new and pairing unchanged: still say it's here, once a minute.
-      if (!items.length && !force && isPaired === lastPaired && now - lastReport < 60000) {
+      // Nothing new: still say it's here, once a minute. A pairing change the
+      // site hasn't taken yet goes sooner, at most every 10 seconds.
+      const wait = isPaired === lastPaired ? 60000 : 10000;
+      if (!items.length && !force && now - lastReport < wait) {
         if (seen) await chrome.storage.local.set({ [SEEN_KEY]: seen });
         return;
       }

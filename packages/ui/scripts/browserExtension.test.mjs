@@ -513,7 +513,8 @@ test("texts: new texts count as seen only once the site took them", () => {
 test("texts: a change in pairing is reported at once, not held for the once-a-minute report", () => {
   const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
   const report = texts.slice(texts.indexOf("async function report"), texts.indexOf("let timer = null"));
-  assert.ok(report.includes("!items.length && !force && isPaired === lastPaired && now - lastReport < 60000"));
+  assert.ok(report.includes("const wait = isPaired === lastPaired ? 60000 : 10000;"));
+  assert.ok(report.includes("!items.length && !force && now - lastReport < wait"));
   assert.ok(report.includes("if (answer && answer.ok === true) lastPaired = isPaired;"));
   assert.ok(report.indexOf("lastPaired = isPaired;") > report.indexOf('type: "texts_seen"'));
 });
