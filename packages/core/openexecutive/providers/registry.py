@@ -23,7 +23,7 @@ from fastapi import HTTPException
 
 from openexecutive.config import get_settings
 from openexecutive.observability import wrap_provider
-from openexecutive.providers import azure, openrouter_catalog
+from openexecutive.providers import azure, openrouter_catalog, vendors
 from openexecutive.providers.anthropic_provider import AnthropicProvider
 from openexecutive.providers.feature_gate import (
     NON_CLAUDE_MAX_OUTPUT_TOKENS,
@@ -222,6 +222,7 @@ def allowed_models() -> list[str]:
       is on.
     * Local models — when ``LOCAL_MODELS_ENABLED`` is on.
     * Models mapped to an Azure deployment (``AZURE_AI_DEPLOYMENTS``).
+    * ``GEMINI_MODELS`` / ``XAI_MODELS`` when that vendor's key is set.
     """
     settings = get_settings()
     models: list[str] = []
@@ -231,6 +232,7 @@ def allowed_models() -> list[str]:
         models.extend(openrouter_models())
     models.extend(_local_models(settings))
     models.extend(m for m in azure.azure_models(settings) if m not in models)
+    models.extend(m for m in vendors.vendor_models(settings) if m not in models)
     return models
 
 
@@ -287,7 +289,7 @@ def _claude_label(model: str) -> str | None:
 
 
 def _model_option(
-    model: str, *, local: bool, openrouter_enabled: bool, on_azure: bool = False
+    model: str, *, local: bool, openrouter_enabled: bool, on_azure: bool = False, on_vendor: bool = False
 ) -> ModelOption:
     """Provider grouping + display name for one allowlisted model.
 
@@ -305,7 +307,7 @@ def _model_option(
     else:
         vendor, sep, name = model.partition("/")
         provider = vendor if sep else "other"
-        route = "direct" if on_azure else "openrouter"
+        route = "direct" if on_azure or on_vendor else "openrouter"
         label = (_claude_label(model) if provider == "anthropic" else None) or name or model
     return {
         "id": model,
@@ -330,6 +332,7 @@ def model_options_for(agent_id: str | None) -> list[ModelOption]:
             local=m in local,
             openrouter_enabled=bool(settings.openrouter_enabled),
             on_azure=m in on_azure,
+            on_vendor=vendors.vendor_for(m, settings) is not None,
         )
         for m in allowed_models_for(agent_id)
     ]
@@ -379,6 +382,7 @@ _local_provider: OpenAICompatibleProvider | None = None
 _azure_claude_provider: azure.AzureClaudeProvider | None = None
 _azure_openai_provider: azure.AzureOpenAIProvider | None = None
 _azure_tokens: dict[str, azure.EntraToken] = {}
+_vendor_providers: dict[str, OpenAICompatibleProvider] = {}
 
 
 def _anthropic() -> AnthropicProvider:
@@ -517,6 +521,20 @@ def _azure_openai() -> azure.AzureOpenAIProvider:
     return _azure_openai_provider
 
 
+def _vendor(vendor: vendors.Vendor) -> OpenAICompatibleProvider:
+    provider = _vendor_providers.get(vendor.name)
+    if provider is None:
+        settings = get_settings()
+        key = str(getattr(settings, vendor.key_setting))
+        timeout = float(getattr(settings, "vendor_timeout_s", 180.0))
+        if vendor is vendors.GOOGLE:
+            provider = vendors.GoogleProvider(base_url=vendors.GOOGLE_BASE_URL, api_key=key, timeout_s=timeout)
+        else:
+            provider = vendors.XAIProvider(base_url=vendors.XAI_BASE_URL, api_key=key, timeout_s=timeout)
+        _vendor_providers[vendor.name] = provider
+    return provider
+
+
 def sees_images(model: str) -> bool:
     """Whether ``model`` can be shown a picture (a browser screenshot,
     ``browser.tools``). Claude and OpenAI's own models can; another model
@@ -543,6 +561,8 @@ def get_provider(model: str) -> LLMProvider:
     * Models mapped to an Azure deployment (``AZURE_AI_DEPLOYMENTS``) —
       the company's own Azure resource: Claude on Foundry's Anthropic
       endpoint, every other model on its OpenAI-compatible endpoint.
+    * ``google/…`` with ``GEMINI_API_KEY``, ``x-ai/…`` with ``XAI_API_KEY``
+      — that vendor's own OpenAI-compatible API.
     * Claude family (any ``claude-<family>-<version>`` id) — Anthropic
       direct by default; OpenRouter when ``OPENROUTER_ENABLED`` is on.
     * Other non-Claude (anything from ``openrouter_models()``, or any
@@ -561,6 +581,8 @@ def get_provider(model: str) -> LLMProvider:
         if _is_claude(model):
             return wrap_provider(_azure_claude(), "azure")
         return wrap_provider(_azure_openai(), "azure")
+    if (vendor := vendors.vendor_for(model, settings)) is not None:
+        return wrap_provider(_vendor(vendor), vendor.name)
     if _is_claude(model):
         if settings.openrouter_enabled:
             return wrap_provider(_openrouter(), "openrouter")
@@ -593,6 +615,8 @@ def pdf_input_supported(model: str) -> bool:
         return bool(getattr(settings, "local_pdf_input", False))
     if azure.deployment_for(model, settings) is not None:
         return _is_claude(model)  # Foundry's Anthropic endpoint reads them
+    if vendors.vendor_for(model, settings) is not None:
+        return False
     if settings.openrouter_enabled:
         return True
     return _is_claude(model) and bool(settings.anthropic_api_key)
@@ -608,6 +632,7 @@ def _reset_for_tests() -> None:
     _azure_claude_provider = None
     _azure_openai_provider = None
     _azure_tokens.clear()
+    _vendor_providers.clear()
 
 
 def reading_limits_for(model: str = "") -> ReadingLimits:

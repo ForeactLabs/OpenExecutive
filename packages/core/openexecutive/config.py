@@ -480,6 +480,40 @@ class Settings(BaseSettings):
             )
         return self
 
+    # ---- Google and xAI keys (providers.vendors) -------------------------
+    # A key of the vendor's own sends its models (``google/…`` /
+    # ``x-ai/…``) straight to it instead of through OpenRouter. The model
+    # lists are what the Council offers with the key (OpenRouter's catalog
+    # adds the rest when it is on); the vendor's own id is the part after
+    # the slash.
+    gemini_api_key: str | None = Field(None, alias="GEMINI_API_KEY")
+    gemini_models: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["google/gemini-3.8-flash", "google/gemini-3.5-flash-lite"],
+        alias="GEMINI_MODELS",
+    )
+    xai_api_key: str | None = Field(None, alias="XAI_API_KEY")
+    xai_models: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["x-ai/grok-4.6", "x-ai/grok-4.5"],
+        alias="XAI_MODELS",
+    )
+    vendor_timeout_s: float = Field(180.0, alias="VENDOR_TIMEOUT_S")
+
+    @field_validator("gemini_models", "xai_models", mode="before")
+    @classmethod
+    def _parse_vendor_models(cls, v: Any) -> list[str]:
+        return _parse_csv_list(v)
+
+    @model_validator(mode="after")
+    def _validate_vendor_models(self) -> "Settings":
+        for name, prefix, models in (
+            ("GEMINI_MODELS", "google/", self.gemini_models),
+            ("XAI_MODELS", "x-ai/", self.xai_models),
+        ):
+            wrong = [m for m in models if not m.startswith(prefix)]
+            if wrong:
+                raise ValueError(f"{name} lists {', '.join(wrong)}: each model starts with {prefix}")
+        return self
+
     @model_validator(mode="after")
     def _validate_provider_available(self) -> "Settings":
         # At least one backend must be reachable, or every model call fails.
@@ -488,12 +522,15 @@ class Settings(BaseSettings):
             or self.openrouter_enabled
             or self.local_models_enabled
             or self.azure_ai_deployments
+            or self.gemini_api_key
+            or self.xai_api_key
         ):
             raise ValueError(
                 "No LLM provider configured. Set ANTHROPIC_API_KEY, or enable "
                 "OpenRouter (OPENROUTER_ENABLED=true + OPENROUTER_API_KEY), or "
                 "enable local models (LOCAL_MODELS_ENABLED=true + LOCAL_BASE_URL), "
-                "or map Azure deployments (AZURE_AI_ENDPOINT + AZURE_AI_DEPLOYMENTS)."
+                "or map Azure deployments (AZURE_AI_ENDPOINT + AZURE_AI_DEPLOYMENTS), "
+                "or set GEMINI_API_KEY or XAI_API_KEY."
             )
         return self
 

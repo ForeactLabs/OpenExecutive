@@ -253,6 +253,13 @@ async def test_ai_model_on_azure_alone_says_so() -> None:
     assert check.summary == "Using your Azure deployments instead of Anthropic. This page doesn't test that connection."
 
 
+async def test_ai_model_on_vendor_keys_names_them() -> None:
+    settings = make_settings(ANTHROPIC_API_KEY=None, GEMINI_API_KEY="gemini-key", XAI_API_KEY="xai-key")
+    check = await check_ai_model(make_snap(settings))
+    assert check.state == "ok"
+    assert check.summary.startswith("Using Google and xAI instead of Anthropic.")
+
+
 # ---------------------------------------------------------------------------
 # Company, owner, the Executive's address, API protection
 # ---------------------------------------------------------------------------
