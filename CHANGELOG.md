@@ -9,6 +9,48 @@ From 0.3.0 on, entries are written by release-please from the titles of the
 merged pull requests (`feat` → Added, `fix` → Fixed). The open release PR holds
 the next entry; edit it there before merging if a line needs rewording.
 
+## [0.8.0](https://github.com/ForeactLabs/OpenExecutive/compare/v0.7.8...v0.8.0) (2026-11-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **delegation:** send as you through the one gate, with one In training ([#986](https://github.com/ForeactLabs/OpenExecutive/issues/986))
+
+### Added
+
+* **briefing:** offer a few real steps on Home with I can also take on ([#985](https://github.com/ForeactLabs/OpenExecutive/issues/985)) ([aa4627d](https://github.com/ForeactLabs/OpenExecutive/commit/aa4627d83664b27819be097f379a50dba4052df7))
+* **briefing:** tidy waiting steps the rules no longer hold ([#980](https://github.com/ForeactLabs/OpenExecutive/issues/980)) ([beef8da](https://github.com/ForeactLabs/OpenExecutive/commit/beef8daaddbed8ff3fd83d580511c4407eb59c1e))
+* **chat:** let the mic work with a Gemini key or the browser's own speech ([#1001](https://github.com/ForeactLabs/OpenExecutive/issues/1001)) ([c14631f](https://github.com/ForeactLabs/OpenExecutive/commit/c14631fbb4b25b1c31607622072255087e4998c1))
+* **delegation:** read and send texts through Google Messages in the browser extension ([#991](https://github.com/ForeactLabs/OpenExecutive/issues/991)) ([bdaf241](https://github.com/ForeactLabs/OpenExecutive/commit/bdaf241d2b71b59e47dc3c534c7e10284e7d82e8))
+* **providers:** run Claude on a company's own Amazon Bedrock or Google Vertex AI ([#999](https://github.com/ForeactLabs/OpenExecutive/issues/999)) ([dbfa546](https://github.com/ForeactLabs/OpenExecutive/commit/dbfa5468c5cc36700dc8c4aa91059b25bfcc8bee))
+* **providers:** run models a company deploys in its own Azure account ([#997](https://github.com/ForeactLabs/OpenExecutive/issues/997)) ([c4c819f](https://github.com/ForeactLabs/OpenExecutive/commit/c4c819f4271ab8633b58c06916bef0d7772e1001))
+* **providers:** send Gemini and Grok to Google's and xAI's own keys ([#998](https://github.com/ForeactLabs/OpenExecutive/issues/998)) ([2537573](https://github.com/ForeactLabs/OpenExecutive/commit/25375737a839e4bef196a9a082f6caf336effcbc))
+* **ui:** press Send in Google Messages with a real click through Chrome ([#1006](https://github.com/ForeactLabs/OpenExecutive/issues/1006)) ([60ca762](https://github.com/ForeactLabs/OpenExecutive/commit/60ca762e9bde3184e34dc643d897815b4b665800))
+* **ui:** put Texts under email on As you and show pairing in progress ([#1003](https://github.com/ForeactLabs/OpenExecutive/issues/1003)) ([f27d995](https://github.com/ForeactLabs/OpenExecutive/commit/f27d995ffb6641d7b7548c10bbd32fd2ade11724))
+* **ui:** simplify Home into For you, What I'm doing and I could also ([#996](https://github.com/ForeactLabs/OpenExecutive/issues/996)) ([fbe9d49](https://github.com/ForeactLabs/OpenExecutive/commit/fbe9d497b96d069bdb900eac303cf469d8b53477))
+
+
+### Fixed
+
+* **alerts:** keep own watches private and tighten five prompts and audits ([#988](https://github.com/ForeactLabs/OpenExecutive/issues/988)) ([ed86de8](https://github.com/ForeactLabs/OpenExecutive/commit/ed86de8f18823382d8b7f1676a02d2451fefbdf7))
+* **briefing:** keep a teammate's steps off the owner's Home ([#995](https://github.com/ForeactLabs/OpenExecutive/issues/995)) ([aa40f16](https://github.com/ForeactLabs/OpenExecutive/commit/aa40f162157207d33906d604db13e5f549ec0e28))
+* **briefing:** shorten the Careful reason on Waiting on rows ([#981](https://github.com/ForeactLabs/OpenExecutive/issues/981)) ([adb103b](https://github.com/ForeactLabs/OpenExecutive/commit/adb103ba89a5efbd68cfa8603720afc211492d00))
+* **briefing:** show a follow-up's short title, not its instruction ([#984](https://github.com/ForeactLabs/OpenExecutive/issues/984)) ([7acd49f](https://github.com/ForeactLabs/OpenExecutive/commit/7acd49fd1a8c18c05f5f132a385473606e88484e))
+* **chat:** end every background turn by its deadline and always report it ([#979](https://github.com/ForeactLabs/OpenExecutive/issues/979)) ([d6a6664](https://github.com/ForeactLabs/OpenExecutive/commit/d6a6664965765026e1cf90b7cba46ab99d04f491))
+* **delegation:** send as you through the one gate, with one In training ([#986](https://github.com/ForeactLabs/OpenExecutive/issues/986)) ([0b4bbc5](https://github.com/ForeactLabs/OpenExecutive/commit/0b4bbc5f1b4034ce175cec801afce3bb82958722))
+* **email:** treat proven mail from a teammate as them asking ([#976](https://github.com/ForeactLabs/OpenExecutive/issues/976)) ([92c3633](https://github.com/ForeactLabs/OpenExecutive/commit/92c3633a65206a5ca4ca07d29ca489b0f141fa29))
+* **memory:** let the chat look-back see what happened and put it right ([#992](https://github.com/ForeactLabs/OpenExecutive/issues/992)) ([95075db](https://github.com/ForeactLabs/OpenExecutive/commit/95075db114af376ed321bc1cb853345afc0229f1))
+* **orchestrator:** leave a card for the person's tap to turn on As you from chat ([#993](https://github.com/ForeactLabs/OpenExecutive/issues/993)) ([0d5164a](https://github.com/ForeactLabs/OpenExecutive/commit/0d5164a8e786ed593f3fa748045057e49a10b486))
+* **orchestrator:** let Balanced wait only on its own reasons ([#982](https://github.com/ForeactLabs/OpenExecutive/issues/982)) ([7c504ec](https://github.com/ForeactLabs/OpenExecutive/commit/7c504ec16f2de755585ce6c1dfcdac7a05f649d8))
+* **orchestrator:** run an approved script card and keep two slips out of Home ([#994](https://github.com/ForeactLabs/OpenExecutive/issues/994)) ([da4eb65](https://github.com/ForeactLabs/OpenExecutive/commit/da4eb655feb3add7e1ac9e155b31b5ea7ef6772e))
+* **orchestrator:** run app actions from chat through the one gate ([#989](https://github.com/ForeactLabs/OpenExecutive/issues/989)) ([55e2b47](https://github.com/ForeactLabs/OpenExecutive/commit/55e2b47db4130da47cea77019c553a8741631220))
+* **orchestrator:** run the rest of a turn at Balanced after a flagged read ([#977](https://github.com/ForeactLabs/OpenExecutive/issues/977)) ([6c391c2](https://github.com/ForeactLabs/OpenExecutive/commit/6c391c26ce6838d48463f59422aaeb9c16937d74))
+* **providers:** raise the anthropic floor and keep Anthropic's headers off the clouds ([#1000](https://github.com/ForeactLabs/OpenExecutive/issues/1000)) ([8c2a28a](https://github.com/ForeactLabs/OpenExecutive/commit/8c2a28ac970a058ccf4eb9fb34411ab715af60cf))
+* **scheduler:** never drop a follow-up on the run's own judgement ([#983](https://github.com/ForeactLabs/OpenExecutive/issues/983)) ([5db9b40](https://github.com/ForeactLabs/OpenExecutive/commit/5db9b4096df693530624105dfb901ed09ed3696e))
+* **ui:** keep the owner off setup while the backend can't be reached ([#1002](https://github.com/ForeactLabs/OpenExecutive/issues/1002)) ([5674d36](https://github.com/ForeactLabs/OpenExecutive/commit/5674d363817828a90fcee153080e2a643b2e4bfc))
+* **ui:** look for the editable box to type in on Google Messages first ([#1004](https://github.com/ForeactLabs/OpenExecutive/issues/1004)) ([9ab420d](https://github.com/ForeactLabs/OpenExecutive/commit/9ab420dd0682ada7a6f09c5a9e12313d3e6e1b2b))
+* **ui:** press the Send button that is on screen in Google Messages ([#1005](https://github.com/ForeactLabs/OpenExecutive/issues/1005)) ([5772453](https://github.com/ForeactLabs/OpenExecutive/commit/5772453d6bb9ca59736fe23cf8d0de8cd4fd3384))
+
 ## [0.7.8](https://github.com/ForeactLabs/OpenExecutive/compare/v0.7.7...v0.7.8) (2026-11-24)
 
 
