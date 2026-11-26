@@ -480,6 +480,55 @@ class Settings(BaseSettings):
             )
         return self
 
+    # ---- Claude on Amazon Bedrock / Google Vertex AI (providers.cloud) ----
+    # ``model=id`` pairs (comma-separated, or a JSON object): the Claude
+    # model as the Council names it, then the id the cloud serves it under.
+    #
+    #   BEDROCK_REGION=us-east-1
+    #   BEDROCK_API_KEY=...   # or BEDROCK_ACCESS_KEY_ID + BEDROCK_SECRET_ACCESS_KEY
+    #   BEDROCK_MODELS=claude-sonnet-5-5=global.anthropic.claude-sonnet-5-5-v1:0
+    bedrock_region: str | None = Field(None, alias="BEDROCK_REGION")
+    bedrock_api_key: str | None = Field(None, alias="BEDROCK_API_KEY")
+    bedrock_access_key_id: str | None = Field(None, alias="BEDROCK_ACCESS_KEY_ID")
+    bedrock_secret_access_key: str | None = Field(None, alias="BEDROCK_SECRET_ACCESS_KEY")
+    bedrock_models: Annotated[dict[str, str], NoDecode] = Field(default_factory=dict, alias="BEDROCK_MODELS")
+    #   VERTEX_PROJECT_ID=my-project
+    #   VERTEX_REGION=global
+    #   VERTEX_CREDENTIALS_JSON={...}   # a service account key; unset = the machine's own
+    #   VERTEX_MODELS=claude-sonnet-5-5=claude-sonnet-5-5@20260301
+    vertex_project_id: str | None = Field(None, alias="VERTEX_PROJECT_ID")
+    vertex_region: str | None = Field(None, alias="VERTEX_REGION")
+    vertex_credentials_json: str | None = Field(None, alias="VERTEX_CREDENTIALS_JSON")
+    vertex_models: Annotated[dict[str, str], NoDecode] = Field(default_factory=dict, alias="VERTEX_MODELS")
+    cloud_timeout_s: float = Field(180.0, alias="CLOUD_TIMEOUT_S")
+
+    @field_validator("bedrock_models", mode="before")
+    @classmethod
+    def _parse_bedrock_models(cls, v: Any) -> dict[str, str]:
+        return _parse_model_map(v, "BEDROCK_MODELS")
+
+    @field_validator("vertex_models", mode="before")
+    @classmethod
+    def _parse_vertex_models(cls, v: Any) -> dict[str, str]:
+        return _parse_model_map(v, "VERTEX_MODELS")
+
+    @model_validator(mode="after")
+    def _validate_cloud_claude(self) -> "Settings":
+        for name, models in (("BEDROCK_MODELS", self.bedrock_models), ("VERTEX_MODELS", self.vertex_models)):
+            wrong = [m for m in models if not re.match(r"^claude-[a-z]+-\d", m)]
+            if wrong:
+                raise ValueError(f"{name} maps Claude models only; {', '.join(wrong)} isn't one")
+        if self.bedrock_models:
+            if not (self.bedrock_region or "").strip():
+                raise ValueError("BEDROCK_MODELS needs BEDROCK_REGION (e.g. us-east-1)")
+            if bool(self.bedrock_access_key_id) != bool(self.bedrock_secret_access_key):
+                raise ValueError("BEDROCK_ACCESS_KEY_ID and BEDROCK_SECRET_ACCESS_KEY go together")
+        if self.vertex_models and not (
+            (self.vertex_project_id or "").strip() and (self.vertex_region or "").strip()
+        ):
+            raise ValueError("VERTEX_MODELS needs VERTEX_PROJECT_ID and VERTEX_REGION")
+        return self
+
     # ---- Google and xAI keys (providers.vendors) -------------------------
     # A key of the vendor's own sends its models (``google/…`` /
     # ``x-ai/…``) straight to it instead of through OpenRouter. The model
@@ -524,13 +573,16 @@ class Settings(BaseSettings):
             or self.azure_ai_deployments
             or self.gemini_api_key
             or self.xai_api_key
+            or self.bedrock_models
+            or self.vertex_models
         ):
             raise ValueError(
                 "No LLM provider configured. Set ANTHROPIC_API_KEY, or enable "
                 "OpenRouter (OPENROUTER_ENABLED=true + OPENROUTER_API_KEY), or "
                 "enable local models (LOCAL_MODELS_ENABLED=true + LOCAL_BASE_URL), "
                 "or map Azure deployments (AZURE_AI_ENDPOINT + AZURE_AI_DEPLOYMENTS), "
-                "or set GEMINI_API_KEY or XAI_API_KEY."
+                "or set GEMINI_API_KEY or XAI_API_KEY, or map Claude on Bedrock "
+                "(BEDROCK_MODELS) or Vertex (VERTEX_MODELS)."
             )
         return self
 
