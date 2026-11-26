@@ -530,7 +530,7 @@ test("texts: a send goes to the live tab, takes over only when none is, and a Us
   assert.ok(body.indexOf("() => elsewhere() || first(document, COMPOSE)") < body.indexOf("const takeOver = elsewhere();"));
   const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
   const one = bg.slice(bg.indexOf("async function sendOneText"), bg.indexOf("function waitLoaded"));
-  assert.ok(one.includes("const live = await liveMessagesTab();") && one.includes("mayTakeOver: live.allElsewhere"));
+  assert.ok(one.includes("const live = await liveMessagesTab();") && one.includes("mayTakeOver: live.allElsewhere && (await liveMessagesTab()).allElsewhere"));
   assert.ok(one.indexOf("const live = await liveMessagesTab();") < one.indexOf('{ type: "texts_busy" }'));
   // A tab that didn't answer may be the live one: no take-over then.
   const live = bg.slice(bg.indexOf("async function liveMessagesTab"), bg.indexOf("async function sendOneText"));

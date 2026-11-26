@@ -401,7 +401,7 @@ async function sendOneText(send) {
   // Nothing was handed over, so nothing can have gone.
   if (!ready) return { ok: false, error: "Google Messages didn't load. Nothing went." };
   try {
-    const out = await chrome.tabs.sendMessage(tab.id, { type: "texts_send_here", conversation: key, number, text, mayTakeOver: live.allElsewhere });
+    const out = await chrome.tabs.sendMessage(tab.id, { type: "texts_send_here", conversation: key, number, text, mayTakeOver: live.allElsewhere && (await liveMessagesTab()).allElsewhere });
     return out && typeof out === "object" ? out : { ok: false, unsure: true, error: "Google Messages didn't answer" };
   } catch {
     // Handed over, then no answer: it may have gone.
