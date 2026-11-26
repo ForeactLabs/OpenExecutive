@@ -519,10 +519,15 @@ test("texts: a change in pairing is reported at once, not held for the once-a-mi
   assert.ok(report.indexOf("lastPaired = isPaired;") > report.indexOf('type: "texts_seen"'));
 });
 
-test("texts: a tab showing Use here takes over before sending, and never reports", () => {
+test("texts: a send goes to the live tab, takes over only when none is, and a Use here tab never reports", () => {
   const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
   const body = texts.slice(texts.indexOf("async function send(msg)"), texts.indexOf("chrome.runtime.onMessage.addListener((msg, sender, reply)"));
   const take = body.indexOf("takeOver.click();");
+  assert.ok(body.indexOf("if (takeOver && msg.mayTakeOver !== true) return") < take);
+  const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
+  const one = bg.slice(bg.indexOf("async function sendOneText"), bg.indexOf("function waitLoaded"));
+  assert.ok(one.includes("const live = await liveMessagesTab();") && one.includes("mayTakeOver: !live"));
+  assert.ok(one.indexOf("const live = await liveMessagesTab();") < one.indexOf('{ type: "texts_busy" }'));
   assert.ok(take > 0 && take < body.indexOf("if (!paired())") && take < body.indexOf("first(document, COMPOSE)"));
   const report = texts.slice(texts.indexOf("async function report"), texts.indexOf("let timer = null"));
   assert.ok(report.indexOf("if (elsewhere()) return;") < report.indexOf('type: "texts_seen"'));

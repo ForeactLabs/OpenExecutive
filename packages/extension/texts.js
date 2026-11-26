@@ -372,8 +372,10 @@
   async function send(msg) {
     const text = String(msg.text || "");
     if (!text.trim()) return { ok: false, error: "There was nothing to send." };
-    // Open in another tab too: take it over here, as the person would.
+    // Live in another tab: never take it from there, where the person may be
+    // typing. Only when no tab was live may this one take over.
     const takeOver = elsewhere();
+    if (takeOver && msg.mayTakeOver !== true) return { ok: false, error: "Google Messages is open in another tab. Nothing went." };
     if (takeOver) {
       takeOver.click();
       await waitFor(() => !elsewhere() && paired(), 15000);

@@ -347,13 +347,31 @@ function sendText(send) {
   return run;
 }
 
+// The Google Messages tab that is live: it runs in one tab at a time and
+// shows "Use here" in the others. Its own tab first, then any other. None
+// live (all show Use here, as after Chrome restarts) gives null.
+async function liveMessagesTab() {
+  const tabs = await chrome.tabs.query({ url: "https://messages.google.com/*" });
+  const { textsTabId } = await chrome.storage.session.get("textsTabId");
+  tabs.sort((a, b) => (b.id === textsTabId) - (a.id === textsTabId));
+  for (const t of tabs) {
+    const ping = await chrome.tabs.sendMessage(t.id, { type: "texts_ping" }).catch(() => null);
+    if (ping && ping.ok && !ping.elsewhere) return t;
+  }
+  return null;
+}
+
 async function sendOneText(send) {
   const text = typeof send.text === "string" ? send.text : "";
   const key = typeof send.conversation === "string" ? send.conversation : "";
   const number = typeof send.number === "string" ? send.number : "";
   if (!text.trim() || (!key && !number)) return { ok: false, error: "Nothing to send, or no one to send it to." };
-  const tab = await keepTexts();
-  if (!tab) return { ok: false, error: "Google Messages isn't open in Chrome. Nothing went." };
+  const kept = await keepTexts();
+  if (!kept) return { ok: false, error: "Google Messages isn't open in Chrome. Nothing went." };
+  // Send where Google Messages is live, so a draft in another tab is never
+  // taken from under the person. Only with no tab live may this one take over.
+  const live = await liveMessagesTab();
+  const tab = live || kept;
   const url = key ? `${MESSAGES}/${encodeURIComponent(key)}` : `${MESSAGES}/new`;
   // Google Messages runs in one tab at a time, so this may be the person's
   // own. Never take it from under a half-typed text of theirs.
@@ -378,7 +396,7 @@ async function sendOneText(send) {
   // Nothing was handed over, so nothing can have gone.
   if (!ready) return { ok: false, error: "Google Messages didn't load. Nothing went." };
   try {
-    const out = await chrome.tabs.sendMessage(tab.id, { type: "texts_send_here", conversation: key, number, text });
+    const out = await chrome.tabs.sendMessage(tab.id, { type: "texts_send_here", conversation: key, number, text, mayTakeOver: !live });
     return out && typeof out === "object" ? out : { ok: false, unsure: true, error: "Google Messages didn't answer" };
   } catch {
     // Handed over, then no answer: it may have gone.
