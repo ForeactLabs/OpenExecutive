@@ -100,6 +100,19 @@ system:
       spend the whole max_tokens budget reasoning and return no tool call —
       the onboarding interview then fails with "did not return a usable
       response".
+      AZURE_AI_DEPLOYMENTS (model=deployment pairs, with AZURE_AI_ENDPOINT
+      and either AZURE_AI_API_KEY or an Entra app: AZURE_AI_TENANT_ID,
+      AZURE_AI_CLIENT_ID, AZURE_AI_CLIENT_SECRET) routes the listed models to
+      the company's own Azure resource (providers/azure.py), right after
+      local slugs and ahead of every other rule. Claude goes to
+      <endpoint>/anthropic/ through anthropic.AsyncAnthropicFoundry, keeping
+      cache_control and thinking but not web_search; other models go to
+      <endpoint>/openai/v1 through OpenAICompatibleProvider with the api-key
+      header (or a cached Entra bearer token: https://ai.azure.com/.default
+      for the Anthropic endpoint, https://cognitiveservices.azure.com/.default
+      for the OpenAI one, or AZURE_AI_TOKEN_SCOPE for both). The model keeps its own name
+      in capability checks, tracing and usage; only the request carries the
+      deployment name.
       Slugs listed in LOCAL_MODELS route to the local backend before any
       other rule is consulted; remaining non-Claude slugs route through
       OpenRouter; selecting an
@@ -137,7 +150,7 @@ system:
     - Audit writes never break a chat turn or tool call — exceptions are swallowed with a warning.
     - Provider selection is per-call by model (openexecutive.providers.get_provider(model)). A single chat turn can mix Anthropic-routed Claude calls, OpenRouter-routed non-Claude calls, and locally-routed self-hosted models — no global "current provider" state.
     - When a non-Claude or local model is selected, Anthropic-only fields (cache_control on system/tool/user blocks, adaptive thinking + output_config) are stripped by the feature gate before the request leaves the process. The web_search server tool is kept for every OpenRouter model (the translator swaps it for OpenRouter's `web` plugin, which serves any model) and stripped only for a self-hosted OpenAI-compatible backend, which has no search plugin. Callers do NOT need to know which model they're routing to.
-    - ANTHROPIC_API_KEY is optional: a Settings validator requires at least one provider (Anthropic key, OpenRouter, or local models) to be configured, so an Anthropic-free deployment is supported but a zero-provider one fails fast at startup.
+    - ANTHROPIC_API_KEY is optional: a Settings validator requires at least one provider (Anthropic key, OpenRouter, Azure deployments, or local models) to be configured, so an Anthropic-free deployment is supported but a zero-provider one fails fast at startup.
     - External-monitor adapters are read-only — they never write to upstream systems. The whole `monitoring/` subsystem is observation-only; surfacing happens through the alert pipeline, never via a direct upstream side-effect.
     - External signals never auto-execute on the principal's behalf. Every signal that surfaces is proposed via the alert pipeline (and thus subject to triage / mute / severity gates); the scheduler never dispatches an outbound message directly off a signal.
     - An external signal whose `dedup_key` already exists is dropped at ingest via the UNIQUE(dedup_key) constraint on `external_signals`. Adapter retries / re-polls cannot multiply alerts for the same upstream event.
