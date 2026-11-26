@@ -243,9 +243,10 @@
         return;
       }
       const now = Date.now();
-      // Another tab has it: that tab reports, not this one.
-      if (elsewhere()) return;
-      const isPaired = paired();
+      // Showing Use here: read nothing, and say only that it isn't live here.
+      // The background passes that on only when no other tab is live.
+      const away = Boolean(elsewhere());
+      const isPaired = !away && paired();
       let items = [];
       let seen = null;
       if (isPaired) {
@@ -262,7 +263,7 @@
         return;
       }
       lastReport = now;
-      const answer = await chrome.runtime.sendMessage({ type: "texts_seen", paired: isPaired, items }).catch(() => null);
+      const answer = await chrome.runtime.sendMessage({ type: "texts_seen", paired: isPaired, items, elsewhere: away }).catch(() => null);
       // A pairing change counts as told once the site took it, or once no
       // site was open to tell: a site opened later hears it within a minute.
       if (isPaired === lastPaired) fastTries = 0;

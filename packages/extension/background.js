@@ -975,11 +975,20 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (msg.type === "texts_seen") {
     // Only the Google Messages page says what Google Messages shows.
     if (!sender.tab || !onMessages(sender.url || sender.tab.url)) return false;
-    const body = { paired: msg.paired === true, items: Array.isArray(msg.items) ? msg.items.slice(0, 100) : [] };
-    // Nothing leaves the browser while Texts is off.
+    const away = msg.elsewhere === true;
+    const body = {
+      paired: !away && msg.paired === true,
+      items: !away && Array.isArray(msg.items) ? msg.items.slice(0, 100) : [],
+    };
+    // Nothing leaves the browser while Texts is off. A tab showing Use here
+    // speaks only when no tab here is live, so it never undoes a live one.
     chrome.storage.local
       .get("textsOn")
-      .then((got) => (got.textsOn === true ? passOnTexts(body) : { ok: false, off: true }))
+      .then(async (got) => {
+        if (got.textsOn !== true) return { ok: false, off: true };
+        if (away && (await liveMessagesTab()).tab) return { ok: true };
+        return passOnTexts(body);
+      })
       .then(reply, () => reply({ ok: false }));
     return true;
   }

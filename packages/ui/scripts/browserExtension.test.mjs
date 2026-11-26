@@ -537,7 +537,12 @@ test("texts: a send goes to the live tab, takes over only when none is, and a Us
   assert.ok(live.includes("if (!ping || !ping.ok || ping.elsewhere !== true) allElsewhere = false;"));
   assert.ok(take > 0 && take < body.indexOf("if (!paired())") && take < body.indexOf("const box = await waitFor(() => first(document, COMPOSE), 15000)"));
   const report = texts.slice(texts.indexOf("async function report"), texts.indexOf("let timer = null"));
-  assert.ok(report.indexOf("if (elsewhere()) return;") < report.indexOf('type: "texts_seen"'));
+  // A Use here tab reads nothing and says it isn't live, and only when no tab is.
+  assert.ok(report.includes("const isPaired = !away && paired();"));
+  assert.ok(report.includes("elsewhere: away }"));
+  const bgSeen = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
+  assert.ok(bgSeen.includes("if (away && (await liveMessagesTab()).tab) return { ok: true };"));
+  assert.ok(bgSeen.includes("items: !away && Array.isArray(msg.items)"));
   assert.ok(texts.includes('[contenteditable="true"][role="textbox"]'));
 });
 
