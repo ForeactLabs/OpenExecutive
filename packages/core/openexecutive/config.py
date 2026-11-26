@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import re
@@ -70,6 +71,38 @@ _DEFAULT_OPENROUTER_CATALOG_PROVIDERS: tuple[str, ...] = (
 # Six hours: OpenRouter adds models a few times a month, so anything tighter
 # is wasted requests; a restart also refreshes.
 _DEFAULT_OPENROUTER_CATALOG_REFRESH_S = 6 * 60 * 60.0
+
+
+def _parse_model_map(v: Any, name: str) -> dict[str, str]:
+    """``model=deployment`` pairs (comma-separated) or a JSON object, for a
+    setting that maps model names to a backend's own names. Blank → ``{}``."""
+    if isinstance(v, dict):
+        pairs = list(v.items())
+    elif v is None or _blank_or_comment(v):
+        return {}
+    elif isinstance(v, str) and v.strip().startswith("{"):
+        loaded = json.loads(v)
+        if not isinstance(loaded, dict):
+            raise ValueError(f"{name} must be a JSON object or model=deployment pairs")
+        pairs = list(loaded.items())
+    elif isinstance(v, str):
+        pairs = []
+        for item in v.split(","):
+            if not item.strip():
+                continue
+            model, sep, target = item.partition("=")
+            if not sep:
+                raise ValueError(f"{name}: {item.strip()!r} is not model=deployment")
+            pairs.append((model, target))
+    else:
+        raise ValueError(f"{name} must be a JSON object or model=deployment pairs")
+    out: dict[str, str] = {}
+    for model, target in pairs:
+        model, target = str(model).strip(), str(target).strip()
+        if not model or not target:
+            raise ValueError(f"{name}: every entry needs a model and a deployment")
+        out[model] = target
+    return out
 
 
 def _parse_csv_list(v: Any) -> list[str]:
@@ -402,6 +435,52 @@ class Settings(BaseSettings):
             )
         return self
 
+    # ---- Azure (Microsoft Foundry / Azure OpenAI) -----------------------
+    # Models a company already runs in its own Azure account. Each model the
+    # Council and the model settings name (``claude-sonnet-5-5``,
+    # ``openai/gpt-6-astra``, ``meta-llama/llama-4-maverick``) is mapped to
+    # the deployment that serves it, and only mapped models go to Azure.
+    # Claude runs on Foundry's Anthropic endpoint (prompt caching and
+    # thinking kept); every other model on its OpenAI-compatible v1 endpoint.
+    #
+    #   AZURE_AI_ENDPOINT=https://contoso-ai.services.ai.azure.com
+    #   AZURE_AI_API_KEY=...            # or the three AZURE_AI_* Entra settings
+    #   AZURE_AI_DEPLOYMENTS=claude-sonnet-5-5=claude-sonnet-prod,openai/gpt-6-astra=gpt6
+    azure_ai_endpoint: str | None = Field(None, alias="AZURE_AI_ENDPOINT")
+    azure_ai_api_key: str | None = Field(None, alias="AZURE_AI_API_KEY")
+    # Sign in as an Entra app instead of with a key (client credentials).
+    azure_ai_tenant_id: str | None = Field(None, alias="AZURE_AI_TENANT_ID")
+    azure_ai_client_id: str | None = Field(None, alias="AZURE_AI_CLIENT_ID")
+    azure_ai_client_secret: str | None = Field(None, alias="AZURE_AI_CLIENT_SECRET")
+    azure_ai_token_scope: str = Field(
+        "https://cognitiveservices.azure.com/.default", alias="AZURE_AI_TOKEN_SCOPE"
+    )
+    # ``model=deployment`` pairs, comma-separated, or a JSON object.
+    azure_ai_deployments: Annotated[dict[str, str], NoDecode] = Field(
+        default_factory=dict, alias="AZURE_AI_DEPLOYMENTS"
+    )
+    azure_ai_timeout_s: float = Field(180.0, alias="AZURE_AI_TIMEOUT_S")
+
+    @field_validator("azure_ai_deployments", mode="before")
+    @classmethod
+    def _parse_azure_deployments(cls, v: Any) -> dict[str, str]:
+        return _parse_model_map(v, "AZURE_AI_DEPLOYMENTS")
+
+    @model_validator(mode="after")
+    def _validate_azure(self) -> "Settings":
+        if not self.azure_ai_deployments:
+            return self
+        endpoint = (self.azure_ai_endpoint or "").strip()
+        if not endpoint.startswith("https://"):
+            raise ValueError("AZURE_AI_DEPLOYMENTS needs AZURE_AI_ENDPOINT (https://<resource>.services.ai.azure.com)")
+        entra = (self.azure_ai_tenant_id, self.azure_ai_client_id, self.azure_ai_client_secret)
+        if not self.azure_ai_api_key and not all(entra):
+            raise ValueError(
+                "AZURE_AI_DEPLOYMENTS needs AZURE_AI_API_KEY, or AZURE_AI_TENANT_ID, "
+                "AZURE_AI_CLIENT_ID and AZURE_AI_CLIENT_SECRET for an Entra app"
+            )
+        return self
+
     @model_validator(mode="after")
     def _validate_provider_available(self) -> "Settings":
         # At least one backend must be reachable, or every model call fails.
@@ -409,11 +488,13 @@ class Settings(BaseSettings):
             self.anthropic_api_key
             or self.openrouter_enabled
             or self.local_models_enabled
+            or self.azure_ai_deployments
         ):
             raise ValueError(
                 "No LLM provider configured. Set ANTHROPIC_API_KEY, or enable "
                 "OpenRouter (OPENROUTER_ENABLED=true + OPENROUTER_API_KEY), or "
-                "enable local models (LOCAL_MODELS_ENABLED=true + LOCAL_BASE_URL)."
+                "enable local models (LOCAL_MODELS_ENABLED=true + LOCAL_BASE_URL), "
+                "or map Azure deployments (AZURE_AI_ENDPOINT + AZURE_AI_DEPLOYMENTS)."
             )
         return self
 
