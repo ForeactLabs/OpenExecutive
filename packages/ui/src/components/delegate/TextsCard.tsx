@@ -54,6 +54,10 @@ export default function TextsCard() {
 
   // Whether to look often: set from the last read, read by the timer.
   const waiting = useRef(false);
+  // Each look and each save gets a number; an answer lands only if no newer
+  // one has, so a look sent before a click never undoes it.
+  const asked = useRef(0);
+  const textsSeen = useRef(0);
   useEffect(() => {
     waiting.current = Boolean(state?.enabled && !state.paired && browser?.connected);
   }, [state, browser]);
@@ -62,20 +66,18 @@ export default function TextsCard() {
     const ctl = new AbortController();
     // Looks may overlap (a slow one never stops the next), but an older
     // answer never lands after a newer one.
-    let asked = 0;
-    let textsSeen = 0;
     let browserSeen = 0;
     const load = () => {
-      const look = ++asked;
+      const look = ++asked.current;
       getTexts(ctl.signal)
         .then((s) => {
-          if (look < textsSeen) return;
-          textsSeen = look;
+          if (look < textsSeen.current) return;
+          textsSeen.current = look;
           setState(s);
           setError(null);
         })
         .catch((err: unknown) => {
-          if (!ctl.signal.aborted && look >= textsSeen)
+          if (!ctl.signal.aborted && look >= textsSeen.current)
             setError(err instanceof Error ? err.message : "Couldn't load this setting.");
         });
       getBrowserStatus()
@@ -115,8 +117,14 @@ export default function TextsCard() {
 
   const toggle = async (next: boolean) => {
     setBusy(true);
+    // Any look already out started before this click: drop its answer.
+    const save = ++asked.current;
     try {
-      setState(await updateTexts(next));
+      const saved = await updateTexts(next);
+      if (save >= textsSeen.current) {
+        textsSeen.current = save;
+        setState(saved);
+      }
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't save that.");

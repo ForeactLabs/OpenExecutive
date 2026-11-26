@@ -13,8 +13,12 @@ test("texts card: looks more often only while waiting on the phone, with the ext
 });
 
 test("texts card: an older answer never lands after a newer one", () => {
-  assert.ok(card.includes("const look = ++asked;"));
-  assert.ok(card.includes("if (look < textsSeen) return;"));
+  assert.ok(card.includes("const look = ++asked.current;"));
+  assert.ok(card.includes("if (look < textsSeen.current) return;"));
+  // A save counts as the newest answer too, so a look sent before the click never undoes it.
+  const toggle = card.slice(card.indexOf("const toggle"), card.indexOf("const extension"));
+  assert.ok(toggle.indexOf("const save = ++asked.current;") < toggle.indexOf("await updateTexts(next)"));
+  assert.ok(toggle.includes("if (save >= textsSeen.current)"));
   assert.ok(card.includes("if (look < browserSeen) return;"));
 });
 
