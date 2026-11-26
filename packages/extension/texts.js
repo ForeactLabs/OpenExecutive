@@ -331,7 +331,12 @@
     }
   }
 
+  // Google Messages draws the box to type in as an editable div
+  // (`div[contenteditable][role=textbox][data-e2e-message-input-box]`),
+  // not a textarea, so that comes first; the textarea forms are for older
+  // versions of the page.
   const COMPOSE = [
+    '[data-e2e-message-input-box][contenteditable="true"]',
     "textarea[data-e2e-message-input-box]",
     "mws-message-compose textarea",
     "mws-autosize-textarea textarea",

@@ -545,6 +545,9 @@ test("texts: a send goes to the live tab, takes over only when none is, and a Us
   assert.ok(bgSeen.includes("if (away && (await liveMessagesTab()).tab) return { ok: true };"));
   assert.ok(bgSeen.includes("items: !away && Array.isArray(msg.items)"));
   assert.ok(texts.includes('[contenteditable="true"][role="textbox"]'));
+  // The live page draws an editable div; it must be looked for before any textarea.
+  const compose = texts.slice(texts.indexOf("const COMPOSE = ["));
+  assert.ok(compose.indexOf(`[data-e2e-message-input-box][contenteditable="true"]`) < compose.indexOf(`"textarea`));
 });
 
 test("texts: a send never takes the person's own tab from under a half-typed text", () => {
