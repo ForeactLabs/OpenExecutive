@@ -247,22 +247,6 @@ export function waitedFor(iso: string | null | undefined, now: Date = new Date()
   return days === 0 ? "today" : `${days} ${days === 1 ? "day" : "days"}`;
 }
 
-/** One row of Home's Waiting on list: the job in words, who started it,
- *  why it waits ("Waits: it's about money") and how long. */
-export function waitingRow(
-  item: WaitingItem,
-  now: Date = new Date(),
-): { title: string; started: string; because: string; age: string } {
-  const top = item.view?.top ?? {};
-  const because = (top.because ?? "").trim();
-  return {
-    title: (top.title ?? "").trim() || item.headline.trim(),
-    started: (top.started ?? "").trim(),
-    because: because ? `Waits: ${because}` : "",
-    age: waitedFor(item.created_at, now),
-  };
-}
-
 /** The line under Home's "Waiting on …" heading: that it needs nothing from
  *  the reader, whose OK it waits for, and how old the oldest is. */
 export function waitingNote(
