@@ -82,3 +82,45 @@ export const MIC_TONES: Record<"start" | "stop", readonly [number, number]> = {
   start: [660, 880],
   stop: [880, 660],
 };
+
+// The longest the browser alone listens when the server didn't say.
+export const ALONE_MAX_SECONDS = 300;
+export const MIC_BLOCKED = "Open Executive can't use the microphone. Allow it in your browser's site settings.";
+
+export type MicMode = { mode: "record" | "alone"; maxSeconds: number } | { mode: "hidden" } | { mode: "ask-again" };
+
+/** How the chat mic works here, from `/chat/voice` (`null`: no answer) and
+ *  what the browser can do: record for the server to write out, or let the
+ *  browser's own recognition hear it alone, or nothing. No answer at all
+ *  isn't "no server", so it asks again rather than pick. */
+export function micMode(
+  status: { available: boolean; max_seconds: number } | null,
+  canRecord: boolean,
+  canHear: boolean,
+): MicMode {
+  if (status === null) return canRecord || canHear ? { mode: "ask-again" } : { mode: "hidden" };
+  if (status.available && canRecord) return { mode: "record", maxSeconds: status.max_seconds };
+  if (canHear) return { mode: "alone", maxSeconds: status.max_seconds || ALONE_MAX_SECONDS };
+  return { mode: "hidden" };
+}
+
+/** When to ask `/chat/voice` again after the `tries`th call got no answer,
+ *  in ms, or null to stop: three more tries, 5, 10 and 15 s apart. */
+export function askAgainAfter(tries: number): number | null {
+  return tries < 4 ? 5000 * tries : null;
+}
+
+/** What the browser hearing alone ending says (`error`: the recognizer's
+ *  error, or null for a tap or the time limit), and whether the mic goes
+ *  for the rest of the page: some browsers (Brave, Opera, Electron shells)
+ *  have the recognizer but nothing behind it, and every run ends "network". */
+export function aloneEnd(error: string | null, heard: string): { message: string | null; hide: boolean } {
+  if (error === "not-allowed" || error === "service-not-allowed" || error === "audio-capture") {
+    return { message: MIC_BLOCKED, hide: false };
+  }
+  if (heard.trim()) return { message: null, hide: false };
+  if (error === "network") {
+    return { message: "This browser can't turn speech into words on its own. Type instead.", hide: true };
+  }
+  return { message: error ? "Couldn't hear it. Try again." : "Didn't catch any words. Try again.", hide: false };
+}

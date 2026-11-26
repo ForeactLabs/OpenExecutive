@@ -14,14 +14,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import Icon from "@/components/Icon";
 import { getVoiceStatus, transcribeRecording } from "@/lib/api";
-import { clock, joinDictation, pickRecordingType, recordingFilename, splitHeard } from "@/lib/dictation";
+import {
+  aloneEnd,
+  askAgainAfter,
+  clock,
+  joinDictation,
+  MIC_BLOCKED,
+  micMode,
+  pickRecordingType,
+  recordingFilename,
+  splitHeard,
+} from "@/lib/dictation";
 import { playMicTone } from "@/lib/micTone";
 
 type Phase = "idle" | "listening" | "hearing";
-
-// The longest the browser alone listens when the server didn't say.
-const ALONE_MAX_SECONDS = 300;
-const MIC_BLOCKED = "Open Executive can't use the microphone. Allow it in your browser's site settings.";
 
 interface Props {
   disabled?: boolean;
@@ -90,17 +96,14 @@ export default function MicButton({ disabled, onLive, onText, onError }: Props) 
     const load = () =>
       void getVoiceStatus().then((status) => {
         if (!live) return;
-        if (status === null) {
+        const how = micMode(status, canRecord, canHear);
+        if (how.mode === "ask-again") {
           tries += 1;
-          if (tries < 4) retry = setTimeout(load, 5000 * tries);
-          return;
-        }
-        if (status.available && canRecord) {
-          setAlone(false);
-          setMaxSeconds(status.max_seconds);
-        } else if (canHear) {
-          setAlone(true);
-          setMaxSeconds(status.max_seconds || ALONE_MAX_SECONDS);
+          const wait = askAgainAfter(tries);
+          if (wait !== null) retry = setTimeout(load, wait);
+        } else if (how.mode !== "hidden") {
+          setAlone(how.mode === "alone");
+          setMaxSeconds(how.maxSeconds);
         }
       });
     load();
@@ -143,13 +146,9 @@ export default function MicButton({ disabled, onLive, onText, onError }: Props) 
       playMicTone("stop");
       const heard = heardRef.current;
       onText(heard);
-      if (error === "not-allowed" || error === "service-not-allowed" || error === "audio-capture") onError(MIC_BLOCKED);
-      else if (error === "network" && !heard.trim()) {
-        // Some browsers (Brave, Opera, Electron shells) have the recognizer
-        // but nothing behind it: the mic goes for the rest of the page.
-        onError("This browser can't turn speech into words on its own. Type instead.");
-        setMaxSeconds(null);
-      } else if (!heard.trim()) onError(error ? "Couldn't hear it. Try again." : "Didn't catch any words. Try again.");
+      const end = aloneEnd(error, heard);
+      if (end.message) onError(end.message);
+      if (end.hide) setMaxSeconds(null);
       setPhase("idle");
     },
     [onError, onText],
