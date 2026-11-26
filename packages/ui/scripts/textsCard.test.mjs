@@ -19,6 +19,9 @@ test("texts card: an older answer never lands after a newer one", () => {
   const toggle = card.slice(card.indexOf("const toggle"), card.indexOf("const extension"));
   assert.ok(toggle.indexOf("const save = ++asked.current;") < toggle.indexOf("await updateTexts(next)"));
   assert.ok(toggle.includes("if (save >= textsSeen.current)"));
+  // And no look starts while the save is out, so none can read the row from before it.
+  assert.ok(toggle.indexOf("saving.current = true;") < toggle.indexOf("await updateTexts(next)"));
+  assert.ok(card.indexOf("if (saving.current) return;") < card.indexOf("const look = ++asked.current;"));
   assert.ok(card.includes("if (look < browserSeen) return;"));
 });
 

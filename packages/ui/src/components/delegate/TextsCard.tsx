@@ -58,6 +58,8 @@ export default function TextsCard() {
   // one has, so a look sent before a click never undoes it.
   const asked = useRef(0);
   const textsSeen = useRef(0);
+  // No look while a save is out: it could read the row from before it.
+  const saving = useRef(false);
   useEffect(() => {
     waiting.current = Boolean(state?.enabled && !state.paired && browser?.connected);
   }, [state, browser]);
@@ -68,6 +70,7 @@ export default function TextsCard() {
     // answer never lands after a newer one.
     let browserSeen = 0;
     const load = () => {
+      if (saving.current) return;
       const look = ++asked.current;
       getTexts(ctl.signal)
         .then((s) => {
@@ -119,6 +122,7 @@ export default function TextsCard() {
     setBusy(true);
     // Any look already out started before this click: drop its answer.
     const save = ++asked.current;
+    saving.current = true;
     try {
       const saved = await updateTexts(next);
       if (save >= textsSeen.current) {
@@ -129,6 +133,7 @@ export default function TextsCard() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't save that.");
     } finally {
+      saving.current = false;
       setBusy(false);
     }
   };
