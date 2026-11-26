@@ -12,7 +12,14 @@ import { watchingLine } from "@/lib/watchingNext";
 // Schedule. Stop ends that one thing
 // only (POST /today/watching/stop). What it left for you stays in Needs you.
 
-export default function WatchingNext({ items }: { items: WatchingItem[] }) {
+export default function WatchingNext({
+  items,
+  onStopped,
+}: {
+  items: WatchingItem[];
+  /** One was stopped: Home reads `/today` again. */
+  onStopped?: () => void;
+}) {
   const [stopped, setStopped] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -25,6 +32,7 @@ export default function WatchingNext({ items }: { items: WatchingItem[] }) {
     try {
       await stopWatching(item.key);
       setStopped((prev) => new Set(prev).add(item.key));
+      onStopped?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't stop it.");
     } finally {

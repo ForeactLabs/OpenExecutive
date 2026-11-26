@@ -878,7 +878,7 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
                   <h2 id="sec-what-im-doing" className="mb-3 text-lg font-semibold text-fg">
                     What I&apos;m doing
                   </h2>
-                  <WatchingNext items={watchingItems} />
+                  <WatchingNext items={watchingItems} onStopped={refreshToday} />
                   <DoneForYou
                     rows={doneRows}
                     onRetry={(row) => void handleRetryApproval(row)}
