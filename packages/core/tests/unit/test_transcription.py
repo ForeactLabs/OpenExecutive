@@ -25,6 +25,7 @@ def _settings(**over: Any) -> SimpleNamespace:
         openrouter_base_url="https://openrouter.ai/api/v1",
         openrouter_referer=None,
         openrouter_app_title="Open Executive",
+        gemini_api_key=None,
     )
     base.update(over)
     return SimpleNamespace(**base)
@@ -91,6 +92,55 @@ def test_a_named_server_wins_over_openrouter(settings) -> None:
     assert where.base_url == "http://whisper.local:8000/v1"
     assert where.api_key is None
     assert where.model == transcription.DEFAULT_MODEL
+
+
+def test_gemini_writes_it_out_when_only_googles_key_is_set(settings) -> None:
+    settings(gemini_api_key="g-key")
+    where = transcription.target()
+    assert where is not None and where.kind == "gemini" and not where.via_openrouter
+    assert where.model == transcription.GEMINI_MODEL
+    assert transcription.available() is True
+    # OpenRouter, or a named server, still comes first.
+    settings(gemini_api_key="g-key", openrouter_api_key="or-key")
+    where = transcription.target()
+    assert where is not None and where.via_openrouter
+
+
+async def test_gemini_gets_the_recording_inline_and_answers_the_words(settings, server) -> None:
+    import base64
+    import json
+
+    settings(gemini_api_key="g-key")
+    server["answer"] = (200, {
+        "candidates": [{"content": {"parts": [{"text": " move my call "}, {"text": "to Friday"}]}}],
+        "usageMetadata": {"promptTokenCount": 120, "candidatesTokenCount": 6},
+    })
+    text = await transcription.transcribe(b"\x1a\x45\xdf\xa3voice", "recording.webm", "audio/webm;codecs=opus")
+
+    assert text == "move my call to Friday"
+    [req] = server["requests"]
+    assert str(req.url) == (
+        f"https://generativelanguage.googleapis.com/v1beta/models/{transcription.GEMINI_MODEL}:generateContent"
+    )
+    assert req.headers["x-goog-api-key"] == "g-key"
+    assert "authorization" not in req.headers
+    body = json.loads(req.read())
+    parts = body["contents"][0]["parts"]
+    assert parts[0]["text"] == transcription.GEMINI_PROMPT
+    assert parts[1]["inline_data"]["mime_type"] == "audio/webm"
+    assert base64.b64decode(parts[1]["inline_data"]["data"]) == b"\x1a\x45\xdf\xa3voice"
+    [row] = server["rows"]
+    assert row["actor"] == "transcription" and row["model"] == transcription.GEMINI_MODEL
+    assert row["usage"].input_tokens == 120 and row["usage"].output_tokens == 6
+
+
+async def test_gemini_failing_or_too_large_is_a_transcription_error(settings, server) -> None:
+    settings(gemini_api_key="g-key")
+    server["answer"] = (400, {"error": {"message": "bad audio"}})
+    with pytest.raises(transcription.TranscriptionError):
+        await transcription.transcribe(b"x", "voice.ogg", "audio/ogg")
+    with pytest.raises(transcription.TranscriptionError, match="14 MB"):
+        await transcription.transcribe(b"x" * (transcription.GEMINI_MAX_BYTES + 1), "voice.ogg", "audio/ogg")
 
 
 async def test_a_recording_is_sent_as_a_standard_upload(settings, server) -> None:
