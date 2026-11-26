@@ -22,7 +22,9 @@ overrides both), cached until shortly before it expires.
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
+import weakref
 from collections.abc import AsyncIterator, Awaitable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import Any
@@ -117,7 +119,22 @@ class EntraToken:
         self._http = http
         self._token: str | None = None
         self._expires_at = 0.0
-        self._lock = asyncio.Lock()
+        # One lock per event loop: background work (alerts, attunement) runs
+        # its model calls on loops of its own threads, and an asyncio.Lock
+        # waited on from a second loop raises. Two loops fetching at once
+        # just sign in twice.
+        self._locks: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Lock] = (
+            weakref.WeakKeyDictionary()
+        )
+        self._locks_guard = threading.Lock()
+
+    def _lock(self) -> asyncio.Lock:
+        loop = asyncio.get_running_loop()
+        with self._locks_guard:
+            lock = self._locks.get(loop)
+            if lock is None:
+                lock = self._locks[loop] = asyncio.Lock()
+            return lock
 
     def cached(self) -> str | None:
         if self._token is not None and time.monotonic() < self._expires_at:
@@ -127,7 +144,7 @@ class EntraToken:
     async def get(self) -> str:
         if (token := self.cached()) is not None:
             return token
-        async with self._lock:
+        async with self._lock():
             if (token := self.cached()) is not None:
                 return token
             if self._http is not None:

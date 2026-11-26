@@ -2,6 +2,7 @@
 Azure account, each mapped to its deployment (providers.azure)."""
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -473,3 +474,28 @@ async def test_an_expired_token_is_fetched_again_before_a_stream(monkeypatch: py
         token._expires_at = 0.0  # the clock passes the token's expiry
     assert len(calls) == 2
     assert [r.headers["authorization"] for r in seen] == ["Bearer token-1", "Bearer token-2"]
+
+
+def test_a_token_is_shared_by_loops_on_other_threads() -> None:
+    import threading
+
+    calls: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json={"access_token": f"token-{len(calls)}", "expires_in": 3600})
+
+    token = azure.EntraToken(tenant_id="t", client_id="c", client_secret="s", scope="sc")
+    results: list[str] = []
+
+    async def fetch() -> None:
+        token._http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        token._expires_at = 0.0  # each loop has to sign in, under its own lock
+        results.append(await token.get())
+
+    threads = [threading.Thread(target=lambda: asyncio.run(fetch())) for _ in range(3)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(results) == 3 and all(r.startswith("token-") for r in results)

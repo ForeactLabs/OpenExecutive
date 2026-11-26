@@ -416,6 +416,7 @@ def _assistant_content_to_openai(content: Any, typed_text: bool = False) -> dict
     text_chunks: list[str] = []
     tool_calls: list[dict[str, Any]] = []
     reasoning_details: list[Any] = []
+    extras: dict[str, Any] = {}
     for block in content:
         if not isinstance(block, dict):
             continue
@@ -430,7 +431,11 @@ def _assistant_content_to_openai(content: Any, typed_text: bool = False) -> dict
         elif btype == OPENROUTER_REASONING_BLOCK:
             details = block.get("reasoning_details")
             if isinstance(details, list):
-                reasoning_details.extend(details)
+                for detail in details:
+                    if isinstance(detail, dict) and detail.get("type") == TOOL_CALL_EXTRA:
+                        extras[str(detail.get("id"))] = detail.get("extra_content")
+                    else:
+                        reasoning_details.append(detail)
         elif btype == "tool_use":
             tool_calls.append(
                 {
@@ -450,6 +455,10 @@ def _assistant_content_to_openai(content: Any, typed_text: bool = False) -> dict
         out["content"] = "\n\n".join(text_chunks) if text_chunks else None
     if reasoning_details:
         out["reasoning_details"] = reasoning_details
+    for call in tool_calls:
+        extra = extras.get(call["id"])
+        if isinstance(extra, dict):
+            call["extra_content"] = extra
     if tool_calls:
         out["tool_calls"] = tool_calls
     return out
@@ -701,6 +710,18 @@ def _block(type_: str, **fields: Any) -> SimpleNamespace:
 # whose thinking was dropped; other vendors lose their chain of thought).
 # https://openrouter.ai/docs/guides/best-practices/reasoning-tokens#preserving-reasoning-blocks
 OPENROUTER_REASONING_BLOCK = "openrouter_reasoning"
+# A ``reasoning_details`` entry holding a tool call's ``extra_content``
+# (Gemini's ``thought_signature``, which its OpenAI-compatible API needs back
+# on the same call next turn). It rides the reasoning block so every loop
+# that already replays that block keeps it; on the way out it goes back onto
+# its call and never reaches a backend as reasoning.
+TOOL_CALL_EXTRA = "openexecutive.tool_call_extra"
+
+
+def _tool_call_extra(call_id: Any, extra: Any) -> dict[str, Any] | None:
+    if isinstance(extra, dict) and extra and isinstance(call_id, str) and call_id:
+        return {"type": TOOL_CALL_EXTRA, "id": call_id, "extra_content": extra}
+    return None
 
 
 def reasoning_replay_block(block: Any) -> dict[str, Any] | None:
@@ -847,6 +868,7 @@ def from_openai_response(body: dict[str, Any]) -> SimpleNamespace:
         content_blocks.append(_block("text", text=_strip_cite_markup(text)))
 
     skipped_server_calls = 0
+    call_extras: list[dict[str, Any]] = []
     for call in msg.get("tool_calls") or []:
         if _is_server_tool_call(call):
             # OpenRouter executed it already (web search); not for the
@@ -865,6 +887,8 @@ def from_openai_response(body: dict[str, Any]) -> SimpleNamespace:
                 input=_strip_cite_in_value(parsed),
             )
         )
+        if (extra := _tool_call_extra(call.get("id"), call.get("extra_content"))) is not None:
+            call_extras.append(extra)
     stop_reason = _stop_reason_from_openai(choice.get("finish_reason"))
     if skipped_server_calls and not any(b.type == "tool_use" for b in content_blocks):
         # Every tool call was server-side: nothing is left for the caller
@@ -875,7 +899,10 @@ def from_openai_response(body: dict[str, Any]) -> SimpleNamespace:
     # itself only ever emits text first for those prompts), so the synthetic
     # block must never displace the text block. Order carries no meaning on
     # the replay side — ``reasoning_details`` is a separate message field.
-    reasoning_block = _reasoning_details_block(msg.get("reasoning_details"))
+    details = msg.get("reasoning_details")
+    reasoning_block = _reasoning_details_block(
+        [*(details if isinstance(details, list) else []), *call_extras]
+    )
     if reasoning_block is not None:
         content_blocks.append(reasoning_block)
 
@@ -1064,10 +1091,12 @@ class StreamAccumulator:
             if idx in self._server_tool_indices:
                 continue  # continuation chunk of a server-side call
             slot = self._tool_calls.setdefault(
-                idx, {"id": "", "name": "", "arg_chunks": []}
+                idx, {"id": "", "name": "", "arg_chunks": [], "extra_content": None}
             )
             if tc.get("id"):
                 slot["id"] = tc["id"]
+            if isinstance(tc.get("extra_content"), dict):
+                slot["extra_content"] = tc["extra_content"]
             fn = tc.get("function") or {}
             if fn.get("name"):
                 slot["name"] = fn["name"]
@@ -1117,8 +1146,14 @@ class StreamAccumulator:
                     input=_strip_cite_in_value(parsed),
                 )
             )
+        call_extras = [
+            extra
+            for idx in sorted(self._tool_calls)
+            if (extra := _tool_call_extra(self._tool_calls[idx]["id"], self._tool_calls[idx].get("extra_content")))
+            is not None
+        ]
         # Reasoning last — see from_openai_response for why.
-        reasoning_block = _reasoning_details_block(self._reasoning_details)
+        reasoning_block = _reasoning_details_block([*self._reasoning_details, *call_extras])
         if reasoning_block is not None:
             content_blocks.append(reasoning_block)
         cache_read, cache_create = _extract_cache_token_counts(self._usage)

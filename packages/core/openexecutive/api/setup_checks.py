@@ -198,6 +198,9 @@ async def check_ai_model(snap: Snapshot) -> SetupCheck:
             for name, on in (
                 ("OpenRouter", settings.openrouter_enabled),
                 ("local models", settings.local_models_enabled),
+                ("your Azure deployments", bool(settings.azure_ai_deployments)),
+                ("Google", bool(settings.gemini_api_key)),
+                ("xAI", bool(settings.xai_api_key)),
             )
             if on
         )
