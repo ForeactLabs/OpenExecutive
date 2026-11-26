@@ -436,16 +436,19 @@ const SEND_SPOT = `(() => {
     const b = shown.find((x) => !x.disabled);
     if (!b) return null;
     const r = b.getBoundingClientRect();
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2, h: innerHeight };
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2, h: innerHeight, at: location.origin + location.pathname };
   }
   return null;
 })()`;
 
-async function sendSpot(target) {
+// The page it reads is checked in the same reading as the spot it clicks:
+// if the person opened another conversation meanwhile, nothing is pressed.
+async function sendSpot(target, at) {
   let last = null;
   for (let i = 0; i < 12; i++) {
     const got = await chrome.debugger.sendCommand(target, "Runtime.evaluate", { expression: SEND_SPOT, returnByValue: true }).catch(() => null);
     const spot = got && got.result ? got.result.value : null;
+    if (spot && spot.at !== at) return null;
     if (spot && last && spot.x === last.x && spot.y === last.y && spot.h === last.h) return spot;
     last = spot;
     await new Promise((ok) => setTimeout(ok, 150));
@@ -459,7 +462,11 @@ async function pressInTab(tab, x, y) {
   if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > 10000 || y > 10000) return { ok: false };
   const now = await chrome.tabs.get(tab.id).catch(() => null);
   if (!now || !onMessages(now.url)) return { ok: false };
-  if (conversation && !String(now.url).split(/[?#]/)[0].endsWith(`/${encodeURIComponent(conversation)}`)) return { ok: false };
+  const at = String(now.url).split(/[?#]/)[0];
+  if (conversation && !at.endsWith(`/${encodeURIComponent(conversation)}`)) return { ok: false };
+  // A new number has no conversation to match: it must still be on the one
+  // the send opened, the page it was on when it asked for the press.
+  if (!conversation && !/\/web\/conversations\/(?!new$)[^/]+$/.test(at)) return { ok: false };
   const target = { tabId: tab.id };
   try {
     await chrome.debugger.attach(target, "1.3");
@@ -469,7 +476,7 @@ async function pressInTab(tab, x, y) {
   // Once the press has started it may have gone, even if a step after fails.
   let started = false;
   try {
-    const spot = await sendSpot(target);
+    const spot = await sendSpot(target, at);
     if (!spot) return { ok: false };
     for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
       if (type === "mousePressed") started = true;

@@ -601,8 +601,12 @@ test("texts: Send is a real press, only in the tab and conversation the send was
   // The conversation checked is the one the send was handed, not what the page says.
   assert.ok(press.includes("const conversation = pressing.conversation;"));
   // The button is found again after attaching (the debugging bar moves it), and the click goes there.
-  assert.ok(press.indexOf("const spot = await sendSpot(target);") > press.indexOf("chrome.debugger.attach"));
+  assert.ok(press.indexOf("const spot = await sendSpot(target, at);") > press.indexOf("chrome.debugger.attach"));
   assert.ok(press.includes("x: spot.x, y: spot.y"));
+  // The page is checked in the same reading as the spot that gets clicked, and a new number must stay on its conversation.
+  assert.ok(bg.includes("at: location.origin + location.pathname") && bg.includes("if (spot && spot.at !== at) return null;"));
+  assert.ok(press.includes("const spot = await sendSpot(target, at);"));
+  assert.ok(press.includes("if (!conversation && !/\\/web\\/conversations\\/(?!new$)[^/]+$/.test(at)) return { ok: false };"));
   // A press that started may have gone, even if a later step failed.
   assert.ok(press.includes('if (type === "mousePressed") started = true;') && press.includes("return { ok: false, maybe: started };"));
   assert.ok(press.includes("endsWith(`/${encodeURIComponent(conversation)}`)"));
