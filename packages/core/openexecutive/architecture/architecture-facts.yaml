@@ -108,7 +108,9 @@ system:
       <endpoint>/anthropic/ through anthropic.AsyncAnthropicFoundry, keeping
       cache_control and thinking but not web_search; other models go to
       <endpoint>/openai/v1 through OpenAICompatibleProvider with the api-key
-      header (or a cached Entra bearer token). The model keeps its own name
+      header (or a cached Entra bearer token: https://ai.azure.com/.default
+      for the Anthropic endpoint, https://cognitiveservices.azure.com/.default
+      for the OpenAI one, or AZURE_AI_TOKEN_SCOPE for both). The model keeps its own name
       in capability checks, tracing and usage; only the request carries the
       deployment name.
       Slugs listed in LOCAL_MODELS route to the local backend before any

@@ -452,9 +452,8 @@ class Settings(BaseSettings):
     azure_ai_tenant_id: str | None = Field(None, alias="AZURE_AI_TENANT_ID")
     azure_ai_client_id: str | None = Field(None, alias="AZURE_AI_CLIENT_ID")
     azure_ai_client_secret: str | None = Field(None, alias="AZURE_AI_CLIENT_SECRET")
-    azure_ai_token_scope: str = Field(
-        "https://cognitiveservices.azure.com/.default", alias="AZURE_AI_TOKEN_SCOPE"
-    )
+    # Unset: each endpoint's own audience (``providers.azure``).
+    azure_ai_token_scope: str | None = Field(None, alias="AZURE_AI_TOKEN_SCOPE")
     # ``model=deployment`` pairs, comma-separated, or a JSON object.
     azure_ai_deployments: Annotated[dict[str, str], NoDecode] = Field(
         default_factory=dict, alias="AZURE_AI_DEPLOYMENTS"

@@ -378,7 +378,7 @@ _openrouter_provider: OpenRouterProvider | None = None
 _local_provider: OpenAICompatibleProvider | None = None
 _azure_claude_provider: azure.AzureClaudeProvider | None = None
 _azure_openai_provider: azure.AzureOpenAIProvider | None = None
-_azure_token: azure.EntraToken | None = None
+_azure_tokens: dict[str, azure.EntraToken] = {}
 
 
 def _anthropic() -> AnthropicProvider:
@@ -473,23 +473,25 @@ def _openrouter() -> OpenRouterProvider:
     return _openrouter_provider
 
 
-def _azure_sign_in(settings: Any) -> tuple[str | None, azure.EntraToken | None]:
-    """The Azure resource key, or the Entra app's token (one for both
-    endpoints, so it's fetched once)."""
-    global _azure_token
+def _azure_sign_in(settings: Any, default_scope: str) -> tuple[str | None, azure.EntraToken | None]:
+    """The Azure resource key, or the Entra app's token for the endpoint's
+    scope (one per scope, so both endpoints share it when the scope is set)."""
     key = getattr(settings, "azure_ai_api_key", None) or None
     if key is not None:
         return key, None
-    if _azure_token is None:
-        _azure_token = azure.entra_token(settings)
-    return None, _azure_token
+    scope = azure.token_scope(settings, default_scope)
+    if scope not in _azure_tokens:
+        token = azure.entra_token(settings, scope)
+        assert token is not None
+        _azure_tokens[scope] = token
+    return None, _azure_tokens[scope]
 
 
 def _azure_claude() -> azure.AzureClaudeProvider:
     global _azure_claude_provider
     if _azure_claude_provider is None:
         settings = get_settings()
-        key, token = _azure_sign_in(settings)
+        key, token = _azure_sign_in(settings, azure.CLAUDE_TOKEN_SCOPE)
         _azure_claude_provider = azure.AzureClaudeProvider(
             endpoint=str(settings.azure_ai_endpoint),
             deployments=dict(settings.azure_ai_deployments),
@@ -504,7 +506,7 @@ def _azure_openai() -> azure.AzureOpenAIProvider:
     global _azure_openai_provider
     if _azure_openai_provider is None:
         settings = get_settings()
-        key, token = _azure_sign_in(settings)
+        key, token = _azure_sign_in(settings, azure.OPENAI_TOKEN_SCOPE)
         _azure_openai_provider = azure.AzureOpenAIProvider(
             endpoint=str(settings.azure_ai_endpoint),
             deployments=dict(settings.azure_ai_deployments),
@@ -599,13 +601,13 @@ def pdf_input_supported(model: str) -> bool:
 def _reset_for_tests() -> None:
     """Drop cached provider singletons. Test-only — pytest fixtures call this."""
     global _anthropic_provider, _openrouter_provider, _local_provider
-    global _azure_claude_provider, _azure_openai_provider, _azure_token
+    global _azure_claude_provider, _azure_openai_provider
     _anthropic_provider = None
     _openrouter_provider = None
     _local_provider = None
     _azure_claude_provider = None
     _azure_openai_provider = None
-    _azure_token = None
+    _azure_tokens.clear()
 
 
 def reading_limits_for(model: str = "") -> ReadingLimits:

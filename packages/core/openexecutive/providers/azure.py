@@ -16,8 +16,8 @@ only the request itself says the deployment.
 
 Sign-in is the resource's key (the ``api-key`` header) or an Entra app
 (``AZURE_AI_TENANT_ID`` / ``_CLIENT_ID`` / ``_CLIENT_SECRET``): a client
-credentials token for ``AZURE_AI_TOKEN_SCOPE``, cached until shortly before
-it expires.
+credentials token for each endpoint's audience (``AZURE_AI_TOKEN_SCOPE``
+overrides both), cached until shortly before it expires.
 """
 from __future__ import annotations
 
@@ -40,6 +40,11 @@ from openexecutive.providers.feature_gate import (
 from openexecutive.providers.openai_compatible import OpenAICompatibleProvider
 
 LOGIN_BASE = "https://login.microsoftonline.com"
+# The audience each endpoint takes an Entra token for: Foundry's Anthropic
+# endpoint is an AI Foundry resource API, the OpenAI v1 one a Cognitive
+# Services API. ``AZURE_AI_TOKEN_SCOPE`` sets one scope for both.
+CLAUDE_TOKEN_SCOPE = "https://ai.azure.com/.default"
+OPENAI_TOKEN_SCOPE = "https://cognitiveservices.azure.com/.default"
 # A token is fetched again this long before Azure says it expires.
 _TOKEN_MARGIN_S = 300.0
 
@@ -142,15 +147,21 @@ class EntraToken:
             return token
 
 
-def entra_token(settings: Any) -> EntraToken | None:
-    """The Entra app sign-in, or None when the resource key is used."""
+def token_scope(settings: Any, default: str) -> str:
+    """The scope to ask Entra for: ``AZURE_AI_TOKEN_SCOPE`` when set, else the
+    endpoint's own (``CLAUDE_TOKEN_SCOPE`` / ``OPENAI_TOKEN_SCOPE``)."""
+    return getattr(settings, "azure_ai_token_scope", None) or default
+
+
+def entra_token(settings: Any, scope: str) -> EntraToken | None:
+    """The Entra app sign-in for ``scope``, or None when the resource key is used."""
     if getattr(settings, "azure_ai_api_key", None):
         return None
     return EntraToken(
         tenant_id=str(settings.azure_ai_tenant_id),
         client_id=str(settings.azure_ai_client_id),
         client_secret=str(settings.azure_ai_client_secret),
-        scope=str(settings.azure_ai_token_scope),
+        scope=scope,
     )
 
 

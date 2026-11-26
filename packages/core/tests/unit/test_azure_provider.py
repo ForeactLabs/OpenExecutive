@@ -23,7 +23,7 @@ DEPLOYMENTS = "claude-sonnet-5-5=claude-sonnet-prod,openai/gpt-6-astra=gpt6,meta
 
 _AZURE_VARS = (
     "AZURE_AI_ENDPOINT", "AZURE_AI_API_KEY", "AZURE_AI_TENANT_ID", "AZURE_AI_CLIENT_ID",
-    "AZURE_AI_CLIENT_SECRET", "AZURE_AI_DEPLOYMENTS",
+    "AZURE_AI_CLIENT_SECRET", "AZURE_AI_DEPLOYMENTS", "AZURE_AI_TOKEN_SCOPE",
 )
 
 
@@ -323,12 +323,153 @@ async def test_entra_sign_in_sends_a_bearer_token_not_a_key(monkeypatch: pytest.
     _azure(monkeypatch, key=False)
     provider = registry_mod._azure_openai()
     calls: list[httpx.Request] = []
-    assert registry_mod._azure_token is not None
-    registry_mod._azure_token._http = _login(calls)
+    registry_mod._azure_tokens[azure.OPENAI_TOKEN_SCOPE]._http = _login(calls)
     seen = _capture(provider, monkeypatch)
     await provider.messages_create(model="meta-llama/llama-4-maverick", max_tokens=5, messages=[{"role": "user", "content": "hi"}])
     assert seen[0].headers["authorization"] == "Bearer token-1"
     assert "api-key" not in seen[0].headers
-    # Claude shares the same sign-in.
-    claude = registry_mod._azure_claude()
-    assert claude._client._azure_ad_token_provider == registry_mod._azure_token.get  # type: ignore[attr-defined]
+
+
+def test_each_endpoint_asks_entra_for_its_own_audience(monkeypatch: pytest.MonkeyPatch) -> None:
+    _azure(monkeypatch, key=False)
+    claude, other = registry_mod._azure_claude(), registry_mod._azure_openai()
+    tokens = registry_mod._azure_tokens
+    assert tokens[azure.CLAUDE_TOKEN_SCOPE]._form["scope"] == "https://ai.azure.com/.default"
+    assert tokens[azure.OPENAI_TOKEN_SCOPE]._form["scope"] == "https://cognitiveservices.azure.com/.default"
+    assert claude._client._azure_ad_token_provider == tokens[azure.CLAUDE_TOKEN_SCOPE].get  # type: ignore[attr-defined]
+    assert other._token is tokens[azure.OPENAI_TOKEN_SCOPE]
+
+
+def test_a_set_scope_is_one_sign_in_for_both_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
+    _azure(monkeypatch, key=False)
+    monkeypatch.setenv("AZURE_AI_TOKEN_SCOPE", "api://contoso-gateway/.default")
+    registry_mod._reset_for_tests()
+    claude, other = registry_mod._azure_claude(), registry_mod._azure_openai()
+    [token] = registry_mod._azure_tokens.values()
+    assert token._form["scope"] == "api://contoso-gateway/.default"
+    assert other._token is token
+    assert claude._client._azure_ad_token_provider == token.get  # type: ignore[attr-defined]
+
+
+# --------------------------------------------------------------------------- #
+# Streaming: the web chat's path
+# --------------------------------------------------------------------------- #
+
+
+def _sse(*events: dict[str, Any]) -> bytes:
+    return "".join(f"event: {e['type']}\ndata: {json.dumps(e)}\n\n" for e in events).encode()
+
+
+_CLAUDE_EVENTS = (
+    {"type": "message_start", "message": {
+        "id": "msg_1", "type": "message", "role": "assistant", "model": "sonnet-prod", "content": [],
+        "stop_reason": None, "stop_sequence": None, "usage": {"input_tokens": 3, "output_tokens": 0},
+    }},
+    {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+    {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "hi"}},
+    {"type": "content_block_stop", "index": 0},
+    {"type": "message_delta", "delta": {"stop_reason": "end_turn", "stop_sequence": None}, "usage": {"output_tokens": 1}},
+    {"type": "message_stop"},
+)
+
+
+def _stream_claude(provider: azure.AzureClaudeProvider) -> list[httpx.Request]:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=_sse(*_CLAUDE_EVENTS))
+
+    provider._client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=False)
+    return seen
+
+
+def _openai_sse() -> bytes:
+    chunks = [
+        {"id": "x", "model": "llama4", "choices": [{"index": 0, "delta": {"role": "assistant", "content": "hi"}}]},
+        {"id": "x", "model": "llama4", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
+        {"id": "x", "model": "llama4", "choices": [], "usage": {"prompt_tokens": 3, "completion_tokens": 1}},
+    ]
+    return ("".join(f"data: {json.dumps(c)}\n\n" for c in chunks) + "data: [DONE]\n\n").encode()
+
+
+def _stream_openai(provider: azure.AzureOpenAIProvider, monkeypatch: pytest.MonkeyPatch) -> list[httpx.Request]:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=_openai_sse())
+
+    client = httpx.AsyncClient(
+        base_url=provider._base_url, headers=provider._client.headers, transport=httpx.MockTransport(handler)
+    )
+    monkeypatch.setattr(provider, "_client", client)
+    return seen
+
+
+_SEARCH = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 3}]
+
+
+@pytest.mark.parametrize("key", [True, False])
+async def test_streamed_claude_goes_to_its_deployment_signed_in(key: bool, monkeypatch: pytest.MonkeyPatch) -> None:
+    _azure(monkeypatch, key=key)
+    provider = registry_mod._azure_claude()
+    calls: list[httpx.Request] = []
+    if not key:
+        registry_mod._azure_tokens[azure.CLAUDE_TOKEN_SCOPE]._http = _login(calls)
+    seen = _stream_claude(provider)
+    async with provider.messages_stream(
+        model="claude-sonnet-5-5", max_tokens=50, tools=_SEARCH, messages=[{"role": "user", "content": "hi"}]
+    ) as stream:
+        final = await stream.get_final_message()
+    assert final.content[0].text == "hi"
+    [request] = seen
+    body = json.loads(request.content)
+    assert str(request.url) == f"{ENDPOINT}/anthropic/v1/messages"
+    assert body["model"] == "claude-sonnet-prod" and body["stream"] is True
+    assert "tools" not in body or not any(t.get("name") == "web_search" for t in body["tools"])
+    if key:
+        assert request.headers["api-key"] == "azure-resource-key" and "authorization" not in request.headers
+    else:
+        assert request.headers["authorization"] == "Bearer token-1" and "api-key" not in request.headers
+
+
+@pytest.mark.parametrize("key", [True, False])
+async def test_streamed_other_models_go_to_their_deployment_signed_in(
+    key: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _azure(monkeypatch, key=key)
+    provider = registry_mod._azure_openai()
+    calls: list[httpx.Request] = []
+    if not key:
+        registry_mod._azure_tokens[azure.OPENAI_TOKEN_SCOPE]._http = _login(calls)
+    seen = _stream_openai(provider, monkeypatch)
+    async with provider.messages_stream(
+        model="meta-llama/llama-4-maverick", max_tokens=50, messages=[{"role": "user", "content": "hi"}]
+    ) as stream:
+        await stream.get_final_message()
+    [request] = seen
+    body = json.loads(request.content)
+    assert str(request.url) == f"{ENDPOINT}/openai/v1/chat/completions"
+    assert body["model"] == "llama4" and body["stream"] is True
+    if key:
+        assert request.headers["api-key"] == "azure-resource-key" and "authorization" not in request.headers
+    else:
+        assert request.headers["authorization"] == "Bearer token-1" and "api-key" not in request.headers
+
+
+async def test_an_expired_token_is_fetched_again_before_a_stream(monkeypatch: pytest.MonkeyPatch) -> None:
+    _azure(monkeypatch, key=False)
+    provider = registry_mod._azure_openai()
+    calls: list[httpx.Request] = []
+    token = registry_mod._azure_tokens[azure.OPENAI_TOKEN_SCOPE]
+    token._http = _login(calls)
+    seen = _stream_openai(provider, monkeypatch)
+    for _ in range(2):
+        async with provider.messages_stream(
+            model="meta-llama/llama-4-maverick", max_tokens=5, messages=[{"role": "user", "content": "hi"}]
+        ) as stream:
+            await stream.get_final_message()
+        token._expires_at = 0.0  # the clock passes the token's expiry
+    assert len(calls) == 2
+    assert [r.headers["authorization"] for r in seen] == ["Bearer token-1", "Bearer token-2"]
