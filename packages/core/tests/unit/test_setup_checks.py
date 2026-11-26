@@ -241,6 +241,18 @@ async def test_ai_model_without_anthropic_names_the_provider_in_use() -> None:
     assert "OpenRouter" in check.summary
 
 
+async def test_ai_model_on_azure_alone_says_so() -> None:
+    settings = make_settings(
+        ANTHROPIC_API_KEY=None,
+        AZURE_AI_ENDPOINT="https://contoso.services.ai.azure.com",
+        AZURE_AI_API_KEY="azure-resource-key",
+        AZURE_AI_DEPLOYMENTS="claude-sonnet-5-5=sonnet-prod",
+    )
+    check = await check_ai_model(make_snap(settings))
+    assert check.state == "ok"
+    assert check.summary == "Using your Azure deployments instead of Anthropic. This page doesn't test that connection."
+
+
 # ---------------------------------------------------------------------------
 # Company, owner, the Executive's address, API protection
 # ---------------------------------------------------------------------------

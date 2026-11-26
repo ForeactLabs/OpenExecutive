@@ -198,6 +198,7 @@ async def check_ai_model(snap: Snapshot) -> SetupCheck:
             for name, on in (
                 ("OpenRouter", settings.openrouter_enabled),
                 ("local models", settings.local_models_enabled),
+                ("your Azure deployments", bool(settings.azure_ai_deployments)),
             )
             if on
         )
