@@ -514,7 +514,8 @@ test("texts: a change in pairing is reported at once, not held for the once-a-mi
   const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
   const report = texts.slice(texts.indexOf("async function report"), texts.indexOf("let timer = null"));
   assert.ok(report.includes("!items.length && !force && isPaired === lastPaired && now - lastReport < 60000"));
-  assert.ok(report.indexOf("lastPaired = isPaired;") < report.indexOf('type: "texts_seen"'));
+  assert.ok(report.includes("if (answer && answer.ok === true) lastPaired = isPaired;"));
+  assert.ok(report.indexOf("lastPaired = isPaired;") > report.indexOf('type: "texts_seen"'));
 });
 
 test("texts: a send never takes the person's own tab from under a half-typed text", () => {
