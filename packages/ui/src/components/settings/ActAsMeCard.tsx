@@ -42,7 +42,8 @@ import { PageSpinner } from "@/components/ui/Spinner";
 // /delegation/voice. Offered to everyone on the team.
 //
 // The As you tab, in two columns: How far it goes as you (the mailbox on its
-// first line, the inbox watcher's status under Your inbox), Read my calendar
+// first line, the inbox watcher's status under Your inbox), the page's
+// `texts` (Texts, so it sits by email instead of under both columns), Read my calendar
 // and the page's `side` (Team members, Say it was written with
 // AI, what it sent); then In training (the switch, who goes on their own,
 // Learn from my edits) and How it learns from you (How you write, how you
@@ -84,10 +85,13 @@ function greetingFields(p: VoiceProfile): Record<string, string> {
 export default function ActAsMeCard({
   load,
   level,
+  texts,
   side,
 }: {
   load: DelegationLoad;
   level: OutsideContentMode | null;
+  /** Right under How far it goes as you, in the first column: Texts. */
+  texts?: ReactNode;
   /** Under Read my calendar, in the first column. */
   side?: ReactNode;
 }) {
@@ -209,8 +213,8 @@ export default function ActAsMeCard({
   );
 
   // Two columns where the page is wide enough (the page sets the container):
-  // how far it goes as you (the mailbox on its first line), your calendar and
-  // `side`; then In training's state (its switch is on Approvals) and how it
+  // how far it goes as you (the mailbox on its first line), `texts`, your
+  // calendar and `side`; then In training's state (its switch is on Approvals) and how it
   // learns from you.
   return (
     <div className="grid gap-4 @4xl:grid-cols-2 @4xl:items-start">
@@ -235,6 +239,7 @@ export default function ActAsMeCard({
             )
           }
         />
+        {texts}
 
         {settings.calendar && (
           <CalendarSection

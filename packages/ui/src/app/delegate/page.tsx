@@ -126,6 +126,7 @@ export default function DelegatePage() {
                 <ActAsMeCard
                   load={delegation}
                   level={level}
+                  texts={<TextsCard />}
                   side={
                     <>
                       {settings.team && <TeamSection team={settings.team} />}
@@ -133,11 +134,6 @@ export default function DelegatePage() {
                     </>
                   }
                 />
-              )}
-              {settings && (
-                <div className="mt-4">
-                  <TextsCard />
-                </div>
               )}
             </Panel>
 

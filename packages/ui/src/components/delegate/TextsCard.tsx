@@ -7,7 +7,7 @@
 // phone. Android only for now: on an iPhone, texts aren't reachable from
 // Chrome.
 import Link from "next/link";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import Switch from "@/components/Switch";
 import { BROWSER_SETTINGS_HREF } from "@/components/browser/BrowserExtensionCard";
@@ -17,6 +17,9 @@ import { getBrowserStatus, getTexts, updateTexts, type BrowserStatus, type Texts
 
 const GOOGLE_MESSAGES = "https://messages.google.com/web";
 const RECHECK_MS = 5000;
+// While Texts is on and Google Messages isn't paired yet, the person is
+// likely scanning the code right now: look more often so the tick shows soon.
+const PAIRING_RECHECK_MS = 2000;
 
 type Phone = "android" | "iphone";
 
@@ -49,6 +52,12 @@ export default function TextsCard() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Whether to look often: set from the last read, read by the timer.
+  const waiting = useRef(false);
+  useEffect(() => {
+    waiting.current = Boolean(state?.enabled && !state.paired);
+  }, [state]);
+
   useEffect(() => {
     const ctl = new AbortController();
     const load = () => {
@@ -65,10 +74,25 @@ export default function TextsCard() {
         .catch(() => undefined);
     };
     load();
-    // Setup happens in other tabs (the store, Google Messages): keep up.
-    const timer = setInterval(load, RECHECK_MS);
+    // Setup happens in other tabs (the store, Google Messages): keep up,
+    // more often while pairing, and at once on coming back to this tab.
+    let timer: ReturnType<typeof setTimeout>;
+    const next = () => {
+      timer = setTimeout(() => {
+        load();
+        next();
+      }, waiting.current ? PAIRING_RECHECK_MS : RECHECK_MS);
+    };
+    next();
+    const back = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    document.addEventListener("visibilitychange", back);
+    window.addEventListener("focus", back);
     return () => {
-      clearInterval(timer);
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", back);
+      window.removeEventListener("focus", back);
       ctl.abort();
     };
   }, []);
@@ -151,6 +175,16 @@ export default function TextsCard() {
                   Open Google Messages
                 </a>{" "}
                 in Chrome. On your phone: Messages › your picture › Device pairing › QR code scanner.
+                {state.enabled && (
+                  <span role="status" className="mt-2 flex items-center gap-2 text-fg">
+                    <span
+                      aria-hidden
+                      className="h-3.5 w-3.5 flex-shrink-0 animate-spin rounded-full border-2 border-zinc-300 border-t-accent"
+                    />
+                    Waiting for your phone. After you scan the code, this ticks by itself, usually within 10 seconds.
+                    Keep the Google Messages tab open.
+                  </span>
+                )}
               </>
             )}
           </Step>
