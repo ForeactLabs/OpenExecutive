@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { AskOEProvider, useAskOE } from "@/components/askoe/AskOEContext";
 import AskOEPanel from "@/components/askoe/AskOEPanel";
@@ -11,6 +11,8 @@ import { useEmbed } from "@/components/embed/EmbedProvider";
 import Icon from "@/components/Icon";
 import PausedBanner from "@/components/executive/PausedBanner";
 import AppSidebar from "@/components/shell/AppSidebar";
+import ReconnectingNotice from "@/components/shell/ReconnectingNotice";
+import { useBackendHealth } from "@/components/shell/useBackendHealth";
 import { PageCrumbProvider, usePageCrumbLabel } from "@/components/shell/PageCrumb";
 import {
   buildMobilePrimary,
@@ -106,30 +108,21 @@ function firstRunGated(pathname: string): boolean {
 
 // The owner lands on setup from any page while no company profile exists
 // (useFirstRunRedirect; Home does the same with the /health it already has).
-function useFirstRunGate(pathname: string): boolean {
+function useFirstRunGate(pathname: string): { redirecting: boolean; reconnecting: boolean } {
   const gated = firstRunGated(pathname);
-  const [profileLoaded, setProfileLoaded] = useState<boolean | undefined>(undefined);
-  useEffect(() => {
-    if (!gated) return;
-    let cancelled = false;
-    fetch("/api/backend/health")
-      .then((r) => r.json())
-      .then((h: { company_profile_loaded?: boolean }) => {
-        if (!cancelled) setProfileLoaded(h.company_profile_loaded === true);
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [gated]);
-  return useFirstRunRedirect(gated ? profileLoaded : undefined);
+  // Only a real answer from /health counts: a backend that can't be reached
+  // (a restart, a deploy) leaves it unknown and is asked again, never read
+  // as "not set up".
+  const { health, reconnecting } = useBackendHealth(gated);
+  const redirecting = useFirstRunRedirect(gated ? health?.company_profile_loaded : undefined);
+  return { redirecting, reconnecting: gated && reconnecting };
 }
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? "/";
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { mode, role, hasDepartments } = useWorkspace();
-  const redirecting = useFirstRunGate(pathname);
+  const { redirecting, reconnecting } = useFirstRunGate(pathname);
   const { embedded } = useEmbed();
 
   // In a host's frame (components/embed/EmbedProvider.tsx): the host has its
@@ -147,6 +140,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             hub={hubForPath(pathname, { mode, roleKind: role.role_kind })}
             bare={isExempt(pathname) || redirecting}
           >
+            {reconnecting && <ReconnectingNotice />}
             {redirecting ? <div className="h-full bg-surface" /> : children}
           </EmbeddedShell>
         </PageCrumbProvider>
@@ -201,6 +195,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             segments={segments}
             onOpenDrawer={() => setDrawerOpen(true)}
           />
+          {reconnecting && <ReconnectingNotice />}
           <PausedBanner />
           {hub && <HubTabs hub={hub} pathname={pathname} />}
           {/* The shell slot has overflow-y-auto as a safety net for pages

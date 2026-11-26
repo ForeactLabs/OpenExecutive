@@ -3,6 +3,8 @@
 import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import OnboardWizard from "@/components/OnboardWizard";
+import ReconnectingNotice from "@/components/shell/ReconnectingNotice";
+import { useBackendHealth } from "@/components/shell/useBackendHealth";
 import OnboardConversation, {
   type Bubble,
 } from "@/components/onboard/OnboardConversation";
@@ -59,8 +61,6 @@ function OnboardFlow() {
   const [turn, setTurn] = useState<OnboardTurn | null>(null);
   const [resumeTurns, setResumeTurns] = useState<Bubble[]>([]);
   const [conversationTurn, setConversationTurn] = useState<OnboardTurn | null>(null);
-  // null while we find out whether a profile exists (a re-run skips the choice).
-  const [hasProfile, setHasProfile] = useState<boolean | null>(null);
   // Set once the describe-first step is done, in place of the `?for=` param.
   const [chosenHere, setChosenHere] = useState<WorkspaceMode | null>(null);
   // Resuming: the remembered session is being fetched.
@@ -77,21 +77,11 @@ function OnboardFlow() {
   const formMode = params.get("mode") === "form";
   const chosenFor = params.get("for");
 
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/backend/health")
-      .then((r) => r.json())
-      .then((h: { company_profile_loaded?: boolean }) => {
-        if (!cancelled) setHasProfile(h.company_profile_loaded === true);
-      })
-      // Unknown: ask. Answering the choice again is harmless.
-      .catch(() => {
-        if (!cancelled) setHasProfile(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Only a real answer from /health: while the backend can't be reached
+  // this waits and asks again, instead of taking it for "no profile yet".
+  const { health, reconnecting } = useBackendHealth();
+  // null while we find out whether a profile exists (a re-run skips the choice).
+  const hasProfile = health ? health.company_profile_loaded : null;
 
   // Pick up the remembered session. Gone (saved, expired, another install):
   // forget it and start fresh.
@@ -168,7 +158,7 @@ function OnboardFlow() {
     router.push("/");
   }
 
-  if (hasProfile === null || resuming) return null;
+  if (hasProfile === null || resuming) return reconnecting ? <ReconnectingNotice /> : null;
 
   if (!hasProfile && !chosenFor && !chosenHere && !resumed) {
     return (
