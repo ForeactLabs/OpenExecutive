@@ -237,7 +237,7 @@ export default function MicButton({ disabled, onLive, onText, onError }: Props) 
           return;
         }
         restarts += 1;
-        restartRef.current = setTimeout(begin, Math.min(2000, 200 * restarts));
+        restartRef.current = setTimeout(begin, by ? 100 : Math.min(2000, 200 * restarts));
       };
       recognitionRef.current = rec;
       try {
