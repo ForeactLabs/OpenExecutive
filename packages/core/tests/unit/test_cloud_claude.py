@@ -299,3 +299,26 @@ def test_a_settings_error_never_prints_the_key() -> None:
     with pytest.raises(ValueError) as caught:
         Settings(VERTEX_PROJECT_ID="acme/x", VERTEX_REGION="global", VERTEX_CREDENTIALS_JSON=_service_account())  # type: ignore[call-arg]
     assert "secret-key-material" not in str(caught.value)
+
+
+async def test_signing_runs_off_the_event_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("botocore")
+    import threading
+
+    from anthropic.lib.bedrock import _auth
+
+    loop_thread = threading.get_ident()
+    signed_on: list[int] = []
+    real = _auth.get_auth_headers
+
+    def spy(**kwargs: Any) -> Any:
+        signed_on.append(threading.get_ident())
+        return real(**kwargs)
+
+    monkeypatch.setattr(_auth, "get_auth_headers", spy)
+    _bedrock(monkeypatch, api_key=False)
+    provider = _inner("claude-sonnet-5-5")
+    seen = _capture(provider)
+    await provider.messages_create(model="claude-sonnet-5-5", max_tokens=5, messages=[{"role": "user", "content": "hi"}])
+    assert seen and signed_on and signed_on[0] != loop_thread
+    assert seen[0].headers["authorization"].startswith("AWS4-HMAC-SHA256")

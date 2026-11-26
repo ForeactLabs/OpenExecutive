@@ -26,12 +26,14 @@ rather than sent under the Council's name.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Awaitable
 from contextlib import AbstractAsyncContextManager
 from typing import Any
 
 import anthropic
+import httpx
 
 from openexecutive.config import GOOGLE_TOKEN_URI
 from openexecutive.providers.feature_gate import (
@@ -103,6 +105,33 @@ class _MappedClaude:
         return self._client.messages.stream(**self._prepare(kwargs))
 
 
+class _BedrockClient(anthropic.AsyncAnthropicBedrock):
+    """Bedrock's client with SigV4 signing off the event loop: finding the
+    machine's role credentials (and refreshing them) makes blocking calls to
+    the instance metadata service or STS."""
+
+    async def _prepare_request(self, request: httpx.Request) -> None:
+        if self.api_key is not None:
+            request.headers["Authorization"] = f"Bearer {self.api_key}"
+            return
+        from anthropic.lib.bedrock._auth import get_auth_headers
+
+        data = request.read().decode()
+        headers = await asyncio.to_thread(
+            get_auth_headers,
+            method=request.method,
+            url=str(request.url),
+            headers=request.headers,
+            aws_access_key=self.aws_access_key,
+            aws_secret_key=self.aws_secret_key,
+            aws_session_token=self.aws_session_token,
+            region=self.aws_region or "us-east-1",
+            profile=self.aws_profile,
+            data=data,
+        )
+        request.headers.update(headers)
+
+
 class BedrockClaudeProvider(_MappedClaude):
     def __init__(
         self,
@@ -125,7 +154,7 @@ class BedrockClaudeProvider(_MappedClaude):
         }
         if timeout is not None:
             kwargs["timeout"] = timeout
-        self._client = anthropic.AsyncAnthropicBedrock(**kwargs)
+        self._client = _BedrockClient(**kwargs)
         if not api_key:
             # SigV4: the key pair, or with neither half the machine's role.
             self._client.api_key = None
