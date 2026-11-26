@@ -351,6 +351,19 @@
     'button[aria-label^="Send" i]',
   ];
 
+  // Google Messages draws two Send buttons: an inline one inside a hidden
+  // (display: none) wrapper and the round one people press. The first in
+  // the page is the hidden one, and clicking it sends nothing, so take the
+  // first one that is actually on screen and enabled.
+  function sendButton() {
+    for (const sel of SEND) {
+      for (const b of document.querySelectorAll(sel)) {
+        if (!b.disabled && b.getClientRects().length > 0) return b;
+      }
+    }
+    return null;
+  }
+
   function outgoingBubbles() {
     return [
       ...document.querySelectorAll(
@@ -430,9 +443,9 @@
       if (box.isConnected) setValue(box, "");
       return { ok: false, error: "Google Messages moved to another conversation. Nothing went." };
     }
-    const button = first(document, SEND);
+    const button = sendButton();
     // From here on Send is pressed: a missing answer is unsure, never "Nothing went".
-    if (button && !button.disabled) button.click();
+    if (button) button.click();
     else pressEnter(box);
     const want = T.squeeze(text, 4000).slice(0, 60);
     const went = await waitFor(() => {
