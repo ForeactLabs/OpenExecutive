@@ -115,9 +115,20 @@ test("a dropdown option is found by its text", () => {
 
 test("the extension asks for nothing past what it uses", () => {
   const manifest = JSON.parse(readFileSync(new URL("../../extension/manifest.json", import.meta.url), "utf8"));
-  assert.deepEqual([...manifest.permissions].sort(), ["alarms", "scripting", "storage", "tabGroups", "tabs"]);
+  // "debugger" presses Send in Google Messages. Chrome doesn't allow it as an optional permission.
+  assert.deepEqual([...manifest.permissions].sort(), ["alarms", "debugger", "scripting", "storage", "tabGroups", "tabs"]);
+  assert.equal(manifest.optional_permissions, undefined);
   assert.equal(manifest.manifest_version, 3);
-  assert.ok(!JSON.stringify(manifest).includes("debugger"));
+  // "debugger" is only for pressing Send in Google Messages: nothing else uses it.
+  const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
+  const press = bg.slice(bg.indexOf("const SEND_SPOT"), bg.indexOf("function waitLoaded"));
+  const uses = bg.split("chrome.debugger.").length - 1;
+  assert.equal(uses, press.split("chrome.debugger.").length - 1);
+  assert.ok(uses > 0);
+  for (const name of ["content.js", "shared.js", "texts.js", "popup.js"]) {
+    const src = readFileSync(new URL(`../../extension/${name}`, import.meta.url), "utf8");
+    assert.ok(!src.includes("chrome.debugger"), name);
+  }
 });
 
 test("only a plain path opens an Open Executive page", () => {
@@ -553,7 +564,7 @@ test("texts: a send goes to the live tab, takes over only when none is, and a Us
   // The same-conversation check sits between the wait and the click.
   const w = texts.indexOf("const button = await waitFor(() => sendButton(), 2000);");
   const g = texts.indexOf("// Right before Send: still the same conversation");
-  const c = texts.indexOf("if (button) button.click();");
+  const c = texts.indexOf("const spot = button && button.getBoundingClientRect();");
   assert.ok(w < g && g < c && !texts.slice(g, c).includes("await"));
   assert.ok(!texts.includes("first(document, SEND)"));
   // The live page draws an editable div; it must be looked for before any textarea.
@@ -580,7 +591,39 @@ test("texts: the conversation is checked again right before Send", () => {
   const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
   const body = texts.slice(texts.indexOf("async function send(msg)"), texts.indexOf("chrome.runtime.onMessage.addListener((msg, sender, reply)"));
   const check = body.indexOf("if (!key || T.keyOf(location.href) !== key || !box.isConnected)");
-  assert.ok(check > body.indexOf("setValue(box, text)") && check < body.indexOf("button.click()"));
+  assert.ok(check > body.indexOf("setValue(box, text)") && check < body.indexOf('type: "texts_press"'));
+});
+
+test("texts: Send is a real press, only in the tab and conversation the send was handed", () => {
+  const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
+  const press = bg.slice(bg.indexOf("async function pressInTab"), bg.indexOf("function waitLoaded"));
+  assert.ok(press.includes("if (!tab || !pressing || tab.id !== pressing.tabId) return { ok: false };"));
+  // The conversation checked is the one the send was handed, not what the page says.
+  assert.ok(press.includes("const conversation = pressing.conversation;"));
+  // The button is found again after attaching (the debugging bar moves it), and the click goes there.
+  assert.ok(press.indexOf("const spot = await sendSpot(target, at);") > press.indexOf("chrome.debugger.attach"));
+  assert.ok(press.includes("x: spot.x, y: spot.y"));
+  // The page is checked in the same reading as the spot that gets clicked, and a new number must stay on its conversation.
+  assert.ok(bg.includes("at: location.origin + location.pathname") && bg.includes("if (spot && spot.at !== at) return null;"));
+  assert.ok(press.includes("const spot = await sendSpot(target, at);"));
+  assert.ok(press.includes("if (!conversation && !/\\/web\\/conversations\\/(?!new$)[^/]+$/.test(at)) return { ok: false };"));
+  // A press that started may have gone, even if a later step failed.
+  assert.ok(press.includes('if (type === "mousePressed") started = true;') && press.includes("return { ok: false, maybe: started };"));
+  assert.ok(press.includes("endsWith(`/${encodeURIComponent(conversation)}`)"));
+  assert.ok(press.includes("await chrome.debugger.detach(target)"));
+  assert.ok(press.indexOf("finally") < press.indexOf("chrome.debugger.detach"));
+  const one = bg.slice(bg.indexOf("async function sendOneText"), bg.indexOf("async function pressInTab"));
+  assert.ok(one.includes("pressing = { tabId: tab.id, conversation: key };") && one.includes("pressing = null;"));
+  const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
+  // No page-made press is left: Google Messages ignores those.
+  assert.ok(!texts.includes("button.click()") && !texts.includes("pressEnter"));
+  // A failed press clears the box and says nothing went.
+  const fail = texts.slice(texts.indexOf("if (pressed && pressed.ok !== true && pressed.maybe !== true) {"), texts.indexOf("// From here on Send is pressed"));
+  assert.ok(fail.length > 0);
+  assert.ok(fail.indexOf('if (box.isConnected) setValue(box, "");') < fail.indexOf("return {"));
+  assert.ok(fail.includes("Nothing went.") && !fail.includes("unsure"));
+  // Sent only when the box emptied and the text shows as a new bubble.
+  assert.ok(texts.includes("return emptied && now.length > before && now.slice(before).some((t) => t.includes(want)) ? true : null;"));
 });
 
 test("texts: a Google Messages page that never answered fails the send, never unsure", () => {

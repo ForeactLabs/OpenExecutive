@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Open Executive",
   "short_name": "Open Executive",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "Lets your Open Executive get things done on websites for you, and read and send your texts in Google Messages when you turn that on.",
   "minimum_chrome_version": "116",
   "icons": {
@@ -27,7 +27,8 @@
     "tabs",
     "tabGroups",
     "storage",
-    "scripting"
+    "scripting",
+    "debugger"
   ],
   "host_permissions": [
     "<all_urls>"

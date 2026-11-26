@@ -405,11 +405,88 @@ async function sendOneText(send) {
   // Nothing was handed over, so nothing can have gone.
   if (!ready) return { ok: false, error: "Google Messages didn't load. Nothing went." };
   try {
+    pressing = { tabId: tab.id, conversation: key };
     const out = await chrome.tabs.sendMessage(tab.id, { type: "texts_send_here", conversation: key, number, text, mayTakeOver: live.allElsewhere && !(await liveMessagesTab(tab.id)).tab });
     return out && typeof out === "object" ? out : { ok: false, unsure: true, error: "Google Messages didn't answer" };
   } catch {
     // Handed over, then no answer: it may have gone.
     return { ok: false, unsure: true, error: "Google Messages stopped answering while sending" };
+  } finally {
+    pressing = null;
+  }
+}
+
+// Google Messages sends only on a real press: a click a page script makes
+// (element.click(), dispatched mouse or key events) is ignored and the text
+// stays in the box. So the press goes through Chrome's own input, by
+// attaching to that one tab for the click and detaching straight after.
+// Only the tab a send was handed to, only while that send runs, and only on
+// the conversation it was handed (or a new one for a number).
+let pressing = null;
+
+// Attaching shows Chrome's "is debugging this browser" bar, which makes the
+// page shorter and moves the compose bar up. So the Send button is found
+// again once attached, after the page has settled, and the click goes where
+// it is then. Same order as SEND in texts.js: the first selector with a
+// button on screen, and only an enabled one.
+const SEND_SPOT = `(() => {
+  for (const sel of ["[data-e2e-send-text-button]", "mws-message-send-button button", 'button[aria-label^="Send" i]']) {
+    const shown = [...document.querySelectorAll(sel)].filter((b) => b.getClientRects().length > 0);
+    if (!shown.length) continue;
+    const b = shown.find((x) => !x.disabled);
+    if (!b) return null;
+    const r = b.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2, h: innerHeight, at: location.origin + location.pathname };
+  }
+  return null;
+})()`;
+
+// The page it reads is checked in the same reading as the spot it clicks:
+// if the person opened another conversation meanwhile, nothing is pressed.
+async function sendSpot(target, at) {
+  let last = null;
+  for (let i = 0; i < 12; i++) {
+    const got = await chrome.debugger.sendCommand(target, "Runtime.evaluate", { expression: SEND_SPOT, returnByValue: true }).catch(() => null);
+    const spot = got && got.result ? got.result.value : null;
+    if (spot && spot.at !== at) return null;
+    if (spot && last && spot.x === last.x && spot.y === last.y && spot.h === last.h) return spot;
+    last = spot;
+    await new Promise((ok) => setTimeout(ok, 150));
+  }
+  return null;
+}
+
+async function pressInTab(tab, x, y) {
+  if (!tab || !pressing || tab.id !== pressing.tabId) return { ok: false };
+  const conversation = pressing.conversation;
+  if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > 10000 || y > 10000) return { ok: false };
+  const now = await chrome.tabs.get(tab.id).catch(() => null);
+  if (!now || !onMessages(now.url)) return { ok: false };
+  const at = String(now.url).split(/[?#]/)[0];
+  if (conversation && !at.endsWith(`/${encodeURIComponent(conversation)}`)) return { ok: false };
+  // A new number has no conversation to match: it must still be on the one
+  // the send opened, the page it was on when it asked for the press.
+  if (!conversation && !/\/web\/conversations\/(?!new$)[^/]+$/.test(at)) return { ok: false };
+  const target = { tabId: tab.id };
+  try {
+    await chrome.debugger.attach(target, "1.3");
+  } catch {
+    return { ok: false };
+  }
+  // Once the press has started it may have gone, even if a step after fails.
+  let started = false;
+  try {
+    const spot = await sendSpot(target, at);
+    if (!spot) return { ok: false };
+    for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
+      if (type === "mousePressed") started = true;
+      await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { type, x: spot.x, y: spot.y, button: type === "mouseMoved" ? "none" : "left", clickCount: type === "mouseMoved" ? 0 : 1 });
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, maybe: started };
+  } finally {
+    await chrome.debugger.detach(target).catch(() => undefined);
   }
 }
 
@@ -974,6 +1051,13 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
       await setTextsOn(OE.originOf(url), msg.on === true, origins);
       return { ok: true };
     })().then(reply, () => reply({ ok: false }));
+    return true;
+  }
+  if (msg.type === "texts_press") {
+    // Only the Google Messages tab a send is running in asks for its press.
+    if (!sender.tab || !onMessages(sender.url || sender.tab.url)) return false;
+    pressInTab(sender.tab, Number(msg.x), Number(msg.y))
+      .then(reply, () => reply({ ok: false }));
     return true;
   }
   if (msg.type === "texts_seen") {
