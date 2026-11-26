@@ -353,8 +353,12 @@ function sendText(send) {
 // `allElsewhere`: every tab answered and showed Use here (as after Chrome
 // restarts), the only time a tab may take it over. A tab that didn't
 // answer (open from before an update, loading, frozen) may be the live one.
-async function liveMessagesTab() {
-  const tabs = await chrome.tabs.query({ url: "https://messages.google.com/*" });
+// `skipId`: leave that tab out. Right after a tab is opened on a
+// conversation its page may not have drawn Use here yet, so its first
+// answer can't be trusted; the recheck before a take-over skips it and
+// only asks whether some other tab went live.
+async function liveMessagesTab(skipId) {
+  const tabs = (await chrome.tabs.query({ url: "https://messages.google.com/*" })).filter((t) => t.id !== skipId);
   const { textsTabId } = await chrome.storage.session.get("textsTabId");
   tabs.sort((a, b) => (b.id === textsTabId) - (a.id === textsTabId));
   let allElsewhere = tabs.length > 0;
@@ -401,7 +405,7 @@ async function sendOneText(send) {
   // Nothing was handed over, so nothing can have gone.
   if (!ready) return { ok: false, error: "Google Messages didn't load. Nothing went." };
   try {
-    const out = await chrome.tabs.sendMessage(tab.id, { type: "texts_send_here", conversation: key, number, text, mayTakeOver: live.allElsewhere && (await liveMessagesTab()).allElsewhere });
+    const out = await chrome.tabs.sendMessage(tab.id, { type: "texts_send_here", conversation: key, number, text, mayTakeOver: live.allElsewhere && !(await liveMessagesTab(tab.id)).tab });
     return out && typeof out === "object" ? out : { ok: false, unsure: true, error: "Google Messages didn't answer" };
   } catch {
     // Handed over, then no answer: it may have gone.
