@@ -68,6 +68,10 @@ export function useBackendHealth<T extends BackendHealth = BackendHealth>(enable
       cancelled = true;
       clearTimeout(timer);
       stop();
+      // Forget this run's answer: switched off and back on (away to setup
+      // and back), the page must wait for a fresh one, not act on the old.
+      setHealth(undefined);
+      setFailures(0);
     };
   }, [enabled]);
 
