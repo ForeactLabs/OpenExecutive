@@ -23,13 +23,12 @@ import { downloadChat } from "@/lib/downloadChat";
 import { ASK_SUGGESTION, recall, remember, STORAGE_KEYS } from "@/lib/firstRun";
 import { headerLabel, sessionTitle } from "@/lib/sessionChannel";
 import Link from "next/link";
+import ReconnectingNotice from "@/components/shell/ReconnectingNotice";
+import { useBackendHealth } from "@/components/shell/useBackendHealth";
+import type { BackendHealth } from "@/lib/backendHealth";
 import { useRouter } from "next/navigation";
 
-interface HealthData {
-  company_profile_loaded: boolean;
-  company_name?: string;
-  status: string;
-}
+type HealthData = BackendHealth;
 
 // Upper bound on a `?draft=` seed — a deep link pre-fills a prompt, not a document.
 const MAX_DRAFT_PARAM_CHARS = 2000;
@@ -41,7 +40,10 @@ export default function HomePage() {
   // business or anyone else's work), for the no-profile banner.
   const { mode: workspaceMode, role } = useWorkspace();
 
-  const [health, setHealth] = useState<HealthData | null>(null);
+  // Only a real answer from /health: while the backend can't be reached
+  // (a restart, a deploy) this stays undefined and is asked again, so it is
+  // never read as "not set up".
+  const { health, reconnecting } = useBackendHealth<HealthData>();
   const [debugOpen, setDebugOpen] = useState(false);
   const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([]);
   const activeTurnIdRef = useRef<string | null>(null);
@@ -67,13 +69,6 @@ export default function HomePage() {
   // Briefing handoffs auto-send pendingPrompt; a `?draft=` deep link only
   // pre-fills it, since the text comes from a URL the user didn't type.
   const [autoSubmitPending, setAutoSubmitPending] = useState(true);
-
-  useEffect(() => {
-    fetch("/api/backend/health")
-      .then((r) => r.json())
-      .then(setHealth)
-      .catch(() => setHealth({ status: "error", company_profile_loaded: false }));
-  }, []);
 
   // Bumped by every navigation handler below. A session load that resolves
   // after the user has already moved on (new chat, briefing, a hand-off, or
@@ -242,7 +237,7 @@ export default function HomePage() {
   }, []);
 
   const isOnboarded = health?.company_profile_loaded === true;
-  const companyName = health?.company_name;
+  const companyName = health?.company_name ?? undefined;
   const profileCopy = PROFILE_COPY[profileWording(workspaceMode, role.role_kind)];
 
   // First run: the owner lands on setup until a profile exists (unless they
@@ -257,7 +252,11 @@ export default function HomePage() {
   // instead.
   const { status: execStatus, unknown: execStatusUnknown } = useExecutiveStatus();
   const deliveryNotice = useBriefDeliveryNotice();
-  const homeBanner = execStatus?.paused && !execStatusUnknown ? (
+  const homeBanner = reconnecting ? (
+    <div className="overflow-hidden rounded-2xl border border-line [&>div]:border-b-0">
+      <ReconnectingNotice />
+    </div>
+  ) : execStatus?.paused && !execStatusUnknown ? (
     <div className="overflow-hidden rounded-2xl border border-amber-500/30 [&>div]:border-b-0">
       <PausedBanner />
     </div>
@@ -388,6 +387,7 @@ export default function HomePage() {
 
         {/* In chat the notices stay as strips above the conversation; on
             the briefing they share one banner slot (see homeBanner). */}
+        {mode === "chat" && reconnecting && <ReconnectingNotice />}
         {mode === "chat" && <PausedBanner />}
         {mode === "chat" && !isOnboarded && health && (
           <div className="border-b border-line bg-accent/5 px-4 sm:px-6 py-2.5 flex items-center justify-between gap-3">
