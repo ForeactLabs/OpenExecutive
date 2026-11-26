@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MIC_TONES, clock, joinDictation, pickRecordingType, recordingFilename, splitHeard } from "../src/lib/dictation.ts";
+import { ALONE_MAX_SECONDS, MIC_BLOCKED, MIC_TONES, aloneEnd, askAgainAfter, clock, micMode, joinDictation, pickRecordingType, recordingFilename, splitHeard } from "../src/lib/dictation.ts";
 
 test("what was heard follows what the box held", () => {
   assert.equal(joinDictation("", "  move my call  "), "move my call");
@@ -71,4 +71,40 @@ test("live words from Chrome on Android, which repeats what came before, don't r
 test("the start tone rises and the stop tone falls", () => {
   assert.ok(MIC_TONES.start[1] > MIC_TONES.start[0]);
   assert.ok(MIC_TONES.stop[1] < MIC_TONES.stop[0]);
+});
+
+test("the mic records for the server, hears alone in the browser, or hides", () => {
+  const on = { available: true, max_seconds: 120 };
+  const off = { available: false, max_seconds: 120 };
+  // Chrome with a speech server: record and write it out.
+  assert.deepEqual(micMode(on, true, true), { mode: "record", maxSeconds: 120 });
+  // Safari or Chrome with no server: the browser's recognition alone.
+  assert.deepEqual(micMode(off, true, true), { mode: "alone", maxSeconds: 120 });
+  assert.deepEqual(micMode({ available: false, max_seconds: 0 }, false, true), { mode: "alone", maxSeconds: ALONE_MAX_SECONDS });
+  // Firefox (records, no recognizer): only with a server.
+  assert.deepEqual(micMode(on, true, false), { mode: "record", maxSeconds: 120 });
+  assert.deepEqual(micMode(off, true, false), { mode: "hidden" });
+  // A server but no recorder: the browser hears it alone.
+  assert.deepEqual(micMode(on, false, true), { mode: "alone", maxSeconds: 120 });
+  assert.deepEqual(micMode(on, false, false), { mode: "hidden" });
+});
+
+test("no answer from the server picks no mode and asks again three times", () => {
+  assert.deepEqual(micMode(null, true, true), { mode: "ask-again" });
+  assert.deepEqual(micMode(null, true, false), { mode: "ask-again" });
+  assert.deepEqual(micMode(null, false, false), { mode: "hidden" });
+  assert.deepEqual([1, 2, 3, 4].map(askAgainAfter), [5000, 10000, 15000, null]);
+});
+
+test("the browser hearing alone ends with the right line", () => {
+  assert.deepEqual(aloneEnd(null, "move my call"), { message: null, hide: false });
+  assert.deepEqual(aloneEnd(null, " "), { message: "Didn't catch any words. Try again.", hide: false });
+  for (const blocked of ["not-allowed", "service-not-allowed", "audio-capture"]) {
+    assert.deepEqual(aloneEnd(blocked, ""), { message: MIC_BLOCKED, hide: false });
+    assert.deepEqual(aloneEnd(blocked, "some words"), { message: MIC_BLOCKED, hide: false });
+  }
+  // A recognizer with nothing behind it (Brave, Opera): the mic goes.
+  assert.equal(aloneEnd("network", "").hide, true);
+  assert.deepEqual(aloneEnd("network", "move my call"), { message: null, hide: false });
+  assert.deepEqual(aloneEnd("start", ""), { message: "Couldn't hear it. Try again.", hide: false });
 });

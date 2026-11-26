@@ -2579,8 +2579,12 @@ knowledge:
       the turn (Claude takes no audio). Any OpenAI-compatible
       POST {base}/audio/transcriptions server: TRANSCRIPTION_BASE_URL (+
       _API_KEY, _MODEL, default whisper-1) wins; else OpenRouter when
-      OPENROUTER_API_KEY is set (elevenlabs/scribe-v2); else none, and a
-      voice note becomes a line asking the sender to type it. 25 MB and
+      OPENROUTER_API_KEY is set (elevenlabs/scribe-v2); else Gemini when
+      GEMINI_API_KEY is set (Google's native generateContent with the
+      recording inline, since its OpenAI-compatible API has no
+      /audio/transcriptions; held under 14 MB for Google's 20 MB request
+      cap); else none, and a voice note becomes a line asking the sender to
+      type it. 25 MB and
       TRANSCRIPTION_MAX_SECONDS (300) caps, the length read on the server
       from the Ogg / WebM / MP4 / WAV container (recording_seconds; the
       browser's own stop is not trusted); a file whose length can't be read
@@ -2599,7 +2603,11 @@ knowledge:
       are attachment text, untrusted-wrapped like a document's.
       The web chat mic records in the browser and posts to
       POST /chat/transcribe; the words land in the message box to edit and
-      send, nothing is kept. GET /chat/voice says whether the mic shows.
+      send, nothing is kept. GET /chat/voice says whether a server writes it
+      out; when none does, the mic still shows wherever the browser has its
+      own speech recognition (Chrome, Edge, Safari) and those words alone go
+      into the box, so the mic works with no speech key at all. Hidden only
+      when neither can hear (Firefox with no server).
     - anything else — the chat tool `read_document`
       (orchestrator.document_tools): `path` (a file another tool saved,
       e.g. get_drive_file_download_url for a scanned Drive PDF) or company

@@ -6,13 +6,25 @@
 // the browser has its own speech recognition (Chrome, Edge, Safari), the
 // words show up while the person talks (`onLive`); when they stop, the
 // recording is written out as before and that version replaces the live
-// words. Without it (Firefox) the words come after stopping. Hidden when
-// speech to text isn't set up or the browser can't record.
+// words. Without it (Firefox) the words come after stopping. Where speech
+// to text isn't set up here (no key that hears audio), the browser's own
+// recognition alone writes out the words (`alone`), so the mic still works
+// in Chrome, Edge and Safari. Hidden only when neither can hear.
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import Icon from "@/components/Icon";
 import { getVoiceStatus, transcribeRecording } from "@/lib/api";
-import { clock, joinDictation, pickRecordingType, recordingFilename, splitHeard } from "@/lib/dictation";
+import {
+  aloneEnd,
+  askAgainAfter,
+  clock,
+  joinDictation,
+  MIC_BLOCKED,
+  micMode,
+  pickRecordingType,
+  recordingFilename,
+  splitHeard,
+} from "@/lib/dictation";
 import { playMicTone } from "@/lib/micTone";
 
 type Phase = "idle" | "listening" | "hearing";
@@ -50,6 +62,9 @@ function browserRecognition(): RecognitionCtor | null {
 export default function MicButton({ disabled, onLive, onText, onError }: Props) {
   const [maxSeconds, setMaxSeconds] = useState<number | null>(null);
   const [phase, setPhase] = useState<Phase>("idle");
+  // No speech to text here: the browser's recognition alone hears it.
+  const [alone, setAlone] = useState(false);
+  const aloneRef = useRef(false);
   const [elapsed, setElapsed] = useState(0);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -72,12 +87,29 @@ export default function MicButton({ disabled, onLive, onText, onError }: Props) 
       typeof window !== "undefined" &&
       typeof window.MediaRecorder !== "undefined" &&
       Boolean(navigator.mediaDevices?.getUserMedia);
-    if (!canRecord) return;
-    void getVoiceStatus().then((status) => {
-      if (live && status?.available) setMaxSeconds(status.max_seconds);
-    });
+    const canHear = typeof window !== "undefined" && browserRecognition() !== null;
+    if (!canRecord && !canHear) return;
+    // No answer at all (a slow start, a dropped line) isn't "no server": it
+    // asks again a few times, with the mic hidden meanwhile.
+    let tries = 0;
+    let retry: ReturnType<typeof setTimeout> | null = null;
+    const load = () =>
+      void getVoiceStatus().then((status) => {
+        if (!live) return;
+        const how = micMode(status, canRecord, canHear);
+        if (how.mode === "ask-again") {
+          tries += 1;
+          const wait = askAgainAfter(tries);
+          if (wait !== null) retry = setTimeout(load, wait);
+        } else if (how.mode !== "hidden") {
+          setAlone(how.mode === "alone");
+          setMaxSeconds(how.maxSeconds);
+        }
+      });
+    load();
     return () => {
       live = false;
+      if (retry) clearTimeout(retry);
     };
   }, []);
 
@@ -103,11 +135,34 @@ export default function MicButton({ disabled, onLive, onText, onError }: Props) 
     }
   };
 
+  // The browser alone stopped (a tap, the time limit, or it failed): what
+  // it heard goes into the box.
+  const finishAlone = useCallback(
+    (error: string | null) => {
+      if (!aloneRef.current) return;
+      aloneRef.current = false;
+      clearTimer();
+      stopRecognition();
+      playMicTone("stop");
+      const heard = heardRef.current;
+      onText(heard);
+      const end = aloneEnd(error, heard);
+      if (end.message) onError(end.message);
+      if (end.hide) setMaxSeconds(null);
+      setPhase("idle");
+    },
+    [onError, onText],
+  );
+
   // Leaving the page mid-recording lets the microphone go.
   useEffect(
     () => () => {
       clearTimer();
       stopRecognition();
+      if (aloneRef.current) {
+        aloneRef.current = false;
+        onTextRef.current(heardRef.current);
+      }
       const rec = recorderRef.current;
       if (rec && rec.state !== "inactive") {
         rec.onstop = null;
@@ -120,27 +175,34 @@ export default function MicButton({ disabled, onLive, onText, onError }: Props) 
   );
 
   const stop = useCallback(() => {
+    if (aloneRef.current) {
+      finishAlone(null);
+      return;
+    }
     clearTimer();
     stopRecognition();
     const rec = recorderRef.current;
     if (rec && rec.state !== "inactive") rec.stop();
-  }, []);
+  }, [finishAlone]);
 
   // Live words from the browser's own recognition. It ends on its own after
   // a pause or a minute, so it starts again (keeping what it had, a little
   // later each time) until the recording stops. An error other than silence
   // ends live words for this recording; the words still come when it stops.
+  // Alone, they are the only words, so it starts again on Android too, and
+  // an error ends the listening there and then.
   const listen = useCallback(() => {
     const Ctor = browserRecognition();
-    if (!Ctor || !onLive) return;
+    const by = aloneRef.current;
+    if (!Ctor || (!onLive && !by)) return;
     let earlier = "";
     let restarts = 0;
     // Chrome on Android plays its own sound each time recognition starts,
     // so there it runs once: after a long pause the rest comes on stop.
     // It also repeats earlier words in each piece it sends.
     const android = /Android/i.test(navigator.userAgent);
-    const maxRestarts = android ? 0 : 20;
-    let failed = false;
+    const maxRestarts = by ? 200 : android ? 0 : 20;
+    let failed: string | null = null;
     wantLiveRef.current = true;
     const begin = () => {
       if (!wantLiveRef.current) return;
@@ -160,39 +222,60 @@ export default function MicButton({ disabled, onLive, onText, onError }: Props) 
         const { settled, pending } = splitHeard(earlier, parts, android);
         latest = joinDictation(settled, pending);
         heardRef.current = latest;
-        onLive(settled, pending);
+        onLive?.(settled, pending);
       };
       rec.onerror = (e) => {
-        if (e.error !== "no-speech") failed = true;
+        if (e.error !== "no-speech" && e.error !== "aborted") failed = e.error;
       };
       rec.onend = () => {
         earlier = latest;
         if (recognitionRef.current !== rec) return;
         recognitionRef.current = null;
-        if (failed || restarts >= maxRestarts) return;
+        if (failed || restarts >= maxRestarts) {
+          if (by) finishAlone(failed);
+          return;
+        }
         restarts += 1;
-        restartRef.current = setTimeout(begin, Math.min(2000, 200 * restarts));
+        restartRef.current = setTimeout(begin, by ? 100 : Math.min(2000, 200 * restarts));
       };
       recognitionRef.current = rec;
       try {
         rec.start();
       } catch {
         recognitionRef.current = null;
+        if (by) finishAlone("start");
       }
     };
     begin();
-  }, [onLive]);
+  }, [onLive, finishAlone]);
 
   const start = useCallback(async () => {
     if (maxSeconds === null) return;
     onError(null);
+    if (alone) {
+      // The browser's recognition asks for the microphone itself.
+      playMicTone("start");
+      aloneRef.current = true;
+      heardRef.current = "";
+      onLive?.("", "");
+      const began = Date.now();
+      setElapsed(0);
+      setPhase("listening");
+      timerRef.current = setInterval(() => {
+        const secs = (Date.now() - began) / 1000;
+        setElapsed(secs);
+        if (secs >= maxSeconds) stop();
+      }, 250);
+      listen();
+      return;
+    }
     // The tone plays on the tap itself, before any permission question.
     playMicTone("start");
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch {
-      onError("Open Executive can't use the microphone. Allow it in your browser's site settings.");
+      onError(MIC_BLOCKED);
       return;
     }
     const type = pickRecordingType((t) => MediaRecorder.isTypeSupported(t));
@@ -243,7 +326,7 @@ export default function MicButton({ disabled, onLive, onText, onError }: Props) 
       setElapsed(secs);
       if (secs >= maxSeconds) stop();
     }, 250);
-  }, [maxSeconds, onError, onLive, onText, stop, listen]);
+  }, [alone, maxSeconds, onError, onLive, onText, stop, listen]);
 
   if (maxSeconds === null) return null;
 

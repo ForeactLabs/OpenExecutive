@@ -4,9 +4,12 @@ Claude takes no audio, so a voice note becomes words here first. Any server
 with the standard ``POST /audio/transcriptions`` call works (a multipart
 ``file`` and ``model``, answering ``{"text": …}``): OpenAI, Groq, a Whisper
 server run locally, or OpenRouter, which is the default whenever
-``OPENROUTER_API_KEY`` is set and nothing else is. With no server there is
-no transcription: ``available()`` is false, the chat mic is hidden and a
-voice note gets a line asking for text.
+``OPENROUTER_API_KEY`` is set and nothing else is. With neither, a
+``GEMINI_API_KEY`` writes it out on Gemini (``_gemini``: the recording goes
+inline to ``generateContent``, which takes audio). With none of these there
+is no transcription here: ``available()`` is false, the chat mic writes out
+words with the browser's own speech recognition alone, and a voice note gets
+a line asking for text.
 
 A recording's length is read from its container before it is sent, and
 the bytes sent each day are capped (``TRANSCRIPTION_MAX_MB_PER_DAY``): the
@@ -19,6 +22,7 @@ call through ``add_usage_listener``.
 """
 from __future__ import annotations
 
+import base64
 import logging
 import math
 import struct
@@ -45,6 +49,17 @@ AUDIO_MEDIA_TYPES: dict[str, str] = {
 # The servers' own upload cap.
 MAX_BYTES = 25 * 1024 * 1024
 OPENROUTER_MODEL = "elevenlabs/scribe-v2"
+# Gemini on Google's own key: the native API, since its OpenAI-compatible
+# one has no /audio/transcriptions. The recording goes inline, base64, in a
+# request Google caps at 20 MB, so the recording is held under 14 MB.
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
+GEMINI_MODEL = "gemini-3.5-flash-lite"
+GEMINI_MAX_BYTES = 14 * 1024 * 1024
+GEMINI_PROMPT = (
+    "Write out exactly what is said in this recording, word for word, in the language it is spoken in. "
+    "Answer with only those words: no heading, no notes, no description of sounds. "
+    "If nothing is said, answer with nothing."
+)
 DEFAULT_MODEL = "whisper-1"
 _TIMEOUT_S = 90.0
 # The servers bill by length, and a file's size says little about it (25 MB
@@ -65,6 +80,8 @@ class Target:
     api_key: str | None
     model: str
     via_openrouter: bool
+    # "gemini": Google's own generateContent, not /audio/transcriptions.
+    kind: str = "standard"
 
 
 @dataclass(frozen=True)
@@ -110,7 +127,17 @@ def target() -> Target | None:
             model=s.transcription_model or OPENROUTER_MODEL,
             via_openrouter=True,
         )
+    gemini = (getattr(s, "gemini_api_key", None) or "").strip()
+    if gemini:
+        return gemini_target(gemini)
     return None
+
+
+def gemini_target(api_key: str) -> Target:
+    """Gemini writing it out, on Google's own key."""
+    return Target(
+        base_url=GEMINI_BASE_URL, api_key=api_key, model=GEMINI_MODEL, via_openrouter=False, kind="gemini",
+    )
 
 
 def _utc_day() -> str:
@@ -175,8 +202,9 @@ async def transcribe(
     where = target()
     if where is None:
         raise TranscriptionError("voice notes aren't set up here")
-    if len(data) > MAX_BYTES:
-        raise TranscriptionError(f"it's larger than {MAX_BYTES // (1024 * 1024)} MB")
+    max_bytes = GEMINI_MAX_BYTES if where.kind == "gemini" else MAX_BYTES
+    if len(data) > max_bytes:
+        raise TranscriptionError(f"it's larger than {max_bytes // (1024 * 1024)} MB")
     limit = max_seconds()
     too_long = TranscriptionError(f"it's longer than {_minutes(limit)}")
     if duration_s is not None and duration_s > limit:
@@ -190,6 +218,9 @@ async def transcribe(
         raise too_long
     if not data:
         raise TranscriptionError("it was empty")
+
+    if where.kind == "gemini":
+        return await _gemini(where, data, _media_type(Path(filename).name, content_type))
 
     headers: dict[str, str] = {}
     if where.api_key:
@@ -227,6 +258,65 @@ async def transcribe(
     usage = body.get("usage") if isinstance(body.get("usage"), dict) else {}
     _record(where, usage or {})
     return str(body.get("text") or "").strip()
+
+
+async def _gemini(where: Target, data: bytes, media_type: str) -> str:
+    """The words in a recording, from Gemini's ``generateContent``: the
+    recording inline beside a line asking for exactly what was said."""
+    payload = {
+        "contents": [{
+            "role": "user",
+            "parts": [
+                {"text": GEMINI_PROMPT},
+                {"inline_data": {"mime_type": media_type, "data": base64.b64encode(data).decode("ascii")}},
+            ],
+        }],
+        "generationConfig": {"temperature": 0},
+    }
+    if not _reserve(len(data)):
+        raise TranscriptionError("today's limit on voice notes is used up")
+    try:
+        try:
+            async with httpx.AsyncClient(timeout=_TIMEOUT_S) as client:
+                resp = await client.post(
+                    f"{where.base_url}/models/{where.model}:generateContent",
+                    headers={"x-goog-api-key": where.api_key or ""},
+                    json=payload,
+                )
+            resp.raise_for_status()
+            body = resp.json()
+        except httpx.HTTPStatusError as exc:
+            logger.warning("transcription failed: HTTP %s", exc.response.status_code)
+            raise TranscriptionError("the speech service didn't answer") from exc
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("transcription failed (%s)", type(exc).__name__)
+            raise TranscriptionError("the speech service didn't answer") from exc
+    finally:
+        _settle(len(data))
+    if not isinstance(body, dict):
+        raise TranscriptionError("the speech service didn't answer")
+    words: list[str] = []
+    candidates = body.get("candidates")
+    first = candidates[0] if isinstance(candidates, list) and candidates else {}
+    content = first.get("content") if isinstance(first, dict) else None
+    parts = content.get("parts") if isinstance(content, dict) else None
+    for part in parts if isinstance(parts, list) else []:
+        if isinstance(part, dict) and isinstance(part.get("text"), str):
+            words.append(part["text"])
+    # Refused (a block reason, or it stopped for safety or recitation) or cut
+    # off: not "nothing was said", which "" would read as.
+    feedback = body.get("promptFeedback")
+    finish = first.get("finishReason") if isinstance(first, dict) else None
+    if (isinstance(feedback, dict) and feedback.get("blockReason")) or (finish not in (None, "STOP")):
+        logger.warning("transcription refused or cut off by Gemini (%s)", finish or "blocked")
+        raise TranscriptionError("the speech service didn't answer")
+    meta_raw = body.get("usageMetadata")
+    meta: dict[str, Any] = meta_raw if isinstance(meta_raw, dict) else {}
+    _record(where, {
+        "input_tokens": meta.get("promptTokenCount"),
+        "output_tokens": meta.get("candidatesTokenCount"),
+    })
+    return "".join(words).strip()
 
 
 def recording_seconds(data: bytes, filename: str, content_type: str = "") -> float | None:

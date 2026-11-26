@@ -303,8 +303,10 @@ class Settings(BaseSettings):
     # ---- Speech to text (voice notes, the chat mic) ---------------------
     # Any server with the standard POST /audio/transcriptions call (OpenAI,
     # Groq, OpenRouter, a self-hosted Whisper server). Unset, it uses
-    # OpenRouter when OPENROUTER_API_KEY is set; with neither there is no
-    # transcription and voice notes get a line asking for text instead.
+    # OpenRouter when OPENROUTER_API_KEY is set, then Gemini when
+    # GEMINI_API_KEY is; with none there is no transcription here: the chat
+    # mic uses the browser's own speech recognition and voice notes get a
+    # line asking for text instead.
     transcription_base_url: str | None = Field(None, alias="TRANSCRIPTION_BASE_URL")
     transcription_api_key: str | None = Field(None, alias="TRANSCRIPTION_API_KEY")
     # Blank: elevenlabs/scribe-v2 on OpenRouter, whisper-1 elsewhere.
