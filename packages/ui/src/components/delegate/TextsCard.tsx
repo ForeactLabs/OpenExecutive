@@ -60,25 +60,31 @@ export default function TextsCard() {
 
   useEffect(() => {
     const ctl = new AbortController();
-    // One look at a time, so an older answer never lands after a newer one.
-    let looking = false;
+    // Looks may overlap (a slow one never stops the next), but an older
+    // answer never lands after a newer one.
+    let asked = 0;
+    let textsSeen = 0;
+    let browserSeen = 0;
     const load = () => {
-      if (looking) return;
-      looking = true;
-      const texts = getTexts(ctl.signal)
+      const look = ++asked;
+      getTexts(ctl.signal)
         .then((s) => {
+          if (look < textsSeen) return;
+          textsSeen = look;
           setState(s);
           setError(null);
         })
         .catch((err: unknown) => {
-          if (!ctl.signal.aborted) setError(err instanceof Error ? err.message : "Couldn't load this setting.");
+          if (!ctl.signal.aborted && look >= textsSeen)
+            setError(err instanceof Error ? err.message : "Couldn't load this setting.");
         });
-      const ext = getBrowserStatus()
-        .then(setBrowser)
+      getBrowserStatus()
+        .then((b) => {
+          if (look < browserSeen) return;
+          browserSeen = look;
+          setBrowser(b);
+        })
         .catch(() => undefined);
-      void Promise.allSettled([texts, ext]).then(() => {
-        looking = false;
-      });
     };
     load();
     // Setup happens in other tabs (the store, Google Messages): keep up,
