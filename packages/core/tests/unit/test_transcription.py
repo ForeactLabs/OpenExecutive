@@ -139,6 +139,17 @@ async def test_gemini_failing_or_too_large_is_a_transcription_error(settings, se
     server["answer"] = (400, {"error": {"message": "bad audio"}})
     with pytest.raises(transcription.TranscriptionError):
         await transcription.transcribe(b"x", "voice.ogg", "audio/ogg")
+    for refused in (
+        {"candidates": [], "promptFeedback": {"blockReason": "OTHER"}},
+        {"candidates": [{"finishReason": "RECITATION", "content": {"parts": []}}]},
+        {"candidates": [{"finishReason": "MAX_TOKENS", "content": {"parts": [{"text": "move my"}]}}]},
+    ):
+        server["answer"] = (200, refused)
+        with pytest.raises(transcription.TranscriptionError):
+            await transcription.transcribe(b"x", "voice.ogg", "audio/ogg")
+    # Nothing said is an empty answer, not an error.
+    server["answer"] = (200, {"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": ""}]}}]})
+    assert await transcription.transcribe(b"x", "voice.ogg", "audio/ogg") == ""
     with pytest.raises(transcription.TranscriptionError, match="14 MB"):
         await transcription.transcribe(b"x" * (transcription.GEMINI_MAX_BYTES + 1), "voice.ogg", "audio/ogg")
 

@@ -303,6 +303,13 @@ async def _gemini(where: Target, data: bytes, media_type: str) -> str:
     for part in parts if isinstance(parts, list) else []:
         if isinstance(part, dict) and isinstance(part.get("text"), str):
             words.append(part["text"])
+    # Refused (a block reason, or it stopped for safety or recitation) or cut
+    # off: not "nothing was said", which "" would read as.
+    feedback = body.get("promptFeedback")
+    finish = first.get("finishReason") if isinstance(first, dict) else None
+    if (isinstance(feedback, dict) and feedback.get("blockReason")) or (finish not in (None, "STOP")):
+        logger.warning("transcription refused or cut off by Gemini (%s)", finish or "blocked")
+        raise TranscriptionError("the speech service didn't answer")
     meta_raw = body.get("usageMetadata")
     meta: dict[str, Any] = meta_raw if isinstance(meta_raw, dict) else {}
     _record(where, {
