@@ -83,18 +83,30 @@ export default function MicButton({ disabled, onLive, onText, onError }: Props) 
       Boolean(navigator.mediaDevices?.getUserMedia);
     const canHear = typeof window !== "undefined" && browserRecognition() !== null;
     if (!canRecord && !canHear) return;
-    void getVoiceStatus().then((status) => {
-      if (!live) return;
-      if (status?.available && canRecord) {
-        setAlone(false);
-        setMaxSeconds(status.max_seconds);
-      } else if (canHear) {
-        setAlone(true);
-        setMaxSeconds(status?.max_seconds ?? ALONE_MAX_SECONDS);
-      }
-    });
+    // No answer at all (a slow start, a dropped line) isn't "no server": it
+    // asks again a few times, with the mic hidden meanwhile.
+    let tries = 0;
+    let retry: ReturnType<typeof setTimeout> | null = null;
+    const load = () =>
+      void getVoiceStatus().then((status) => {
+        if (!live) return;
+        if (status === null) {
+          tries += 1;
+          if (tries < 4) retry = setTimeout(load, 5000 * tries);
+          return;
+        }
+        if (status.available && canRecord) {
+          setAlone(false);
+          setMaxSeconds(status.max_seconds);
+        } else if (canHear) {
+          setAlone(true);
+          setMaxSeconds(status.max_seconds || ALONE_MAX_SECONDS);
+        }
+      });
+    load();
     return () => {
       live = false;
+      if (retry) clearTimeout(retry);
     };
   }, []);
 
@@ -132,7 +144,12 @@ export default function MicButton({ disabled, onLive, onText, onError }: Props) 
       const heard = heardRef.current;
       onText(heard);
       if (error === "not-allowed" || error === "service-not-allowed" || error === "audio-capture") onError(MIC_BLOCKED);
-      else if (!heard.trim()) onError(error ? "Couldn't hear it. Try again." : "Didn't catch any words. Try again.");
+      else if (error === "network" && !heard.trim()) {
+        // Some browsers (Brave, Opera, Electron shells) have the recognizer
+        // but nothing behind it: the mic goes for the rest of the page.
+        onError("This browser can't turn speech into words on its own. Type instead.");
+        setMaxSeconds(null);
+      } else if (!heard.trim()) onError(error ? "Couldn't hear it. Try again." : "Didn't catch any words. Try again.");
       setPhase("idle");
     },
     [onError, onText],
