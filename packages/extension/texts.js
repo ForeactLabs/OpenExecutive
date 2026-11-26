@@ -218,6 +218,9 @@
   const SEEN_KEY = "textsSeen";
   let reporting = false;
   let lastReport = 0;
+  // What the last report said about pairing: a change goes at once, so the
+  // site's setup ticks soon after the code is scanned.
+  let lastPaired = null;
 
   let again = false;
 
@@ -246,12 +249,13 @@
         items = out.items;
         seen = out.seen;
       }
-      // Nothing new: still say it's here, once a minute.
-      if (!items.length && !force && now - lastReport < 60000) {
+      // Nothing new and pairing unchanged: still say it's here, once a minute.
+      if (!items.length && !force && isPaired === lastPaired && now - lastReport < 60000) {
         if (seen) await chrome.storage.local.set({ [SEEN_KEY]: seen });
         return;
       }
       lastReport = now;
+      lastPaired = isPaired;
       const answer = await chrome.runtime.sendMessage({ type: "texts_seen", paired: isPaired, items }).catch(() => null);
       // Only what the site took counts as seen: with no Open Executive tab
       // to take them (or a failed one), the same texts go again next time.

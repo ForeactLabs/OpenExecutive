@@ -181,8 +181,8 @@ export default function TextsCard() {
                       aria-hidden
                       className="h-3.5 w-3.5 flex-shrink-0 animate-spin rounded-full border-2 border-zinc-300 border-t-accent"
                     />
-                    Waiting for your phone. After you scan the code, this ticks by itself, usually within 10 seconds.
-                    Keep the Google Messages tab open.
+                    Waiting for your phone. After you scan the code, this ticks by itself once Chrome sees it
+                    paired. Keep the Google Messages tab open.
                   </span>
                 )}
               </>

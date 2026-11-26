@@ -510,6 +510,13 @@ test("texts: new texts count as seen only once the site took them", () => {
   assert.ok(!report.includes("[SEEN_KEY]: out.seen"));
 });
 
+test("texts: a change in pairing is reported at once, not held for the once-a-minute report", () => {
+  const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
+  const report = texts.slice(texts.indexOf("async function report"), texts.indexOf("let timer = null"));
+  assert.ok(report.includes("!items.length && !force && isPaired === lastPaired && now - lastReport < 60000"));
+  assert.ok(report.indexOf("lastPaired = isPaired;") < report.indexOf('type: "texts_seen"'));
+});
+
 test("texts: a send never takes the person's own tab from under a half-typed text", () => {
   const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
   const one = bg.slice(bg.indexOf("async function sendOneText"), bg.indexOf("function waitLoaded"));
