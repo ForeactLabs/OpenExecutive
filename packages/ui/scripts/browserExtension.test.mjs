@@ -550,6 +550,11 @@ test("texts: a send goes to the live tab, takes over only when none is, and a Us
   assert.ok(pick.includes("b.getClientRects().length > 0"));
   assert.ok(pick.includes('if (shown.length) return shown.find((b) => !b.disabled) || null;'));
   assert.ok(texts.includes("const button = await waitFor(() => sendButton(), 2000);"));
+  // The same-conversation check sits between the wait and the click.
+  const w = texts.indexOf("const button = await waitFor(() => sendButton(), 2000);");
+  const g = texts.indexOf("// Right before Send: still the same conversation");
+  const c = texts.indexOf("if (button) button.click();");
+  assert.ok(w < g && g < c && !texts.slice(g, c).includes("await"));
   assert.ok(!texts.includes("first(document, SEND)"));
   // The live page draws an editable div; it must be looked for before any textarea.
   const compose = texts.slice(texts.indexOf("const COMPOSE = ["));

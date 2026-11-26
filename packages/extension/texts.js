@@ -440,13 +440,14 @@
     const before = outgoingTexts().length;
     setValue(box, text);
     await pause(300);
+    // The page enables Send a moment after the text goes in. Wait before the
+    // check below, so nothing awaits between that check and the click.
+    const button = await waitFor(() => sendButton(), 2000);
     // Right before Send: still the same conversation, and still its box.
     if (!key || T.keyOf(location.href) !== key || !box.isConnected) {
       if (box.isConnected) setValue(box, "");
       return { ok: false, error: "Google Messages moved to another conversation. Nothing went." };
     }
-    // The page enables Send a moment after the text goes in.
-    const button = await waitFor(() => sendButton(), 2000);
     // From here on Send is pressed: a missing answer is unsure, never "Nothing went".
     if (button) button.click();
     else pressEnter(box);
