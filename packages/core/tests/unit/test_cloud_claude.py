@@ -322,3 +322,13 @@ async def test_signing_runs_off_the_event_loop(monkeypatch: pytest.MonkeyPatch) 
     await provider.messages_create(model="claude-sonnet-5-5", max_tokens=5, messages=[{"role": "user", "content": "hi"}])
     assert seen and signed_on and signed_on[0] != loop_thread
     assert seen[0].headers["authorization"].startswith("AWS4-HMAC-SHA256")
+
+
+def test_anthropics_custom_headers_never_go_to_a_cloud(monkeypatch: pytest.MonkeyPatch) -> None:
+    from google.oauth2.credentials import Credentials
+
+    monkeypatch.setenv("ANTHROPIC_CUSTOM_HEADERS", "x-internal: secret")
+    bedrock = cloud.BedrockClaudeProvider(region="us-east-1", models={}, api_key="k")
+    vertex = cloud.VertexClaudeProvider(project_id="p", region="global", models={}, credentials=Credentials(token="t"))
+    for provider in (bedrock, vertex):
+        assert "x-internal" not in provider._client.default_headers

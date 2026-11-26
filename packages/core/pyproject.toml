@@ -7,7 +7,7 @@ requires-python = ">=3.11"
 license = {text = "Apache-2.0"}
 authors = [{name = "Open Executive Contributors"}]
 dependencies = [
-    "anthropic>=0.52.0",
+    "anthropic>=0.102.0",
     # Claude on a company's own Amazon Bedrock (providers.cloud): request
     # signing and Bedrock's event-stream decoding come from botocore.
     "boto3>=1.35.0",
