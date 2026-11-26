@@ -515,7 +515,7 @@ test("texts: a change in pairing is reported at once, not held for the once-a-mi
   const report = texts.slice(texts.indexOf("async function report"), texts.indexOf("let timer = null"));
   assert.ok(report.includes("const wait = isPaired === lastPaired ? 60000 : 10000;"));
   assert.ok(report.includes("!items.length && !force && now - lastReport < wait"));
-  assert.ok(report.includes("if (answer && (answer.ok === true || answer.nobody === true)) lastPaired = isPaired;"));
+  assert.ok(report.includes("else if ((answer && (answer.ok === true || answer.nobody === true)) || ++fastTries >= 6) {"));
   const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
   assert.ok(bg.includes("nobody: tabs.length === 0"));
   assert.ok(report.indexOf("lastPaired = isPaired;") > report.indexOf('type: "texts_seen"'));

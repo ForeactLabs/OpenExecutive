@@ -221,6 +221,9 @@
   // What the last report said about pairing: a change goes at once, so the
   // site's setup ticks soon after the code is scanned.
   let lastPaired = null;
+  // Fast tries at telling a pairing change: after a minute of them, back to
+  // once a minute, so a site that never takes it isn't sent one every 10 s.
+  let fastTries = 0;
 
   let again = false;
 
@@ -262,7 +265,11 @@
       const answer = await chrome.runtime.sendMessage({ type: "texts_seen", paired: isPaired, items }).catch(() => null);
       // A pairing change counts as told once the site took it, or once no
       // site was open to tell: a site opened later hears it within a minute.
-      if (answer && (answer.ok === true || answer.nobody === true)) lastPaired = isPaired;
+      if (isPaired === lastPaired) fastTries = 0;
+      else if ((answer && (answer.ok === true || answer.nobody === true)) || ++fastTries >= 6) {
+        lastPaired = isPaired;
+        fastTries = 0;
+      }
       // Only what the site took counts as seen: with no Open Executive tab
       // to take them (or a failed one), the same texts go again next time.
       if (seen && ((answer && answer.ok === true) || !items.length)) await chrome.storage.local.set({ [SEEN_KEY]: seen });
