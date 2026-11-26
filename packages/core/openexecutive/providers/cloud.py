@@ -17,8 +17,12 @@ is left out: not every region or account offers it.
   (``VERTEX_CREDENTIALS_JSON``) or, without one, the machine's Google
   credentials.
 
-Neither client follows redirects, which would carry the credential headers
-to another host.
+Each client is built from these settings alone: its host comes from the
+region given here, never from ``ANTHROPIC_BEDROCK_BASE_URL`` /
+``ANTHROPIC_VERTEX_BASE_URL``, and Bedrock never picks up
+``AWS_BEARER_TOKEN_BEDROCK``. Neither follows redirects, which would carry
+the credential headers to another host. A model with no id here is refused
+rather than sent under the Council's name.
 """
 from __future__ import annotations
 
@@ -29,6 +33,7 @@ from typing import Any
 
 import anthropic
 
+from openexecutive.config import GOOGLE_TOKEN_URI
 from openexecutive.providers.feature_gate import (
     FeatureSpec,
     apply_feature_gates,
@@ -43,6 +48,20 @@ CLOUD_CLAUDE_SPEC = FeatureSpec(
     supports_tool_use=True,
 )
 VERTEX_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
+
+
+def bedrock_base_url(region: str) -> str:
+    return f"https://bedrock-runtime.{region}.amazonaws.com"
+
+
+def vertex_base_url(region: str) -> str:
+    """Vertex's host for ``region``, as Google documents it: one global
+    host, two multi-region ones, and a host per region."""
+    if region == "global":
+        return "https://aiplatform.googleapis.com/v1"
+    if region in ("us", "eu"):
+        return f"https://aiplatform.{region}.rep.googleapis.com/v1"
+    return f"https://{region}-aiplatform.googleapis.com/v1"
 
 
 def bedrock_id_for(model: str, settings: Any) -> str | None:
@@ -72,7 +91,10 @@ class _MappedClaude:
         model = str(kwargs.get("model", ""))
         fitted = fit_claude_generation(model, relax_forced_tool_choice(model, kwargs))
         gated = apply_feature_gates(CLOUD_CLAUDE_SPEC, fitted)
-        return {**gated, "model": self._ids.get(model, model)}
+        cloud_id = self._ids.get(model)
+        if cloud_id is None:
+            raise ValueError(f"{model!r} has no id on this cloud")
+        return {**gated, "model": cloud_id}
 
     def messages_create(self, **kwargs: Any) -> Awaitable[Any]:
         return self._client.messages.create(**self._prepare(kwargs))
@@ -95,27 +117,36 @@ class BedrockClaudeProvider(_MappedClaude):
         super().__init__(models)
         kwargs: dict[str, Any] = {
             "aws_region": region,
+            "base_url": bedrock_base_url(region),
+            # Always given, so the SDK never reads AWS_BEARER_TOKEN_BEDROCK;
+            # cleared below when the call is signed instead.
+            "api_key": api_key or "",
             "http_client": anthropic.DefaultAsyncHttpxClient(follow_redirects=False),
         }
-        if api_key:
-            kwargs["api_key"] = api_key
-        elif access_key_id and secret_access_key:
-            kwargs["aws_access_key"] = access_key_id
-            kwargs["aws_secret_key"] = secret_access_key
         if timeout is not None:
             kwargs["timeout"] = timeout
         self._client = anthropic.AsyncAnthropicBedrock(**kwargs)
+        if not api_key:
+            # SigV4: the key pair, or with neither half the machine's role.
+            self._client.api_key = None
+            self._client.aws_access_key = access_key_id or None
+            self._client.aws_secret_key = secret_access_key or None
 
 
 def vertex_credentials(raw: str | None) -> Any:
     """A service account's JSON key → Google credentials, or None for the
-    machine's own. Only the error's type is kept: the key is in the input."""
+    machine's own. The key gets its tokens from Google's own token endpoint
+    only (google-auth posts the signed assertion to ``token_uri``). Only the
+    error's type is kept: the key is in the input."""
     if not raw:
         return None
     from google.oauth2 import service_account
 
     try:
         info = json.loads(raw)
+        if not isinstance(info, dict) or info.get("token_uri", GOOGLE_TOKEN_URI) != GOOGLE_TOKEN_URI:
+            raise ValueError("token_uri")
+        info["token_uri"] = GOOGLE_TOKEN_URI
         return service_account.Credentials.from_service_account_info(info, scopes=[VERTEX_SCOPE])
     except Exception as exc:  # noqa: BLE001 - the message can quote the key
         raise ValueError(f"VERTEX_CREDENTIALS_JSON isn't a service account key ({type(exc).__name__})") from None
@@ -135,6 +166,7 @@ class VertexClaudeProvider(_MappedClaude):
         kwargs: dict[str, Any] = {
             "project_id": project_id,
             "region": region,
+            "base_url": vertex_base_url(region),
             "http_client": anthropic.DefaultAsyncHttpxClient(follow_redirects=False),
         }
         if credentials is not None:

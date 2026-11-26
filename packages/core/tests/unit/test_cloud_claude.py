@@ -197,3 +197,105 @@ def test_neither_cloud_follows_redirects(monkeypatch: pytest.MonkeyPatch) -> Non
     vertex = cloud.VertexClaudeProvider(project_id="p", region="global", models={}, credentials=Credentials(token="t"))
     assert bedrock._client._client.follow_redirects is False
     assert vertex._client._client.follow_redirects is False
+
+
+# --------------------------------------------------------------------------- #
+# Hosts, ids and keys come from these settings only
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    "env",
+    [
+        {"BEDROCK_REGION": "evil.example/x"},
+        {"BEDROCK_REGION": "us-east-1.evil.example#"},
+        {"VERTEX_REGION": "evil.example/"},
+        {"VERTEX_PROJECT_ID": "acme/../other"},
+    ],
+)
+def test_a_region_or_project_cant_change_the_host(env: dict[str, str]) -> None:
+    base: dict[str, str] = {
+        "BEDROCK_REGION": "us-east-1", "BEDROCK_MODELS": f"claude-sonnet-5-5={BEDROCK_ID}",
+        "VERTEX_PROJECT_ID": "acme-ai", "VERTEX_REGION": "us-east5", "VERTEX_MODELS": f"claude-opus-5-5={VERTEX_ID}",
+    }
+    with pytest.raises(ValueError, match="isn't a"):
+        Settings(**{**base, **env})  # type: ignore[arg-type]
+
+
+def test_a_region_is_used_without_its_spaces() -> None:
+    settings = Settings(BEDROCK_REGION=" us-east-1 ", BEDROCK_MODELS=f"claude-sonnet-5-5={BEDROCK_ID}")  # type: ignore[call-arg]
+    assert settings.bedrock_region == "us-east-1"
+
+
+@pytest.mark.parametrize("pair", ["claude-sonnet-5-5=a/b", "claude-sonnet-5-5=x?y", "claude-sonnet-5-5/x=ok"])
+def test_a_model_id_cant_reach_another_path(pair: str) -> None:
+    with pytest.raises(ValueError, match="Claude models only|characters"):
+        Settings(BEDROCK_REGION="us-east-1", BEDROCK_MODELS=pair)  # type: ignore[call-arg]
+
+
+async def test_an_unmapped_model_is_refused_not_sent_under_its_name() -> None:
+    provider = cloud.BedrockClaudeProvider(region="us-east-1", models={}, api_key="k")
+    seen = _capture(provider)
+    with pytest.raises(ValueError, match="no id"):
+        await provider.messages_create(model="claude-haiku-5-5", max_tokens=5, messages=[{"role": "user", "content": "hi"}])
+    assert seen == []
+
+
+async def test_the_sdks_environment_overrides_are_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("botocore")
+    monkeypatch.setenv("ANTHROPIC_BEDROCK_BASE_URL", "https://evil.example")
+    monkeypatch.setenv("ANTHROPIC_VERTEX_BASE_URL", "https://evil.example")
+    monkeypatch.setenv("AWS_BEARER_TOKEN_BEDROCK", "someone-elses-token")
+    _bedrock(monkeypatch, api_key=False)
+    bedrock = _inner("claude-sonnet-5-5")
+    seen = _capture(bedrock)
+    await bedrock.messages_create(model="claude-sonnet-5-5", max_tokens=5, messages=[{"role": "user", "content": "hi"}])
+    [request] = seen
+    assert request.url.host == "bedrock-runtime.us-east-1.amazonaws.com"
+    assert request.headers["authorization"].startswith("AWS4-HMAC-SHA256 Credential=AKIAEXAMPLE/")
+    assert "someone-elses-token" not in " ".join(request.headers.values())
+
+    from google.oauth2.credentials import Credentials
+
+    vertex = cloud.VertexClaudeProvider(
+        project_id="acme-ai", region="global", models={"claude-opus-5-5": VERTEX_ID}, credentials=Credentials(token="t")
+    )
+    seen = _capture(vertex)
+    await vertex.messages_create(model="claude-opus-5-5", max_tokens=5, messages=[{"role": "user", "content": "hi"}])
+    assert seen[0].url.host == "aiplatform.googleapis.com"
+
+
+@pytest.mark.parametrize(
+    ("region", "host"),
+    [
+        ("global", "aiplatform.googleapis.com"),
+        ("us", "aiplatform.us.rep.googleapis.com"),
+        ("eu", "aiplatform.eu.rep.googleapis.com"),
+        ("us-east5", "us-east5-aiplatform.googleapis.com"),
+    ],
+)
+def test_each_vertex_region_has_googles_host(region: str, host: str) -> None:
+    assert httpx.URL(cloud.vertex_base_url(region)).host == host
+
+
+def _service_account(**extra: str) -> str:
+    return json.dumps({
+        "type": "service_account", "project_id": "acme-ai", "client_email": "oe@acme-ai.iam.gserviceaccount.com",
+        "private_key": "-----BEGIN PRIVATE KEY-----secret-key-material", "private_key_id": "1", **extra,
+    })
+
+
+def test_a_service_account_key_gets_tokens_from_google_only() -> None:
+    raw = _service_account(token_uri="https://evil.example/token")
+    with pytest.raises(ValueError, match="token_uri") as caught:
+        Settings(VERTEX_PROJECT_ID="acme-ai", VERTEX_REGION="global", VERTEX_CREDENTIALS_JSON=raw)  # type: ignore[call-arg]
+    assert "secret-key-material" not in str(caught.value)
+    with pytest.raises(ValueError) as again:
+        cloud.vertex_credentials(raw)
+    assert "secret-key-material" not in str(again.value)
+
+
+def test_a_settings_error_never_prints_the_key() -> None:
+    with pytest.raises(ValueError) as caught:
+        Settings(VERTEX_PROJECT_ID="acme/x", VERTEX_REGION="global", VERTEX_CREDENTIALS_JSON=_service_account())  # type: ignore[call-arg]
+    assert "secret-key-material" not in str(caught.value)

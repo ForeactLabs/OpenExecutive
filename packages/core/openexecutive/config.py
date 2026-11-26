@@ -73,6 +73,30 @@ _DEFAULT_OPENROUTER_CATALOG_PROVIDERS: tuple[str, ...] = (
 _DEFAULT_OPENROUTER_CATALOG_REFRESH_S = 6 * 60 * 60.0
 
 
+# Claude as the Council names it, and the id a cloud serves a model under
+# (``global.anthropic.claude-sonnet-5-5-v1:0``, ``claude-sonnet-5-5@20260301``).
+# Both end up in a request path, so neither may hold ``/``, ``?`` or ``#``.
+_CLOUD_CLAUDE_NAME = re.compile(r"claude-[a-z]+-\d[a-z0-9.-]*")
+_CLOUD_MODEL_ID = re.compile(r"[A-Za-z0-9._:@-]+")
+# A region or project id; both become part of the cloud's host or path.
+_CLOUD_REGION = re.compile(r"[a-z0-9-]+")
+# The only place a service account key may send itself for a token.
+GOOGLE_TOKEN_URI = "https://oauth2.googleapis.com/token"
+
+
+def _check_service_account_key(raw: str) -> None:
+    """VERTEX_CREDENTIALS_JSON is a service account key that gets its token
+    from Google. Errors never quote it: it holds the private key."""
+    try:
+        info = json.loads(raw)
+    except ValueError:
+        raise ValueError("VERTEX_CREDENTIALS_JSON isn't JSON") from None
+    if not isinstance(info, dict) or info.get("type") != "service_account":
+        raise ValueError("VERTEX_CREDENTIALS_JSON isn't a service account key")
+    if info.get("token_uri", GOOGLE_TOKEN_URI) != GOOGLE_TOKEN_URI:
+        raise ValueError(f"VERTEX_CREDENTIALS_JSON's token_uri must be {GOOGLE_TOKEN_URI}")
+
+
 def _parse_model_map(v: Any, name: str) -> dict[str, str]:
     """``model=deployment`` pairs (comma-separated) or a JSON object, for a
     setting that maps model names to a backend's own names. Blank → ``{}``."""
@@ -135,6 +159,9 @@ class Settings(BaseSettings):
         # `make dev` exports those as empty strings; without this flag an
         # optional int like DISCORD_NOTIFY_CHANNEL_ID crashes startup.
         env_ignore_empty=True,
+        # A failed check never prints the settings it was given: they hold
+        # keys (a Vertex service account key is a whole setting).
+        hide_input_in_errors=True,
     )
 
     # Optional: a deployment can run entirely on local / OpenRouter models
@@ -512,21 +539,35 @@ class Settings(BaseSettings):
     def _parse_vertex_models(cls, v: Any) -> dict[str, str]:
         return _parse_model_map(v, "VERTEX_MODELS")
 
+    @field_validator("bedrock_region", "vertex_region", "vertex_project_id", mode="before")
+    @classmethod
+    def _strip_cloud_names(cls, v: Any) -> Any:
+        return v.strip() or None if isinstance(v, str) else v
+
     @model_validator(mode="after")
     def _validate_cloud_claude(self) -> "Settings":
         for name, models in (("BEDROCK_MODELS", self.bedrock_models), ("VERTEX_MODELS", self.vertex_models)):
-            wrong = [m for m in models if not re.match(r"^claude-[a-z]+-\d", m)]
+            wrong = [m for m in models if not _CLOUD_CLAUDE_NAME.fullmatch(m)]
             if wrong:
                 raise ValueError(f"{name} maps Claude models only; {', '.join(wrong)} isn't one")
+            bad_ids = [m for m, cloud_id in models.items() if not _CLOUD_MODEL_ID.fullmatch(cloud_id)]
+            if bad_ids:
+                raise ValueError(f"{name}: the id for {', '.join(bad_ids)} has characters a model id can't")
         if self.bedrock_models:
-            if not (self.bedrock_region or "").strip():
+            if not self.bedrock_region:
                 raise ValueError("BEDROCK_MODELS needs BEDROCK_REGION (e.g. us-east-1)")
             if bool(self.bedrock_access_key_id) != bool(self.bedrock_secret_access_key):
                 raise ValueError("BEDROCK_ACCESS_KEY_ID and BEDROCK_SECRET_ACCESS_KEY go together")
-        if self.vertex_models and not (
-            (self.vertex_project_id or "").strip() and (self.vertex_region or "").strip()
-        ):
+        if self.bedrock_region and not _CLOUD_REGION.fullmatch(self.bedrock_region):
+            raise ValueError("BEDROCK_REGION isn't a region name (e.g. us-east-1)")
+        if self.vertex_models and not (self.vertex_project_id and self.vertex_region):
             raise ValueError("VERTEX_MODELS needs VERTEX_PROJECT_ID and VERTEX_REGION")
+        if self.vertex_region and not _CLOUD_REGION.fullmatch(self.vertex_region):
+            raise ValueError("VERTEX_REGION isn't a region name (e.g. us-east5 or global)")
+        if self.vertex_project_id and not _CLOUD_REGION.fullmatch(self.vertex_project_id):
+            raise ValueError("VERTEX_PROJECT_ID isn't a project id (e.g. acme-ai)")
+        if self.vertex_credentials_json:
+            _check_service_account_key(self.vertex_credentials_json)
         return self
 
     # ---- Google and xAI keys (providers.vendors) -------------------------
