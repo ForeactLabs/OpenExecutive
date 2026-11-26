@@ -351,6 +351,21 @@
     'button[aria-label^="Send" i]',
   ];
 
+  // Google Messages draws two Send buttons: an inline one inside a hidden
+  // (display: none) wrapper and the round one people press. The first in
+  // the page is the hidden one, and clicking it sends nothing, so take the
+  // first one that is actually on screen and enabled.
+  // The first selector with a button on screen decides: if that button is
+  // still disabled, nothing is returned (and Enter is used), so a looser
+  // selector further down never picks some other "Send…" button.
+  function sendButton() {
+    for (const sel of SEND) {
+      const shown = [...document.querySelectorAll(sel)].filter((b) => b.getClientRects().length > 0);
+      if (shown.length) return shown.find((b) => !b.disabled) || null;
+    }
+    return null;
+  }
+
   function outgoingBubbles() {
     return [
       ...document.querySelectorAll(
@@ -425,14 +440,16 @@
     const before = outgoingTexts().length;
     setValue(box, text);
     await pause(300);
+    // The page enables Send a moment after the text goes in. Wait before the
+    // check below, so nothing awaits between that check and the click.
+    const button = await waitFor(() => sendButton(), 2000);
     // Right before Send: still the same conversation, and still its box.
     if (!key || T.keyOf(location.href) !== key || !box.isConnected) {
       if (box.isConnected) setValue(box, "");
       return { ok: false, error: "Google Messages moved to another conversation. Nothing went." };
     }
-    const button = first(document, SEND);
     // From here on Send is pressed: a missing answer is unsure, never "Nothing went".
-    if (button && !button.disabled) button.click();
+    if (button) button.click();
     else pressEnter(box);
     const want = T.squeeze(text, 4000).slice(0, 60);
     const went = await waitFor(() => {
