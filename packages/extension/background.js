@@ -310,15 +310,6 @@ function setTextsOn(origin, on, origins) {
     }
     const any = Object.values(by).some((v) => v === true);
     await chrome.storage.local.set(any === textsOn ? { textsOnBy: by } : { textsOnBy: by, textsOn: any });
-    // Turned on here for the first time: ask Chrome's OK to press Send now,
-    // while the person is setting Texts up, not at their first text.
-    if (any && textsOn !== true && !(await mayPress())) {
-      try {
-        await chrome.tabs.create({ url: chrome.runtime.getURL("texts-allow.html"), active: true });
-      } catch {
-        // No tab to ask in: the popup asks too.
-      }
-    }
   });
   textsStateQueue = run.catch(() => undefined);
   return run;
@@ -462,20 +453,9 @@ async function sendSpot(target) {
   return null;
 }
 
-// "debugger" is an optional permission: asked for only when someone turns
-// Texts on (texts-allow.html, or the popup), never of anyone else.
-async function mayPress() {
-  try {
-    return (await chrome.permissions.contains({ permissions: ["debugger"] })) === true;
-  } catch {
-    return false;
-  }
-}
-
 async function pressInTab(tab, x, y) {
   if (!tab || !pressing || tab.id !== pressing.tabId) return { ok: false };
   const conversation = pressing.conversation;
-  if (!(await mayPress())) return { ok: false, needsOk: true };
   if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > 10000 || y > 10000) return { ok: false };
   const now = await chrome.tabs.get(tab.id).catch(() => null);
   if (!now || !onMessages(now.url)) return { ok: false };
@@ -486,15 +466,18 @@ async function pressInTab(tab, x, y) {
   } catch {
     return { ok: false };
   }
+  // Once the press has started it may have gone, even if a step after fails.
+  let started = false;
   try {
     const spot = await sendSpot(target);
     if (!spot) return { ok: false };
     for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
+      if (type === "mousePressed") started = true;
       await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { type, x: spot.x, y: spot.y, button: type === "mouseMoved" ? "none" : "left", clickCount: type === "mouseMoved" ? 0 : 1 });
     }
     return { ok: true };
   } catch {
-    return { ok: false };
+    return { ok: false, maybe: started };
   } finally {
     await chrome.debugger.detach(target).catch(() => undefined);
   }

@@ -45,11 +45,6 @@ async function render() {
   $("stay").hidden = list.length === 0;
   $("stay-box").checked = stayConnected !== false;
 
-  // Texts is on here but Chrome hasn't given its OK to press Send yet.
-  const { textsOn } = await chrome.storage.local.get("textsOn");
-  const mayPress = await chrome.permissions.contains({ permissions: ["debugger"] }).catch(() => false);
-  $("texts-ok").hidden = !(textsOn === true && !mayPress);
-
   const { stoppedUntil } = await chrome.storage.session.get("stoppedUntil");
   $("stopped").hidden = !(typeof stoppedUntil === "number" && stoppedUntil > Date.now());
 
@@ -101,11 +96,6 @@ $("stay-box").addEventListener("change", async (e) => {
   // Turning it back on also undoes closing its window.
   if (on) await chrome.storage.session.set({ ownClosed: false });
   await chrome.storage.local.set({ stayConnected: on });
-});
-
-$("texts-ok-btn").addEventListener("click", async () => {
-  await chrome.permissions.request({ permissions: ["debugger"] }).catch(() => false);
-  void render();
 });
 
 $("resume").addEventListener("click", async () => {

@@ -445,17 +445,18 @@
     // Google Messages ignores a press made from the page, so Chrome makes a
     // real one on the Send button (see pressInTab in background.js).
     const spot = button && button.getBoundingClientRect();
-    const pressed = spot
-      ? await chrome.runtime
-          .sendMessage({ type: "texts_press", x: spot.left + spot.width / 2, y: spot.top + spot.height / 2, conversation: msg.conversation || "" })
-          .catch(() => null)
-      : null;
-    if (!pressed || pressed.ok !== true) {
+    if (!spot) {
+      if (box.isConnected) setValue(box, "");
+      return { ok: false, error: "Google Messages didn't show its Send button. Nothing went." };
+    }
+    const pressed = await chrome.runtime
+      .sendMessage({ type: "texts_press", x: spot.left + spot.width / 2, y: spot.top + spot.height / 2 })
+      .catch(() => null);
+    // No answer, or a press that failed part way, may still have gone: only a
+    // press refused before it started means nothing went.
+    if (pressed && pressed.ok !== true && pressed.maybe !== true) {
       // No real press happened, so nothing went: take the text back out.
       if (box.isConnected) setValue(box, "");
-      if (pressed && pressed.needsOk === true) {
-        return { ok: false, error: "Chrome hasn't given Open Executive its OK to press Send yet: click the Open Executive extension and press Allow sending texts. Nothing went." };
-      }
       return { ok: false, error: "Chrome didn't let Open Executive press Send in Google Messages. Nothing went." };
     }
     // From here on Send is pressed: a missing answer is unsure, never "Nothing went".

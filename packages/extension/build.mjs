@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { deflateRawSync } from "node:zlib";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const FILES = ["manifest.json", "site-rules.js", "shared.js", "content.js", "background.js", "texts.js", "texts-allow.html", "texts-allow.js", "popup.html", "popup.js"];
+const FILES = ["manifest.json", "site-rules.js", "shared.js", "content.js", "background.js", "texts.js", "popup.html", "popup.js"];
 const ICONS = ["icon16.png", "icon32.png", "icon48.png", "icon128.png"];
 
 /** The options from the command line, then the environment. */
