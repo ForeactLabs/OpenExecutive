@@ -382,6 +382,12 @@
     if (!text.trim()) return { ok: false, error: "There was nothing to send." };
     // Live in another tab: never take it from there, where the person may be
     // typing. Only when no tab was live may this one take over.
+    // The page may draw "Use here" a moment after it loads: wait for it, or
+    // for the box to type in (or the number to type, for someone new).
+    await waitFor(
+      () => elsewhere() || first(document, COMPOSE) || first(document, ["input[data-e2e-contact-input]", "mw-contact-chips-input input"]),
+      10000,
+    );
     const takeOver = elsewhere();
     if (takeOver && msg.mayTakeOver !== true) return { ok: false, error: "Google Messages is open in another tab. Nothing went." };
     if (takeOver) {

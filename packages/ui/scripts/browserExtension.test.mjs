@@ -526,6 +526,8 @@ test("texts: a send goes to the live tab, takes over only when none is, and a Us
   const body = texts.slice(texts.indexOf("async function send(msg)"), texts.indexOf("chrome.runtime.onMessage.addListener((msg, sender, reply)"));
   const take = body.indexOf("takeOver.click();");
   assert.ok(body.indexOf("if (takeOver && msg.mayTakeOver !== true) return") < take);
+  // It waits for the page to show either Use here or a box before deciding.
+  assert.ok(body.indexOf("() => elsewhere() || first(document, COMPOSE)") < body.indexOf("const takeOver = elsewhere();"));
   const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
   const one = bg.slice(bg.indexOf("async function sendOneText"), bg.indexOf("function waitLoaded"));
   assert.ok(one.includes("const live = await liveMessagesTab();") && one.includes("mayTakeOver: live.allElsewhere"));
