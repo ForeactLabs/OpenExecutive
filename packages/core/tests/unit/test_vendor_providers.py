@@ -140,6 +140,19 @@ async def test_google_gets_its_own_id_key_and_reasoning_effort(monkeypatch: pyte
     assert "cache_control" not in json.dumps(body) and "usage" not in body
 
 
+@pytest.mark.parametrize(
+    ("reasoning", "effort"),
+    [
+        ({"effort": "max"}, "high"), ({"effort": "xhigh"}, "high"), ({"effort": "high"}, "high"),
+        ({"effort": "minimal"}, "minimal"), ({"effort": "none"}, "none"), ({"enabled": False}, "none"),
+        ({"max_tokens": 1024}, "low"), ({"max_tokens": 4096}, "medium"), ({"max_tokens": 32000}, "high"),
+        ({}, None),
+    ],
+)
+def test_each_reasoning_level_reaches_its_nearest_gemini_level(reasoning: dict[str, Any], effort: str | None) -> None:
+    assert vendors.gemini_effort(reasoning) == effort
+
+
 async def test_xai_gets_its_own_id_key_and_no_reasoning(monkeypatch: pytest.MonkeyPatch) -> None:
     _keys(monkeypatch)
     provider = _inner("x-ai/grok-4.6")
