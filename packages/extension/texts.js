@@ -325,12 +325,6 @@
     el.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
-  function pressEnter(el) {
-    for (const type of ["keydown", "keypress", "keyup"]) {
-      el.dispatchEvent(new KeyboardEvent(type, { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true }));
-    }
-  }
-
   // Google Messages draws the box to type in as an editable div
   // (`div[contenteditable][role=textbox][data-e2e-message-input-box]`),
   // not a textarea, so that comes first; the textarea forms are for older
@@ -448,13 +442,26 @@
       if (box.isConnected) setValue(box, "");
       return { ok: false, error: "Google Messages moved to another conversation. Nothing went." };
     }
+    // Google Messages ignores a press made from the page, so Chrome makes a
+    // real one on the Send button (see pressInTab in background.js).
+    const spot = button && button.getBoundingClientRect();
+    const pressed = spot
+      ? await chrome.runtime
+          .sendMessage({ type: "texts_press", x: spot.left + spot.width / 2, y: spot.top + spot.height / 2, conversation: msg.conversation || "" })
+          .catch(() => null)
+      : null;
+    if (!pressed || pressed.ok !== true) {
+      // No real press happened, so nothing went: take the text back out.
+      if (box.isConnected) setValue(box, "");
+      return { ok: false, error: "Chrome didn't let Open Executive press Send in Google Messages. Nothing went." };
+    }
     // From here on Send is pressed: a missing answer is unsure, never "Nothing went".
-    if (button) button.click();
-    else pressEnter(box);
     const want = T.squeeze(text, 4000).slice(0, 60);
+    // Sent means both: the box emptied and the text shows as a new bubble.
     const went = await waitFor(() => {
       const now = outgoingTexts();
-      return now.length > before && now.slice(before).some((t) => t.includes(want)) ? true : null;
+      const emptied = !box.isConnected || !T.squeeze(textOf(box), 10);
+      return emptied && now.length > before && now.slice(before).some((t) => t.includes(want)) ? true : null;
     }, 20000);
     // Send was pressed: it may have gone, so never say it didn't.
     if (!went) return { ok: false, unsure: true, error: "Google Messages didn't show the text as sent" };
