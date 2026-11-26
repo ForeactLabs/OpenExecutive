@@ -55,13 +55,17 @@ export default function TextsCard() {
   // Whether to look often: set from the last read, read by the timer.
   const waiting = useRef(false);
   useEffect(() => {
-    waiting.current = Boolean(state?.enabled && !state.paired);
-  }, [state]);
+    waiting.current = Boolean(state?.enabled && !state.paired && browser?.connected);
+  }, [state, browser]);
 
   useEffect(() => {
     const ctl = new AbortController();
+    // One look at a time, so an older answer never lands after a newer one.
+    let looking = false;
     const load = () => {
-      getTexts(ctl.signal)
+      if (looking) return;
+      looking = true;
+      const texts = getTexts(ctl.signal)
         .then((s) => {
           setState(s);
           setError(null);
@@ -69,9 +73,12 @@ export default function TextsCard() {
         .catch((err: unknown) => {
           if (!ctl.signal.aborted) setError(err instanceof Error ? err.message : "Couldn't load this setting.");
         });
-      getBrowserStatus()
+      const ext = getBrowserStatus()
         .then(setBrowser)
         .catch(() => undefined);
+      void Promise.allSettled([texts, ext]).then(() => {
+        looking = false;
+      });
     };
     load();
     // Setup happens in other tabs (the store, Google Messages): keep up,
@@ -79,7 +86,8 @@ export default function TextsCard() {
     let timer: ReturnType<typeof setTimeout>;
     const next = () => {
       timer = setTimeout(() => {
-        load();
+        // A hidden tab waits: coming back looks at once.
+        if (document.visibilityState === "visible") load();
         next();
       }, waiting.current ? PAIRING_RECHECK_MS : RECHECK_MS);
     };
@@ -88,11 +96,9 @@ export default function TextsCard() {
       if (document.visibilityState === "visible") load();
     };
     document.addEventListener("visibilitychange", back);
-    window.addEventListener("focus", back);
     return () => {
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", back);
-      window.removeEventListener("focus", back);
       ctl.abort();
     };
   }, []);
@@ -175,7 +181,7 @@ export default function TextsCard() {
                   Open Google Messages
                 </a>{" "}
                 in Chrome. On your phone: Messages › your picture › Device pairing › QR code scanner.
-                {state.enabled && (
+                {state.enabled && extension && (
                   <span role="status" className="mt-2 flex items-center gap-2 text-fg">
                     <span
                       aria-hidden
