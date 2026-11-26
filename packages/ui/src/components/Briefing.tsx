@@ -465,9 +465,6 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
   const needsYouCount =
     rightNowRows.length + mineProposals.length + replies.cards.length + inviteCards.cards.length +
     actionCards.cards.length + elsewhere.length;
-  // Home's headline, in the Executive's words: what needs you. What it did
-  // and is following up on is said once, under What I'm doing.
-  const headline = homeHeadline(needsYouCount, 0, 0, teamOffTrack(departments, today?.people ?? []));
 
   // For you's quiet rows: whose OK the team's cards wait on, the counts to
   // act on (the server's `to_act_on`: overdue tasks, goals at risk or never
@@ -477,6 +474,16 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
   const watched = watchingRow(monitoringProposals);
   const showWeeklyReview = Boolean(solo && weeklyReview);
   const forYouHasRows = Boolean(forYouWaiting || actOn.length > 0 || watched || showWeeklyReview);
+  // Home's headline, in the Executive's words: what needs you. What it did
+  // and is following up on is said once, under What I'm doing. With For you
+  // still listing something (an overdue task, a change on a watch), it never
+  // says All clear.
+  const headline = homeHeadline(
+    needsYouCount,
+    0,
+    0,
+    teamOffTrack(departments, today?.people ?? []) || forYouHasRows,
+  );
   // "Already on my own", from I could also's list, shown under What I'm doing.
   const [ownWork, setOwnWork] = useState<string[]>([]);
   const watchingItems = today?.watching ?? [];
