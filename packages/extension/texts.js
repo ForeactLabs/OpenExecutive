@@ -260,8 +260,9 @@
       }
       lastReport = now;
       const answer = await chrome.runtime.sendMessage({ type: "texts_seen", paired: isPaired, items }).catch(() => null);
-      // A pairing change counts as told only once the site took it.
-      if (answer && answer.ok === true) lastPaired = isPaired;
+      // A pairing change counts as told once the site took it, or once no
+      // site was open to tell: a site opened later hears it within a minute.
+      if (answer && (answer.ok === true || answer.nobody === true)) lastPaired = isPaired;
       // Only what the site took counts as seen: with no Open Executive tab
       // to take them (or a failed one), the same texts go again next time.
       if (seen && ((answer && answer.ok === true) || !items.length)) await chrome.storage.local.set({ [SEEN_KEY]: seen });

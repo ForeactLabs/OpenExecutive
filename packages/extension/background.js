@@ -333,7 +333,8 @@ async function passOnTexts(body) {
     }
   }
   // Every site with Texts on took them, or they go again next time.
-  return { ok: on.size > 0 && took.size === on.size };
+  // `nobody`: no site tab was open to take them at all.
+  return { ok: on.size > 0 && took.size === on.size, nobody: tabs.length === 0 };
 }
 
 // Send one text in Google Messages: open its conversation (or a new one) in
