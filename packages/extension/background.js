@@ -310,6 +310,15 @@ function setTextsOn(origin, on, origins) {
     }
     const any = Object.values(by).some((v) => v === true);
     await chrome.storage.local.set(any === textsOn ? { textsOnBy: by } : { textsOnBy: by, textsOn: any });
+    // Turned on here for the first time: ask Chrome's OK to press Send now,
+    // while the person is setting Texts up, not at their first text.
+    if (any && textsOn !== true && !(await mayPress())) {
+      try {
+        await chrome.tabs.create({ url: chrome.runtime.getURL("texts-allow.html"), active: true });
+      } catch {
+        // No tab to ask in: the popup asks too.
+      }
+    }
   });
   textsStateQueue = run.catch(() => undefined);
   return run;
@@ -424,8 +433,19 @@ async function sendOneText(send) {
 // the conversation it was handed (or a new one for a number).
 let pressingTab = null;
 
+// "debugger" is an optional permission: asked for only when someone turns
+// Texts on (texts-allow.html, or the popup), never of anyone else.
+async function mayPress() {
+  try {
+    return (await chrome.permissions.contains({ permissions: ["debugger"] })) === true;
+  } catch {
+    return false;
+  }
+}
+
 async function pressInTab(tab, x, y, conversation) {
   if (!tab || tab.id !== pressingTab) return { ok: false };
+  if (!(await mayPress())) return { ok: false, needsOk: true };
   if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > 10000 || y > 10000) return { ok: false };
   const now = await chrome.tabs.get(tab.id).catch(() => null);
   if (!now || !onMessages(now.url)) return { ok: false };

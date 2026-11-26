@@ -115,7 +115,9 @@ test("a dropdown option is found by its text", () => {
 
 test("the extension asks for nothing past what it uses", () => {
   const manifest = JSON.parse(readFileSync(new URL("../../extension/manifest.json", import.meta.url), "utf8"));
-  assert.deepEqual([...manifest.permissions].sort(), ["alarms", "debugger", "scripting", "storage", "tabGroups", "tabs"]);
+  assert.deepEqual([...manifest.permissions].sort(), ["alarms", "scripting", "storage", "tabGroups", "tabs"]);
+  // Pressing Send in Google Messages needs "debugger": optional, asked only of people who turn Texts on.
+  assert.deepEqual(manifest.optional_permissions, ["debugger"]);
   assert.equal(manifest.manifest_version, 3);
   // "debugger" is only for pressing Send in Google Messages: nothing else uses it.
   const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
@@ -123,7 +125,7 @@ test("the extension asks for nothing past what it uses", () => {
   const uses = bg.split("chrome.debugger.").length - 1;
   assert.equal(uses, press.split("chrome.debugger.").length - 1);
   assert.ok(uses > 0);
-  for (const name of ["content.js", "shared.js", "texts.js", "popup.js"]) {
+  for (const name of ["content.js", "shared.js", "texts.js", "popup.js", "texts-allow.js"]) {
     const src = readFileSync(new URL(`../../extension/${name}`, import.meta.url), "utf8");
     assert.ok(!src.includes("chrome.debugger"), name);
   }
@@ -596,6 +598,16 @@ test("texts: Send is a real press, only in the tab and conversation the send was
   const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
   const press = bg.slice(bg.indexOf("async function pressInTab"), bg.indexOf("function waitLoaded"));
   assert.ok(press.includes("if (!tab || tab.id !== pressingTab) return { ok: false };"));
+  assert.ok(press.includes("if (!(await mayPress())) return { ok: false, needsOk: true };"));
+  // Chrome's OK is asked for when Texts is first turned on here.
+  const on = bg.slice(bg.indexOf("function setTextsOn"), bg.indexOf("async function passOnTexts"));
+  assert.ok(on.includes('if (any && textsOn !== true && !(await mayPress()))') && on.includes('chrome.runtime.getURL("texts-allow.html")'));
+  const allow = readFileSync(new URL("../../extension/texts-allow.js", import.meta.url), "utf8");
+  assert.ok(allow.includes('chrome.permissions.request({ permissions: ["debugger"] })'));
+  const popup = readFileSync(new URL("../../extension/popup.js", import.meta.url), "utf8");
+  assert.ok(popup.includes('$("texts-ok").hidden = !(textsOn === true && !mayPress);'));
+  const build = readFileSync(new URL("../../extension/build.mjs", import.meta.url), "utf8");
+  assert.ok(build.includes('"texts-allow.html", "texts-allow.js"'));
   assert.ok(press.includes("endsWith(`/${encodeURIComponent(conversation)}`)"));
   assert.ok(press.includes("await chrome.debugger.detach(target)"));
   assert.ok(press.indexOf("finally") < press.indexOf("chrome.debugger.detach"));
@@ -605,7 +617,9 @@ test("texts: Send is a real press, only in the tab and conversation the send was
   // No page-made press is left: Google Messages ignores those.
   assert.ok(!texts.includes("button.click()") && !texts.includes("pressEnter"));
   // A failed press clears the box and says nothing went.
-  assert.ok(texts.includes('if (box.isConnected) setValue(box, "");\n      return { ok: false, error: "Chrome didn\'t let Open Executive press Send in Google Messages. Nothing went." };'));
+  const fail = texts.slice(texts.indexOf("if (!pressed || pressed.ok !== true) {"), texts.indexOf("// From here on Send is pressed"));
+  assert.ok(fail.indexOf('if (box.isConnected) setValue(box, "");') < fail.indexOf("return {"));
+  assert.ok(fail.includes("Nothing went.") && !fail.includes("unsure"));
   // Sent only when the box emptied and the text shows as a new bubble.
   assert.ok(texts.includes("return emptied && now.length > before && now.slice(before).some((t) => t.includes(want)) ? true : null;"));
 });

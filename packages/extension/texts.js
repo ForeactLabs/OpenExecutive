@@ -453,6 +453,9 @@
     if (!pressed || pressed.ok !== true) {
       // No real press happened, so nothing went: take the text back out.
       if (box.isConnected) setValue(box, "");
+      if (pressed && pressed.needsOk === true) {
+        return { ok: false, error: "Chrome hasn't given Open Executive its OK to press Send yet: click the Open Executive extension and press Allow sending texts. Nothing went." };
+      }
       return { ok: false, error: "Chrome didn't let Open Executive press Send in Google Messages. Nothing went." };
     }
     // From here on Send is pressed: a missing answer is unsure, never "Nothing went".

@@ -27,7 +27,9 @@
     "tabs",
     "tabGroups",
     "storage",
-    "scripting",
+    "scripting"
+  ],
+  "optional_permissions": [
     "debugger"
   ],
   "host_permissions": [
