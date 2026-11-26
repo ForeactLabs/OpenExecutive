@@ -475,14 +475,14 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
   const showWeeklyReview = Boolean(solo && weeklyReview);
   const forYouHasRows = Boolean(forYouWaiting || actOn.length > 0 || watched || showWeeklyReview);
   // Home's headline, in the Executive's words: what needs you. What it did
-  // and is following up on is said once, under What I'm doing. With For you
-  // still listing something (an overdue task, a change on a watch), it never
-  // says All clear.
+  // and is following up on is said once, under What I'm doing. While For you
+  // lists something to act on (an overdue task, a change on a watch), it
+  // never says All clear; waiting on a teammate or the weekly review don't.
   const headline = homeHeadline(
     needsYouCount,
     0,
     0,
-    teamOffTrack(departments, today?.people ?? []) || forYouHasRows,
+    teamOffTrack(departments, today?.people ?? []) || actOn.length > 0 || Boolean(watched),
   );
   // "Already on my own", from I could also's list, shown under What I'm doing.
   const [ownWork, setOwnWork] = useState<string[]>([]);
