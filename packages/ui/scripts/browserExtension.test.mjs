@@ -547,8 +547,9 @@ test("texts: a send goes to the live tab, takes over only when none is, and a Us
   assert.ok(texts.includes('[contenteditable="true"][role="textbox"]'));
   // Send presses the Send button that is on screen, never the hidden inline one.
   const pick = texts.slice(texts.indexOf("function sendButton()"), texts.indexOf("function outgoingBubbles()"));
-  assert.ok(pick.includes("!b.disabled && b.getClientRects().length > 0"));
-  assert.ok(texts.includes("const button = sendButton();"));
+  assert.ok(pick.includes("b.getClientRects().length > 0"));
+  assert.ok(pick.includes('if (shown.length) return shown.find((b) => !b.disabled) || null;'));
+  assert.ok(texts.includes("const button = await waitFor(() => sendButton(), 2000);"));
   assert.ok(!texts.includes("first(document, SEND)"));
   // The live page draws an editable div; it must be looked for before any textarea.
   const compose = texts.slice(texts.indexOf("const COMPOSE = ["));

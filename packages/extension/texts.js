@@ -355,11 +355,13 @@
   // (display: none) wrapper and the round one people press. The first in
   // the page is the hidden one, and clicking it sends nothing, so take the
   // first one that is actually on screen and enabled.
+  // The first selector with a button on screen decides: if that button is
+  // still disabled, nothing is returned (and Enter is used), so a looser
+  // selector further down never picks some other "Send…" button.
   function sendButton() {
     for (const sel of SEND) {
-      for (const b of document.querySelectorAll(sel)) {
-        if (!b.disabled && b.getClientRects().length > 0) return b;
-      }
+      const shown = [...document.querySelectorAll(sel)].filter((b) => b.getClientRects().length > 0);
+      if (shown.length) return shown.find((b) => !b.disabled) || null;
     }
     return null;
   }
@@ -443,7 +445,8 @@
       if (box.isConnected) setValue(box, "");
       return { ok: false, error: "Google Messages moved to another conversation. Nothing went." };
     }
-    const button = sendButton();
+    // The page enables Send a moment after the text goes in.
+    const button = await waitFor(() => sendButton(), 2000);
     // From here on Send is pressed: a missing answer is unsure, never "Nothing went".
     if (button) button.click();
     else pressEnter(box);
