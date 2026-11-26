@@ -535,7 +535,7 @@ test("texts: a send goes to the live tab, takes over only when none is, and a Us
   // A tab that didn't answer may be the live one: no take-over then.
   const live = bg.slice(bg.indexOf("async function liveMessagesTab"), bg.indexOf("async function sendOneText"));
   assert.ok(live.includes("if (!ping || !ping.ok || ping.elsewhere !== true) allElsewhere = false;"));
-  assert.ok(take > 0 && take < body.indexOf("if (!paired())") && take < body.indexOf("first(document, COMPOSE)"));
+  assert.ok(take > 0 && take < body.indexOf("if (!paired())") && take < body.indexOf("const box = await waitFor(() => first(document, COMPOSE), 15000)"));
   const report = texts.slice(texts.indexOf("async function report"), texts.indexOf("let timer = null"));
   assert.ok(report.indexOf("if (elsewhere()) return;") < report.indexOf('type: "texts_seen"'));
   assert.ok(texts.includes('[contenteditable="true"][role="textbox"]'));
