@@ -288,3 +288,27 @@ export function waitingNote(
     age === "" ? "" : age === "today" ? " Since today." : team.length === 1 ? ` Waiting ${age}.` : ` Oldest ${age}.`;
   return `Nothing for you to do. ${whose}${since}`;
 }
+
+// The quiet rows under the cards in Home's For you: whose OK the team's
+// cards wait on (opens them), each count to act on (overdue tasks, goals at
+// risk, people to follow up; each opens its page), then what changed on the
+// watches (opens them). Each is said here and nowhere else on Home.
+export type ForYouRow = {
+  key: string;
+  title: string;
+  detail: string;
+  open: "team" | "monitoring" | "link";
+  href?: string;
+};
+export function forYouRows(input: {
+  waiting: { title: string; detail: string } | null;
+  actOn: { key: string; text: string; href: string }[];
+  watched: { title: string; detail: string } | null;
+}): ForYouRow[] {
+  const rows: ForYouRow[] = [];
+  if (input.waiting) rows.push({ key: "waiting", title: input.waiting.title, detail: input.waiting.detail, open: "team" });
+  for (const c of input.actOn) rows.push({ key: c.key, title: c.text, detail: "", open: "link", href: c.href });
+  if (input.watched)
+    rows.push({ key: "monitoring", title: input.watched.title, detail: input.watched.detail, open: "monitoring" });
+  return rows;
+}

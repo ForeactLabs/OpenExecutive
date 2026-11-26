@@ -4,6 +4,7 @@ import {
   ageLabel,
   briefingSummary,
   daysUntil,
+  forYouRows,
   greeting,
   handAsks,
   homeHeadline,
@@ -224,4 +225,30 @@ test("a waiting row says the job, who started it, why it waits and how long", as
     "Nothing for you to do. It waits for someone else's OK. Waiting 4 days.",
   );
   assert.equal(waitedFor("2026-11-23T13:00:00Z", now), "1 day");
+});
+
+test("For you's quiet rows: waiting, each count to act on, then what changed on the watches", () => {
+  const rows = forYouRows({
+    waiting: { title: "Waiting on Sam", detail: "Send the Acme quote" },
+    actOn: [
+      { key: "tasks_overdue", text: "1 task overdue", href: "/tasks" },
+      { key: "goals_at_risk", text: "1 goal at risk", href: "/goals" },
+    ],
+    watched: { title: "2 things changed on what I'm watching", detail: "Acme opened the quote, and 1 more" },
+  });
+  assert.deepEqual(
+    rows.map((r) => [r.key, r.open, r.href ?? ""]),
+    [
+      ["waiting", "team", ""],
+      ["tasks_overdue", "link", "/tasks"],
+      ["goals_at_risk", "link", "/goals"],
+      ["monitoring", "monitoring", ""],
+    ],
+  );
+  assert.equal(rows[0].detail, "Send the Acme quote");
+  assert.equal(rows[1].title, "1 task overdue");
+});
+
+test("For you has no quiet rows when nothing waits, is due or changed", () => {
+  assert.deepEqual(forYouRows({ waiting: null, actOn: [], watched: null }), []);
 });
