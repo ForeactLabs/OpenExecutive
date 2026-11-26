@@ -155,6 +155,7 @@ class BedrockClaudeProvider(_MappedClaude):
         if timeout is not None:
             kwargs["timeout"] = timeout
         self._client = _BedrockClient(**kwargs)
+        self._client._custom_headers = {}  # never ANTHROPIC_CUSTOM_HEADERS
         if not api_key:
             # SigV4: the key pair, or with neither half the machine's role.
             self._client.api_key = None
@@ -203,3 +204,4 @@ class VertexClaudeProvider(_MappedClaude):
         if timeout is not None:
             kwargs["timeout"] = timeout
         self._client = anthropic.AsyncAnthropicVertex(**kwargs)
+        self._client._custom_headers = {}  # never ANTHROPIC_CUSTOM_HEADERS
