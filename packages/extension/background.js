@@ -414,14 +414,14 @@ async function sendOneText(send) {
   // Nothing was handed over, so nothing can have gone.
   if (!ready) return { ok: false, error: "Google Messages didn't load. Nothing went." };
   try {
-    pressingTab = tab.id;
+    pressing = { tabId: tab.id, conversation: key };
     const out = await chrome.tabs.sendMessage(tab.id, { type: "texts_send_here", conversation: key, number, text, mayTakeOver: live.allElsewhere && !(await liveMessagesTab(tab.id)).tab });
     return out && typeof out === "object" ? out : { ok: false, unsure: true, error: "Google Messages didn't answer" };
   } catch {
     // Handed over, then no answer: it may have gone.
     return { ok: false, unsure: true, error: "Google Messages stopped answering while sending" };
   } finally {
-    pressingTab = null;
+    pressing = null;
   }
 }
 
@@ -431,7 +431,36 @@ async function sendOneText(send) {
 // attaching to that one tab for the click and detaching straight after.
 // Only the tab a send was handed to, only while that send runs, and only on
 // the conversation it was handed (or a new one for a number).
-let pressingTab = null;
+let pressing = null;
+
+// Attaching shows Chrome's "is debugging this browser" bar, which makes the
+// page shorter and moves the compose bar up. So the Send button is found
+// again once attached, after the page has settled, and the click goes where
+// it is then. Same order as SEND in texts.js: the first selector with a
+// button on screen, and only an enabled one.
+const SEND_SPOT = `(() => {
+  for (const sel of ["[data-e2e-send-text-button]", "mws-message-send-button button", 'button[aria-label^="Send" i]']) {
+    const shown = [...document.querySelectorAll(sel)].filter((b) => b.getClientRects().length > 0);
+    if (!shown.length) continue;
+    const b = shown.find((x) => !x.disabled);
+    if (!b) return null;
+    const r = b.getBoundingClientRect();
+    return { x: r.left + r.width / 2, y: r.top + r.height / 2, h: innerHeight };
+  }
+  return null;
+})()`;
+
+async function sendSpot(target) {
+  let last = null;
+  for (let i = 0; i < 12; i++) {
+    const got = await chrome.debugger.sendCommand(target, "Runtime.evaluate", { expression: SEND_SPOT, returnByValue: true }).catch(() => null);
+    const spot = got && got.result ? got.result.value : null;
+    if (spot && last && spot.x === last.x && spot.y === last.y && spot.h === last.h) return spot;
+    last = spot;
+    await new Promise((ok) => setTimeout(ok, 150));
+  }
+  return null;
+}
 
 // "debugger" is an optional permission: asked for only when someone turns
 // Texts on (texts-allow.html, or the popup), never of anyone else.
@@ -443,8 +472,9 @@ async function mayPress() {
   }
 }
 
-async function pressInTab(tab, x, y, conversation) {
-  if (!tab || tab.id !== pressingTab) return { ok: false };
+async function pressInTab(tab, x, y) {
+  if (!tab || !pressing || tab.id !== pressing.tabId) return { ok: false };
+  const conversation = pressing.conversation;
   if (!(await mayPress())) return { ok: false, needsOk: true };
   if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > 10000 || y > 10000) return { ok: false };
   const now = await chrome.tabs.get(tab.id).catch(() => null);
@@ -457,8 +487,10 @@ async function pressInTab(tab, x, y, conversation) {
     return { ok: false };
   }
   try {
+    const spot = await sendSpot(target);
+    if (!spot) return { ok: false };
     for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
-      await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { type, x, y, button: type === "mouseMoved" ? "none" : "left", clickCount: type === "mouseMoved" ? 0 : 1 });
+      await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { type, x: spot.x, y: spot.y, button: type === "mouseMoved" ? "none" : "left", clickCount: type === "mouseMoved" ? 0 : 1 });
     }
     return { ok: true };
   } catch {
@@ -1034,7 +1066,7 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (msg.type === "texts_press") {
     // Only the Google Messages tab a send is running in asks for its press.
     if (!sender.tab || !onMessages(sender.url || sender.tab.url)) return false;
-    pressInTab(sender.tab, Number(msg.x), Number(msg.y), typeof msg.conversation === "string" ? msg.conversation : "")
+    pressInTab(sender.tab, Number(msg.x), Number(msg.y))
       .then(reply, () => reply({ ok: false }));
     return true;
   }

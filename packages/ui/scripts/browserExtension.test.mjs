@@ -121,7 +121,7 @@ test("the extension asks for nothing past what it uses", () => {
   assert.equal(manifest.manifest_version, 3);
   // "debugger" is only for pressing Send in Google Messages: nothing else uses it.
   const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
-  const press = bg.slice(bg.indexOf("async function pressInTab"), bg.indexOf("function waitLoaded"));
+  const press = bg.slice(bg.indexOf("const SEND_SPOT"), bg.indexOf("function waitLoaded"));
   const uses = bg.split("chrome.debugger.").length - 1;
   assert.equal(uses, press.split("chrome.debugger.").length - 1);
   assert.ok(uses > 0);
@@ -597,7 +597,12 @@ test("texts: the conversation is checked again right before Send", () => {
 test("texts: Send is a real press, only in the tab and conversation the send was handed", () => {
   const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
   const press = bg.slice(bg.indexOf("async function pressInTab"), bg.indexOf("function waitLoaded"));
-  assert.ok(press.includes("if (!tab || tab.id !== pressingTab) return { ok: false };"));
+  assert.ok(press.includes("if (!tab || !pressing || tab.id !== pressing.tabId) return { ok: false };"));
+  // The conversation checked is the one the send was handed, not what the page says.
+  assert.ok(press.includes("const conversation = pressing.conversation;"));
+  // The button is found again after attaching (the debugging bar moves it), and the click goes there.
+  assert.ok(press.indexOf("const spot = await sendSpot(target);") > press.indexOf("chrome.debugger.attach"));
+  assert.ok(press.includes("x: spot.x, y: spot.y"));
   assert.ok(press.includes("if (!(await mayPress())) return { ok: false, needsOk: true };"));
   // Chrome's OK is asked for when Texts is first turned on here.
   const on = bg.slice(bg.indexOf("function setTextsOn"), bg.indexOf("async function passOnTexts"));
@@ -612,7 +617,7 @@ test("texts: Send is a real press, only in the tab and conversation the send was
   assert.ok(press.includes("await chrome.debugger.detach(target)"));
   assert.ok(press.indexOf("finally") < press.indexOf("chrome.debugger.detach"));
   const one = bg.slice(bg.indexOf("async function sendOneText"), bg.indexOf("async function pressInTab"));
-  assert.ok(one.includes("pressingTab = tab.id;") && one.includes("pressingTab = null;"));
+  assert.ok(one.includes("pressing = { tabId: tab.id, conversation: key };") && one.includes("pressing = null;"));
   const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
   // No page-made press is left: Google Messages ignores those.
   assert.ok(!texts.includes("button.click()") && !texts.includes("pressEnter"));
