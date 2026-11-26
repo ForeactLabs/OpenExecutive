@@ -6,13 +6,20 @@ import ScheduleLink from "@/components/schedule/ScheduleLink";
 import { stopWatching, type WatchingItem } from "@/lib/api";
 import { watchingLine } from "@/lib/watchingNext";
 
-// Following up on Home, under Done for you: what the Executive is keeping
+// Following up, inside Home's What I'm doing: what the Executive is keeping
 // an eye on for you and when it acts next (GET /today `watching`): the
 // follow-ups it will send, then your standing work. The full list is Work →
 // Schedule. Stop ends that one thing
 // only (POST /today/watching/stop). What it left for you stays in Needs you.
 
-export default function WatchingNext({ items }: { items: WatchingItem[] }) {
+export default function WatchingNext({
+  items,
+  onStopped,
+}: {
+  items: WatchingItem[];
+  /** One was stopped: Home reads `/today` again. */
+  onStopped?: () => void;
+}) {
   const [stopped, setStopped] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -25,6 +32,7 @@ export default function WatchingNext({ items }: { items: WatchingItem[] }) {
     try {
       await stopWatching(item.key);
       setStopped((prev) => new Set(prev).add(item.key));
+      onStopped?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't stop it.");
     } finally {
@@ -33,11 +41,9 @@ export default function WatchingNext({ items }: { items: WatchingItem[] }) {
   };
 
   return (
-    <section aria-labelledby="sec-watching-next" className="mb-8">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <h2 id="sec-watching-next" className="text-lg font-semibold text-fg">
-          Following up
-        </h2>
+    <div className="mt-4 first:mt-0">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <h3 className="text-sm font-medium text-fg-muted">Following up</h3>
         <ScheduleLink kind="follow_up" />
       </div>
       <ul className="rounded-2xl border border-line bg-surface-elevated px-4 sm:px-5">
@@ -63,6 +69,6 @@ export default function WatchingNext({ items }: { items: WatchingItem[] }) {
         })}
       </ul>
       {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
-    </section>
+    </div>
   );
 }

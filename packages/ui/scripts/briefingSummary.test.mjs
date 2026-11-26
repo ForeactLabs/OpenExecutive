@@ -4,6 +4,7 @@ import {
   ageLabel,
   briefingSummary,
   daysUntil,
+  forYouRows,
   greeting,
   handAsks,
   homeHeadline,
@@ -186,8 +187,8 @@ test("the watching row says what changed, and counts several", () => {
   );
 });
 
-test("a waiting row says the job, who started it, why it waits and how long", async () => {
-  const { waitingRow, waitingNote, waitedFor } = await import("../src/lib/briefingSummary.ts");
+test("the waiting note says whose OK it waits for and how long", async () => {
+  const { waitingNote, waitedFor } = await import("../src/lib/briefingSummary.ts");
   const now = new Date("2026-11-24T14:00:00Z");
   const held = {
     headline: "Message Dana Price",
@@ -195,19 +196,6 @@ test("a waiting row says the job, who started it, why it waits and how long", as
     routed_to_person_id: 12,
     view: { top: { title: "Message Dana Price", started: "I started this", because: "it's about money" } },
   };
-  assert.deepEqual(waitingRow(held, now), {
-    title: "Message Dana Price",
-    started: "I started this",
-    because: "Waits: it's about money",
-    age: "4 days",
-  });
-  // A card with no held step keeps its headline and says nothing it can't.
-  assert.deepEqual(waitingRow({ headline: "Reply to Dana", created_at: "2026-11-24T09:00:00Z" }, now), {
-    title: "Reply to Dana",
-    started: "",
-    because: "",
-    age: "today",
-  });
   const people = [{ id: 12, full_name: "Dana Price" }, { id: 7, full_name: "Sam Lee" }];
   assert.equal(waitingNote([held], people, now), "Nothing for you to do. Dana has to OK it. Waiting 4 days.");
   assert.equal(
@@ -224,4 +212,30 @@ test("a waiting row says the job, who started it, why it waits and how long", as
     "Nothing for you to do. It waits for someone else's OK. Waiting 4 days.",
   );
   assert.equal(waitedFor("2026-11-23T13:00:00Z", now), "1 day");
+});
+
+test("For you's quiet rows: waiting, each count to act on, then what changed on the watches", () => {
+  const rows = forYouRows({
+    waiting: { title: "Waiting on Sam", detail: "Send the Acme quote" },
+    actOn: [
+      { key: "tasks_overdue", text: "1 task overdue", href: "/tasks" },
+      { key: "goals_at_risk", text: "1 goal at risk", href: "/goals" },
+    ],
+    watched: { title: "2 things changed on what I'm watching", detail: "Acme opened the quote, and 1 more" },
+  });
+  assert.deepEqual(
+    rows.map((r) => [r.key, r.open, r.href ?? ""]),
+    [
+      ["waiting", "team", ""],
+      ["tasks_overdue", "link", "/tasks"],
+      ["goals_at_risk", "link", "/goals"],
+      ["monitoring", "monitoring", ""],
+    ],
+  );
+  assert.equal(rows[0].detail, "Send the Acme quote");
+  assert.equal(rows[1].title, "1 task overdue");
+});
+
+test("For you has no quiet rows when nothing waits, is due or changed", () => {
+  assert.deepEqual(forYouRows({ waiting: null, actOn: [], watched: null }), []);
 });

@@ -8,8 +8,8 @@ import { whenLabel } from "@/lib/pulseView";
 
 import { buttonClass } from "../ui/Button";
 
-// Done for you on Home: what the Executive did or is doing for you in the
-// last day (GET /today `done_for_you`). A card you approved is one row whose
+// Done for you, inside Home's What I'm doing: what the Executive did or is
+// doing for you in the last day (GET /today `done_for_you`). A card you approved is one row whose
 // chip changes in place from Working on it to Done (or Didn't work, with
 // Try again); what it did on its own follows. Each row's tag says whose name
 // it went out in. Nothing here waits on you, so
@@ -44,10 +44,8 @@ export default function DoneForYou({
 }) {
   if (rows.length === 0) return null;
   return (
-    <section id={DONE_FOR_YOU_ID} aria-labelledby="sec-done-for-you" className="mb-8 scroll-mt-4">
-      <h2 id="sec-done-for-you" className="mb-3 text-lg font-semibold text-fg">
-        Done for you <span className="font-normal text-fg-muted">(last day)</span>
-      </h2>
+    <div id={DONE_FOR_YOU_ID} className="mt-4 scroll-mt-4 first:mt-0">
+      <h3 className="mb-2 text-sm font-medium text-fg-muted">Done for you, last day</h3>
       <ul className="rounded-2xl border border-line bg-surface-elevated px-4 sm:px-5">
         {rows.slice(0, SHOWN).map((row) => {
           const link = doneLink(row);
@@ -94,6 +92,6 @@ export default function DoneForYou({
           </Link>
         </li>
       </ul>
-    </section>
+    </div>
   );
 }

@@ -25,6 +25,8 @@ import {
   type Today,
 } from "@/lib/api";
 import { greeting, homeHeadline, teamOffTrack, waitingNote, waitingOnTeam, watchingRow } from "@/lib/briefingSummary";
+import { ForYouRows } from "./briefing/ForYouRows";
+import { OnMyOwn } from "./briefing/TakeOnOffer";
 import { cardFromSearch } from "@/lib/cardMentions";
 import { FIRST_RUN_LINKS } from "@/lib/firstRun";
 import {
@@ -53,7 +55,6 @@ import { RightNowItem } from "./briefing/RightNow";
 import WaitingElsewhereRow from "./briefing/WaitingElsewhere";
 import HandMeSomething from "./briefing/HandMeSomething";
 import WatchingNext from "./briefing/WatchingNext";
-import { WaitingOnTeam } from "./briefing/WaitingOnTeam";
 import ProposalCard from "./briefing/ProposalCard";
 import RequestGroupCard from "./briefing/RequestGroupCard";
 import { TONE_TEXT, type ContinueHandler } from "./briefing/shared";
@@ -66,10 +67,12 @@ import { PageSpinner } from "@/components/ui/Spinner";
 // The card pieces stay importable from here for pages that show them alone.
 export { ProposalCard };
 
-// Home, the briefing: a greeting and one summary line, the Ask box, the
-// "Needs you" queue as large cards, then "At a glance": a row of count tiles —
-// one per section with something in it — each opening its full list in a
-// side panel or its page. Today's written brief ("What's going on") opens in a panel too.
+// Home, the briefing: a greeting and one line saying what needs you, the Ask
+// box, then three sections, each thing said once. For you: the cards only
+// you can answer, then one quiet row each for whose OK the team's cards wait
+// on, what's overdue or at risk, and what changed on the watches. What I'm
+// doing: what it's following up on, what it did in the last day, and what
+// it already does on its own. I could also: steps it offers to take next.
 
 // "Needs you" shows this many cards before a "Show N more" toggle.
 const NEEDS_YOU_VISIBLE = 3;
@@ -82,16 +85,6 @@ const NEEDS_YOU_ID = "sec-needs-you";
 
 type PanelKey = "monitoring" | "team" | "weeklyReview";
 
-interface Tile {
-  key: string;
-  // An item opens its side panel, or else goes to its page.
-  panel?: PanelKey;
-  href?: string;
-  // What it says, whole ("5 goals, 1 at risk").
-  text: string;
-  // More on hover: where a watch's change was noticed.
-  hint?: string;
-}
 
 interface BriefingProps {
   // Called when the user clicks a briefing item to continue the thread
@@ -472,29 +465,29 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
   const needsYouCount =
     rightNowRows.length + mineProposals.length + replies.cards.length + inviteCards.cards.length +
     actionCards.cards.length + elsewhere.length;
-  // Home's headline, in the Executive's words: what needs you, what it
-  // handled in the last day (what failed or is still running isn't) and
-  // what it's watching. The rest (people, departments, under way,
-  // monitoring) is one quiet line at the bottom.
+
+  // For you's quiet rows: whose OK the team's cards wait on, the counts to
+  // act on (the server's `to_act_on`: overdue tasks, goals at risk or never
+  // checked, people to follow up) and what changed on the watches.
+  const forYouWaiting = waitingOnTeam(otherProposals, today?.people ?? []);
+  const actOn = today?.to_act_on ?? [];
+  const watched = watchingRow(monitoringProposals);
+  const showWeeklyReview = Boolean(solo && weeklyReview);
+  const forYouHasRows = Boolean(forYouWaiting || actOn.length > 0 || watched || showWeeklyReview);
+  // Home's headline, in the Executive's words: what needs you. What it did
+  // and is following up on is said once, under What I'm doing. While For you
+  // lists something to act on (an overdue task, a change on a watch), it
+  // never says All clear; waiting on a teammate or the weekly review don't.
   const headline = homeHeadline(
     needsYouCount,
-    doneRows.filter((r) => r.status === "done").length,
-    (today?.watching ?? []).length,
-    teamOffTrack(departments, today?.people ?? []),
+    0,
+    0,
+    teamOffTrack(departments, today?.people ?? []) || actOn.length > 0 || Boolean(watched),
   );
-
-  // The bottom line: only the counts that need you, each a link (the
-  // server's `to_act_on`: overdue tasks, goals at risk or never checked,
-  // people to follow up), then what waits on someone else on the team and
-  // what changed on the watches. Everything else is on track.
-  const tiles: Tile[] = [];
-  if (today) {
-    for (const c of today.to_act_on ?? []) tiles.push({ key: c.key, href: c.href, text: c.text });
-    const watched = watchingRow(monitoringProposals);
-    if (watched) tiles.push({ key: "monitoring", panel: "monitoring", text: watched.line, hint: watched.detail || undefined });
-    if (solo && weeklyReview)
-      tiles.push({ key: "weeklyReview", panel: "weeklyReview", text: "This week's review is ready" });
-  }
+  // "Already on my own", from I could also's list, shown under What I'm doing.
+  const [ownWork, setOwnWork] = useState<string[]>([]);
+  const watchingItems = today?.watching ?? [];
+  const showDoing = doneRows.length > 0 || watchingItems.length > 0 || ownWork.length > 0;
 
   // The Needs you queue: replies waiting first (they came in first, as their
   // own section did), then the proposals in score order, with the approvals
@@ -663,6 +656,7 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
   const hideEmptyNeedsYou =
     !firstWeek &&
     queue.length === 0 &&
+    !forYouHasRows &&
     !snoozed &&
     !rerunNotice &&
     !replies.notice;
@@ -762,13 +756,13 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
 
           {today && (
             <>
-              {/* Needs you — decisions routed to the caller, and replies
-                  waiting to be sent. */}
+              {/* For you — decisions routed to the caller and replies
+                  waiting to be sent, then the quiet rows. */}
               {!hideEmptyNeedsYou && (
                 <section id={NEEDS_YOU_ID} className="mb-8 scroll-mt-4">
                 <div className="mb-3 flex items-center gap-2">
                   <h2 className="text-lg font-semibold text-fg">
-                    Needs you
+                    For you
                     {needsYouCount > 0 && <span className="ml-1.5 font-normal text-fg-muted">({needsYouCount})</span>}
                   </h2>
                   {replies.cards.length > 0 && <InfoTip align="left">{REPLIES_WAITING_TIP}</InfoTip>}
@@ -866,56 +860,42 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
                     )}
                   </p>
                 ) : null}
+                <ForYouRows
+                  waiting={forYouWaiting}
+                  actOn={actOn}
+                  watched={watched}
+                  onOpenTeam={() => setOpenPanel("team")}
+                  onOpenMonitoring={() => setOpenPanel("monitoring")}
+                  onWeeklyReview={showWeeklyReview ? () => setOpenPanel("weeklyReview") : undefined}
+                />
                 </section>
               )}
 
-              {/* What waits on a teammate: its own short list, out of Needs
-                  you; a row opens the full cards. */}
-              <WaitingOnTeam
-                proposals={otherProposals}
-                people={today.people ?? []}
-                onOpen={() => setOpenPanel("team")}
+              {/* What I'm doing: what it's following up on, what it did in
+                  the last day, and what it already does on its own. */}
+              {showDoing && (
+                <section aria-labelledby="sec-what-im-doing" className="mb-8">
+                  <h2 id="sec-what-im-doing" className="mb-3 text-lg font-semibold text-fg">
+                    What I&apos;m doing
+                  </h2>
+                  <WatchingNext items={watchingItems} onStopped={refreshToday} />
+                  <DoneForYou
+                    rows={doneRows}
+                    onRetry={(row) => void handleRetryApproval(row)}
+                    onOpenChat={onOpenChat}
+                  />
+                  <OnMyOwn own={ownWork} />
+                </section>
+              )}
+
+              {/* I could also: real steps it can take next (briefing/take_on.py). */}
+              <TakeOn
+                onOpenChat={onOpenChat ? (id) => onOpenChat(id) : undefined}
+                onFinished={refreshToday}
+                onOwn={setOwnWork}
               />
-
-              {/* Real steps it can take next (briefing/take_on.py). */}
-              <TakeOn onOpenChat={onOpenChat ? (id) => onOpenChat(id) : undefined} onFinished={refreshToday} />
-
-              <DoneForYou
-                rows={doneRows}
-                onRetry={(row) => void handleRetryApproval(row)}
-                onOpenChat={onOpenChat}
-              />
-
-              <WatchingNext items={today?.watching ?? []} />
 
               {showHeadline && needsYouCount === 0 && onContinue && <HandMeSomething onPick={onContinue} />}
-
-              {/* Only what needs you, as links; then that the rest is on track. */}
-              {today && (
-                <nav aria-label="More" className="mb-8 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-                  {tiles.map((t) => {
-                    const cls = "font-medium text-accent hover:underline underline-offset-4";
-                    const panel = t.panel;
-                    return panel ? (
-                      <button
-                        key={t.key}
-                        type="button"
-                        onClick={() => setOpenPanel(panel)}
-                        aria-haspopup="dialog"
-                        title={t.hint}
-                        className={cls}
-                      >
-                        {t.text}
-                      </button>
-                    ) : (
-                      <Link key={t.key} href={t.href ?? "/"} className={cls}>
-                        {t.text}
-                      </Link>
-                    );
-                  })}
-                  <span className="ml-auto text-fg-muted">Everything else is on track</span>
-                </nav>
-              )}
 
               <SidePanel
                 open={openPanel === "team"}
