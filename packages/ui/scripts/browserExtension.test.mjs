@@ -510,6 +510,43 @@ test("texts: new texts count as seen only once the site took them", () => {
   assert.ok(!report.includes("[SEEN_KEY]: out.seen"));
 });
 
+test("texts: a change in pairing is reported at once, not held for the once-a-minute report", () => {
+  const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
+  const report = texts.slice(texts.indexOf("async function report"), texts.indexOf("let timer = null"));
+  assert.ok(report.includes("const wait = isPaired === lastPaired ? 60000 : 10000;"));
+  assert.ok(report.includes("!items.length && !force && now - lastReport < wait"));
+  assert.ok(report.includes("else if ((answer && (answer.ok === true || answer.nobody === true)) || ++fastTries >= 6) {"));
+  const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
+  assert.ok(bg.includes("nobody: tabs.length === 0"));
+  assert.ok(report.indexOf("lastPaired = isPaired;") > report.indexOf('type: "texts_seen"'));
+});
+
+test("texts: a send goes to the live tab, takes over only when none is, and a Use here tab never reports", () => {
+  const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
+  const body = texts.slice(texts.indexOf("async function send(msg)"), texts.indexOf("chrome.runtime.onMessage.addListener((msg, sender, reply)"));
+  const take = body.indexOf("takeOver.click();");
+  assert.ok(body.indexOf("if (takeOver && msg.mayTakeOver !== true) return") < take);
+  // It waits for the page to show either Use here or a box before deciding.
+  assert.ok(body.indexOf("() => elsewhere() || first(document, COMPOSE)") < body.indexOf("const takeOver = elsewhere();"));
+  const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
+  const one = bg.slice(bg.indexOf("async function sendOneText"), bg.indexOf("function waitLoaded"));
+  assert.ok(one.includes("const live = await liveMessagesTab();") && one.includes("mayTakeOver: live.allElsewhere && !(await liveMessagesTab(tab.id)).tab"));
+  assert.ok(one.indexOf("const live = await liveMessagesTab();") < one.indexOf('{ type: "texts_busy" }'));
+  // A tab that didn't answer may be the live one: no take-over then.
+  const live = bg.slice(bg.indexOf("async function liveMessagesTab"), bg.indexOf("async function sendOneText"));
+  assert.ok(live.includes("if (!ping || !ping.ok || ping.elsewhere !== true) allElsewhere = false;"));
+  assert.ok(live.includes(".filter((t) => t.id !== skipId)"));
+  assert.ok(take > 0 && take < body.indexOf("if (!paired())") && take < body.indexOf("const box = await waitFor(() => first(document, COMPOSE), 15000)"));
+  const report = texts.slice(texts.indexOf("async function report"), texts.indexOf("let timer = null"));
+  // A Use here tab reads nothing and says it isn't live, and only when no tab is.
+  assert.ok(report.includes("const isPaired = !away && paired();"));
+  assert.ok(report.includes("elsewhere: away }"));
+  const bgSeen = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
+  assert.ok(bgSeen.includes("if (away && (await liveMessagesTab()).tab) return { ok: true };"));
+  assert.ok(bgSeen.includes("items: !away && Array.isArray(msg.items)"));
+  assert.ok(texts.includes('[contenteditable="true"][role="textbox"]'));
+});
+
 test("texts: a send never takes the person's own tab from under a half-typed text", () => {
   const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
   const one = bg.slice(bg.indexOf("async function sendOneText"), bg.indexOf("function waitLoaded"));

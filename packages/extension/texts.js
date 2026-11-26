@@ -218,6 +218,12 @@
   const SEEN_KEY = "textsSeen";
   let reporting = false;
   let lastReport = 0;
+  // What the last report said about pairing: a change goes at once, so the
+  // site's setup ticks soon after the code is scanned.
+  let lastPaired = null;
+  // Fast tries at telling a pairing change: after a minute of them, back to
+  // once a minute, so a site that never takes it isn't sent one every 10 s.
+  let fastTries = 0;
 
   let again = false;
 
@@ -237,7 +243,10 @@
         return;
       }
       const now = Date.now();
-      const isPaired = paired();
+      // Showing Use here: read nothing, and say only that it isn't live here.
+      // The background passes that on only when no other tab is live.
+      const away = Boolean(elsewhere());
+      const isPaired = !away && paired();
       let items = [];
       let seen = null;
       if (isPaired) {
@@ -246,13 +255,22 @@
         items = out.items;
         seen = out.seen;
       }
-      // Nothing new: still say it's here, once a minute.
-      if (!items.length && !force && now - lastReport < 60000) {
+      // Nothing new: still say it's here, once a minute. A pairing change the
+      // site hasn't taken yet goes sooner, at most every 10 seconds.
+      const wait = isPaired === lastPaired ? 60000 : 10000;
+      if (!items.length && !force && now - lastReport < wait) {
         if (seen) await chrome.storage.local.set({ [SEEN_KEY]: seen });
         return;
       }
       lastReport = now;
-      const answer = await chrome.runtime.sendMessage({ type: "texts_seen", paired: isPaired, items }).catch(() => null);
+      const answer = await chrome.runtime.sendMessage({ type: "texts_seen", paired: isPaired, items, elsewhere: away }).catch(() => null);
+      // A pairing change counts as told once the site took it, or once no
+      // site was open to tell: a site opened later hears it within a minute.
+      if (isPaired === lastPaired) fastTries = 0;
+      else if ((answer && (answer.ok === true || answer.nobody === true)) || ++fastTries >= 6) {
+        lastPaired = isPaired;
+        fastTries = 0;
+      }
       // Only what the site took counts as seen: with no Open Executive tab
       // to take them (or a failed one), the same texts go again next time.
       if (seen && ((answer && answer.ok === true) || !items.length)) await chrome.storage.local.set({ [SEEN_KEY]: seen });
@@ -285,8 +303,20 @@
     return null;
   }
 
+  // Google Messages runs in one tab at a time. In any other tab it shows
+  // "Use here" over the page, and the box to type in never comes.
+  function elsewhere() {
+    return [...document.querySelectorAll("button")].find((b) => /^\s*use here\s*$/i.test(textOf(b))) || null;
+  }
+
   function setValue(el, text) {
     el.focus();
+    if (el.isContentEditable) {
+      document.execCommand("selectAll", false);
+      if (text) document.execCommand("insertText", false, text);
+      else document.execCommand("delete", false);
+      return;
+    }
     const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
     if (setter) setter.call(el, text);
@@ -307,6 +337,8 @@
     "mws-autosize-textarea textarea",
     "textarea.input",
     "textarea",
+    'mws-message-compose [contenteditable="true"]',
+    '[contenteditable="true"][role="textbox"]',
   ];
   const SEND = [
     "[data-e2e-send-text-button]",
@@ -349,6 +381,20 @@
   async function send(msg) {
     const text = String(msg.text || "");
     if (!text.trim()) return { ok: false, error: "There was nothing to send." };
+    // Live in another tab: never take it from there, where the person may be
+    // typing. Only when no tab was live may this one take over.
+    // The page may draw "Use here" a moment after it loads: wait for it, or
+    // for the box to type in (or the number to type, for someone new).
+    await waitFor(
+      () => elsewhere() || first(document, COMPOSE) || first(document, ["input[data-e2e-contact-input]", "mw-contact-chips-input input"]),
+      10000,
+    );
+    const takeOver = elsewhere();
+    if (takeOver && msg.mayTakeOver !== true) return { ok: false, error: "Google Messages is open in another tab. Nothing went." };
+    if (takeOver) {
+      takeOver.click();
+      await waitFor(() => !elsewhere() && paired(), 15000);
+    }
     if (!paired()) return { ok: false, error: "Google Messages isn't paired with their phone." };
     if (!msg.conversation) {
       const problem = await startConversation(String(msg.number || ""));
@@ -361,7 +407,15 @@
     // new number opened. The person may be using this tab too.
     const key = T.keyOf(location.href);
     const box = await waitFor(() => first(document, COMPOSE), 15000);
-    if (!box) return { ok: false, error: "Google Messages didn't show the box to type in." };
+    if (!box) {
+      // Say what the page showed instead, so the next look knows where to start.
+      const why = elsewhere()
+        ? " It was open in another tab and didn't take over here."
+        : !document.querySelector("mws-message-wrapper, mws-messages-list")
+          ? " The conversation didn't open."
+          : "";
+      return { ok: false, error: `Google Messages didn't show the box to type in.${why} Nothing went.` };
+    }
     if (T.keyOf(location.href) !== key) return { ok: false, error: "Google Messages moved to another conversation. Nothing went." };
     const before = outgoingTexts().length;
     setValue(box, text);
@@ -404,7 +458,7 @@
       return true;
     }
     if (msg.type === "texts_ping") {
-      reply({ ok: true, paired: paired() });
+      reply({ ok: true, paired: paired(), elsewhere: Boolean(elsewhere()) });
       return false;
     }
     if (msg.type === "texts_busy") {

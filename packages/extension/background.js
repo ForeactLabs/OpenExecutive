@@ -333,7 +333,8 @@ async function passOnTexts(body) {
     }
   }
   // Every site with Texts on took them, or they go again next time.
-  return { ok: on.size > 0 && took.size === on.size };
+  // `nobody`: no site tab was open to take them at all.
+  return { ok: on.size > 0 && took.size === on.size, nobody: tabs.length === 0 };
 }
 
 // Send one text in Google Messages: open its conversation (or a new one) in
@@ -347,13 +348,39 @@ function sendText(send) {
   return run;
 }
 
+// The Google Messages tab that is live: it runs in one tab at a time and
+// shows "Use here" in the others. Its own tab first, then any other.
+// `allElsewhere`: every tab answered and showed Use here (as after Chrome
+// restarts), the only time a tab may take it over. A tab that didn't
+// answer (open from before an update, loading, frozen) may be the live one.
+// `skipId`: leave that tab out. Right after a tab is opened on a
+// conversation its page may not have drawn Use here yet, so its first
+// answer can't be trusted; the recheck before a take-over skips it and
+// only asks whether some other tab went live.
+async function liveMessagesTab(skipId) {
+  const tabs = (await chrome.tabs.query({ url: "https://messages.google.com/*" })).filter((t) => t.id !== skipId);
+  const { textsTabId } = await chrome.storage.session.get("textsTabId");
+  tabs.sort((a, b) => (b.id === textsTabId) - (a.id === textsTabId));
+  let allElsewhere = tabs.length > 0;
+  for (const t of tabs) {
+    const ping = await chrome.tabs.sendMessage(t.id, { type: "texts_ping" }).catch(() => null);
+    if (ping && ping.ok && !ping.elsewhere) return { tab: t, allElsewhere: false };
+    if (!ping || !ping.ok || ping.elsewhere !== true) allElsewhere = false;
+  }
+  return { tab: null, allElsewhere };
+}
+
 async function sendOneText(send) {
   const text = typeof send.text === "string" ? send.text : "";
   const key = typeof send.conversation === "string" ? send.conversation : "";
   const number = typeof send.number === "string" ? send.number : "";
   if (!text.trim() || (!key && !number)) return { ok: false, error: "Nothing to send, or no one to send it to." };
-  const tab = await keepTexts();
-  if (!tab) return { ok: false, error: "Google Messages isn't open in Chrome. Nothing went." };
+  const kept = await keepTexts();
+  if (!kept) return { ok: false, error: "Google Messages isn't open in Chrome. Nothing went." };
+  // Send where Google Messages is live, so a draft in another tab is never
+  // taken from under the person. Only with no tab live may this one take over.
+  const live = await liveMessagesTab();
+  const tab = live.tab || kept;
   const url = key ? `${MESSAGES}/${encodeURIComponent(key)}` : `${MESSAGES}/new`;
   // Google Messages runs in one tab at a time, so this may be the person's
   // own. Never take it from under a half-typed text of theirs.
@@ -378,7 +405,7 @@ async function sendOneText(send) {
   // Nothing was handed over, so nothing can have gone.
   if (!ready) return { ok: false, error: "Google Messages didn't load. Nothing went." };
   try {
-    const out = await chrome.tabs.sendMessage(tab.id, { type: "texts_send_here", conversation: key, number, text });
+    const out = await chrome.tabs.sendMessage(tab.id, { type: "texts_send_here", conversation: key, number, text, mayTakeOver: live.allElsewhere && !(await liveMessagesTab(tab.id)).tab });
     return out && typeof out === "object" ? out : { ok: false, unsure: true, error: "Google Messages didn't answer" };
   } catch {
     // Handed over, then no answer: it may have gone.
@@ -952,11 +979,20 @@ chrome.runtime.onMessage.addListener((msg, sender, reply) => {
   if (msg.type === "texts_seen") {
     // Only the Google Messages page says what Google Messages shows.
     if (!sender.tab || !onMessages(sender.url || sender.tab.url)) return false;
-    const body = { paired: msg.paired === true, items: Array.isArray(msg.items) ? msg.items.slice(0, 100) : [] };
-    // Nothing leaves the browser while Texts is off.
+    const away = msg.elsewhere === true;
+    const body = {
+      paired: !away && msg.paired === true,
+      items: !away && Array.isArray(msg.items) ? msg.items.slice(0, 100) : [],
+    };
+    // Nothing leaves the browser while Texts is off. A tab showing Use here
+    // speaks only when no tab here is live, so it never undoes a live one.
     chrome.storage.local
       .get("textsOn")
-      .then((got) => (got.textsOn === true ? passOnTexts(body) : { ok: false, off: true }))
+      .then(async (got) => {
+        if (got.textsOn !== true) return { ok: false, off: true };
+        if (away && (await liveMessagesTab()).tab) return { ok: true };
+        return passOnTexts(body);
+      })
       .then(reply, () => reply({ ok: false }));
     return true;
   }
