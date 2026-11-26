@@ -240,6 +240,8 @@
         return;
       }
       const now = Date.now();
+      // Another tab has it: that tab reports, not this one.
+      if (elsewhere()) return;
       const isPaired = paired();
       let items = [];
       let seen = null;
@@ -292,8 +294,20 @@
     return null;
   }
 
+  // Google Messages runs in one tab at a time. In any other tab it shows
+  // "Use here" over the page, and the box to type in never comes.
+  function elsewhere() {
+    return [...document.querySelectorAll("button")].find((b) => /^\s*use here\s*$/i.test(textOf(b))) || null;
+  }
+
   function setValue(el, text) {
     el.focus();
+    if (el.isContentEditable) {
+      document.execCommand("selectAll", false);
+      if (text) document.execCommand("insertText", false, text);
+      else document.execCommand("delete", false);
+      return;
+    }
     const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     const setter = Object.getOwnPropertyDescriptor(proto, "value")?.set;
     if (setter) setter.call(el, text);
@@ -314,6 +328,8 @@
     "mws-autosize-textarea textarea",
     "textarea.input",
     "textarea",
+    'mws-message-compose [contenteditable="true"]',
+    '[contenteditable="true"][role="textbox"]',
   ];
   const SEND = [
     "[data-e2e-send-text-button]",
@@ -356,6 +372,12 @@
   async function send(msg) {
     const text = String(msg.text || "");
     if (!text.trim()) return { ok: false, error: "There was nothing to send." };
+    // Open in another tab too: take it over here, as the person would.
+    const takeOver = elsewhere();
+    if (takeOver) {
+      takeOver.click();
+      await waitFor(() => !elsewhere() && paired(), 15000);
+    }
     if (!paired()) return { ok: false, error: "Google Messages isn't paired with their phone." };
     if (!msg.conversation) {
       const problem = await startConversation(String(msg.number || ""));
@@ -368,7 +390,15 @@
     // new number opened. The person may be using this tab too.
     const key = T.keyOf(location.href);
     const box = await waitFor(() => first(document, COMPOSE), 15000);
-    if (!box) return { ok: false, error: "Google Messages didn't show the box to type in." };
+    if (!box) {
+      // Say what the page showed instead, so the next look knows where to start.
+      const why = elsewhere()
+        ? " It was open in another tab and didn't take over here."
+        : !document.querySelector("mws-message-wrapper, mws-messages-list")
+          ? " The conversation didn't open."
+          : "";
+      return { ok: false, error: `Google Messages didn't show the box to type in.${why} Nothing went.` };
+    }
     if (T.keyOf(location.href) !== key) return { ok: false, error: "Google Messages moved to another conversation. Nothing went." };
     const before = outgoingTexts().length;
     setValue(box, text);
@@ -411,7 +441,7 @@
       return true;
     }
     if (msg.type === "texts_ping") {
-      reply({ ok: true, paired: paired() });
+      reply({ ok: true, paired: paired(), elsewhere: Boolean(elsewhere()) });
       return false;
     }
     if (msg.type === "texts_busy") {

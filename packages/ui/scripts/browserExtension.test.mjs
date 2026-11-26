@@ -519,6 +519,16 @@ test("texts: a change in pairing is reported at once, not held for the once-a-mi
   assert.ok(report.indexOf("lastPaired = isPaired;") > report.indexOf('type: "texts_seen"'));
 });
 
+test("texts: a tab showing Use here takes over before sending, and never reports", () => {
+  const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
+  const body = texts.slice(texts.indexOf("async function send(msg)"), texts.indexOf("chrome.runtime.onMessage.addListener((msg, sender, reply)"));
+  const take = body.indexOf("takeOver.click();");
+  assert.ok(take > 0 && take < body.indexOf("if (!paired())") && take < body.indexOf("first(document, COMPOSE)"));
+  const report = texts.slice(texts.indexOf("async function report"), texts.indexOf("let timer = null"));
+  assert.ok(report.indexOf("if (elsewhere()) return;") < report.indexOf('type: "texts_seen"'));
+  assert.ok(texts.includes('[contenteditable="true"][role="textbox"]'));
+});
+
 test("texts: a send never takes the person's own tab from under a half-typed text", () => {
   const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
   const one = bg.slice(bg.indexOf("async function sendOneText"), bg.indexOf("function waitLoaded"));
