@@ -140,6 +140,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             hub={hubForPath(pathname, { mode, roleKind: role.role_kind })}
             bare={isExempt(pathname) || redirecting}
           >
+            {reconnecting && <ReconnectingNotice />}
             {redirecting ? <div className="h-full bg-surface" /> : children}
           </EmbeddedShell>
         </PageCrumbProvider>

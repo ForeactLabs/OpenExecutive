@@ -36,4 +36,7 @@ export function retryDelayMs(failures: number): number {
  * the first quick retry fixes shows nothing. */
 export const RECONNECTING_AFTER = 2;
 
+/** How long one /health call may take before it counts as a miss. */
+export const HEALTH_TIMEOUT_MS = 5_000;
+
 export const RECONNECTING_TEXT = "Reconnecting to your Executive…";

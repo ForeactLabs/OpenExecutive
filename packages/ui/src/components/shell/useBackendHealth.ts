@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { parseHealth, RECONNECTING_AFTER, retryDelayMs, type BackendHealth } from "@/lib/backendHealth";
+import { HEALTH_TIMEOUT_MS, parseHealth, RECONNECTING_AFTER, retryDelayMs, type BackendHealth } from "@/lib/backendHealth";
 
 export interface BackendHealthState<T extends BackendHealth> {
   /** The backend's answer; undefined until one arrives. */
@@ -32,7 +32,9 @@ export function useBackendHealth<T extends BackendHealth = BackendHealth>(enable
       clearTimeout(timer);
       let answer: BackendHealth | null = null;
       try {
-        const r = await fetch("/api/backend/health");
+        // A hang (a deploy that took the connection but isn't serving yet)
+        // counts as a miss, so the strip and the retries still happen.
+        const r = await fetch("/api/backend/health", { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) });
         const body: unknown = await r.json().catch(() => null);
         answer = parseHealth(r.ok, body);
       } catch {
