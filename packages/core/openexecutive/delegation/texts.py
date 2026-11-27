@@ -547,7 +547,9 @@ def send_who(send: Send, *, db_path: Path | None = None) -> str:
         conv = conversation(send.conversation_id, db_path=db_path)
         if conv is not None:
             return conv.who
-    return number_who(send.to_number, db_path=db_path) or "them"
+    name = number_who(send.to_number, db_path=db_path)
+    # The number stays beside a People name (only its last ten digits matched).
+    return (f"{name} ({send.to_number})" if name != send.to_number else name) or "them"
 
 
 def number_who(number: str, *, db_path: Path | None = None) -> str:

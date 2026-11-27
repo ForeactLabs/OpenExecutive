@@ -298,7 +298,7 @@ def test_who_a_conversation_is_with(ids: dict[str, int]) -> None:
     # A number on People is named; any other stays a number.
     assert tx.number_who("555-201-3344") == "Mike Chen"
     assert tx.number_who("555 999 0000") == "555 999 0000"
-    assert text_tools.recipient_words({"to": "+1 555 201 3344"}) == "Mike Chen"
+    assert text_tools.recipient_words({"to": "+1 555 201 3344"}) == "Mike Chen (+1 555 201 3344)"
 
 
 def test_a_text_to_someone_unknown_is_someone_new_and_the_card_names_them(
