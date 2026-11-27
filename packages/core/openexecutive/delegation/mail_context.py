@@ -147,6 +147,8 @@ class _Cursor:
 
 
 _SCANNING: set[int] = set()
+PRUNE_EVERY = timedelta(hours=1)
+_pruned_at: datetime | None = None
 # Looks in a row an email's gist was missing (failed or left out), by
 # (person, message id). In memory: a restart only gives it fresh tries.
 _MISSES: dict[tuple[int, str], int] = {}
@@ -783,7 +785,7 @@ async def _look_due(person_ids: list[int], now: datetime) -> None:
 def maybe_look(now: datetime) -> bool:
     """Start the due looks as one task when none is running. True when it
     started one. Never raises."""
-    global _look_task
+    global _look_task, _pruned_at
     try:
         if _look_task is not None and not _look_task.done():
             return False
@@ -791,9 +793,14 @@ def maybe_look(now: datetime) -> bool:
 
         if _client_slot_active():
             return False
-        from openexecutive.delegation import noticed
+        if _pruned_at is None or now - _pruned_at >= PRUNE_EVERY:
+            # The two days hold even when nothing new comes; hourly, and only
+            # where the store exists, so an idle workspace isn't written to.
+            from openexecutive.delegation import noticed
 
-        noticed.prune(now=now)  # the two days hold even when nothing new comes
+            if db.company_path(None).exists():
+                noticed.prune(now=now)
+            _pruned_at = now
         due = _due(now)
         if not due:
             return False
