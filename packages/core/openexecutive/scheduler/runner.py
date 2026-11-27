@@ -3247,8 +3247,11 @@ async def _send_teammate_briefs(now: datetime) -> None:
                 # messages do (people.held_messages), and it is told.
                 from openexecutive.people.held_messages import hold
 
-                hold(person.id, brief.text, source=teammate_brief.KIND, release_at=quiet_until, now=now)
-                teammate_brief.record_delivered(person.id, brief)
+                held_id = hold(
+                    person.id, brief.text, source=teammate_brief.KIND, release_at=quiet_until, now=now,
+                )
+                # Told once it is sent, not now (teammate_brief.settle_kept).
+                teammate_brief.record_kept(person.id, brief, held_id)
                 audit_log(
                     "scheduled_action",
                     f"teammate_brief_morning kept for person {person.id} until their quiet hours end",

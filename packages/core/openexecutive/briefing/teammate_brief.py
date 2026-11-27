@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from openexecutive.people.models import Person
@@ -114,6 +114,11 @@ async def write(person: Person, now: datetime | None = None) -> TeammateBrief | 
     pid = person.id
     now = now or datetime.now(UTC)
     kind = kind_for(pid)
+    # Yesterday's brief kept for their quiet hours counts once it was sent.
+    # One still waiting to go out is the one they get: a second written now
+    # would repeat it and arrive right behind it.
+    if await asyncio.to_thread(settle_kept, pid, now):
+        return None
     since = brief_state.since_for(kind, now)
     data = await asyncio.to_thread(_scoped_today, pid)
     if data is None:
@@ -171,12 +176,134 @@ async def write(person: Person, now: datetime | None = None) -> TeammateBrief | 
     )
 
 
-def record_delivered(person_id: int, brief: TeammateBrief) -> None:
+def record_delivered(person_id: int, brief: TeammateBrief, *, at: str | None = None) -> None:
     """After it reached them: the window, the fingerprint, what it told."""
     from openexecutive.briefing import brief_items, brief_state
 
-    brief_state.record_delivered(kind_for(person_id), brief.fingerprint, brief.text)
+    brief_state.record_delivered(kind_for(person_id), brief.fingerprint, brief.text, at=at)
     brief_items.record(KIND, brief.items, person_id)
+
+
+def _pending_scope(person_id: int) -> str:
+    return f"brief_pending:{KIND}:{person_id}"
+
+
+def _read_kept(person_id: int) -> list[dict[str, Any]]:
+    import json
+
+    from openexecutive.briefing import narrative_cache
+
+    row = narrative_cache.get(_pending_scope(person_id))
+    if row is None:
+        return []
+    try:
+        data = json.loads(row.narrative_text)
+    except (TypeError, ValueError):
+        return []
+    return [e for e in data if isinstance(e, dict)] if isinstance(data, list) else []
+
+
+def _write_kept(person_id: int, entries: list[dict[str, Any]]) -> None:
+    import json
+
+    from openexecutive.briefing import narrative_cache
+
+    narrative_cache.put(narrative_cache.BriefingNarrative(
+        scope=_pending_scope(person_id), input_hash="",
+        narrative_text=json.dumps(entries), generated_at=narrative_cache.utc_now_iso(),
+    ))
+
+
+def record_kept(person_id: int, brief: TeammateBrief, held_id: int) -> None:
+    """A brief kept for their quiet hours (``people.held_messages``): told
+    only once it is sent, which ``settle_kept`` checks on their next one.
+    Each kept brief has its own entry, so a second one kept while the first
+    still waits does not lose it."""
+    from openexecutive.briefing import narrative_cache
+
+    try:
+        entries = [e for e in _read_kept(person_id) if e.get("held_id") != held_id]
+        entries.append({
+            "held_id": held_id, "text": brief.text,
+            "fingerprint": brief.fingerprint, "items": brief.items,
+            # Its window ends when it was written, not when it went out:
+            # what happened while it waited is news for the next one.
+            "written_at": narrative_cache.utc_now_iso(),
+        })
+        _write_kept(person_id, entries)
+    except Exception:
+        # It still goes out when their quiet hours end: told a little early
+        # beats the next brief retelling all of it.
+        logger.exception("teammate_brief: couldn't keep person %s's brief; counted as told now", person_id)
+        record_delivered(person_id, brief)
+
+
+# How long a kept brief still waiting holds back the next one. Past this
+# its delivery is stuck (a failed chat app, a long leave) and a fresh brief
+# is worth more than waiting behind a stale "Do today".
+KEPT_FRESH_FOR = timedelta(hours=20)
+
+
+def settle_kept(person_id: int, now: datetime | None = None) -> bool:
+    """A kept brief that was sent since counts as delivered, as of when it
+    was written (its window ends there); one that was dropped told nothing.
+    Still waiting: left as it is.
+
+    One sent after a newer brief already reached them (theirs waited while
+    the next day's went straight out) does not take that newer brief's
+    place: it only adds what it told that the newer one did not track, and
+    leaves the window and fingerprint where the newer one set them.
+    True while one written in the last ``KEPT_FRESH_FOR`` is still waiting to
+    go out. Never raises."""
+    from openexecutive.alerts.lifecycle import parse_aware
+    from openexecutive.briefing import brief_items, brief_state
+    from openexecutive.people.held_messages import status
+
+    try:
+        entries = _read_kept(person_id)
+        if not entries:
+            return False
+        waiting: list[dict[str, Any]] = []
+        unread: list[dict[str, Any]] = []
+        sent: list[tuple[str, dict[str, Any]]] = []
+        for entry in entries:
+            try:
+                state, sent_at = status(int(entry.get("held_id", 0)))
+            except (TypeError, ValueError):
+                continue
+            if state == "waiting":
+                waiting.append(entry)
+            elif state == "unknown":
+                # Couldn't read it: look again next time, and don't let a
+                # read error cost them today's brief.
+                unread.append(entry)
+            elif state == "sent":
+                sent.append((str(entry.get("written_at") or sent_at or ""), entry))
+        kind = kind_for(person_id)
+        for as_of, entry in sorted(sent, key=lambda t: t[0]):
+            items = {str(k): str(v) for k, v in (entry.get("items") or {}).items()}
+            last = brief_state.last_delivered(kind)
+            last_at = parse_aware(last.generated_at) if last else None
+            this_at = parse_aware(as_of)
+            if last_at is not None and (this_at is None or last_at > this_at):
+                brief_items.record(KIND, {**items, **brief_items.told(KIND, person_id)}, person_id)
+                continue
+            # On top of what is already told: another kept one settled in this
+            # pass (written while this one waited) may hold items this lacks.
+            record_delivered(person_id, TeammateBrief(
+                text=str(entry.get("text", "")), fingerprint=str(entry.get("fingerprint", "")),
+                items={**brief_items.told(KIND, person_id), **items},
+            ), at=as_of or None)
+        if len(waiting) + len(unread) != len(entries):
+            _write_kept(person_id, waiting + unread)
+        cutoff = (now or datetime.now(UTC)) - KEPT_FRESH_FOR
+        return any(
+            (at := parse_aware(str(e.get("written_at") or ""))) is not None and at > cutoff
+            for e in waiting
+        )
+    except Exception:
+        logger.exception("teammate_brief: couldn't settle person %s's kept brief", person_id)
+        return False
 
 
 __all__ = [
@@ -186,5 +313,7 @@ __all__ = [
     "gets_a_brief",
     "kind_for",
     "record_delivered",
+    "record_kept",
+    "settle_kept",
     "write",
 ]

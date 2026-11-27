@@ -227,3 +227,79 @@ def test_a_line_naming_someone_is_kept() -> None:
         "- Nothing new from Dana Reyes on the Acme lease she promised by Friday.\n"
         "- No update from Dana since Monday on the lease renewal."
     )
+
+
+def test_a_bold_lead_in_item_keeps_its_part_heading() -> None:
+    text = (
+        "**Do today**\n"
+        "**Sign the Pine View lease** — Dana needs it by noon.\n\n"
+        "**New since yesterday**\n"
+        "- Nothing new in your inbox.\n"
+        "- Dana sent the lease."
+    )
+    assert brief_items.drop_empty_lines(text) == (
+        "**Do today**\n"
+        "**Sign the Pine View lease** — Dana needs it by noon.\n\n"
+        "**New since yesterday**\n"
+        "- Dana sent the lease."
+    )
+
+
+@pytest.mark.parametrize("lead_in", ["Sign Acme lease", "Sign it"])
+def test_a_short_bold_lead_in_item_keeps_its_part_heading(lead_in: str) -> None:
+    text = (
+        "**Do today**\n"
+        f"**{lead_in}** — Dana needs it by noon.\n\n"
+        "**New since yesterday**\n"
+        "- Nothing new in your inbox.\n"
+        "- Dana sent it."
+    )
+    assert brief_items.drop_empty_lines(text).startswith(f"**Do today**\n**{lead_in}**")
+
+
+def test_an_empty_part_above_an_inline_part_is_dropped() -> None:
+    text = (
+        "**Do today**\n"
+        "- Nothing new in your inbox.\n\n"
+        "**New since yesterday** — Dana sent the lease."
+    )
+    assert brief_items.drop_empty_lines(text) == "**New since yesterday** — Dana sent the lease."
+
+
+def test_a_one_character_label_is_mentioned_only_as_a_word() -> None:
+    assert brief_items._mentioned("5", "Item 5 is due.")
+    assert not brief_items._mentioned("5", "Call Dana at 3:15.")
+    # Everyday words alone are in any prose: not taken as a mention.
+    assert not brief_items._mentioned("Due", "Rent is due Friday.")
+    assert not brief_items._mentioned("IT due", "Do it today, then call Dana.")
+
+
+def test_a_short_headline_still_counts_as_told() -> None:
+    vat = _card(250, "Q3 VAT due")
+    rendered = "- Q3 VAT due\nClose 4 buyouts\nJosef R"
+    assert "card:250" in brief_items.item_states(_data(vat), rendered, {}, "1. File the Q3 VAT return today.")
+    assert "card:250" not in brief_items.item_states(_data(vat), rendered, {}, "1. Call Dana.")
+    # A short token counts only as a whole word.
+    assert "card:250" not in brief_items.item_states(
+        _data(vat), rendered, {}, "Q3 board pack and the elevator vote."
+    )
+    lone = _card(251, "VAT due")
+    assert "card:251" not in brief_items.item_states(
+        _data(lone), "- VAT due", {}, "Reviewed the private equity deck."
+    )
+
+
+def test_every_part_the_prompts_name_is_a_part_heading() -> None:
+    import re
+    from pathlib import Path
+
+    import openexecutive
+
+    root = Path(openexecutive.__file__).parent
+    named = set()
+    for rel in ("briefing/narrative.py", "workflows/end_of_day_digest.py"):
+        text = (root / rel).read_text()
+        named |= {m.casefold() for m in re.findall(r"\*\*([A-Z][A-Za-z ]{1,40})\*\*", text)}
+    # An item's tag in an example line, not a part.
+    named -= {"office lease"}
+    assert named <= brief_items._PART_NAMES, named - brief_items._PART_NAMES

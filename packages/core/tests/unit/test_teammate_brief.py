@@ -61,6 +61,10 @@ def board(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 def test_a_teammate_with_nothing_on_their_plate_gets_nothing(board: dict[str, Any]) -> None:
     board["data"]["proposals"] = []
     assert asyncio.run(teammate_brief.write(_person(5), NOW)) is None
+    # One stuck for longer (a failed chat app, a long leave) no longer holds
+    # back a fresh brief.
+    later = datetime.now(UTC) + teammate_brief.KEPT_FRESH_FOR + timedelta(minutes=1)
+    assert teammate_brief.settle_kept(5, later) is False
     assert board["contexts"] == []
 
 
@@ -88,6 +92,10 @@ def test_a_quiet_answer_sends_nothing(board: dict[str, Any]) -> None:
 
     board["texts"] = [QUIET_PRINCIPAL]
     assert asyncio.run(teammate_brief.write(_person(5), NOW)) is None
+    # One stuck for longer (a failed chat app, a long leave) no longer holds
+    # back a fresh brief.
+    later = datetime.now(UTC) + teammate_brief.KEPT_FRESH_FOR + timedelta(minutes=1)
+    assert teammate_brief.settle_kept(5, later) is False
 
 
 def test_who_gets_a_brief(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -158,13 +166,13 @@ def test_a_teammate_in_quiet_hours_gets_it_when_they_end(monkeypatch: pytest.Mon
         "openexecutive.people.held_messages.hold",
         lambda pid, text, **kw: held.append((pid, kw["release_at"])) or 1,
     )
-    recorded: list[int] = []
+    kept: list[int] = []
     monkeypatch.setattr(teammate_brief, "write", _write)
     monkeypatch.setattr(runner, "deliver_to_person", _deliver)
-    monkeypatch.setattr(teammate_brief, "record_delivered", lambda pid, brief: recorded.append(pid))
+    monkeypatch.setattr(teammate_brief, "record_kept", lambda pid, brief, held_id: kept.append(pid))
     asyncio.run(runner._send_teammate_briefs(NOW))
     assert written == [5]  # the one on leave is not written to
-    assert held == [(5, later)] and recorded == [5]
+    assert held == [(5, later)] and kept == [5]  # told only once it is sent
 
 
 def test_nobody_is_written_a_brief_nothing_can_reach(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -201,3 +209,145 @@ def test_what_was_done_for_them_with_no_department_reaches_them(monkeypatch: pyt
     monkeypatch.setattr(today_route, "_build_activity", lambda *a, **kw: SimpleNamespace(items=items))
     got = teammate_brief._activity(5, NOW, ["ops"])
     assert [a["title"] for a in got] == ["Nudged Dana's vendor", "Ops check-in"]
+
+
+def test_a_kept_brief_is_told_only_once_it_was_sent(
+    board: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.people import held_messages
+
+    original = held_messages._connect
+    monkeypatch.setattr(held_messages, "_connect", lambda db_path=None: original(tmp_path / "held.db"))
+    brief = asyncio.run(teammate_brief.write(_person(5), NOW))
+    assert brief is not None
+    held_id = held_messages.hold(5, brief.text, source=teammate_brief.KIND, release_at=NOW)
+    teammate_brief.record_kept(5, brief, held_id)
+    # Still waiting: nothing told yet, and no second brief that would
+    # repeat it and arrive right behind it.
+    assert teammate_brief.settle_kept(5) is True
+    assert brief_items.told(teammate_brief.KIND, 5) == {}
+    assert asyncio.run(teammate_brief.write(_person(5), NOW)) is None
+    # One stuck for longer (a failed chat app, a long leave) no longer holds
+    # back a fresh brief.
+    later = datetime.now(UTC) + teammate_brief.KEPT_FRESH_FOR + timedelta(minutes=1)
+    assert teammate_brief.settle_kept(5, later) is False
+    written_at = teammate_brief._read_kept(5)[0]["written_at"]
+    held_messages.mark_sent([held_id])
+    teammate_brief.settle_kept(5)
+    assert brief_items.told(teammate_brief.KIND, 5) == brief.items
+    # The next window starts when it was written, not when it went out, so
+    # what happened while it waited is still news.
+    from openexecutive.briefing import brief_state
+
+    last = brief_state.last_delivered(teammate_brief.kind_for(5))
+    assert last is not None and last.generated_at == written_at
+
+
+def test_a_kept_brief_sent_after_a_newer_one_does_not_replace_it(
+    board: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dataclasses import replace
+
+    from openexecutive.briefing import brief_state
+    from openexecutive.people import held_messages
+
+    original = held_messages._connect
+    monkeypatch.setattr(held_messages, "_connect", lambda db_path=None: original(tmp_path / "held.db"))
+    old = asyncio.run(teammate_brief.write(_person(5), NOW))
+    assert old is not None
+    first = held_messages.hold(5, old.text, source=teammate_brief.KIND, release_at=NOW)
+    teammate_brief.record_kept(5, old, first)
+    # A second one kept while the first still waits keeps both.
+    second = held_messages.hold(5, old.text, source=teammate_brief.KIND, release_at=NOW)
+    teammate_brief.record_kept(5, old, second)
+    assert [e["held_id"] for e in teammate_brief._read_kept(5)] == [first, second]
+    # The next day's brief went straight out, then the first kept one was sent.
+    newer = replace(old, text="Newer brief", fingerprint="newer", items={"newer:item": "s"})
+    teammate_brief.record_delivered(5, newer, at="2099-01-01T00:00:00+00:00")
+    held_messages.mark_sent([first])
+    teammate_brief.settle_kept(5)
+    last = brief_state.last_delivered(teammate_brief.kind_for(5))
+    assert last is not None and last.narrative_text == "Newer brief"
+    assert brief_items.told(teammate_brief.KIND, 5) == {**old.items, "newer:item": "s"}
+    # The one still waiting stays kept.
+    assert [e["held_id"] for e in teammate_brief._read_kept(5)] == [second]
+
+
+def test_a_kept_brief_that_was_dropped_tells_nothing(
+    board: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.briefing import brief_state
+    from openexecutive.people import held_messages
+
+    original = held_messages._connect
+    monkeypatch.setattr(held_messages, "_connect", lambda db_path=None: original(tmp_path / "held.db"))
+    brief = asyncio.run(teammate_brief.write(_person(5), NOW))
+    assert brief is not None
+    before = brief_state.last_delivered(teammate_brief.kind_for(5))
+    held_id = held_messages.hold(5, brief.text, source=teammate_brief.KIND, release_at=NOW)
+    teammate_brief.record_kept(5, brief, held_id)
+    held_messages._drop([held_id], NOW, None)
+    assert teammate_brief.settle_kept(5) is False
+    assert brief_items.told(teammate_brief.KIND, 5) == {}
+    assert teammate_brief._read_kept(5) == []
+    assert brief_state.last_delivered(teammate_brief.kind_for(5)) == before
+
+
+def test_a_read_error_on_a_kept_brief_does_not_cost_the_day(
+    board: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.people import held_messages
+
+    original = held_messages._connect
+    monkeypatch.setattr(held_messages, "_connect", lambda db_path=None: original(tmp_path / "held.db"))
+    brief = asyncio.run(teammate_brief.write(_person(5), NOW))
+    assert brief is not None
+    held_id = held_messages.hold(5, brief.text, source=teammate_brief.KIND, release_at=NOW)
+    teammate_brief.record_kept(5, brief, held_id)
+    monkeypatch.setattr(held_messages, "status", lambda _id, **_kw: ("unknown", None))
+    # Not known to be waiting: today's brief is still written, nothing is
+    # counted as told, and the kept one is looked at again next time.
+    assert teammate_brief.settle_kept(5) is False
+    assert brief_items.told(teammate_brief.KIND, 5) == {}
+    assert [e["held_id"] for e in teammate_brief._read_kept(5)] == [held_id]
+    # An id no longer there was never sent.
+    monkeypatch.undo()
+    monkeypatch.setattr(held_messages, "_connect", lambda db_path=None: original(tmp_path / "held.db"))
+    assert held_messages.status(held_id + 999) == ("dropped", None)
+
+
+def test_two_kept_briefs_sent_together_keep_both_told(
+    board: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dataclasses import replace
+
+    from openexecutive.people import held_messages
+
+    original = held_messages._connect
+    monkeypatch.setattr(held_messages, "_connect", lambda db_path=None: original(tmp_path / "held.db"))
+    brief = asyncio.run(teammate_brief.write(_person(5), NOW))
+    assert brief is not None
+    first = replace(brief, items={"card:1": "a"})
+    second = replace(brief, items={"card:2": "b"})
+    ids = []
+    for kept in (first, second):
+        held_id = held_messages.hold(5, kept.text, source=teammate_brief.KIND, release_at=NOW)
+        teammate_brief.record_kept(5, kept, held_id)
+        ids.append(held_id)
+    held_messages.mark_sent(ids)
+    teammate_brief.settle_kept(5)
+    assert brief_items.told(teammate_brief.KIND, 5) == {"card:1": "a", "card:2": "b"}
+
+
+def test_a_brief_that_could_not_be_kept_counts_as_told_now(
+    board: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    brief = asyncio.run(teammate_brief.write(_person(5), NOW))
+    assert brief is not None
+
+    def _fail(*_a: Any, **_kw: Any) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(teammate_brief, "_write_kept", _fail)
+    teammate_brief.record_kept(5, brief, 1)
+    assert brief_items.told(teammate_brief.KIND, 5) == brief.items
