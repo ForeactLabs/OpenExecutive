@@ -107,6 +107,10 @@ def test_only_a_count_changing_is_not_news() -> None:
     assert not only_counts_or_marks("Plans from 49 a month", "Plans from 59 a month")
     assert not only_counts_or_marks("Version 17 is out", "Version 18 is out")
     assert only_counts_or_marks("1,204 customers", "1,317 customers")
+    # A page too long to compare whole is never called a count change.
+    from openexecutive.monitoring.sources import page_watch
+    filler = " ".join(["word"] * page_watch._MAX_DIFF_WORDS)
+    assert not only_counts_or_marks(f"Open roles 14 {filler}", f"Open roles 15 {filler} Acme acquired")
     assert not only_counts_or_marks("same", "same")
 
 

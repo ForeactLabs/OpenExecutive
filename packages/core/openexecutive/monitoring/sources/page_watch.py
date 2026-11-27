@@ -520,9 +520,10 @@ def only_counts_or_marks(old: str, new: str) -> bool:
     a decimal), and nothing within a few words of it saying it is money, a
     rate, a size, a date or a version ("$", "USD", "%", "a month",
     "million", "June", "Version")."""
-    old_words = old.split()[:_MAX_DIFF_WORDS]
-    new_words = new.split()[:_MAX_DIFF_WORDS]
-    if old_words == new_words:
+    old_words = old.split()
+    new_words = new.split()
+    # Past what can be compared, a change could hide anywhere: tell it.
+    if old_words == new_words or max(len(old_words), len(new_words)) > _MAX_DIFF_WORDS:
         return False
 
     def letters(words: list[str]) -> list[str]:
