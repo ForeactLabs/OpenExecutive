@@ -354,6 +354,18 @@ def test_mail_from_before_it_was_turned_on_is_context_only(owner: Any, monkeypat
     assert model["acts"] == []
 
 
+def test_a_long_outlook_id_reaches_the_turn_whole(owner: Any, model: dict[str, Any]) -> None:
+    long_id = "AAQkAGFkZmNiNTQ0LWNjOTYtNGI1Ny1hMDU3LTdmNmNiYWQ2NjBmOAAQAPf-eaKvMkREq8d2HUmyf-o=" * 3
+    m = _msg(long_id)
+    m.thread_id = long_id + "T"
+    _look(owner, Mailbox(m))
+    [(_, prompt, _)] = model["acts"]
+    assert f"message_id: {long_id}\n" in prompt
+    assert f"thread_id: {long_id}T\n" in prompt
+    [kept] = noticed.recent(owner.id, now=NOW)
+    assert kept.item_key == long_id and kept.thread_id == long_id + "T"
+
+
 def test_mail_with_no_readable_time_is_context_only(owner: Any, model: dict[str, Any]) -> None:
     undated = _msg("m1")
     undated.received_at = ""

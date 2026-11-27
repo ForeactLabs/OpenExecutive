@@ -694,6 +694,7 @@ def _left_to_us(message: Any, exec_address: str, replies: _Replies) -> bool:
 def prompt_for(person: Any, notes: list[_Note]) -> str:
     """What the turn reads: each email that ties to something known, as
     data, and what to do."""
+    from openexecutive.delegation import noticed
     from openexecutive.delegation.ghostwriter import one_line
     from openexecutive.delegation.texts_watch import first_name
     from openexecutive.orchestrator.content_trust import wrap_untrusted
@@ -709,8 +710,8 @@ def prompt_for(person: Any, notes: list[_Note]) -> str:
     for note in notes:
         m = note.message
         body = "\n".join([
-            f"message_id: {one_line(m.id, 80)}",
-            f"thread_id: {one_line(m.thread_id or '', 80)}",
+            f"message_id: {one_line(m.id, noticed.ID_CHARS)}",
+            f"thread_id: {one_line(m.thread_id or '', noticed.ID_CHARS)}",
             f"From: {one_line(m.from_name or '', 80)} <{one_line(m.from_addr or '', 120)}>",
             f"Subject: {one_line(m.subject or '', 200)}",
             f"Says: {note.gist}",

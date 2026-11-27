@@ -45,6 +45,8 @@ MAX_LISTED = 40
 _FIELD_CHARS = 200
 _GIST_CHARS = 240
 _TIE_CHARS = 120
+# Message and thread ids are kept whole: Outlook's run to 512 characters.
+ID_CHARS = 512
 _MATCH_SUBJECT_CHARS = 40
 _REPLY_PREFIX_RE = re.compile(r"^\s*((re|fw|fwd|aw|wg|sv|tr)\s*:\s*)+", re.IGNORECASE)
 
@@ -139,7 +141,7 @@ def note(
     subject or gist changed takes the new words and is new again (True)."""
     moment = now or datetime.now(UTC)
     arrived = received_at or moment
-    key = (item_key or "").strip()[:_FIELD_CHARS]
+    key = (item_key or "").strip()[:ID_CHARS]
     if not key:
         return False
     name = _one_line(sender_name, 80)
@@ -179,7 +181,7 @@ def note(
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     person_id, source, key, matched, name, _one_line(sender, 160).lower(), title,
-                    _one_line(gist, _GIST_CHARS), _one_line(tie, _TIE_CHARS), _one_line(thread_id, 120),
+                    _one_line(gist, _GIST_CHARS), _one_line(tie, _TIE_CHARS), _one_line(thread_id, ID_CHARS),
                     _iso(arrived), _iso(moment), int(wants_act),
                 ),
             )
