@@ -3145,9 +3145,6 @@ async def _run_principal_brief(action: ScheduledAction, now: datetime) -> None:
                 detail=f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__,
             )
 
-    if kind == "principal_brief_morning":
-        # Each teammate's own brief, right after the owner's.
-        await _send_teammate_briefs(now)
     if kind in _DIGEST_BRIEF_KINDS:
         # Everyone else who chose "In my briefs" gets theirs now, on its own:
         # only the principal has a brief to carry them.
@@ -3162,6 +3159,12 @@ async def _run_principal_brief(action: ScheduledAction, now: datetime) -> None:
         logger.info("scheduler: %s not chained — the workspace is now in team mode", kind)
     else:
         _enqueue_next_principal_brief(kind, after=_chain_after(action))
+    if kind == "principal_brief_morning":
+        # Each teammate's own brief, right after the owner's, once the
+        # owner's row is done and chained: one model call each must not hold
+        # it "running", where a restart would run the owner's brief again.
+        # A restart mid-way only leaves the rest unsent, so news tomorrow.
+        await _send_teammate_briefs(now)
 
 
 # The briefs that carry held messages ("In my briefs", people.notifications).
