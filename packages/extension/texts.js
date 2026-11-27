@@ -53,12 +53,27 @@
   const NOT_A_PLACE = "(?<!apt )(?<!apt\\. )(?<!apartment )(?<!suite )(?<!ste )(?<!room )(?<!rm )(?<!unit )(?<!floor )(?<!building )(?<!bldg )(?<!lot )(?<!box )(?<!#)(?<!no\\. )";
   const CODE_NEAR = new RegExp(CODE_WORD + "[^\\d\\n]{0,25}" + NUMBER + "|" + NOT_A_PLACE + NUMBER + "[^\\d\\n]{0,40}" + CODE_WORD, "i");
   const SIGN_IN_LINK = /\b(magic link|sign[- ]?in link|log[- ]?in link|is this you signing in|approve (?:this |the )?sign[- ]?in|tap to (?:sign|log) in|trying to sign in)\b/i;
+  // A gate, door or wifi code is kept, but only when the place word belongs
+  // to the code ("The code for the gate is 4821", "Enter 4821 at the gate").
+  const PLACE = "(?:gates?|doors?|garage|alarm|lock ?box|keypad|wi-?fi|building|lobby)";
+  const HOME_CODE = new RegExp(
+    "\\b" + PLACE + "(?:\\s+(?:entry|access|opener|door|alarm))*\\s+(?:codes?|passcodes?|passwords?|pins?)\\b" +
+      "|\\b(?:codes?|passcodes?|passwords?|pins?)\\s+(?:for|to)\\s+(?:the\\s+|your\\s+)?" + PLACE + "\\b" +
+      "|\\b(?:wi-?fi|network|ssid)\\s*(?::|is)\\s*(?!(?:your|the|a|my)\\b)\\S+\\s+(?:password|pass|pw)\\b" +
+      "|" + NUMBER + "\\s+(?:at|on|into)\\s+(?:the\\s+)?" + PLACE + "\\b",
+    "i",
+  );
+  // Words only a sign-in code has: with one, nothing keeps it.
+  const SIGN_IN_WORD = /\b(?:verification|confirmation code|(?:to|and) (?:confirm|verify)|verify your|sign[- ]?in|log[- ]?in|otp|one[- ]time|2fa|two[- ]factor|authenticat\w*|security code|reset|recover\w*|(?:do not|don'?t|never) share)\b/i;
   const ENTER_CODE = new RegExp("\\b(?:enter|type)\\s+" + NUMBER + "|\\buse\\s+" + NUMBER + "\\s+(?:to|for)\\s+(?:verify|confirm|sign|log|authenticat)", "i");
 
   /** Whether the words read like a sign-in code or a sign-in link. */
   T.isSignInCode = function (text) {
     const s = String(text || "");
-    return SIGN_IN_LINK.test(s) || ENTER_CODE.test(s) || CODE_NEAR.test(s);
+    if (SIGN_IN_LINK.test(s)) return true;
+    // A gate, door or wifi code, however it is worded, is kept.
+    if (!SIGN_IN_WORD.test(s) && HOME_CODE.test(s)) return false;
+    return ENTER_CODE.test(s) || CODE_NEAR.test(s);
   };
 
   /** One line of text, at most `max` characters. */
@@ -137,6 +152,10 @@
   const KEEP = 30 * DAY;
   // Seen-map mark for a row a full first look had no room for.
   const WAITING = "~";
+  // The same, for a row the old version had told: "~e.<fingerprint>". It
+  // still goes as earlier while its text is the same one, never once a new
+  // text came in.
+  const WAITING_TOLD = "~e.";
 
   /**
    * What to tell Open Executive about the list, given what it said before
@@ -163,10 +182,12 @@
       // A row a full first look had no room for ("~") is still judged as a
       // first look, so its old text never reads as new.
       const kept = first ? "" : String(next[row.key] || "");
-      const look = first || kept === WAITING;
+      const toldPrint = kept.startsWith(WAITING_TOLD) ? kept.slice(WAITING_TOLD.length) : null;
+      const waited = kept === WAITING || toldPrint !== null;
+      const look = first || waited;
       // What was seen is "<fingerprint>.<count of changes>": the count tells
       // the same words again later ("ok") from the same report sent again.
-      const [beforePrint, beforeCount] = (kept === WAITING ? "" : kept).split(".");
+      const [beforePrint, beforeCount] = (waited ? "" : kept).split(".");
       if (beforePrint === print) continue;
       const count = (parseInt(beforeCount, 10) || 0) + 1;
       const before = look ? WAITING : next[row.key];
@@ -175,12 +196,13 @@
       // A first look can't date a row it can't read the time of: left out.
       if (look && (shown === null || now - shown > KEEP)) continue;
       if (T.isSignInCode(row.snippet)) continue;
-      const toldBefore = Boolean(told && typeof told === "object" && String(told[row.key] || "").split(".")[0] === print);
+      const toldBefore = toldPrint === print || Boolean(told && typeof told === "object" && String(told[row.key] || "").split(".")[0] === print);
       const earlier = look && (toldBefore || !row.unread || row.outgoing || now - shown > DAY);
       items.push({
         // What was seen before (taken off before it goes): a row cut from a
         // full report is put back to it, so the next report tells it.
         before,
+        print: look && toldBefore ? print : null,
         // The same change, reported again (an answer that never came back),
         // is the same ref, so it is kept once.
         ref: `${row.key}:${print}:${count}`,
@@ -206,9 +228,9 @@
     items.sort((a, b) => Number(a.earlier) - Number(b.earlier));
     for (const cut of items.slice(100)) {
       if (cut.before === undefined) delete next[cut.conversation];
-      else next[cut.conversation] = cut.before;
+      else next[cut.conversation] = cut.before === WAITING && cut.print ? WAITING_TOLD + cut.print : cut.before;
     }
-    return { items: items.slice(0, 100).map(({ before, ...item }) => item), seen: next };
+    return { items: items.slice(0, 100).map(({ before, print, ...item }) => item), seen: next };
   };
 
   /** The conversation key in a Google Messages address, or "". */

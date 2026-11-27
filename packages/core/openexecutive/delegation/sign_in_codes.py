@@ -43,6 +43,26 @@ _SIGN_IN_LINK = re.compile(
     r"tap to (?:sign|log) in|trying to sign in)\b",
     re.IGNORECASE,
 )
+# A gate, door, garage, alarm, lockbox or wifi code, however it is worded,
+# is something people text each other and ask about later: never dropped.
+# The place word must belong to the code ("The gate entry code is 4821",
+# "The code for the gate is 4821", "Wifi: HomeNet, password 84219375",
+# "Enter 4821 at the gate"), never just appear somewhere in the text.
+_PLACE = r"(?:gates?|doors?|garage|alarm|lock ?box|keypad|wi-?fi|building|lobby)"
+_HOME_CODE = re.compile(
+    r"\b" + _PLACE + r"(?:\s+(?:entry|access|opener|door|alarm))*\s+(?:codes?|passcodes?|passwords?|pins?)\b"
+    r"|\b(?:codes?|passcodes?|passwords?|pins?)\s+(?:for|to)\s+(?:the\s+|your\s+)?" + _PLACE + r"\b"
+    r"|\b(?:wi-?fi|network|ssid)\s*(?::|is)\s*(?!(?:your|the|a|my)\b)\S+\s+(?:password|pass|pw)\b"
+    r"|" + _NUMBER + r"\s+(?:at|on|into)\s+(?:the\s+)?" + _PLACE + r"\b",
+    re.IGNORECASE,
+)
+# Words only a sign-in code has: with one of them, nothing keeps it
+# ("Enter 482913 to confirm your Wi-Fi account").
+_SIGN_IN_WORD = re.compile(
+    r"\b(?:verification|confirmation code|(?:to|and) (?:confirm|verify)|verify your|sign[- ]?in|log[- ]?in|otp"
+    r"|one[- ]time|2fa|two[- ]factor|authenticat\w*|security code|reset|recover\w*|(?:do not|don'?t|never) share)\b",
+    re.IGNORECASE,
+)
 # "Enter 482913 to confirm", "Use 482913 to verify your account": a number
 # to type back somewhere.
 _ENTER_CODE = re.compile(
@@ -56,8 +76,8 @@ def is_sign_in_code(text: str) -> bool:
     """Whether the words read like a sign-in code ("Your code is 482913",
     "Enter 4 8 2 9 1 3 to confirm") or a sign-in link or prompt."""
     words = text or ""
-    return bool(
-        _SIGN_IN_LINK.search(words)
-        or _ENTER_CODE.search(words)
-        or _CODE_NEAR.search(words)
-    )
+    if _SIGN_IN_LINK.search(words):
+        return True
+    if not _SIGN_IN_WORD.search(words) and _HOME_CODE.search(words):
+        return False
+    return bool(_ENTER_CODE.search(words) or _CODE_NEAR.search(words))
