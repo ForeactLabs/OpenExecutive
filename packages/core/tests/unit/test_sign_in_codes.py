@@ -33,6 +33,6 @@ def test_ordinary_texts_are_not() -> None:
         "Gate code is 4821", "Door code 1234#", "The wifi password is 84219375",
         "Apt 1402, the code is on the fridge", "Room 1402, the password is on the fridge",
         "Suite 1200, the door code is on the sign", "Door code is 4821, see you at 7", "Room 1402, wifi password is on the fridge",
-        "The code for the gate is 4821", "The gate entry code is 4821", "Garage door opener code is 4821", "Wifi: HomeNet, password 84219375", "Wifi is HomeNet, password 84219375", "Network: HomeNet Password: 84219375", "Gate access code is 4821", "Building access code is 4821", "Enter 4821 at the gate", "The network password is 84219375", "Network password: 84219375", "Gate code 4821, PIN 9999 for the alarm", "The code for the gate is 4821, can you confirm you got it?",
+        "The code for the gate is 4821", "The gate entry code is 4821", "Garage door opener code is 4821", "Wifi: HomeNet, password 84219375", "Wifi is HomeNet, password 84219375", "Network: HomeNet Password: 84219375", "Gate access code is 4821", "Building access code is 4821", "Enter 4821 at the gate", "Gate code is 4821. Text me if the code doesn't work", "Garage code 4821. Same code for the side door", "The gate code is now 4821 (new code)", "The network password is 84219375", "Network password: 84219375", "Gate code 4821, PIN 9999 for the alarm", "The code for the gate is 4821, can you confirm you got it?",
     ):
         assert not is_sign_in_code(text), text

@@ -56,16 +56,20 @@
   // A gate, door or wifi code is kept, but only when the place word belongs
   // to the code ("The code for the gate is 4821", "Enter 4821 at the gate").
   const PLACE = "(?:gates?|doors?|garage|alarm|lock ?box|keypad|wi-?fi|building|lobby)";
+  // The home code's own number goes with it ("Gate code is now 4821"), so
+  // nothing left behind pairs with a later "code".
+  const HOME_TAIL = "(?:\\s*(?:[:=-]|\\bis\\b|\\bwas\\b)?\\s*(?:now\\s+|still\\s+)?" + NUMBER + ")?";
   const HOME_CODE = new RegExp(
-    "\\b(?:gates?|doors?|garage|alarm|lock ?box|keypad|building|lobby)(?:\\s+(?:entry|access|opener|door|alarm))*\\s+(?:codes?|passcodes?|passwords?|pins?)\\b" +
+    "(?:\\b(?:gates?|doors?|garage|alarm|lock ?box|keypad|building|lobby)(?:\\s+(?:entry|access|opener|door|alarm))*\\s+(?:codes?|passcodes?|passwords?|pins?)\\b" +
       // A Wi-Fi "code" is usually a portal's one-time code: only a Wi-Fi password counts.
       "|\\b(?:wi-?fi(?:\\s+network)?|network)\\s+(?:passwords?|pass|pw)\\b" +
-      "|\\b(?:codes?|passcodes?|pins?)\\s+" + NUMBER + "\\s+(?:for|to)\\s+(?:the\\s+|your\\s+)?" + PLACE + "\\b" +
       "|\\b(?:codes?|passcodes?|passwords?|pins?)\\s+(?:for|to)\\s+(?:the\\s+|your\\s+)?" + PLACE + "\\b" +
-      "|\\b(?:wi-?fi|network|ssid)\\s*(?::|is)\\s*(?!(?:your|the|a|my)\\b)\\S+\\s+(?:password|pass|pw)\\b" +
+      "|\\b(?:wi-?fi|network|ssid)\\s*(?::|is)\\s*(?!(?:your|the|a|my)\\b)\\S+\\s+(?:password|pass|pw)\\b)" + HOME_TAIL +
+      "|\\b(?:codes?|passcodes?|pins?)\\s+" + NUMBER + "\\s+(?:for|to)\\s+(?:the\\s+|your\\s+)?" + PLACE + "\\b" +
       "|" + NUMBER + "\\s+(?:at|on|into)\\s+(?:the\\s+)?" + PLACE + "\\b",
     "gi",
   );
+
   // Words only a sign-in code has: with one, nothing keeps it.
   const SIGN_IN_WORD = /\b(?:verification|confirmation code|(?:to|and) (?:confirm|verify)|verify your|sign[- ]?in|log[- ]?in|otp|one[- ]time|2fa|two[- ]factor|authenticat\w*|security code|reset|recover\w*|(?:do not|don'?t|never) share)\b/i;
   const ENTER_CODE = new RegExp("\\b(?:enter|type)\\s+" + NUMBER + "|\\buse\\s+" + NUMBER + "\\s+(?:to|for)\\s+(?:verify|confirm|sign|log|authenticat)", "i");
