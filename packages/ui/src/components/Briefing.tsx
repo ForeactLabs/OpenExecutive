@@ -45,6 +45,7 @@ import InfoTip from "./InfoTip";
 import { ACTION_CARDS_TIP, ActionCardItem, useActionCards } from "./ActionCards";
 import { INVITE_CARDS_TIP, InviteCardItem, useInviteCards } from "./InviteCards";
 import { REPLIES_WAITING_TIP, ReplyCardItem, useReplyCards } from "./RepliesWaiting";
+import { CouncilMark } from "./BrandMark";
 import Icon from "./Icon";
 import { MonitoringPanelBody } from "./briefing/AwarenessPanels";
 import DoneForYou from "./briefing/DoneForYou";
@@ -761,6 +762,7 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
               {!hideEmptyNeedsYou && (
                 <section id={NEEDS_YOU_ID} className="mb-8 scroll-mt-4">
                 <div className="mb-3 flex items-center gap-2">
+                  <Icon name="user" size="w-5 h-5" className="flex-shrink-0 text-fg" />
                   <h2 className="text-lg font-semibold text-fg">
                     For you
                     {needsYouCount > 0 && <span className="ml-1.5 font-normal text-fg-muted">({needsYouCount})</span>}
@@ -875,9 +877,14 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
                   the last day, and what it already does on its own. */}
               {showDoing && (
                 <section aria-labelledby="sec-what-im-doing" className="mb-8">
-                  <h2 id="sec-what-im-doing" className="mb-3 text-lg font-semibold text-fg">
-                    What I&apos;m doing
-                  </h2>
+                  {/* For you is the reader's (a person), What I'm doing the
+                      Executive's (its Council mark). */}
+                  <div className="mb-3 flex items-center gap-2">
+                    <CouncilMark className="w-5 h-5 flex-shrink-0 text-fg" />
+                    <h2 id="sec-what-im-doing" className="text-lg font-semibold text-fg">
+                      What I&apos;m doing
+                    </h2>
+                  </div>
                   <WatchingNext items={watchingItems} onStopped={refreshToday} />
                   <DoneForYou
                     rows={doneRows}
