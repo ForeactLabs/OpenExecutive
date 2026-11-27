@@ -147,6 +147,8 @@ class _Cursor:
 
 
 _SCANNING: set[int] = set()
+# Only mail this new can start a turn: a backlog is context only.
+ACT_MAX_AGE = timedelta(hours=1)
 PRUNE_EVERY = timedelta(hours=1)
 _pruned_at: datetime | None = None
 # Looks in a row an email's gist was missing (failed or left out), by
@@ -527,23 +529,30 @@ async def _look(person: Any, client: Any, cursor: _Cursor, now: datetime) -> Loo
     from openexecutive.delegation.settings import enabled_since
 
     switched_on = enabled_since(person.id)
+    # The reply watcher's cards and outcomes, read once for the whole look.
+    replies = _Replies.read(person, [n.message.id for n in notes])
     for note in notes:
         m = note.message
         arrived = _parse(m.received_at) or now
-        after_on = switched_on is None or arrived >= switched_on
+        # Only mail that came since they turned it on, and lately (a backlog
+        # after a gap, or on the first look after this shipped, is context
+        # only, as the reply watcher never catches up either). Unreadable
+        # is context only.
+        recent_enough = switched_on is not None and arrived >= switched_on and now - arrived <= ACT_MAX_AGE
         if noticed.note(
             person.id, source=noticed.EMAIL, item_key=m.id, sender_name=m.from_name or "",
             sender=m.from_addr or "", subject=m.subject or "", gist=note.gist, tie=note.tie,
             thread_id=m.thread_id or "", received_at=_parse(m.received_at) or now, now=now,
-            wants_act=note.act and after_on and _left_to_us(person, m, exec_address),
+            wants_act=note.act and recent_enough and _left_to_us(m, exec_address, replies),
         ):
             result.kept += 1
     # What this look found to act on, and any earlier one whose turn failed.
     waiting = noticed.waiting_to_act(person.id, source=noticed.EMAIL, now=now)
+    replies = replies.with_outcomes(person, [item.item_key for item in waiting])
     ready: list[Any] = []
     handled: list[str] = []
     for item in waiting:
-        state = _reply_state(person, item, now)
+        state = _reply_state(item, now, replies)
         if state == "act":
             ready.append(item)
         elif state == "handled":
@@ -568,23 +577,60 @@ async def _look(person: Any, client: Any, cursor: _Cursor, now: datetime) -> Loo
     return result
 
 
-def _reply_state(person: Any, item: Any, now: datetime) -> str:
-    """Whether the reply watcher (``delegation.inbox``) handles this email
-    with a card of its own: ``handled``; hasn't looked at it yet: ``wait``
-    (it holds new mail for ``inbox.GRACE`` first, and a turn now could do
-    what the card's own work then does again); otherwise ``act``."""
+@dataclass
+class _Replies:
+    """What the reply watcher (``delegation.inbox``) has for one person,
+    read once per look: whether it is on, its open cards' threads and its
+    outcomes by message id. ``ok`` False when it couldn't be read."""
+
+    on: bool = False
+    card_threads: frozenset[str] = frozenset()
+    outcomes: dict[str, str] | None = None
+    ok: bool = True
+
+    @classmethod
+    def read(cls, person: Any, message_ids: list[str]) -> _Replies:
+        from openexecutive.delegation import inbox
+
+        try:
+            return cls(
+                on=inbox.get_watch(person.id).enabled,
+                card_threads=frozenset(inbox.card_threads(inbox.open_cards(person.id))),
+                outcomes=inbox.outcomes(person.id, message_ids) if message_ids else {},
+            )
+        except Exception:
+            logger.warning("mail_context: couldn't read the reply cards", exc_info=True)
+            return cls(ok=False)
+
+    def with_outcomes(self, person: Any, message_ids: list[str]) -> _Replies:
+        from openexecutive.delegation import inbox
+
+        missing = [m for m in message_ids if m not in (self.outcomes or {})]
+        if not self.ok or not missing:
+            return self
+        try:
+            more = inbox.outcomes(person.id, missing)
+        except Exception:
+            logger.warning("mail_context: couldn't read the reply outcomes", exc_info=True)
+            return _Replies(ok=False)
+        return _Replies(self.on, self.card_threads, {**(self.outcomes or {}), **more}, True)
+
+
+def _reply_state(item: Any, now: datetime, replies: _Replies) -> str:
+    """Whether the reply watcher handles this email with a card of its own:
+    ``handled``; hasn't looked at it yet: ``wait`` (it holds new mail for
+    ``inbox.GRACE`` first, and a turn now could do what the card's own work
+    then does again); otherwise ``act``."""
     from openexecutive.config import get_settings
     from openexecutive.delegation import inbox
 
-    try:
-        if item.thread_id and item.thread_id in inbox.card_threads(inbox.open_cards(person.id)):
-            return "handled"
-        if not inbox.get_watch(person.id).enabled:
-            return "act"
-        outcome = inbox.outcomes(person.id, [item.item_key]).get(item.item_key)
-    except Exception:
-        logger.warning("mail_context: couldn't read the reply cards", exc_info=True)
+    if not replies.ok:
         return "wait"
+    if item.thread_id and item.thread_id in replies.card_threads:
+        return "handled"
+    if not replies.on:
+        return "act"
+    outcome = (replies.outcomes or {}).get(item.item_key)
     if outcome in (inbox.DRAFTED, inbox.SENT):
         return "handled"
     if outcome not in (None, inbox.RETRY, inbox.PROCESSING):  # PROCESSING: still deciding
@@ -605,7 +651,7 @@ def _from_kept(item: Any) -> _Note:
     return _Note(message, relation="", gist=item.gist, tie=item.tie, act=True)
 
 
-def _left_to_us(person: Any, message: Any, exec_address: str) -> bool:
+def _left_to_us(message: Any, exec_address: str, replies: _Replies) -> bool:
     """Whether nothing else handles ``message``: a reply card of its own
     (``delegation.inbox``), or the Executive's own turn on its copy."""
     from openexecutive.delegation import inbox
@@ -613,15 +659,11 @@ def _left_to_us(person: Any, message: Any, exec_address: str) -> bool:
     addressed = {a.strip().lower() for a in [*getattr(message, "to", []), *getattr(message, "cc", [])]}
     if exec_address and exec_address in addressed:
         return False
-    try:
-        if inbox.outcomes(person.id, [message.id]).get(message.id) in (inbox.DRAFTED, inbox.SENT):
-            return False
-        if message.thread_id in inbox.card_threads(inbox.open_cards(person.id)):
-            return False
-    except Exception:
-        logger.warning("mail_context: couldn't read the reply cards", exc_info=True)
+    if not replies.ok:
         return False
-    return True
+    if (replies.outcomes or {}).get(message.id) in (inbox.DRAFTED, inbox.SENT):
+        return False
+    return message.thread_id not in replies.card_threads
 
 
 # --------------------------------------------------------------------------- #

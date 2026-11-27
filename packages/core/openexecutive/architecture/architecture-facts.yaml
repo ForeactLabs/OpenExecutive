@@ -12201,8 +12201,9 @@ delegation:
     new again). A look that finds Act as me turned off by the time its
     gists are written keeps nothing. Acting: wants_act is stored on the row
     and waiting_to_act picks up any not acted on (a turn that failed to
-    start is tried on the next look; one that failed after starting is not; mail from before Act as me was
-    last turned on (settings.enabled_since) is context only, never acted on,
+    start is tried on the next look; one that failed after starting is not; only mail from the last hour (ACT_MAX_AGE)
+    that came after Act as me was last turned on (settings.enabled_since;
+    unreadable is context only) can start a turn, so a backlog is context only,
     since it may have taken steps); only act with a non-empty tie, claimed
     once (claim_to_act), and never for mail that has a reply card or went
     to the Executive's own address too (those have their own turn); with

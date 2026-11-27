@@ -16,6 +16,7 @@ from openexecutive.audit import logger as audit_logger
 from openexecutive.audit.logger import AuditLogger
 from openexecutive.delegation import inbox, mail_context, noticed
 from openexecutive.delegation.gmail import MailMessage
+from openexecutive.delegation.settings import enabled_since as real_enabled_since
 from openexecutive.delegation.settings import set_enabled
 from openexecutive.memory import episodic
 from openexecutive.people import registry as people_registry
@@ -351,6 +352,33 @@ def test_mail_from_before_it_was_turned_on_is_context_only(owner: Any, monkeypat
     (item,) = noticed.recent(owner.id, now=NOW)
     assert item.tie == "3:00 PM Board prep" and not item.wants_act
     assert model["acts"] == []
+
+
+def test_a_backlog_is_context_only(owner: Any, model: dict[str, Any]) -> None:
+    # On long before (shipped to someone who had it on), or back after a gap.
+    _look(owner, Mailbox(_msg("m1", minutes_ago=180)))
+    (item,) = noticed.recent(owner.id, now=NOW)
+    assert item.tie and not item.wants_act and model["acts"] == []
+
+
+def test_when_it_was_turned_on_unreadable_is_context_only(owner: Any, monkeypatch: pytest.MonkeyPatch,
+                                                          model: dict[str, Any]) -> None:
+    import openexecutive.delegation.settings as delegation_settings
+
+    monkeypatch.setattr(delegation_settings, "enabled_since", lambda pid, **_: None)
+    _look(owner, Mailbox(_msg("m1")))
+    assert model["acts"] == []
+
+
+def test_enabled_since_reads_when_it_was_turned_on(tmp_path: Path) -> None:
+    db_path = tmp_path / "s.db"
+    assert real_enabled_since(5, db_path=db_path) is None
+    before = datetime.now(UTC)
+    set_enabled(5, True, updated_by="test", db_path=db_path)
+    since = real_enabled_since(5, db_path=db_path)
+    assert since is not None and since >= before
+    set_enabled(5, False, updated_by="test", db_path=db_path)
+    assert real_enabled_since(5, db_path=db_path) is None
 
 
 def test_nothing_is_read_with_act_as_me_off(owner: Any, model: dict[str, Any]) -> None:
