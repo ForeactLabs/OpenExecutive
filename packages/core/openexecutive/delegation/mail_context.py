@@ -7,7 +7,8 @@ Executive knows what came in: a delivery, a bank alert, a flight change, a
 receipt, a note from a client.
 
 **What it keeps.** Each new email in the inbox, every tab but promotions,
-social and forums (and never spam, trash, drafts, their own mail, the
+social and forums (Gmail's; Outlook has no such tabs, so its Focused and
+Other both count) (and never spam, trash, drafts, their own mail, the
 Executive's or this package's drafts), becomes one row in
 ``delegation.noticed``: sender, subject, and a one-line gist of what it
 says, written by one small model call per batch (``GIST_PROMPT``). The gist
@@ -480,8 +481,18 @@ async def _look(person: Any, client: Any, cursor: _Cursor, now: datetime) -> Loo
             result.kept += 1
     # What this look found to act on, and any earlier one whose turn failed.
     waiting = noticed.waiting_to_act(person.id, source=noticed.EMAIL, now=now)
-    claimed = set(noticed.claim_to_act(person.id, [item.item_key for item in waiting], now=now))
-    picked = [_from_kept(item) for item in waiting if item.item_key in claimed]
+    ready: list[Any] = []
+    handled: list[str] = []
+    for item in waiting:
+        state = _reply_state(person, item, now)
+        if state == "act":
+            ready.append(item)
+        elif state == "handled":
+            handled.append(item.item_key)
+    # A reply card of its own handles it: marked acted, with no turn.
+    noticed.claim_to_act(person.id, handled, now=now)
+    claimed = set(noticed.claim_to_act(person.id, [item.item_key for item in ready], now=now))
+    picked = [_from_kept(item) for item in ready if item.item_key in claimed]
     if picked:
         result.acted = len(picked)
         # Every email of the look shared the gist call, so any one of them
@@ -492,6 +503,32 @@ async def _look(person: Any, client: Any, cursor: _Cursor, now: datetime) -> Loo
         off_team = any(n.relation != "team" for n in notes) or any(p.message.id not in this_look for p in picked)
         _start_turn(person, client, picked, off_team=off_team)
     return result
+
+
+def _reply_state(person: Any, item: Any, now: datetime) -> str:
+    """Whether the reply watcher (``delegation.inbox``) handles this email
+    with a card of its own: ``handled``; hasn't looked at it yet: ``wait``
+    (it holds new mail for ``inbox.GRACE`` first, and a turn now could do
+    what the card's own work then does again); otherwise ``act``."""
+    from openexecutive.config import get_settings
+    from openexecutive.delegation import inbox
+
+    try:
+        if item.thread_id and item.thread_id in inbox.card_threads(inbox.open_cards(person.id)):
+            return "handled"
+        if not inbox.get_watch(person.id).enabled:
+            return "act"
+        outcome = inbox.outcomes(person.id, [item.item_key]).get(item.item_key)
+    except Exception:
+        logger.warning("mail_context: couldn't read the reply cards", exc_info=True)
+        return "wait"
+    if outcome in (inbox.DRAFTED, inbox.SENT, inbox.PROCESSING):
+        return "handled"
+    if outcome not in (None, inbox.RETRY):
+        return "act"
+    poll = timedelta(minutes=get_settings().delegation_inbox_poll_minutes)
+    received = _parse(item.received_at) or now
+    return "wait" if now - received < inbox.GRACE + 2 * poll else "act"
 
 
 def _from_kept(item: Any) -> _Note:
@@ -568,8 +605,13 @@ def prompt_for(person: Any, notes: list[_Note]) -> str:
 
 
 def _start_turn(person: Any, client: Any, notes: list[_Note], *, off_team: bool) -> None:
+    from openexecutive.audit.context import unscoped_audit_rows
+
     try:
-        task = asyncio.get_running_loop().create_task(_act(person, client, notes, off_team=off_team))
+        # The look reads under the person's private scope; the turn isn't
+        # part of it and sets its own (``_turn``).
+        with unscoped_audit_rows():
+            task = asyncio.get_running_loop().create_task(_act(person, client, notes, off_team=off_team))
     except RuntimeError:
         logger.info("mail_context: no event loop to act for person %s", person.id)
         return
@@ -581,17 +623,22 @@ async def _act(person: Any, client: Any, notes: list[_Note], *, off_team: bool) 
     from openexecutive.delegation import noticed
 
     try:
-        await _turn(person, client, prompt_for(person, notes), off_team=off_team)
+        executive, session = await _prepare(person, client, off_team=off_team)
     except Exception:
-        # Not acted on: the next look picks it up again (waiting_to_act).
-        logger.exception("mail_context: the turn for person %s failed", person.id)
+        # Nothing ran yet: the next look picks it up again (waiting_to_act).
+        logger.exception("mail_context: couldn't start the turn for person %s", person.id)
         noticed.release(person.id, [n.message.id for n in notes])
+        return
+    try:
+        await _turn(person, executive, session, prompt_for(person, notes))
+    except Exception:
+        # It may have taken steps before it failed, so it isn't run again.
+        logger.exception("mail_context: the turn for person %s failed", person.id)
 
 
-async def _turn(person: Any, client: Any, prompt: str, *, off_team: bool) -> None:
-    """The person's Executive, unattended, for them alone, with their own
-    mailbox to read."""
-    from openexecutive.audit.context import rows_for_person
+async def _prepare(person: Any, client: Any, *, off_team: bool) -> tuple[Any, Any]:
+    """The person's Executive and an unattended session, for them alone,
+    with their own mailbox to read."""
     from openexecutive.delegation.settings import DelegationOverride
     from openexecutive.onboarding.profile_builder import load_or_create_profile
     from openexecutive.orchestrator.executive import Executive
@@ -608,6 +655,12 @@ async def _turn(person: Any, client: Any, prompt: str, *, off_team: bool) -> Non
         delegation_override=DelegationOverride(enabled=True, gmail=client, person=person, inbox_work=True),
     )
     executive = Executive(mcp_gateway=await ensure_active_gateway())
+    return executive, session
+
+
+async def _turn(person: Any, executive: Any, session: Any, prompt: str) -> None:
+    from openexecutive.audit.context import rows_for_person
+
     with contextlib.nullcontext() if person.is_principal else rows_for_person(person.id):
         await executive.chat(user_message=prompt, session=session, person_id=person.id, memory_text="")
 

@@ -99,10 +99,15 @@ def model(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
                 entries.append({"n": n, "gist": "A note", "tie": "", "act": False})
         return {"emails": entries}
 
-    async def turn(person: Any, client: Any, prompt: str, *, off_team: bool) -> None:
-        seen["acts"].append((person.id, prompt, off_team))
+    async def prepare(person: Any, client: Any, *, off_team: bool) -> tuple[Any, Any]:
+        return None, {"off_team": off_team}
 
+    async def turn(person: Any, executive: Any, session: Any, prompt: str) -> None:
+        seen["acts"].append((person.id, prompt, session["off_team"]))
+
+    seen["prepare"] = prepare
     monkeypatch.setattr(mail_context, "_call_model", gist_call)
+    monkeypatch.setattr(mail_context, "_prepare", prepare)
     monkeypatch.setattr(mail_context, "_turn", turn)
     return seen
 
@@ -318,22 +323,71 @@ def test_a_busy_inbox_is_read_page_by_page(owner: Any, model: dict[str, Any]) ->
     assert [i.item_key for i in noticed.recent(owner.id, now=NOW)] == ["m1"]
 
 
-def test_a_failed_turn_is_tried_again_on_the_next_look(owner: Any, monkeypatch: pytest.MonkeyPatch,
-                                                      model: dict[str, Any]) -> None:
+def test_a_turn_that_failed_to_start_is_tried_again(owner: Any, monkeypatch: pytest.MonkeyPatch,
+                                                    model: dict[str, Any]) -> None:
+    calls: list[int] = []
+
+    async def failing(person: Any, client: Any, *, off_team: bool) -> tuple[Any, Any]:
+        calls.append(person.id)
+        raise RuntimeError("gateway down")
+
+    monkeypatch.setattr(mail_context, "_prepare", failing)
+    client = Mailbox(_msg("m1"))
+    _look(owner, client)
+    assert len(calls) == 1 and model["acts"] == []
+    monkeypatch.setattr(mail_context, "_prepare", model["prepare"])
+    _look(owner, client, NOW + timedelta(minutes=10))
+    assert len(model["acts"]) == 1
+    _look(owner, client, NOW + timedelta(minutes=20))
+    assert len(model["acts"]) == 1
+
+
+def test_a_turn_that_failed_after_starting_is_not_run_again(owner: Any, monkeypatch: pytest.MonkeyPatch,
+                                                            model: dict[str, Any]) -> None:
     calls: list[str] = []
 
-    async def failing(person: Any, client: Any, prompt: str, *, off_team: bool) -> None:
-        calls.append(prompt)
+    async def failing(person: Any, executive: Any, session: Any, prompt: str) -> None:
+        calls.append(prompt)  # it may already have told the attendees
         raise RuntimeError("model busy")
 
     monkeypatch.setattr(mail_context, "_turn", failing)
     client = Mailbox(_msg("m1"))
     _look(owner, client)
-    assert len(calls) == 1
-    monkeypatch.setattr(mail_context, "_turn", lambda *a, **k: model["acts"].append(a) or asyncio.sleep(0))
     _look(owner, client, NOW + timedelta(minutes=10))
-    assert len(model["acts"]) == 1
-    _look(owner, client, NOW + timedelta(minutes=20))
+    assert len(calls) == 1
+
+
+def test_the_principals_turn_is_not_under_the_looks_private_scope(owner: Any, monkeypatch: pytest.MonkeyPatch,
+                                                                  model: dict[str, Any]) -> None:
+    from openexecutive.audit import context as audit_context
+
+    scopes: list[tuple[bool, Any]] = []
+
+    async def turn(person: Any, executive: Any, session: Any, prompt: str) -> None:
+        scopes.append((audit_context._rows_private.get(), audit_context._rows_owner.get()))
+
+    monkeypatch.setattr(mail_context, "_turn", turn)
+    _look(owner, Mailbox(_msg("m1")))
+    assert scopes == [(False, None)]
+
+
+def test_waits_for_the_reply_watcher_and_leaves_its_cards_alone(owner: Any, model: dict[str, Any]) -> None:
+    inbox.set_watch(owner.id, True, updated_by="test", now=NOW - timedelta(days=1))
+    fresh = _msg("m1", minutes_ago=1)
+    _look(owner, Mailbox(fresh))
+    assert model["acts"] == []  # the reply watcher hasn't looked yet
+    inbox._claim(owner.id, fresh, relation="", outcome=inbox.DRAFTED, now=NOW)
+    _look(owner, Mailbox(fresh), NOW + timedelta(minutes=10))
+    assert model["acts"] == []  # its reply card handles it
+    assert noticed.waiting_to_act(owner.id, source=noticed.EMAIL, now=NOW + timedelta(minutes=10)) == []
+
+
+def test_acts_once_the_reply_watcher_needs_no_reply(owner: Any, model: dict[str, Any]) -> None:
+    inbox.set_watch(owner.id, True, updated_by="test", now=NOW - timedelta(days=1))
+    fresh = _msg("m1", minutes_ago=1)
+    _look(owner, Mailbox(fresh))
+    inbox._claim(owner.id, fresh, relation="", outcome=inbox.NOT_NEEDED, now=NOW)
+    _look(owner, Mailbox(fresh), NOW + timedelta(minutes=10))
     assert len(model["acts"]) == 1
 
 

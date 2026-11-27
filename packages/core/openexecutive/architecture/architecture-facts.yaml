@@ -12197,10 +12197,15 @@ delegation:
     whose item changes in place passes refresh=True (new words, updates+1,
     new again). A look that finds Act as me turned off by the time its
     gists are written keeps nothing. Acting: wants_act is stored on the row
-    and waiting_to_act picks up any not acted on (a failed turn is tried on
-    the next look); only act with a non-empty tie, claimed once
-    (claim_to_act), and never for mail that has a reply card or went to the
-    Executive's own address too (those have their own turn); one unattended
+    and waiting_to_act picks up any not acted on (a turn that failed to
+    start is tried on the next look; one that failed after starting is not,
+    since it may have taken steps); only act with a non-empty tie, claimed
+    once (claim_to_act), and never for mail that has a reply card or went
+    to the Executive's own address too (those have their own turn); with
+    Draft replies on it waits for the reply watcher to look first
+    (inbox.GRACE + two polls), so a card's own work and this turn never
+    both act on one email; the turn starts outside the look's private
+    audit scope (unscoped_audit_rows) and sets its own; one unattended
     turn per look as the person (DelegationOverride inbox_work=True, so it
     can read the mail; sender_off_team unless every email of the look is
     from a verified teammate, since they share one gist call; an unverified
