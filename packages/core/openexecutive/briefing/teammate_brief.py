@@ -165,7 +165,7 @@ async def write(person: Person, now: datetime | None = None) -> TeammateBrief | 
     text = await asyncio.to_thread(name_cards_for, text, pid)
     return TeammateBrief(
         text=keep_app_links(text), fingerprint=fingerprint,
-        items=brief_items.item_states(data),
+        items=brief_items.item_states(data, rendered, told),
     )
 
 

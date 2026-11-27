@@ -175,3 +175,30 @@ def test_real_lines_and_the_nothing_new_line_stay() -> None:
 def test_an_inline_heading_keeps_its_heading_only_when_its_text_is_empty() -> None:
     text = "**Today** - No calendar or stuck items in this brief.\n**Needs you** - Approve the draft."
     assert brief_items.drop_empty_lines(text) == "**Needs you** - Approve the draft."
+
+
+def test_a_line_that_goes_on_past_the_empty_part_stays() -> None:
+    text = (
+        "**New since yesterday**\n"
+        "- No change from Acme since Friday; Dana still needs your sign-off by noon.\n"
+        "- Nothing on the calendar blocks the 2pm Dana call, so prep the pricing memo.\n"
+        "- Nothing on the calendar today."
+    )
+    assert brief_items.drop_empty_lines(text) == (
+        "**New since yesterday**\n"
+        "- No change from Acme since Friday; Dana still needs your sign-off by noon.\n"
+        "- Nothing on the calendar blocks the 2pm Dana call, so prep the pricing memo."
+    )
+
+
+def test_only_what_the_context_showed_is_recorded_as_told() -> None:
+    cards = [_card(300 + i, f"Older card number {i}") for i in range(3)]
+    data = _data(*cards)
+    rendered = "- Older card number 0\n- Older card number 1\n(and 1 more on Home)\nClose 4 buyouts\nJosef R"
+    states = brief_items.item_states(data, rendered, {})
+    assert "card:300" in states and "card:301" in states
+    assert "card:302" not in states  # cut by the list's limit: still news
+    # Told before and unchanged, it stays told though today's line was cut.
+    full = brief_items.item_states(data)
+    assert "card:302" in brief_items.item_states(data, rendered, full)
+    assert "dept:ops" in states and "awaiting:7" in states

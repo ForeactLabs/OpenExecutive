@@ -346,7 +346,6 @@ class MorningBriefWorkflow(Workflow):
         from openexecutive.briefing import brief_items
 
         told = await asyncio.to_thread(brief_items.told, BRIEF_KIND)
-        item_states = brief_items.item_states(today_data)
         fingerprint = brief_state.build_brief_fingerprint(
             today_data=today_data, activity=activity, handled=handled, since=since,
             pending_watch_suggestions=pending_suggestions, mode=mode,
@@ -392,7 +391,9 @@ class MorningBriefWorkflow(Workflow):
                 "since": since.isoformat(),
                 "private_to_principal": private_used,
                 # Recorded with the fingerprint, only once it is delivered.
-                "brief_items": item_states,
+                # Until the context is rendered (and on a suppressed day,
+                # which tells nothing new) it is what was already told.
+                "brief_items": told,
             },
         )
 
@@ -443,6 +444,18 @@ class MorningBriefWorkflow(Workflow):
                 # them alone, never a brief someone else started.
                 requests_of=today_route.principal_id() if private_ok else None,
                 told=told,
+            )
+            # What this brief tells: only what its context showed, so a card
+            # cut by a list's limit stays news for the next one.
+            yield WorkflowEvent(
+                type="result",
+                data={
+                    "brief_fingerprint": fingerprint,
+                    "suppressed": False,
+                    "since": since.isoformat(),
+                    "private_to_principal": private_used,
+                    "brief_items": brief_items.item_states(today_data, rendered, told),
+                },
             )
             # standalone=True → the enumerated DM brief (no cards beside it),
             # not the /today header synthesis.

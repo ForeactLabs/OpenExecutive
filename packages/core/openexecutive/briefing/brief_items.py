@@ -102,24 +102,65 @@ def due_state(d: dict[str, Any]) -> str:
     return _digest(d.get("state"), d.get("due_date"), d.get("description"))
 
 
-def item_states(today_data: dict[str, Any]) -> dict[str, str]:
-    """Every item ``today_data`` names, keyed, with its state."""
+def _named(text: object, rendered: str | None, limit: int = 60) -> bool:
+    """Whether ``text`` (its first ``limit`` characters, on one line) is in
+    the context the brief was written from. Without a context, everything
+    counts as named."""
+    if rendered is None:
+        return True
+    from openexecutive.briefing.brief_state import quoted
+
+    line = " ".join(str(text or "").split())
+    if not line:
+        return False
+    return line[:limit] in rendered or quoted(line, limit) in rendered
+
+
+def item_states(
+    today_data: dict[str, Any],
+    rendered: str | None = None,
+    told_items: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Every item ``today_data`` names, keyed, with its state.
+
+    With ``rendered`` (the context the brief was written from), only what it
+    showed the reader, plus what ``told_items`` already held unchanged: a
+    card cut by a list's limit ("and 7 more on Home") was never told, so it
+    stays news, and one told before and unchanged stays told even on a day
+    its closing line was cut short."""
+
+    def keep(key: str, state: str, label: object) -> bool:
+        return _named(label, rendered) or (told_items or {}).get(key) == state
+
     out: dict[str, str] = {}
     for p in today_data.get("proposals") or []:
         key = card_key(p)
         if key:
-            out[key] = card_state(p)
+            state = card_state(p)
+            if keep(key, state, p.get("headline")):
+                out[key] = state
     for d in today_data.get("departments") or []:
         if not (d.get("at_risk_count", 0) or d.get("off_track_count", 0)):
             continue
-        out[dept_key(d)] = dept_state(d)
-        for g in d.get("attention_goals") or []:
-            out[goal_key(d, g)] = goal_state(g)
+        goals = d.get("attention_goals") or []
+        kept_goal = False
+        for g in goals:
+            key, state = goal_key(d, g), goal_state(g)
+            if keep(key, state, g.get("key_result")):
+                out[key] = state
+                kept_goal = True
+        key, state = dept_key(d), dept_state(d)
+        if kept_goal or keep(key, state, d.get("title") or d.get("slug")):
+            out[key] = state
     for p in today_data.get("people") or []:
         if p.get("awaiting_count", 0):
-            out[person_key(p)] = person_state(p)
+            key, state = person_key(p), person_state(p)
+            if keep(key, state, p.get("full_name")):
+                out[key] = state
     for d in today_data.get("due_soon") or []:
-        out[due_key(d)] = due_state(d)
+        key, state = due_key(d), due_state(d)
+        if keep(key, state, d.get("description")):
+            out[key] = state
     if len(out) > _MAX_ITEMS:
         out = dict(list(out.items())[:_MAX_ITEMS])
     return out
@@ -185,8 +226,9 @@ def far_off(p: dict[str, Any], now: datetime) -> bool:
 # happens to contain "nothing" stays.
 _EMPTY_LINE = re.compile(
     r"^(?:"
-    r"nothing\s+(?:else\s+|new\s+)?(?:is\s+)?(?:new|on\b|flagged|overdue|due|stuck|scheduled|"
-    r"completed|changed|came|has\s+come|to\s+report|in\s+(?:the|your)\b|since\b)"
+    r"nothing\s+(?:else\s+|new\s+)?(?:is\s+)?(?:new|flagged|overdue|due|stuck|scheduled|"
+    r"completed|changed|came|has\s+come|to\s+report|in\s+(?:the|your)\b|since\b|"
+    r"on\s+(?:the\s+|your\s+|my\s+)?(?:calendar|plate|radar|side)\b[^,;]{0,25}$)"
     r"|nothing\s+new\b"
     r"|no\s+(?:new\s+)?(?:calendar|meetings?|stuck|events?|inbox|mail|email|change|news|"
     r"development|update)s?\b.*\b(?:today|since|context|brief|overnight|in\s+this)\b"
@@ -204,6 +246,7 @@ _SELF_TALK = re.compile(
     r"top[- ]call\s+card|8:00\s*am\s+top\s+call)",
     re.IGNORECASE,
 )
+_MORE_CLAUSES = re.compile(r";|,\s*(?:so|but|and|which|while|though)\b|\s[—–]\s|\.\s+\S")
 _BULLET = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+")
 # "**Heading**", "**Heading:**", "**Heading** —" on a line of its own.
 _HEADING = re.compile(r"^\s*\*\*[^*\n]{1,60}\*\*\s*:?\s*[—-]?\s*$")
@@ -219,7 +262,13 @@ def _says_nothing(text: str) -> bool:
         return False
     if "](" in body:  # a line with a link points at something real
         return False
-    return bool(_EMPTY_LINE.match(body) or _SELF_TALK.search(body))
+    if _SELF_TALK.search(body):
+        return True
+    # A line that goes on past the empty part ("No change from Acme since
+    # Friday; Dana still needs your sign-off") carries news: keep it.
+    if _MORE_CLAUSES.search(body):
+        return False
+    return bool(_EMPTY_LINE.match(body))
 
 
 def drop_empty_lines(text: str) -> str:

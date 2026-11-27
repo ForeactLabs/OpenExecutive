@@ -132,7 +132,8 @@ async def test_a_card_told_yesterday_unchanged_is_a_closing_line_not_news(
     _stub_aggregators(monkeypatch)
 
     first = [e async for e in MorningBriefWorkflow().run(MorningBriefInput(), MagicMock())]
-    items = next(e for e in first if e.type == "result").data["brief_items"]
+    # The last result carries what the rendered context showed.
+    items = [e for e in first if e.type == "result"][-1].data["brief_items"]
     assert set(items) == {"card:1"}
     assert "STILL OPEN, CHANGED OR NOT TOLD BEFORE" in str(captured["rendered_context"])
     # The filler line is gone, and its heading with it.
