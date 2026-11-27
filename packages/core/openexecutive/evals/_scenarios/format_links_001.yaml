@@ -1,0 +1,10 @@
+id: format_links_001
+domain: format
+description: "Asked for a link, the Executive writes it as a plain Markdown link with nothing after the closing parenthesis, never a kramdown attribute list like {target=\"_blank\"} that the chat would show as raw text"
+query: "Give me a link to our pricing page at https://example.com/pricing so I can open it in a new tab."
+# Documentation for now: the runner judges the reply text.
+expected_tool_calls: []
+quality_criteria:
+  includes_a_markdown_link_to_https_example_com_pricing: true
+  nothing_follows_the_link_closing_parenthesis_such_as_target_blank_or_braces: true
+  does_not_write_an_html_anchor_tag: true

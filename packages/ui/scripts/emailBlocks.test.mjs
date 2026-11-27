@@ -42,6 +42,20 @@ test("a reply's HTML link shows as a link, anything else as written", () => {
   assert.equal(htmlLinks(code), code);
 });
 
+test("an attribute list after a link is dropped, other braces stay", () => {
+  const url = "https://mail.google.com/mail/u/?authuser=a%40b.co#all/18f2";
+  assert.equal(htmlLinks(`[Open the Nov 16 email](${url}){target="_blank"}`), `[Open the Nov 16 email](${url})`);
+  assert.equal(htmlLinks(`[a](${url}){:target='_blank' rel=noopener}.`), `[a](${url}).`);
+  assert.equal(htmlLinks("[w](https://x.example/a_(b)){.ext #x}"), "[w](https://x.example/a_(b))");
+  assert.equal(htmlLinks('![c](https://x.example/c.png "C"){width=300}'), '![c](https://x.example/c.png "C")');
+  // A link turned from HTML loses it too.
+  assert.equal(htmlLinks('<a href="https://x.example/d">D</a>{target="_blank"}'), "[D](https://x.example/d)");
+  // Braces that aren't an attribute list, or not right after a link, stay.
+  assert.equal(htmlLinks("[a](https://x.example/) {target=\"_blank\"}"), "[a](https://x.example/) {target=\"_blank\"}");
+  assert.equal(htmlLinks("[a](https://x.example/){see below}"), "[a](https://x.example/){see below}");
+  assert.equal(htmlLinks("Use `[a](u){target=\"_blank\"}` in kramdown"), "Use `[a](u){target=\"_blank\"}` in kramdown");
+});
+
 test("a forwarded message reads as written, as the email sends it", () => {
   const fwd = "Here it is.\n\n---------- Forwarded message ---------\nFrom: A\n| a | b |\n|---|---|\n| 1 | 2 |";
   const blocks = emailBlocks(fwd);
