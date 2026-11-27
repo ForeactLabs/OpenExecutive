@@ -59,12 +59,14 @@ def card_key(p: dict[str, Any]) -> str | None:
 
 
 def card_state(p: dict[str, Any]) -> str:
-    """What would make a card news again: its text, what it needs, the
-    review's verdict and note, why now, its due date. Never its age."""
+    """What would make a card news again: its headline, what it needs, the
+    review's verdict, its due date and severity. Never its age, and never
+    the review's note or why-now: the alert review rewrites both in new
+    words on every pass (one runs right before each brief), so hashing
+    them would retell an unchanged card every morning."""
     return _digest(
         p.get("headline"), p.get("suggested_action"), p.get("review_verdict"),
-        p.get("review_note"), p.get("why_now"), str(p.get("due_at") or "")[:10],
-        p.get("severity"),
+        str(p.get("due_at") or "")[:10], p.get("severity"),
     )
 
 

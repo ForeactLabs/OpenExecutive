@@ -68,6 +68,17 @@ def test_a_card_state_ignores_its_age_but_not_what_it_needs() -> None:
     older = {**card, "created_at": (NOW - timedelta(days=9)).isoformat()}
     assert brief_items.card_state(card) == brief_items.card_state(older)
     assert brief_items.card_state(card) != brief_items.card_state({**card, "suggested_action": "Send"})
+    assert brief_items.card_state(card) != brief_items.card_state({**card, "review_verdict": "likely_stale"})
+
+
+def test_a_reworded_review_note_is_not_news() -> None:
+    # The alert review rewrites its note and why-now in new words each pass.
+    pine = _card(220, "Pine View II buyout", review_note="waiting ~3 days", why_now="Dana asked Monday")
+    told = brief_items.item_states(_data(pine))
+    reworded = {**pine, "review_note": "still waiting on Dana", "why_now": "no reply since Monday"}
+    out = _render(_data(reworded), told)
+    assert "Pine View II buyout" in out.split("STILL OPEN, ALREADY TOLD")[1]
+    assert "CHANGED OR NOT TOLD BEFORE" not in out
 
 
 def test_an_unchanged_card_told_before_goes_on_the_closing_line_only() -> None:
