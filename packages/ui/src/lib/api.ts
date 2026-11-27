@@ -188,6 +188,18 @@ export interface SourcesEvent extends AnswerSources {
   session_id?: string;
 }
 
+// What the turn has done so far, sent whole each time it changes; the last
+// one (done: true) is saved with the reply (lib/turnTimeline.ts).
+export interface TimelineEvent {
+  type: "timeline";
+  session_id?: string;
+  task?: string;
+  seconds?: number;
+  done?: boolean;
+  steps?: unknown[];
+  reads?: string[];
+}
+
 // The running turn took messages the user sent while it worked (POST
 // /chat/add), named by the ids the client gave them.
 export interface MessageAdded {
@@ -277,6 +289,7 @@ export type StreamItem =
   | FormPatch
   | Activity
   | SourcesEvent
+  | TimelineEvent
   | MessageAdded
   | HandingOver
   | HeldStepsEvent
@@ -1541,6 +1554,10 @@ export interface ChatMessage {
   // analysis it left out — from the stream's `sources` event, and persisted
   // to `chat_messages.sources` so a reloaded chat still shows it.
   sources?: AnswerSources;
+  // Assistant rows only: what the reply did, step by step, from the stream's
+  // last `timeline` event or `chat_messages.steps` on reload. Read with
+  // lib/turnTimeline.ts timelineFrom.
+  steps?: unknown;
   // Assistant rows only: the persisted row id (from the stream's `done`
   // event, or from a reloaded session) and any 👍/👎 on it. The id is what
   // lets the reply be rated.

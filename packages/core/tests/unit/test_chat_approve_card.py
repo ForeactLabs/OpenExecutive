@@ -109,6 +109,15 @@ def test_approve_on_a_chat_card_approves_it_and_the_turn_carries_on(
     assert resp.status_code == 200
     # The turn shows it's doing the step while it runs.
     assert json.dumps(chat_route.APPROVING_LABEL) in resp.text
+    # ...and its "What I did" timeline opens with that step.
+    timelines = [
+        json.loads(line[6:]) for line in resp.text.splitlines()
+        if line.startswith("data: ") and '"type": "timeline"' in line
+    ]
+    assert timelines and timelines[0]["steps"][0]["kind"] == "do"
+    assert timelines[0]["steps"][0]["label"] == chat_route.APPROVING_LABEL.rstrip("…")
+    assert timelines[-1]["steps"][0]["label"] == "Did what you approved"
+    assert timelines[-1]["steps"][0]["state"] == "done"
     assert approved == [(43, {"input": {"url": "https://example.com"}})]
     block = captured["stream_chat"]["page_context_block"]
     assert "THE CARD THEY JUST APPROVED" in block
@@ -182,6 +191,34 @@ def test_a_page_in_another_app_never_approves_a_card(
     _ = resp.text
     block = captured["stream_chat"]["page_context_block"]
     assert decisions.HOST_APPROVE_NOTE in block
+    # Nothing was approved, so the timeline shows no step for it.
+    assert '"type": "timeline"' not in resp.text
+
+
+def _timelines(text: str) -> list[dict[str, Any]]:
+    return [
+        json.loads(line[6:]) for line in text.splitlines()
+        if line.startswith("data: ") and '"type": "timeline"' in line
+    ]
+
+
+def test_a_refused_approve_is_never_shown_as_done(
+    temp_db: Path, patched_deps: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fastapi import HTTPException
+
+    people_store.upsert_person(full_name="Alex", is_principal=True)
+    _capture(monkeypatch, {})
+
+    async def refuse(*_a: Any, **_kw: Any) -> Any:
+        raise HTTPException(status_code=403, detail={"message": "Not your department's card"})
+
+    monkeypatch.setattr(decisions, "approve_decision", refuse)
+    resp = _client().post("/chat", json={"message": "Approved", "approve_card": 43})
+    assert resp.status_code == 200
+    step = _timelines(resp.text)[-1]["steps"][0]
+    assert step["kind"] == "do"
+    assert step["state"] != "done"
 
 
 class _Page:

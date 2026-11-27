@@ -18,6 +18,8 @@ import { initials } from "@/lib/initials";
 import FeatureName from "@/components/FeatureName";
 import { ChatActionCards } from "@/components/ActionCards";
 import ChatDraftCard from "@/components/ChatDraftCard";
+import StepsChip from "@/components/StepsTimeline";
+import type { TurnTimeline } from "@/lib/turnTimeline";
 import { useExecutiveName } from "@/components/executive/ExecutiveStatusContext";
 
 interface MessageProps {
@@ -36,6 +38,10 @@ interface MessageProps {
   // What the reply looked at, and any part of the analysis it had to leave
   // out. Shown once the reply has finished streaming.
   sources?: AnswerSources;
+  // What the reply did, step by step: a chip above it that opens the
+  // "What I did" timeline (components/StepsTimeline.tsx).
+  steps?: TurnTimeline | null;
+  onOpenSteps?: () => void;
   // Explicit 👍/👎 on a persisted reply. Rendered only when `onFeedback` is
   // given (the reply has a stored id) and the reply has finished streaming.
   feedback?: "up" | "down" | null;
@@ -276,6 +282,8 @@ export default function Message({
   actions,
   stopped,
   sources,
+  steps,
+  onOpenSteps,
   feedback,
   onFeedback,
   status,
@@ -352,6 +360,7 @@ export default function Message({
           </span>
           {executiveName}
         </div>
+        {steps && onOpenSteps && !isStreaming && <StepsChip timeline={steps} onOpen={onOpenSteps} />}
         <div className="prose prose-invert prose-sm max-w-none
           prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-code:bg-surface-overlay prose-code:before:content-none prose-code:after:content-none
           prose-pre:bg-surface-overlay prose-pre:text-fg prose-pre:border

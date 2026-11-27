@@ -87,6 +87,7 @@ def save_message(
     sender_person_id: int | None = None,
     sources: str | None = None,
     sender_surface: str | None = None,
+    steps: str | None = None,
 ) -> int:
     """Persist one chat message and return its row id. ``action_chips`` is a
     JSON-encoded list of the assistant turn's action-chip dicts (or None), so
@@ -99,17 +100,18 @@ def save_message(
     ``sources`` is the JSON ``TurnSources.payload()`` of an assistant reply —
     what it looked at and which areas it had to leave out — or None.
     ``sender_surface`` is ``"host"`` for a user message a host origin's page
-    sent (``host_wrote``)."""
+    sent (``host_wrote``). ``steps`` is the JSON timeline of what an
+    assistant reply did (``orchestrator.turn_timeline``), or None."""
     text = content if isinstance(content, str) else str(content)
     now = datetime.now(UTC).isoformat()
     with _get_conn(db_path) as conn:
         cur = conn.execute(
             "INSERT INTO chat_messages "
             "(session_id, role, content, created_at, action_chips, stopped, sender_person_id, "
-            "sources, sender_surface) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "sources, sender_surface, steps) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 session_id, role, text, now, action_chips, 1 if stopped else 0,
-                sender_person_id, sources, sender_surface,
+                sender_person_id, sources, sender_surface, steps,
             ),
         )
         if role == "user" and sender_surface == "host":
@@ -187,7 +189,7 @@ def load_messages(
         return []
     with _get_conn(db_path) as conn:
         rows = conn.execute(
-            "SELECT id, role, content, action_chips, stopped, feedback, sources, sender_person_id "
+            "SELECT id, role, content, action_chips, stopped, feedback, sources, sender_person_id, steps "
             "FROM chat_messages "
             "WHERE session_id = ? ORDER BY id",
             (session_id,),
@@ -230,6 +232,16 @@ def load_messages(
                 sources = None
             if isinstance(sources, dict):
                 msg["sources"] = sources
+        # What the reply did, step by step, for its "What I did" timeline.
+        if row["role"] == "assistant" and row["steps"]:
+            from openexecutive.orchestrator.turn_timeline import from_saved
+
+            try:
+                timeline = from_saved(json.loads(row["steps"]))
+            except (ValueError, TypeError):
+                timeline = None
+            if timeline is not None:
+                msg["steps"] = timeline
         out.append(msg)
     return out
 

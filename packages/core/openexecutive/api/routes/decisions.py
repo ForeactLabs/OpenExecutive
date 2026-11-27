@@ -1211,7 +1211,22 @@ HOST_APPROVE_NOTE = (
 )
 
 
-async def approve_in_chat(instance_id: int, request: Request, input_edits: dict[str, Any] | None = None) -> str:
+class ChatApprovalNote(str):
+    """The note a chat turn reads about a card it approved, and whether the
+    step went through (``done``), for the turn's "What I did" timeline."""
+
+    done: bool = False
+
+
+def _chat_note(text: str, *, done: bool) -> ChatApprovalNote:
+    note = ChatApprovalNote(text)
+    note.done = done
+    return note
+
+
+async def approve_in_chat(
+    instance_id: int, request: Request, input_edits: dict[str, Any] | None = None
+) -> ChatApprovalNote:
     """Approve tapped on a card shown under a reply in the person's own chat
     (web or phone), then what that chat's next turn reads, so the Executive
     carries on with what they asked instead of stopping at the card.
@@ -1234,16 +1249,18 @@ async def approve_in_chat(instance_id: int, request: Request, input_edits: dict[
             detail = "it couldn't be done"
         # Labelled as data: a failed step's words can carry the outside
         # service's text, as what a step gave back can.
-        return (
+        return _chat_note(
             "They tapped Approve on a card in this chat, but it didn't go through. "
             "Say so in a line, then carry on with what you can.\nWhy:\n"
-            + wrap_untrusted(detail[:300], source="tool_result")
+            + wrap_untrusted(detail[:300], source="tool_result"),
+            done=False,
         )
     except Exception:
         logger.exception("decisions: approving card %d from the chat failed", instance_id)
-        return (
+        return _chat_note(
             "They tapped Approve on a card in this chat, but something went wrong, so it may not "
-            "have gone through. Say so in a line; don't say it was done."
+            "have gone through. Say so in a line; don't say it was done.",
+            done=False,
         )
     payload = _parse_payload(instance)
     try:
@@ -1261,7 +1278,7 @@ async def approve_in_chat(instance_id: int, request: Request, input_edits: dict[
     result = (final.get("result") or final.get("did")) if isinstance(final, dict) else None
     if isinstance(result, str) and result.strip():
         note += "\nWhat it gave back:\n" + wrap_untrusted(result[:_CHAT_RESULT_CHARS], source="tool_result")
-    return note
+    return _chat_note(note, done=True)
 
 
 class StepSayBody(BaseModel):

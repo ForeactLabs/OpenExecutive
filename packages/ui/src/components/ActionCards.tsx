@@ -243,11 +243,14 @@ export function ChatActionCards({
   if (shown.length === 0 && others.length === 0) return null;
   return (
     <div className="mt-3 space-y-3">
+      {/* data-decision-id: the "What I did" timeline scrolls to a card. */}
       {shown.map((card) => (
-        <ActionCardItem key={card.decision_id} card={card} onGone={gone} />
+        <div key={card.decision_id} data-decision-id={card.decision_id}>
+          <ActionCardItem card={card} onGone={gone} />
+        </div>
       ))}
       {others.map((id) => (
-        <div key={id}>
+        <div key={id} data-decision-id={id}>
           <ChatMeetingCard id={id} />
           <ChatAppActionCard id={id} />
           <ChatHeldActionCard id={id} onApprove={onApprove} approveDisabled={approveDisabled} />
