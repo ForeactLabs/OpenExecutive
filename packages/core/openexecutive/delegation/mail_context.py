@@ -209,6 +209,15 @@ def get_cursor(person_id: int, *, db_path: Path | None = None) -> _Cursor:
     )
 
 
+def _save_if_on(cursor: _Cursor) -> None:
+    """Save a look's read point unless Act as me went off during it:
+    ``forget`` deleted it then, and turning it on again starts from then."""
+    from openexecutive.delegation.settings import is_enabled
+
+    if is_enabled(cursor.person_id):
+        _save_cursor(cursor)
+
+
 def _save_cursor(cursor: _Cursor, *, db_path: Path | None = None) -> None:
     conn = _connect(db_path)
     try:
@@ -426,7 +435,7 @@ async def look_person(person: Any, *, gmail: Any = None, now: datetime | None = 
                 wait = _backoff(cursor.failures) if status == "error" else AUTH_RECHECK
                 cursor.last_poll_at = moment.isoformat()
                 cursor.backoff_until = (moment + wait).isoformat()
-                _save_cursor(cursor)
+                _save_if_on(cursor)
                 return LookResult(status)
             try:
                 result = await _look(person, client, cursor, moment)
@@ -435,13 +444,13 @@ async def look_person(person: Any, *, gmail: Any = None, now: datetime | None = 
             except GmailAuthError:
                 cursor.last_poll_at = moment.isoformat()
                 cursor.backoff_until = (moment + AUTH_RECHECK).isoformat()
-                _save_cursor(cursor)
+                _save_if_on(cursor)
                 return LookResult("needs_reconnect")
             except GmailError:
                 cursor.failures += 1
                 cursor.last_poll_at = moment.isoformat()
                 cursor.backoff_until = (moment + _backoff(cursor.failures)).isoformat()
-                _save_cursor(cursor)
+                _save_if_on(cursor)
                 return LookResult("error")
             if result.call_failed:
                 # The gist model failed: try again after a backoff.
@@ -451,7 +460,7 @@ async def look_person(person: Any, *, gmail: Any = None, now: datetime | None = 
                 cursor.failures = 0
                 cursor.backoff_until = None
             cursor.last_poll_at = moment.isoformat()
-            _save_cursor(cursor)
+            _save_if_on(cursor)
             logger.info("mail_context: look %s", result.counts())
             return result
     except Exception:
@@ -460,7 +469,7 @@ async def look_person(person: Any, *, gmail: Any = None, now: datetime | None = 
             cursor.failures += 1
             cursor.last_poll_at = moment.isoformat()
             cursor.backoff_until = (moment + _backoff(cursor.failures)).isoformat()
-            _save_cursor(cursor)
+            _save_if_on(cursor)
         except Exception:
             logger.warning("mail_context: couldn't record the crash", exc_info=True)
         return LookResult("error")

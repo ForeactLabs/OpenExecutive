@@ -366,6 +366,21 @@ def test_a_long_outlook_id_reaches_the_turn_whole(owner: Any, model: dict[str, A
     assert kept.item_key == long_id and kept.thread_id == long_id + "T"
 
 
+def test_a_failed_look_after_switching_off_keeps_no_read_point(owner: Any, model: dict[str, Any]) -> None:
+    from openexecutive.delegation.gmail import GmailError
+
+    class OffThenFails(Mailbox):
+        async def received_since(self, after: datetime, *, before: datetime | None = None,
+                                 limit: int = 25) -> list[Any]:
+            set_enabled(owner.id, False, updated_by="test")
+            mail_context.forget(owner.id)
+            raise GmailError("boom")
+
+    _look(owner, OffThenFails())
+    assert mail_context.get_cursor(owner.id).read_through is None
+    assert mail_context.get_cursor(owner.id).last_poll_at is None
+
+
 def test_mail_with_no_readable_time_is_context_only(owner: Any, model: dict[str, Any]) -> None:
     undated = _msg("m1")
     undated.received_at = ""
