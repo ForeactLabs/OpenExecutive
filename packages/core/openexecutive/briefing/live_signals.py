@@ -746,8 +746,7 @@ def own_inbox(since: datetime, tz: tzinfo, now: datetime | None = None) -> OwnIn
     said_of = _kept_mail(principal.id, since, now)
     # Mail the watcher noted is told (or passed over) from its own row.
     kept = {key: item for key, item in said_of.items() if key not in seen}
-    lines: list[str] = []
-    refs: list[dict[str, Any]] = []
+    shown: list[tuple[datetime, str, dict[str, Any]]] = []
     others: list[str] = []
     others_total = 0
     total = 0
@@ -769,8 +768,6 @@ def own_inbox(since: datetime, tz: tzinfo, now: datetime | None = None) -> OwnIn
                 others.append(_one_line(f"{who}: {subject}", 90))
             continue
         total += 1
-        if len(lines) >= _INBOX_MAX:
-            continue
         who = f"{name} ({address})" if name and address else _named(address, True)
         at = _local_hhmm(d["_at"].isoformat(), tz, now)
         if on_card:
@@ -790,8 +787,7 @@ def own_inbox(since: datetime, tz: tzinfo, now: datetime | None = None) -> OwnIn
         said = said_of.get(str(d["message_id"]))
         if said is not None and said.gist:
             line += f" (says: {said.gist})"
-        lines.append(f"{line} — {what}" if what else line)
-        refs.append(_mail_ref(d))
+        shown.append((d["_at"], f"{line} — {what}" if what else line, _mail_ref(d)))
     # What else reached their inbox, kept as context (delegation.noticed):
     # bank, delivery and travel mail the reply watcher passes over. Only what
     # ties to something known is a line; the rest is "Also in".
@@ -813,11 +809,16 @@ def own_inbox(since: datetime, tz: tzinfo, now: datetime | None = None) -> OwnIn
                 others.append(_one_line(f"{who_short}: {what_said}", 120))
             continue
         total += 1
-        if len(lines) >= _INBOX_MAX:
-            continue
         at = _local_hhmm(item.received_at, tz, now)
-        lines.append(_one_line(f"[{at}] from {who_short}: {what_said} — ties to {item.tie}", 400))
-        refs.append(_mail_ref({"message_id": item.item_key, "thread_id": item.thread_id}))
+        shown.append((
+            arrived_at or now or datetime.now(UTC),
+            _one_line(f"[{at}] from {who_short}: {what_said} — ties to {item.tie}", 400),
+            _mail_ref({"message_id": item.item_key, "thread_id": item.thread_id}),
+        ))
+    # Newest first across both kinds, then the cap.
+    shown.sort(key=lambda row: row[0], reverse=True)
+    lines = [line for _, line, _ in shown[:_INBOX_MAX]]
+    refs = [ref for _, _, ref in shown[:_INBOX_MAX]]
     return OwnInbox(tuple(lines), tuple(others), others_total, tuple(refs), total)
 
 

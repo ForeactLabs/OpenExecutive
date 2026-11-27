@@ -834,6 +834,24 @@ def test_own_inbox_counts_a_send_to_the_sender_from_another_thread(
     assert sorted(r["message_id"] for r in mail.refs) == ["m2", "m4"]
 
 
+def test_a_new_kept_line_is_not_crowded_out_by_older_watcher_lines(principal: SimpleNamespace) -> None:
+    from openexecutive.delegation import inbox, noticed
+
+    now = datetime(2026, 10, 26, 18, 0, tzinfo=UTC)
+    for n in range(live_signals._INBOX_MAX):
+        at = now - timedelta(hours=6, minutes=n)
+        inbox._note_mail(7, _mail(f"w{n}", f"p{n}@co.test", f"P{n}", f"Note {n}", at, f"t{n}"), relation="contact")
+    noticed.note(7, source=noticed.EMAIL, item_key="k1", sender_name="Delta", subject="Flight update",
+                 gist="DL123 delayed 90 minutes", tie="3:00 PM Board prep",
+                 received_at=now - timedelta(minutes=10), now=now)
+
+    mail = live_signals.own_inbox(now - timedelta(hours=12), UTC, now)
+
+    assert "DL123 delayed 90 minutes" in mail.lines[0]
+    assert len(mail.lines) == live_signals._INBOX_MAX
+    assert mail.total == live_signals._INBOX_MAX + 1
+
+
 def test_kept_mail_they_wrote_to_the_sender_about_is_left_out(
     principal: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
