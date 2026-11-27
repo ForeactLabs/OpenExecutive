@@ -111,6 +111,10 @@ def test_only_a_count_changing_is_not_news() -> None:
     assert not only_counts_or_marks("Raised 20 million in Series B", "Raised 45 million in Series B")
     assert not only_counts_or_marks("Plans from 49 a month", "Plans from 59 a month")
     assert not only_counts_or_marks("Version 17 is out", "Version 18 is out")
+    # A price or rate written with no symbol is still a price.
+    assert not only_counts_or_marks("Pro price: 49", "Pro price: 59")
+    assert not only_counts_or_marks("Starter 49 Pro 99", "Starter 59 Pro 119")
+    assert not only_counts_or_marks("Interest rate 4 points", "Interest rate 5 points")
     assert only_counts_or_marks("1,204 customers", "1,317 customers")
     # A big jump is news, not a tick.
     assert not only_counts_or_marks("We employ 200 people", "We employ 2,000 people")
@@ -251,11 +255,19 @@ def test_only_what_was_shown_counts_as_already_reported(tmp_path: Path, monkeypa
     find(other, 2, "alerted")                 # shown elsewhere: counts
     find(other, 3, "suppressed_low_relevance")  # never shown: doesn't
     find(suggested, 4, "brief_line")          # a suggestion's: doesn't
+    find(me, 5, "failed")                     # its own but never checked: doesn't
+    find(me, 6, "suppressed_triage")          # triage said no: counts
+    find(me, 7, "suppressed_triage")          # triage couldn't read it: doesn't
+    with ms._get_conn(db_path) as conn:
+        rows = conn.execute("SELECT id, source_external_id FROM external_signals").fetchall()
+    ids = {r["source_external_id"]: r["id"] for r in rows}
+    ms.note_triage_outcome([ids["r6"]], alert_id=None, reason="not material", db_path=db_path)
+    ms.note_triage_outcome([ids["r7"]], alert_id=None, reason="rate_limited", db_path=db_path)
 
     item = ms.get_watchlist_item(me, db_path=db_path)
     assert item is not None
     got = ms.recent_query_finds(item, since=datetime.now(UTC) - timedelta(days=1), db_path=db_path)
-    assert sorted(title for _, title in got) == ["story 1", "story 2"]
+    assert sorted(title for _, title in got) == ["story 1", "story 2", "story 6"]
 
 
 def test_an_unchanged_watch_card_is_still_looked_at_now_and_then(db: Path) -> None:

@@ -39,6 +39,7 @@ from openexecutive.monitoring.models import (
     ORIGIN_RESEARCH_PROPOSED,
     OUTCOME_ALERTED,
     OUTCOME_BRIEF_LINE,
+    OUTCOME_FAILED,
     OUTCOME_HELD_BRIEF,
     OUTCOME_HELD_DIGEST,
     OUTCOME_SUPPRESSED_BASELINE,
@@ -1280,7 +1281,7 @@ def recent_query_finds(
     db_path: Path | None = None,
 ) -> list[tuple[str, str]]:
     """``(link, title)`` of web search finds since ``since``, newest first:
-    this watch's own (whatever became of them), and what another live
+    this watch's own (unless it could not be checked), and what another live
     company-wide web search watch actually showed (a card, a brief line, a
     held digest), never another person's own watch, a suggestion or a
     switched-off watch, so a story one search already reported isn't
@@ -1299,13 +1300,20 @@ def recent_query_finds(
     own = item.id if item.id is not None else -1
     shown = (OUTCOME_ALERTED, OUTCOME_BRIEF_LINE, OUTCOME_HELD_DIGEST, OUTCOME_HELD_BRIEF)
     marks = ", ".join("?" * len(others)) or "NULL"
+    # An own find that couldn't be checked (failed, or triage never read it)
+    # was never judged, so it must not hide the same story next time.
+    unchecked = ("rate_limited", "triage_error", "parse_error")
     with _get_conn(db_path) as conn:
         rows = conn.execute(
             "SELECT raw_payload_json FROM external_signals WHERE captured_at >= ? AND "
-            f"(watchlist_id = ? OR (watchlist_id IN ({marks}) "
+            "((watchlist_id = ? AND COALESCE(processed_outcome, '') != ? AND NOT "
+            "(processed_outcome = ? AND json_valid(enrichment_json) AND "
+            f"COALESCE(json_extract(enrichment_json, '$.triage_reason'), '') IN ({', '.join('?' * len(unchecked))}))) "
+            f"OR (watchlist_id IN ({marks}) "
             f"AND processed_outcome IN ({', '.join('?' * len(shown))}))) "
             "ORDER BY captured_at DESC LIMIT ?",
-            (since.isoformat(), own, *sorted(others), *shown, limit),
+            (since.isoformat(), own, OUTCOME_FAILED, OUTCOME_SUPPRESSED_TRIAGE, *unchecked,
+             *sorted(others), *shown, limit),
         ).fetchall()
     out: list[tuple[str, str]] = []
     for row in rows:

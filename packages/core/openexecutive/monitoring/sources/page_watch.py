@@ -498,8 +498,8 @@ _MONEY_OR_RATE = frozenset("$€£¥₹%")
 # A bare count: digits, with thousands commas.
 _COUNT_RE = re.compile(r"\d{1,3}(?:,\d{3})+|\d+")
 _EDGE_MARKS = ".,;:!?()[]{}\"'“”‘’"
-# Words that make a number near them news: money, a rate, a size, a date,
-# a version. Only a number with none of these nearby is a plain count.
+# Words that make a number near them news: money, a rate, a price or plan,
+# a size, a date, a version. Only a number with none of these nearby is a plain count.
 _UNIT_WORDS = frozenset((
     "usd", "eur", "gbp", "jpy", "cad", "aud", "inr", "chf", "dollars", "euros", "pounds",
     "percent", "pct", "per", "apr", "apy", "bps", "mo", "month", "months", "monthly",
@@ -508,6 +508,10 @@ _UNIT_WORDS = frozenset((
     "june", "jul", "july", "aug", "august", "sep", "sept", "september", "oct", "october",
     "nov", "november", "dec", "december", "q1", "q2", "q3", "q4",
     "version", "v", "release", "build", "series", "round",
+    "price", "prices", "priced", "pricing", "cost", "costs", "fee", "fees", "rate", "rates",
+    "plan", "plans", "tier", "tiers", "seat", "seats", "user", "users", "points", "pts",
+    "starter", "basic", "pro", "plus", "premium", "team", "business", "enterprise",
+    "trial", "salary", "wage", "pay", "rent", "deposit", "discount", "off",
 ))
 # How many words either side of a changed number are read for those words.
 _UNIT_WINDOW = 3
@@ -570,6 +574,10 @@ def only_counts_or_marks(old: str, new: str) -> bool:
             return False
         if not _small_steps(old_words[i1:i2], new_words[j1:j2]):
             return False
+        # Only a moved number needs its neighbours read; a mark alone
+        # ("team's" to "team’s") has none to be money.
+        if not any(ch.isdigit() for w in changed for ch in w):
+            continue
         around = (
             *old_words[max(0, i1 - _UNIT_WINDOW):i2 + _UNIT_WINDOW],
             *new_words[max(0, j1 - _UNIT_WINDOW):j2 + _UNIT_WINDOW],
