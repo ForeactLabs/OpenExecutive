@@ -1103,3 +1103,46 @@ def test_a_text_shows_as_sent_as_you() -> None:
     assert today._as_tag(item(sent=True)).startswith("Sent as ")
     assert today._as_tag(item(sent=True)) != "Sent as you"
     assert ttl.on_own_device("send_text") and not ttl.on_own_device("message_person")
+
+
+def _newest_row() -> Any:
+    with ttl._connect() as conn:
+        return conn.execute(f"SELECT * FROM {ttl.LOG_TABLE} ORDER BY id DESC LIMIT 1").fetchone()
+
+
+def _log_id_of(send_id: int) -> Any:
+    with tx._connect() as conn:
+        return conn.execute(f"SELECT log_id FROM {tx.TEXT_SENDS_TABLE} WHERE id=?", (send_id,)).fetchone()["log_id"]
+
+
+def test_a_text_through_the_gate_is_sending_until_it_went(
+    ids: dict[str, int], as_turn_for: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    as_turn_for(owner)
+    # Nothing holds it: it goes on its own, through the real gate.
+    monkeypatch.setattr(ttl, "_hit", lambda *a, **k: (None, None))
+    out = json.loads(asyncio.run(
+        ttl._gated("send_text", text_tools.handle_send_text, {"to": "555 201 3344", "text": "Ok"},
+                   source="chat", mcp=False),
+    ))
+    assert out["status"] == "on_its_way"
+    row = _newest_row()
+    assert row["tool"] == "send_text" and row["status"] == ttl.SENDING
+    assert _log_id_of(out["send_id"]) == row["id"]
+    tx.settle_send(owner, out["send_id"], status=tx.SENT, conversation_key="k6")
+    assert _row(row["id"])["status"] == "done"
+
+
+def test_a_text_that_went_on_its_own_is_sending_until_it_went(ids: dict[str, int], as_turn_for: Any) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    as_turn_for(owner)
+    result = asyncio.run(text_tools.handle_send_text({"to": "555 201 3355", "text": "Ok"}))
+    send_id = json.loads(result)["send_id"]
+    ttl._went_on_its_own("send_text", {"to": "555 201 3355", "text": "Ok"}, result, mcp=False)
+    row = _newest_row()
+    assert row["status"] == ttl.SENDING and _log_id_of(send_id) == row["id"]
+    tx.settle_send(owner, send_id, status=tx.FAILED, error="Nothing went.")
+    assert _row(row["id"])["status"] == "failed"
