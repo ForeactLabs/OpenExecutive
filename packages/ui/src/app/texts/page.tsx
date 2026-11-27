@@ -20,7 +20,7 @@ import { remember, STORAGE_KEYS } from "@/lib/firstRun";
 const RECHECK_MS = 15_000;
 const SETUP_HREF = "/delegate#as-you";
 
-type Filter = "all" | "sent" | "read";
+type Filter = "all" | "texted" | "read";
 
 const STATUS: Record<TextThread["status"], { words: string; tone: string }> = {
   sent: { words: "Sent as you", tone: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" },
@@ -208,7 +208,7 @@ export default function TextsPage() {
             <TextSomeone />
             <div className="flex flex-wrap gap-2">
               {chip("all", "All")}
-              {chip("sent", "Sent as you")}
+              {chip("texted", "Texted for you")}
               {chip("read", "Read for you")}
             </div>
             {error ? <p className="text-sm text-rose-500">{error}</p> : null}
