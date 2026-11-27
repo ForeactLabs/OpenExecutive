@@ -23,16 +23,11 @@ _CODE_WORD = (
     r"\b(?:codes?|passcodes?|passwords?|passwd|otp|pins?)\b"
 )
 # The code close to its word, either way round: "code is 482913", "PIN: 4821",
-# "482913 is your verification code", "G-482913 is your Google verification code".
-# Number first only with a sign-in cue right before the code word, or
-# "your <brand>" ("4821 is your Uber code"), so "Suite 1200, the door code
-# is on the sign" is not one.
-_CUE = (
-    r"(?:(?:verification|security|sign[- ]?in|log[- ]?in|login|one[- ]time|authentication|confirmation|access)\s+"
-    r"|your\s+(?:\S+\s+){0,2})"
-)
+# "482913 is your Bank of America code". A gate, door or wifi code is left
+# out by its word (``_CODE_WORD``), so "Suite 1200, the door code is on the
+# sign" isn't one.
 _CODE_NEAR = re.compile(
-    _CODE_WORD + r"[^\d\n]{0,25}" + _NUMBER + "|" + _NUMBER + r"[^\d\n]{0,40}" + _CUE + _CODE_WORD,
+    _CODE_WORD + r"[^\d\n]{0,25}" + _NUMBER + "|" + _NUMBER + r"[^\d\n]{0,40}" + _CODE_WORD,
     re.IGNORECASE,
 )
 # A link or prompt that signs someone in, with no code at all.
