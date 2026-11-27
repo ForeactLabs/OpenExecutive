@@ -379,6 +379,18 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSessionId]);
 
+  // Once the turn has ended, a panel opened on it settles on its reply, or
+  // closes when it left none, so a later reply (a teammate's) never opens it.
+  // (Adjusted while rendering, when the turn's loading flag drops.)
+  const [stepsTurnLoading, setStepsTurnLoading] = useState(isLoading);
+  if (stepsTurnLoading !== isLoading) {
+    setStepsTurnLoading(isLoading);
+    if (!isLoading && stepsOpen !== null && typeof stepsOpen === "object") {
+      const reply = messages.findIndex((m, j) => j >= stepsOpen.live && m.role === "assistant");
+      setStepsOpen(reply < 0 ? null : reply);
+    }
+  }
+
   // Who is in this chat. Read when it opens, after its first turn names it,
   // and whenever someone joins or leaves.
   useEffect(() => {
