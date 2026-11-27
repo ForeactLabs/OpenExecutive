@@ -604,6 +604,24 @@ test("texts: the press waits for the debugging bar, presses only where the butto
   assert.ok(press.includes("if (again && again.full) await pressAt(target, again);"));
 });
 
+test("texts: the press brings Google Messages on screen first, then puts things back", () => {
+  const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
+  const press = bg.slice(bg.indexOf("async function pressInTab"), bg.indexOf("function waitLoaded"));
+  // Shown before attaching, put back after detaching, and after a failed attach too.
+  assert.ok(press.indexOf("await showForPress(now)") < press.indexOf("chrome.debugger.attach"));
+  assert.ok(press.lastIndexOf("await putBack(now, back)") > press.indexOf("chrome.debugger.detach"));
+  assert.equal(press.split("await putBack(now, back)").length - 1, 2);
+  const show = bg.slice(bg.indexOf("async function showForPress"), bg.indexOf("async function putBack"));
+  assert.ok(show.includes('state: "normal"') && show.includes("{ active: true }") && show.includes("{ focused: true }"));
+  const back = bg.slice(bg.indexOf("async function putBack"), bg.indexOf("async function pressInTab"));
+  // Never pulled away from under the person, who went to it meanwhile.
+  assert.ok(back.includes("if (!now || !now.active) return;"));
+  assert.ok(back.includes('{ state: "minimized" }') && back.includes("back.focusedId"));
+  // A press as a real mouse makes it: the left button held while pressed.
+  const at = bg.slice(bg.indexOf("async function pressAt"), bg.indexOf("async function showForPress"));
+  assert.ok(at.includes('buttons: type === "mousePressed" ? 1 : 0') && at.includes('pointerType: "mouse"'));
+});
+
 test("texts: off forgets what was seen, so on again is a first look", () => {
   const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
   assert.ok(texts.includes("await chrome.storage.local.remove(SEEN_KEY);"));
@@ -711,7 +729,7 @@ test("texts: Send is a real press, only in the tab and conversation the send was
   assert.ok(press.includes("const conversation = pressing.conversation;"));
   // The button is found again after attaching (the debugging bar moves it), and the click goes there.
   assert.ok(press.indexOf("const spot = await sendSpot(target, at);") > press.indexOf("chrome.debugger.attach"));
-  assert.ok(press.includes("await pressAt(target, spot);") && bg.includes("x: spot.x, y: spot.y"));
+  assert.ok(press.includes("await pressAt(target, spot);") && bg.includes("x: spot.x,") && bg.includes("y: spot.y,"));
   // The page is checked in the same reading as the spot that gets clicked, and a new number must stay on its conversation.
   assert.ok(bg.includes("at: location.origin + location.pathname") && bg.includes("if (spot && spot.at !== at) return null;"));
   assert.ok(press.includes("const spot = await sendSpot(target, at);"));

@@ -500,8 +500,44 @@ async function sendSpot(target, at, settle = true) {
 
 async function pressAt(target, spot) {
   for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
-    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { type, x: spot.x, y: spot.y, button: type === "mouseMoved" ? "none" : "left", clickCount: type === "mouseMoved" ? 0 : 1 });
+    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
+      type,
+      x: spot.x,
+      y: spot.y,
+      button: type === "mouseMoved" ? "none" : "left",
+      buttons: type === "mousePressed" ? 1 : 0,
+      clickCount: type === "mouseMoved" ? 0 : 1,
+      pointerType: "mouse",
+    });
   }
+}
+
+// Chrome only delivers a press to a page that is on screen. Google Messages
+// sits in a background tab of the extension's own window, which is kept
+// minimized: there the press goes nowhere, though the button is found. So
+// for the press the tab is brought up in front, then everything is put back
+// the way it was (unless the person moved to it meanwhile).
+async function showForPress(tab) {
+  const win = await chrome.windows.get(tab.windowId, { populate: true }).catch(() => null);
+  if (!win) return null;
+  const shown = (win.tabs || []).find((t) => t.active) || null;
+  const [before] = await chrome.windows.getAll({ windowTypes: ["normal"] }).then((all) => all.filter((w) => w.focused));
+  const back = { windowId: win.id, minimized: win.state === "minimized", tabId: shown && shown.id !== tab.id ? shown.id : null, focusedId: before && before.id !== win.id ? before.id : null };
+  if (back.minimized) await chrome.windows.update(win.id, { state: "normal" });
+  if (back.tabId !== null) await chrome.tabs.update(tab.id, { active: true });
+  await chrome.windows.update(win.id, { focused: true });
+  await pause(400);
+  return back;
+}
+
+async function putBack(tab, back) {
+  if (!back) return;
+  const now = await chrome.tabs.get(tab.id).catch(() => null);
+  // The person went to it meanwhile: leave it where they are.
+  if (!now || !now.active) return;
+  if (back.tabId !== null) await chrome.tabs.update(back.tabId, { active: true }).catch(() => undefined);
+  if (back.minimized) await chrome.windows.update(back.windowId, { state: "minimized" }).catch(() => undefined);
+  if (back.focusedId !== null) await chrome.windows.update(back.focusedId, { focused: true }).catch(() => undefined);
 }
 
 async function pressInTab(tab, x, y) {
@@ -516,9 +552,11 @@ async function pressInTab(tab, x, y) {
   // the send opened, the page it was on when it asked for the press.
   if (!conversation && !/\/web\/conversations\/(?!new$)[^/]+$/.test(at)) return { ok: false };
   const target = { tabId: tab.id };
+  const back = await showForPress(now).catch(() => null);
   try {
     await chrome.debugger.attach(target, "1.3");
   } catch {
+    await putBack(now, back).catch(() => undefined);
     return { ok: false };
   }
   // Once the press has started it may have gone, even if a step after fails.
@@ -543,6 +581,7 @@ async function pressInTab(tab, x, y) {
     return { ok: false, maybe: started };
   } finally {
     await chrome.debugger.detach(target).catch(() => undefined);
+    await putBack(now, back).catch(() => undefined);
   }
 }
 
