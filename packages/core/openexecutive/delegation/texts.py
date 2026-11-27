@@ -22,7 +22,9 @@ shown, the extension reads nothing, the Executive isn't offered the text
 tools, and what was kept is dropped when the API starts (``tidy``). Each
 person's own switch is kept, so turning it back on resumes it.
 
-Texts older than ``KEEP_DAYS`` are dropped.
+Texts older than ``KEEP_DAYS`` are dropped. Sign-in codes are never kept
+(``sign_in_codes``): the extension doesn't send them, and one that comes
+anyway is dropped here.
 """
 from __future__ import annotations
 
@@ -47,6 +49,7 @@ from openexecutive.delegation.schema import (
     TEXTS_TABLE,
     ensure_schema,
 )
+from openexecutive.delegation.sign_in_codes import is_sign_in_code
 from openexecutive.utils import db
 
 KEEP_DAYS = 30
@@ -192,7 +195,16 @@ def tidy(*, db_path: Path | None = None) -> None:
                 conn.execute(f"DELETE FROM {table}")
             return
         _prune(conn, None)
+        _drop_codes(conn)
     expire_all(db_path=db_path)
+
+
+def _drop_codes(conn: sqlite3.Connection) -> None:
+    """Drop sign-in codes kept before they were left out (``record``)."""
+    rows = conn.execute(f"SELECT id, text FROM {TEXTS_TABLE} WHERE outgoing=0").fetchall()
+    codes = [(int(r["id"]),) for r in rows if is_sign_in_code(str(r["text"] or ""))]
+    if codes:
+        conn.executemany(f"DELETE FROM {TEXTS_TABLE} WHERE id=?", codes)
 
 
 def _prune(conn: sqlite3.Connection, person_id: int | None) -> None:
@@ -232,6 +244,9 @@ class Incoming:
     # so only the Executive's own sends count as outgoing (``_echo_of``). It
     # only skips the turn on that text (kept as already looked at).
     outgoing: bool = False
+    # Already in the list when the browser first looked (texts just turned
+    # on): kept to read, never answered as if it just came.
+    earlier: bool = False
 
 
 @dataclass(frozen=True)
@@ -295,6 +310,9 @@ def record(person_id: int, items: list[Incoming], *, db_path: Path | None = None
                 continue
             if item.at < cutoff:
                 continue
+            # A sign-in code is never kept, nor its conversation touched.
+            if is_sign_in_code(item.text):
+                continue
             conversation_id = _upsert_conversation(conn, person_id, item, now)
             # Which way a text went: only a text the Executive itself just sent
             # is theirs. The page's "You: …" is words anyone can type, so it
@@ -316,9 +334,9 @@ def record(person_id: int, items: list[Incoming], *, db_path: Path | None = None
                 # skips the turn on it: the worst a stranger typing "You:"
                 # gets is no reply on its own (it is still kept and read).
                 (person_id, conversation_id, ref, sender, words, int(outgoing), _iso(min(item.at, now)),
-                 int(outgoing or item.outgoing)),
+                 int(outgoing or item.outgoing or item.earlier)),
             )
-            if cur.rowcount and cur.lastrowid is not None and not outgoing and not item.outgoing:
+            if cur.rowcount and cur.lastrowid is not None and not (outgoing or item.outgoing or item.earlier):
                 fresh.append(int(cur.lastrowid))
         conn.execute(
             f"DELETE FROM {TEXTS_TABLE} WHERE person_id=? AND id NOT IN "
@@ -384,18 +402,22 @@ def _upsert_conversation(conn: sqlite3.Connection, person_id: int, item: Incomin
         f"SELECT id FROM {TEXT_CONVERSATIONS_TABLE} WHERE person_id=? AND key=?", (person_id, key),
     ).fetchone()
     number = _clip(item.number, 40)
+    # When its latest text came, not when the browser said so: a first look
+    # tells a month of conversations at once, and the list is newest first.
+    # Never moved back by an older text told late.
+    at = _iso(min(item.at, now))
     if row is not None:
         conn.execute(
             f"UPDATE {TEXT_CONVERSATIONS_TABLE} SET title=?, number=CASE WHEN ?<>'' THEN ? ELSE number END, "
-            "is_group=?, updated_at=? WHERE id=?",
-            (_clip(item.title, 200), number, number, int(item.is_group), _iso(now), row["id"]),
+            "is_group=?, updated_at=MAX(updated_at, ?) WHERE id=?",
+            (_clip(item.title, 200), number, number, int(item.is_group), at, row["id"]),
         )
         return str(row["id"])
     new_id = "tc_" + secrets.token_hex(8)
     conn.execute(
         f"INSERT INTO {TEXT_CONVERSATIONS_TABLE} (id, person_id, key, title, number, is_group, updated_at) "
         "VALUES (?,?,?,?,?,?,?)",
-        (new_id, person_id, key, _clip(item.title, 200), number, int(item.is_group), _iso(now)),
+        (new_id, person_id, key, _clip(item.title, 200), number, int(item.is_group), at),
     )
     return new_id
 
