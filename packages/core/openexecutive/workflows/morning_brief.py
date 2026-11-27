@@ -449,18 +449,6 @@ class MorningBriefWorkflow(Workflow):
                 requests_of=today_route.principal_id() if private_ok else None,
                 told=told,
             )
-            # What this brief tells: only what its context showed, so a card
-            # cut by a list's limit stays news for the next one.
-            yield WorkflowEvent(
-                type="result",
-                data={
-                    "brief_fingerprint": fingerprint,
-                    "suppressed": False,
-                    "since": since.isoformat(),
-                    "private_to_principal": private_used,
-                    "brief_items": brief_items.item_states(today_data, rendered, told),
-                },
-            )
             # standalone=True → the enumerated DM brief (no cards beside it),
             # not the /today header synthesis.
             artifact_text = await synthesize_briefing_narrative(
@@ -503,6 +491,19 @@ class MorningBriefWorkflow(Workflow):
         from openexecutive.alerts.card_refs import keep_app_links
 
         artifact_text = keep_app_links(artifact_text)
+        # What this brief told: what its context showed and the brief itself
+        # mentions, so an item cut by a list's limit, the word limit or
+        # grounding stays news for the next one.
+        yield WorkflowEvent(
+            type="result",
+            data={
+                "brief_fingerprint": fingerprint,
+                "suppressed": False,
+                "since": since.isoformat(),
+                "private_to_principal": private_used,
+                "brief_items": brief_items.item_states(today_data, rendered, told, artifact_text),
+            },
+        )
 
         yield WorkflowEvent(
             type="step_done",

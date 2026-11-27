@@ -116,10 +116,31 @@ def _named(text: object, rendered: str | None, limit: int = 60) -> bool:
     return line[:limit] in rendered or quoted(line, limit) in rendered
 
 
+_MENTION_STOP = frozenset({"with", "from", "that", "this", "your", "their", "about", "into", "over"})
+
+
+def _mentioned(text: object, said: str | None) -> bool:
+    """Whether the delivered brief ``said`` mentions ``text``: one of its
+    first content words (two when it has two or more), since the brief
+    words an item in its own way. Without ``said``, everything counts."""
+    if said is None:
+        return True
+    words = [
+        w for w in re.findall(r"[a-z][a-z'-]{3,}", str(text or "").lower())
+        if w not in _MENTION_STOP
+    ][:6]
+    if not words:
+        return False
+    lowered = said.lower()
+    hits = sum(1 for w in words if w in lowered)
+    return hits >= min(2, len(words))
+
+
 def item_states(
     today_data: dict[str, Any],
     rendered: str | None = None,
     told_items: dict[str, str] | None = None,
+    said: str | None = None,
 ) -> dict[str, str]:
     """Every item ``today_data`` names, keyed, with its state.
 
@@ -127,10 +148,14 @@ def item_states(
     showed the reader, plus what ``told_items`` already held unchanged: a
     card cut by a list's limit ("and 7 more on Home") was never told, so it
     stays news, and one told before and unchanged stays told even on a day
-    its closing line was cut short."""
+    its closing line was cut short. With ``said`` (the brief as delivered),
+    an item the context showed but the brief left out (its word limit,
+    grounding, a dropped line) is not told either."""
 
     def keep(key: str, state: str, label: object) -> bool:
-        return _named(label, rendered) or (told_items or {}).get(key) == state
+        if (told_items or {}).get(key) == state:
+            return True
+        return _named(label, rendered) and _mentioned(label, said)
 
     out: dict[str, str] = {}
     for p in today_data.get("proposals") or []:
@@ -246,6 +271,9 @@ _SELF_TALK = re.compile(
     r"top[- ]call\s+card|8:00\s*am\s+top\s+call)",
     re.IGNORECASE,
 )
+# A capitalised word past the first ("Nothing new from Dana on the lease")
+# names someone or something: the line is news, not an empty part.
+_NAMES_SOMETHING = re.compile(r"\s[A-Z][a-z]")
 _MORE_CLAUSES = re.compile(r";|,\s*(?:so|but|and|which|while|though)\b|\s[—–]\s|\.\s+\S")
 _BULLET = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+")
 # "**Heading**", "**Heading:**", "**Heading** —" on a line of its own.
@@ -266,7 +294,7 @@ def _says_nothing(text: str) -> bool:
         return True
     # A line that goes on past the empty part ("No change from Acme since
     # Friday; Dana still needs your sign-off") carries news: keep it.
-    if _MORE_CLAUSES.search(body):
+    if _MORE_CLAUSES.search(body) or _NAMES_SOMETHING.search(body):
         return False
     return bool(_EMPTY_LINE.match(body))
 

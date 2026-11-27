@@ -135,3 +135,33 @@ def test_the_scheduler_sends_each_teammate_their_own(monkeypatch: pytest.MonkeyP
     asyncio.run(runner._send_teammate_briefs(NOW))
     assert sent == [(5, "brief for 5", True)]
     assert recorded == [5]
+
+
+def test_a_teammate_in_quiet_hours_gets_it_when_they_end(monkeypatch: pytest.MonkeyPatch) -> None:
+    people = [_person(5), _person(6, on_leave_until=NOW.date())]
+    monkeypatch.setattr("openexecutive.people.store.list_people", lambda: people)
+    monkeypatch.setattr(teammate_brief, "gets_a_brief", lambda p: True)
+    monkeypatch.setattr("openexecutive.audit.log_event", lambda *a, **k: None)
+    later = NOW + timedelta(hours=6)
+    monkeypatch.setattr(runner, "_teammate_quiet_until", lambda person, now: later)
+    written: list[int | None] = []
+
+    async def _write(person: Person, now: datetime) -> teammate_brief.TeammateBrief:
+        written.append(person.id)
+        return teammate_brief.TeammateBrief(text="brief", fingerprint="fp", items={})
+
+    async def _deliver(*a: Any, **kw: Any) -> runner.PrincipalDelivery:
+        raise AssertionError("not sent in their quiet hours")
+
+    held: list[tuple[int, datetime]] = []
+    monkeypatch.setattr(
+        "openexecutive.people.held_messages.hold",
+        lambda pid, text, **kw: held.append((pid, kw["release_at"])) or 1,
+    )
+    recorded: list[int] = []
+    monkeypatch.setattr(teammate_brief, "write", _write)
+    monkeypatch.setattr(runner, "deliver_to_person", _deliver)
+    monkeypatch.setattr(teammate_brief, "record_delivered", lambda pid, brief: recorded.append(pid))
+    asyncio.run(runner._send_teammate_briefs(NOW))
+    assert written == [5]  # the one on leave is not written to
+    assert held == [(5, later)] and recorded == [5]

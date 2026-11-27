@@ -202,3 +202,28 @@ def test_only_what_the_context_showed_is_recorded_as_told() -> None:
     full = brief_items.item_states(data)
     assert "card:302" in brief_items.item_states(data, rendered, full)
     assert "dept:ops" in states and "awaiting:7" in states
+
+
+def test_what_the_brief_left_out_is_not_told() -> None:
+    pine = _card(220, "Pine View II buyout")
+    catoosa = _card(221, "Catoosa closing statement")
+    rendered = "- Pine View II buyout\n- Catoosa closing statement\nClose 4 buyouts\nJosef R"
+    said = "**Do today**\n1. Say yes to the Pine View buyout."
+    states = brief_items.item_states(_data(pine, catoosa), rendered, {}, said)
+    assert "card:220" in states
+    assert "card:221" not in states  # the word limit left it out: still news
+    assert not any(k.startswith("goal:") for k in states)
+
+
+def test_a_line_naming_someone_is_kept() -> None:
+    text = (
+        "**Waiting on**\n"
+        "- Nothing new from Dana Reyes on the Acme lease she promised by Friday.\n"
+        "- No update from Dana since Monday on the lease renewal.\n"
+        "- Nothing new in your inbox."
+    )
+    assert brief_items.drop_empty_lines(text) == (
+        "**Waiting on**\n"
+        "- Nothing new from Dana Reyes on the Acme lease she promised by Friday.\n"
+        "- No update from Dana since Monday on the lease renewal."
+    )

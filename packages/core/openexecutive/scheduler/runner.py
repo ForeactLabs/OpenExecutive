@@ -3230,8 +3230,29 @@ async def _send_teammate_briefs(now: datetime) -> None:
     for person in people:
         assert person.id is not None
         try:
+            if _on_leave(person, now):
+                continue  # their brief waits for them to be back, as news
             brief = await teammate_brief.write(person, now)
             if brief is None:
+                continue
+            quiet_until = _teammate_quiet_until(person, now)
+            if quiet_until is not None:
+                # Their quiet hours: it goes when they end, as their other
+                # messages do (people.held_messages), and it is told.
+                from openexecutive.people.held_messages import hold
+
+                hold(person.id, brief.text, source=teammate_brief.KIND, release_at=quiet_until, now=now)
+                teammate_brief.record_delivered(person.id, brief)
+                audit_log(
+                    "scheduled_action",
+                    f"teammate_brief_morning kept for person {person.id} until their quiet hours end",
+                    actor="scheduler",
+                    details={
+                        "phase": "after_quiet_hours", "kind": teammate_brief.KIND,
+                        "person_id": person.id, "release_at": quiet_until.isoformat(),
+                    },
+                    private_to_person=person.id,
+                )
                 continue
             # A brief to its reader: its done row must not read as work
             # done, or the next brief repeats it as news.
@@ -3256,6 +3277,30 @@ async def _send_teammate_briefs(now: datetime) -> None:
             )
         except Exception:
             logger.exception("scheduler: person %s's brief failed", person.id)
+
+
+def _on_leave(person: Any, now: datetime) -> bool:
+    leave = getattr(person, "on_leave_until", None)
+    return leave is not None and now.astimezone(UTC).date() <= leave
+
+
+def _teammate_quiet_until(person: Any, now: datetime) -> datetime | None:
+    """When a teammate's own quiet hours end, while ``now`` is inside them;
+    None otherwise (or when their settings can't be read)."""
+    from openexecutive.people.notifications import (
+        get_notification_settings,
+        in_quiet_hours,
+        quiet_hours_end,
+    )
+
+    try:
+        settings = get_notification_settings(person.id)
+        if not in_quiet_hours(settings, now):
+            return None
+        return quiet_hours_end(settings, now)
+    except Exception:
+        logger.exception("scheduler: couldn't read person %s's quiet hours", person.id)
+        return None
 
 
 def _release_others_digests(now: datetime) -> None:
