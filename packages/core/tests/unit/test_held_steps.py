@@ -300,3 +300,19 @@ def test_pending_held_tools_names_the_held_tools_for_the_same_reader() -> None:
     expired = Session()
     _hold(expired, "send_text", age=oc.HELD_TTL_SECONDS + 1)
     assert oc.pending_held_tools(expired) == ()
+
+
+@pytest.mark.parametrize(
+    ("tool", "reads"),
+    [
+        ("read_document", True),
+        ("search_my_email", True),
+        ("notion__search", True),
+        ("google_workspace__search_drive_files", False),
+        ("google_workspace__send_gmail_message", False),
+        ("send_text", False),
+        ("", False),
+    ],
+)
+def test_may_read_outside(tool: str, reads: bool) -> None:
+    assert oc.may_read_outside(tool) is reads

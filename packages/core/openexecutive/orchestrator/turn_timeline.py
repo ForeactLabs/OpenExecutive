@@ -444,12 +444,15 @@ class TurnTimeline:
         # A held step's round already showed (its activity came, no chip
         # followed): that round is the one waiting, not one that failed.
         # ``held_tools`` names the held tools; each round of one, still
-        # without a chip, waits, but only after the turn's first read: a
-        # step is held only once something from outside was read, so a
-        # round of the same tool before that went through.
-        from openexecutive.orchestrator.outside_content import step_words
+        # without a chip, waits, but only after the turn's first round that
+        # could read outside content: a step is held only once something
+        # from outside was read, so a round of the same tool before that
+        # went through.
+        from openexecutive.orchestrator.outside_content import may_read_outside, step_words
 
-        first_read = next((i for i, s in enumerate(self.steps) if s.kind == LOOK), len(self.steps))
+        first_read = next(
+            (i for i, s in enumerate(self.steps) if may_read_outside(s.tool)), len(self.steps)
+        )
         covered: set[str] = set()
         for tool in dict.fromkeys(str(t) for t in held_tools if t):
             for step in self.steps[first_read + 1 :]:

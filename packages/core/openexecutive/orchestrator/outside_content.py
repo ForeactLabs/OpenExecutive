@@ -511,6 +511,32 @@ def _reads(tool_name: str, tool_input: Any) -> bool:
         return True
 
 
+def may_read_outside(tool_name: str) -> bool:
+    """Whether a tool, known only by name (a chat round's activity), can
+    read outside content or the speaker's own mail: what has to come before
+    a step is held. A search or listing of the company's own Drive or
+    OneDrive does not. Never raises."""
+    try:
+        from openexecutive.orchestrator.extensions import reads_outside
+        from openexecutive.orchestrator.mail_read_tools import (
+            MAIL_READ_TOOLS,
+            SAVE_MY_EMAIL_ATTACHMENT,
+        )
+
+        name = str(tool_name or "")
+        if not name:
+            return False
+        if name != SAVE_MY_EMAIL_ATTACHMENT and name in {t["name"] for t in MAIL_READ_TOOLS}:
+            return True
+        if name in _FETCH_TOOLS:
+            return True
+        if "__" in name:
+            return gateway_call_reads(name) and name not in _COMPANY_LISTINGS
+        return bool(reads_outside(name))
+    except Exception:
+        return True
+
+
 def defers_read(tool_name: str, tool_input: Any) -> bool:
     """Whether this call is refused for now: the person just said go to what
     the previous turn held, and this is a read in the first round that
