@@ -542,7 +542,19 @@ def send_who(send: Send, *, db_path: Path | None = None) -> str:
         conv = conversation(send.conversation_id, db_path=db_path)
         if conv is not None:
             return conv.who
-    return send.to_number or "them"
+    return number_who(send.to_number) or "them"
+
+
+def number_who(number: str) -> str:
+    """A number in words: the name on People (contacts included) when the
+    number is theirs, else the number itself. Never raises."""
+    number = (number or "").strip()
+    if not number:
+        return ""
+    conv = Conversation(id="", person_id=0, key="", title="", number=number, is_group=False, updated_at="")
+    person = known_person(conv)
+    name = str(getattr(person, "full_name", "") or "").strip() if person is not None else ""
+    return name or number
 
 
 def outcome_words(send: Send, who: str) -> str:

@@ -208,7 +208,7 @@ async def handle_send_text(tool_input: dict[str, Any]) -> str:
     )
     texts.wake(actor)
     settled = await _settled(send.id) if texts.connected(actor) else send
-    who = conv.who if conv is not None else to
+    who = conv.who if conv is not None else await asyncio.to_thread(texts.number_who, to)
     if settled is None:
         # Gone while it waited: Texts was turned off, which forgets every send.
         return json.dumps({"error": f"Nothing went: Texts was turned off before it was sent. {_OFF_NOTE}"})
@@ -236,7 +236,7 @@ async def handle_send_text(tool_input: dict[str, Any]) -> str:
             ),
         })
     if settled.status == texts.SENT:
-        return json.dumps({"status": "sent", "send_id": send.id, "message": f"Texted {who} from their phone."})
+        return json.dumps({"status": "sent", "send_id": send.id, "message": f"Texted {who} from your phone."})
     if settled.status == texts.UNSURE:
         return json.dumps({
             "status": "unsure",
@@ -271,7 +271,13 @@ def recipient_words(tool_input: dict[str, Any]) -> str:
     if conversation_id:
         conv = own_conversation(conversation_id)
         return conv.who if conv is not None else ""
-    return str(tool_input.get("to") or "").strip()[:40]
+    from openexecutive.delegation import texts
+
+    to = str(tool_input.get("to") or "").strip()[:40]
+    try:
+        return texts.number_who(to)[:60]
+    except Exception:
+        return to
 
 
 def reached_person(tool_input: dict[str, Any]) -> Any:

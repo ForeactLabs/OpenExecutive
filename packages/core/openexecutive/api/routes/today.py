@@ -3345,7 +3345,11 @@ def _lead_line(row: Any, jobs: dict[int, Any], answers: dict[tuple[int, str], st
         if answered:
             parts.append(answered)
         elif row.outcome:
-            parts.append(row.outcome)
+            # A text logged before it said "your phone" read "their phone".
+            outcome = row.outcome
+            if row.tool == "send_text" and outcome.endswith(" from their phone."):
+                outcome = outcome.removesuffix(" from their phone.") + " from your phone."
+            parts.append(outcome)
         return " · ".join(parts)
     except Exception:
         logger.warning("today: couldn't write As me's line", exc_info=True)

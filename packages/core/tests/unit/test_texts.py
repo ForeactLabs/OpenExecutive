@@ -295,6 +295,10 @@ def test_who_a_conversation_is_with(ids: dict[str, int]) -> None:
     assert tx.known_person(by_title["Ben Teammate"]) is None
     assert tx.known_person(by_title["Family"]) is None
     assert tx.known_person(by_title["Sam Stranger"]) is None
+    # A number on People is named; any other stays a number.
+    assert tx.number_who("555-201-3344") == "Mike Chen"
+    assert tx.number_who("555 999 0000") == "555 999 0000"
+    assert text_tools.recipient_words({"to": "+1 555 201 3344"}) == "Mike Chen"
 
 
 def test_a_text_to_someone_unknown_is_someone_new_and_the_card_names_them(
@@ -500,6 +504,8 @@ def test_a_text_goes_through_their_browser(ids: dict[str, int], as_turn_for: Any
     monkeypatch.setattr(text_tools, "_settled", browser_sends)
     out = json.loads(asyncio.run(text_tools.handle_send_text({"conversation_id": conv.id, "text": "Friday."})))
     assert out["status"] == "sent"
+    # Done for you shows it to the person who sent it: their own phone is "your phone".
+    assert out["message"].endswith(" from your phone.")
 
 
 def test_texts_turned_off_while_a_send_waits_says_nothing_went(
@@ -1224,3 +1230,13 @@ def test_a_text_that_went_on_its_own_is_sending_until_it_went(ids: dict[str, int
     assert row["status"] == ttl.SENDING and _log_id_of(send_id) == row["id"]
     tx.settle_send(owner, send_id, status=tx.FAILED, error="Nothing went.")
     assert _row(row["id"])["status"] == "failed"
+
+
+def test_an_older_text_row_says_your_phone() -> None:
+    from types import SimpleNamespace
+
+    from openexecutive.api.routes import today
+
+    row = SimpleNamespace(tool="send_text", to_person_id=None, job_id=None, prompted_by="",
+                          outcome="Texted 4078644111 from their phone.", at=NOW.isoformat())
+    assert today._lead_line(row, {}, {}).endswith("Texted 4078644111 from your phone.")
