@@ -87,7 +87,11 @@ async function ownTab() {
   const origins = await connectedOrigins();
   // Google Messages (kept there for texts, in the group) is never a page to work on.
   const work = (await chrome.tabs.query({ windowId: id })).filter((t) => !t.pinned && !onMessages(t.url) && !OE.onConnected(t.url, origins));
-  return work.find((t) => t.active) || work[work.length - 1] || null;
+  // While a text's press shows Messages there (so no work tab is active),
+  // the page that was showing is still the one a step works on. A tab the
+  // workflow itself made active since wins.
+  const before = pressShowing && pressShowing.windowId === id ? work.find((t) => t.id === pressShowing.tabId) : null;
+  return work.find((t) => t.active) || before || work[work.length - 1] || null;
 }
 
 // ---- Its window beside the chat ----
@@ -437,6 +441,8 @@ async function sendOneText(send) {
 // Only the tab a send was handed to, only while that send runs, and only on
 // the conversation it was handed (or a new one for a number).
 let pressing = null;
+// The tab a press moved from, while Messages shows in its place.
+let pressShowing = null;
 
 // Attaching shows Chrome's "is debugging this browser" bar, which makes the
 // page shorter and moves the compose bar up. So the Send button is found
@@ -500,8 +506,89 @@ async function sendSpot(target, at, settle = true) {
 
 async function pressAt(target, spot) {
   for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
-    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { type, x: spot.x, y: spot.y, button: type === "mouseMoved" ? "none" : "left", clickCount: type === "mouseMoved" ? 0 : 1 });
+    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
+      type,
+      x: spot.x,
+      y: spot.y,
+      button: type === "mouseMoved" ? "none" : "left",
+      buttons: type === "mousePressed" ? 1 : 0,
+      clickCount: type === "mouseMoved" ? 0 : 1,
+      pointerType: "mouse",
+    });
   }
+}
+
+// Chrome only delivers a press to a page that is on screen. Google Messages
+// sits in a background tab of the extension's own window, which is kept
+// minimized: there the press goes nowhere, though the button is found. So
+// for the press the window is shown (never focused, so what the person types
+// stays in their own window) with the tab showing, then put back the way it
+// was. If the person went to it meanwhile (its window took the focus), it is
+// left where they are.
+async function showForPress(tab, target) {
+  const win = await chrome.windows.get(tab.windowId, { populate: true }).catch(() => null);
+  if (!win) return null;
+  const shown = (win.tabs || []).find((t) => t.active) || null;
+  const back = { windowId: win.id, minimized: win.state === "minimized", tabId: shown && shown.id !== tab.id ? shown.id : null, focused: win.focused, focusedId: null };
+  // Whatever step fails, what was changed is still put back.
+  try {
+    if (back.minimized) await chrome.windows.update(win.id, { state: "normal", focused: false });
+    if (back.tabId !== null) {
+      pressShowing = { windowId: win.id, tabId: back.tabId };
+      await chrome.tabs.update(tab.id, { active: true });
+      // In a window the person is typing in, their keys would now go to the
+      // box holding the text: take the focus off it straight away.
+      await chrome.debugger.sendCommand(target, "Runtime.evaluate", { expression: UNFOCUS }).catch(() => null);
+    }
+    await pause(400);
+  } catch {
+    // Put back by the caller.
+  }
+  return back;
+}
+
+const UNFOCUS = `(() => { const a = document.activeElement; if (a && a !== document.body && a.blur) a.blur(); })()`;
+
+// Only when the press didn't go from behind their windows: the window comes
+// in front for that one press, with its focused field blurred so nothing
+// typed elsewhere reaches the box, and the focus goes straight back after it.
+async function focusForPress(back, target) {
+  const [before] = (await chrome.windows.getAll({ windowTypes: ["normal"] })).filter((w) => w.focused);
+  // Only from another Chrome window, which the focus can go back to: never
+  // from another app, which it could not.
+  if (!before || before.id === back.windowId) return false;
+  back.focusedId = before.id;
+  back.tookFocus = true;
+  // Keys they were typing elsewhere must not reach the box holding the text:
+  // blurred before the window takes the focus, and again after in case the
+  // page put it back.
+  await chrome.debugger.sendCommand(target, "Runtime.evaluate", { expression: UNFOCUS }).catch(() => null);
+  await chrome.windows.update(back.windowId, { focused: true });
+  await chrome.debugger.sendCommand(target, "Runtime.evaluate", { expression: UNFOCUS }).catch(() => null);
+  await pause(200);
+  return true;
+}
+
+async function putBack(tab, back) {
+  if (!back || back.done) return;
+  pressShowing = null;
+  if (back.focused) {
+    // Their own window, in front: only their tab comes back, and only if
+    // Messages is still the one showing (they didn't move on themselves).
+    const now = await chrome.tabs.get(tab.id).catch(() => null);
+    if (back.tabId !== null && now && now.active) await chrome.tabs.update(back.tabId, { active: true }).catch(() => undefined);
+    back.done = true;
+    return;
+  }
+  const win = await chrome.windows.get(back.windowId).catch(() => null);
+  // The person went to it meanwhile: leave it where they are.
+  if (!win || (win.focused && !back.tookFocus)) return;
+  // A tab made active since (a workflow's step) stays: only Messages, still showing, gives way.
+  const shown = await chrome.tabs.get(tab.id).catch(() => null);
+  if (back.tabId !== null && shown && shown.active) await chrome.tabs.update(back.tabId, { active: true }).catch(() => undefined);
+  if (back.minimized) await chrome.windows.update(back.windowId, { state: "minimized" }).catch(() => undefined);
+  if (back.focusedId !== null) await chrome.windows.update(back.focusedId, { focused: true }).catch(() => undefined);
+  back.done = true;
 }
 
 async function pressInTab(tab, x, y) {
@@ -521,6 +608,7 @@ async function pressInTab(tab, x, y) {
   } catch {
     return { ok: false };
   }
+  const back = await showForPress(now, target).catch(() => null);
   // Once the press has started it may have gone, even if a step after fails.
   let started = false;
   try {
@@ -533,16 +621,34 @@ async function pressInTab(tab, x, y) {
     // there. Never when the box emptied, which is what a send does, so a
     // text that went is never sent twice.
     await pause(1500);
-    const after = await readSpot(target);
+    let after = await readSpot(target);
     if (after && after.at === at && after.full && (after.x !== spot.x || after.y !== spot.y)) {
       const again = await sendSpot(target, at, false);
       if (again && again.full) await pressAt(target, again);
+      await pause(1500);
+      after = await readSpot(target);
+    }
+    // Still in the box: a window behind the person's own may not take a
+    // press. Once, it comes in front for the press alone, and the focus goes
+    // straight back, so nothing they type lands in the box.
+    // The spot is found before the focus is taken, and the focus is held
+    // only for the press, with the box unfocused.
+    if (back && !back.focused && after && after.at === at && after.full) {
+      const last = await sendSpot(target, at, false);
+      if (last && last.full) {
+        if (await focusForPress(back, target)) {
+          const check = await readSpot(target);
+          if (check && check.at === at && check.full && check.x === last.x && check.y === last.y) await pressAt(target, check);
+          await putBack(now, back);
+        }
+      }
     }
     return { ok: true };
   } catch {
     return { ok: false, maybe: started };
   } finally {
     await chrome.debugger.detach(target).catch(() => undefined);
+    await putBack(now, back).catch(() => undefined);
   }
 }
 
