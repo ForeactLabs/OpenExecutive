@@ -151,9 +151,11 @@ async def handle_read_texts(tool_input: dict[str, Any]) -> str:
         getattr(session, "sender_off_team", False) is True
         or getattr(session, "answers_a_text", False) is True
         or getattr(session, "reply_card_work", None) is not None
+        or getattr(getattr(session, "delegation_override", None), "inbox_work", False) is True
     ):
         # A turn answering someone else's words (a contact's mail, an inbox
-        # reply card's email, any text) never sees the person's texts: codes
+        # reply card's email, an email that just came in, even a teammate's,
+        # any text) never sees the person's texts: codes
         # from their bank are in them, and a text can show a teammate's
         # number its sender picked. What it answers is in its prompt.
         return json.dumps({"conversations": [], "note": "Their texts aren't shown on a turn answering someone's text or email."})
