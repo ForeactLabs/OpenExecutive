@@ -121,6 +121,7 @@ class LookResult:
     kept: int = 0
     acted: int = 0
     failed: int = 0
+    call_failed: bool = False
 
     def counts(self) -> dict[str, Any]:
         return {"status": self.status, "kept": self.kept, "acted": self.acted, "failed": self.failed}
@@ -146,6 +147,10 @@ class _Cursor:
 
 
 _SCANNING: set[int] = set()
+# Looks in a row an email's gist was missing (failed or left out), by
+# (person, message id). In memory: a restart only gives it fresh tries.
+_MISSES: dict[tuple[int, str], int] = {}
+GIST_TRIES = 3
 _look_task: asyncio.Task[None] | None = None
 _TURN_TASKS: set[asyncio.Task[None]] = set()
 
@@ -422,8 +427,8 @@ async def look_person(person: Any, *, gmail: Any = None, now: datetime | None = 
                 cursor.backoff_until = (moment + _backoff(cursor.failures)).isoformat()
                 _save_cursor(cursor)
                 return LookResult("error")
-            if result.failed:
-                # The gist model failed for some: try again after a backoff.
+            if result.call_failed:
+                # The gist model failed: try again after a backoff.
                 cursor.failures += 1
                 cursor.backoff_until = (moment + _backoff(cursor.failures)).isoformat()
             else:
@@ -486,11 +491,22 @@ async def _look(person: Any, client: Any, cursor: _Cursor, now: datetime) -> Loo
         outside_known = any(line.startswith("Meeting ") for line in known.splitlines())
         for start in range(0, len(notes), GIST_BATCH):
             batch = notes[start:start + GIST_BATCH]
-            await gist(batch, known)
-            # Failed, or left out of the answer: read again, not kept bare.
-            missed = [n.message.id for n in batch if not n.answered]
-            result.failed += len(missed)
-            unread.update(missed)
+            if not await gist(batch, known):
+                result.call_failed = True
+            # Failed, or left out of the answer: read again rather than kept
+            # bare, up to GIST_TRIES looks, then kept with who and what alone
+            # so one email never holds the rest back.
+            for n in batch:
+                key = (person.id, n.message.id)
+                if n.answered:
+                    _MISSES.pop(key, None)
+                    continue
+                result.failed += 1
+                _MISSES[key] = _MISSES.get(key, 0) + 1
+                if _MISSES[key] < GIST_TRIES:
+                    unread.add(n.message.id)
+                else:
+                    _MISSES.pop(key, None)
     if unread:
         # Not kept yet, and the read point stays at the oldest of them, so
         # the next look (after a backoff) gists them again rather than

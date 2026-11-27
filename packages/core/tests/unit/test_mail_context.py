@@ -41,6 +41,13 @@ def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     people_registry.invalidate()
 
 
+@pytest.fixture(autouse=True)
+def _fresh_misses() -> Iterator[None]:
+    mail_context._MISSES.clear()
+    yield
+    mail_context._MISSES.clear()
+
+
 @pytest.fixture
 def owner() -> Any:
     pid = people_store.upsert_person(full_name="Olivia Owner", is_principal=True, email=OWNER)
@@ -310,7 +317,21 @@ def test_an_email_the_gist_left_out_is_read_again(owner: Any, monkeypatch: pytes
     result = _look(owner, client)
     assert result.failed == 1
     assert len(noticed.recent(owner.id, now=NOW)) == 1
-    assert mail_context.get_cursor(owner.id).failures == 1
+    assert mail_context.get_cursor(owner.id).failures == 0  # the call worked: no backoff
+
+
+def test_an_email_never_gisted_is_kept_bare_after_a_few_tries(owner: Any, monkeypatch: pytest.MonkeyPatch,
+                                                              model: dict[str, Any]) -> None:
+    async def broken(turn: str) -> dict[str, Any]:
+        raise RuntimeError("model busy")
+
+    monkeypatch.setattr(mail_context, "_call_model", broken)
+    client = Mailbox(_msg("m1"))
+    for n in range(mail_context.GIST_TRIES):
+        _look(owner, client, NOW + timedelta(hours=3 * n))
+    later = NOW + timedelta(hours=3 * (mail_context.GIST_TRIES - 1))
+    (item,) = noticed.recent(owner.id, now=later)
+    assert (item.subject, item.gist) == ("Flight DL123 update", "")
 
 
 def test_nothing_is_read_with_act_as_me_off(owner: Any, model: dict[str, Any]) -> None:

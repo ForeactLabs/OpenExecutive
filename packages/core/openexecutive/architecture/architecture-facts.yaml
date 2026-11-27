@@ -12188,9 +12188,10 @@ delegation:
     batch of 10 (GIST_PROMPT, forced note_emails tool, no other tools, the
     emails as data) writes a one-line gist, a tie to something known (a
     meeting in their next 48 h with Read my calendar on, an open task of
-    theirs, a sender on the team or in contacts) and act; a batch whose call
-    fails is not kept, the read point stays at its oldest email and the look
-    backs off, so the next one gists it again. Each email is one
+    theirs, a sender on the team or in contacts) and act; an email whose
+    call fails or that the answer leaves out is not kept, the read point
+    stays at it (and a failed call backs off), so the next look gists it
+    again, up to GIST_TRIES (3) looks, then it is kept bare. Each email is one
     delegation_noticed row (person_id, source, item_key = message id,
     match_key = sender name + start of subject, gist, tie, acted_at,
     updates), the person's alone, deleted after 2 days and on Act as me off
