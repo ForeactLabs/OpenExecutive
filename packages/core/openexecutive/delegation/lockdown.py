@@ -98,6 +98,7 @@ MAIL_TOUCHED_ALLOWED_TOOLS: frozenset[str] = frozenset({
     "read_my_email",
     "read_my_email_attachment",
     "search_my_email",
+    "what_came_in",
     # A copy of one attached file into the Executive's own Drive or OneDrive,
     # shared with the speaker alone: only when they asked in their own words
     # this turn, and every argument that reaches the storage (fixed folder,

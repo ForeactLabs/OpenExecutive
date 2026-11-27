@@ -82,6 +82,9 @@ _SENSITIVE_SUBSTRINGS = (
     # their own calendar.
     "my_email",
     "my_calendar",
+    # what_came_in returns what reached the speaker lately, with gists of
+    # their own mail (delegation.noticed).
+    "what_came_in",
     # Always in the loop: recall_history returns the speaker's own notes,
     # private to them.
     "recall_history",

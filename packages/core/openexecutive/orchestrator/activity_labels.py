@@ -146,6 +146,7 @@ _LABELS: dict[str, str] = {
     "open_in_app": "Finding the right screen…",
     "my_email_awaiting_reply": "Checking what's waiting on a reply…",
     "my_email_read_before": "Finding the email you mean…",
+    "what_came_in": "Checking what came in…",
     "my_calendar": "Checking your calendar…",
 
     # Always in the loop: the speaker's own notes

@@ -163,6 +163,20 @@ def _maybe_scan_inbox(now: datetime) -> bool:
         return False
 
 
+def _maybe_read_mail_context(now: datetime) -> bool:
+    """Act as me's inbox read for context (delegation/mail_context.py): what
+    reached each person's own inbox becomes their private context, and an
+    email that ties to something known gets a turn. Throttled there like the
+    inbox watcher, its own task. Never raises."""
+    try:
+        from openexecutive.delegation.mail_context import maybe_look
+
+        return maybe_look(now)
+    except Exception:
+        logger.exception("scheduler: mail context look failed to start")
+        return False
+
+
 def _maybe_keep_contacts(now: datetime) -> bool:
     """Keep the principal's contacts up to date (people/contact_keeper.py),
     throttled there. A hook here, like the inbox watcher, rather than a
@@ -401,6 +415,7 @@ async def run_scheduler(
             try:
                 _maybe_refresh_narrative(now)
                 _maybe_scan_inbox(now)
+                _maybe_read_mail_context(now)
                 _maybe_keep_contacts(now)
                 _maybe_remind_notes(now)
                 _maybe_send_reminders(now)

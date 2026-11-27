@@ -33,6 +33,11 @@ TEXT_SETTINGS_TABLE = "delegation_text_settings"
 TEXT_CONVERSATIONS_TABLE = "delegation_text_conversations"
 TEXTS_TABLE = "delegation_texts"
 TEXT_SENDS_TABLE = "delegation_text_sends"
+# What came in for a person, kept a short while as their private context
+# (``delegation.noticed``), and where the inbox read for it got to
+# (``delegation.mail_context``).
+NOTICED_TABLE = "delegation_noticed"
+MAIL_CONTEXT_TABLE = "delegation_mail_context"
 
 TABLES: tuple[str, ...] = (
     SETTINGS_TABLE,
@@ -57,9 +62,42 @@ TABLES: tuple[str, ...] = (
     TEXT_CONVERSATIONS_TABLE,
     TEXTS_TABLE,
     TEXT_SENDS_TABLE,
+    NOTICED_TABLE,
+    MAIL_CONTEXT_TABLE,
 )
 
 _DDL: tuple[str, ...] = (
+    # One row per thing that came in for a person (an email, a phone
+    # alert), theirs alone, deleted after ``noticed.KEEP``. ``item_key`` is
+    # the source's own id; ``match_key`` the same item seen another way.
+    f"CREATE TABLE IF NOT EXISTS {NOTICED_TABLE} ("
+    "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+    "  person_id INTEGER NOT NULL,"
+    "  source TEXT NOT NULL,"
+    "  item_key TEXT NOT NULL,"
+    "  match_key TEXT NOT NULL DEFAULT '',"
+    "  sender_name TEXT NOT NULL DEFAULT '',"
+    "  sender TEXT NOT NULL DEFAULT '',"
+    "  subject TEXT NOT NULL DEFAULT '',"
+    "  gist TEXT NOT NULL DEFAULT '',"
+    "  tie TEXT NOT NULL DEFAULT '',"
+    "  thread_id TEXT NOT NULL DEFAULT '',"
+    "  received_at TEXT NOT NULL,"
+    "  noted_at TEXT NOT NULL,"
+    "  acted_at TEXT,"
+    # Times the source changed it in place (``noticed.note(refresh=True)``).
+    "  updates INTEGER NOT NULL DEFAULT 0,"
+    "  UNIQUE(person_id, item_key)"
+    ")",
+    f"CREATE INDEX IF NOT EXISTS idx_{NOTICED_TABLE}_person_received "
+    f"ON {NOTICED_TABLE}(person_id, received_at)",
+    f"CREATE TABLE IF NOT EXISTS {MAIL_CONTEXT_TABLE} ("
+    "  person_id INTEGER PRIMARY KEY,"
+    "  read_through TEXT,"
+    "  last_poll_at TEXT,"
+    "  backoff_until TEXT,"
+    "  failures INTEGER NOT NULL DEFAULT 0"
+    ")",
     # Texts: the person's switch, and what their browser last said about
     # Google Messages. One row per person; absent means off.
     f"CREATE TABLE IF NOT EXISTS {TEXT_SETTINGS_TABLE} ("

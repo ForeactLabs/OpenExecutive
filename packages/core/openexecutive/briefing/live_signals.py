@@ -743,6 +743,9 @@ def own_inbox(since: datetime, tz: tzinfo, now: datetime | None = None) -> OwnIn
         picked.append(d | {"_at": arrived})
     picked.sort(key=lambda d: d["_at"], reverse=True)
     done = watcher.outcomes(principal.id, [str(d["message_id"]) for d in picked])
+    said_of = _kept_mail(principal.id, since, now)
+    # Mail the watcher noted is told (or passed over) from its own row.
+    kept = {key: item for key, item in said_of.items() if key not in seen}
     lines: list[str] = []
     refs: list[dict[str, Any]] = []
     others: list[str] = []
@@ -784,9 +787,46 @@ def own_inbox(since: datetime, tz: tzinfo, now: datetime | None = None) -> OwnIn
         else:
             what = ""
         line = f"[{at}] from {who}: \"{subject}\""
+        said = said_of.get(str(d["message_id"]))
+        if said is not None and said.gist:
+            line += f" (says: {said.gist})"
         lines.append(f"{line} — {what}" if what else line)
         refs.append(_mail_ref(d))
+    # What else reached their inbox, kept as context (delegation.noticed):
+    # bank, delivery and travel mail the reply watcher passes over. Only what
+    # ties to something known is a line; the rest is "Also in".
+    for item in kept.values():
+        arrived_at = parse_aware(item.received_at)
+        replied_at = answered.get(item.thread_id) if item.thread_id else None
+        if replied_at is not None and arrived_at is not None and replied_at > arrived_at:
+            continue  # they answered it since
+        who_short = _one_line(item.sender_name, 60) or _one_line(item.sender, 60)
+        what_said = item.gist or _one_line(item.subject, 100) or "(no subject)"
+        if not item.tie:
+            others_total += 1
+            if len(others) < _INBOX_OTHERS_MAX:
+                others.append(_one_line(f"{who_short}: {what_said}", 120))
+            continue
+        total += 1
+        if len(lines) >= _INBOX_MAX:
+            continue
+        at = _local_hhmm(item.received_at, tz, now)
+        lines.append(_one_line(f"[{at}] from {who_short}: {what_said} — ties to {item.tie}", 400))
+        refs.append(_mail_ref({"message_id": item.item_key, "thread_id": item.thread_id}))
     return OwnInbox(tuple(lines), tuple(others), others_total, tuple(refs), total)
+
+
+def _kept_mail(person_id: int, since: datetime, now: datetime | None) -> dict[str, Any]:
+    """The emails kept as ``person_id``'s context since ``since``
+    (``delegation.noticed``), by message id, newest first. Never raises."""
+    from openexecutive.delegation import noticed
+
+    try:
+        items = noticed.recent(person_id, since=since, source=noticed.EMAIL, now=now)
+    except Exception:
+        logger.exception("live_signals: kept mail read failed")
+        return {}
+    return {item.item_key: item for item in items}
 
 
 def _wrote_back(d: dict[str, Any], fyi: bool, sends: list[tuple[datetime, str]]) -> bool:

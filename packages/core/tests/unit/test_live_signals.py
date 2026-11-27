@@ -751,6 +751,32 @@ def test_own_inbox_splits_people_they_deal_with_from_the_rest(
     assert mail.refs[0]["kind"] == "mail" and mail.refs[0]["message_id"] == "m1"
 
 
+def test_own_inbox_adds_what_was_kept_as_context(principal: SimpleNamespace) -> None:
+    from openexecutive.delegation import inbox, noticed
+
+    now = datetime(2026, 10, 26, 18, 0, tzinfo=UTC)
+    at = now - timedelta(hours=1)
+    inbox._note_mail(7, _mail("m1", "andy@svn.test", "Andy Agee", "Re: loan figures", at), relation="contact")
+    noticed.note(7, source=noticed.EMAIL, item_key="m1", sender_name="Andy Agee", subject="Re: loan figures",
+                 gist="Andy sent the revised loan figures", received_at=at, now=now)
+    # Mail the reply watcher passed over: tied to something known, or not.
+    noticed.note(7, source=noticed.EMAIL, item_key="m2", sender_name="Delta", subject="Flight update",
+                 gist="DL123 delayed 90 minutes", tie="3:00 PM Board prep", received_at=at, now=now)
+    noticed.note(7, source=noticed.EMAIL, item_key="m3", sender_name="UPS", subject="Delivered",
+                 gist="Box left at the front door", received_at=at, now=now)
+    # Someone else's never shows.
+    noticed.note(9, source=noticed.EMAIL, item_key="m4", sender_name="X", subject="Theirs", tie="t",
+                 received_at=at, now=now)
+
+    mail = live_signals.own_inbox(now - timedelta(hours=12), UTC, now)
+
+    assert "(says: Andy sent the revised loan figures)" in mail.lines[0]
+    assert any("DL123 delayed 90 minutes — ties to 3:00 PM Board prep" in line for line in mail.lines)
+    assert mail.others == ("UPS: Box left at the front door",)
+    assert not any("Theirs" in line for line in [*mail.lines, *mail.others])
+    assert {r["message_id"] for r in mail.refs} == {"m1", "m2"}
+
+
 def test_own_inbox_leaves_out_mail_they_answered_since(
     principal: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
