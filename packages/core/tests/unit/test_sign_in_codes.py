@@ -11,6 +11,10 @@ def test_codes_and_sign_in_links_are_found() -> None:
         "Is this you signing in?",
         "Your PIN: 4821",
         "Your code is 1234",
+        "123 456 is your Instagram code. Don't share it.", "123456 is your Amazon OTP. Do not share it with anyone.",
+        "4821 is your Uber code",
+        "482913 is your Bank of America code", "123456 is your Wells Fargo SafePass code",
+        "482913 is the code for your account", "482913 - WhatsApp code",
         "482913 is your verification code", "G-482913 is your Google verification code",
         "Your Google code is G-482913", "Use 482913 to verify your account",
     ):
@@ -25,5 +29,8 @@ def test_ordinary_texts_are_not() -> None:
         "Can't log in to the portal, call me at 555-123-4567", "Please verify the invoice total, it is 12500",
         "zip code 94103", "Can you verify the address? 1600 Amphitheatre Pkwy, 94043",
         "Login meeting moved, dial 4155551234",
+        "Gate code is 4821", "Door code 1234#", "The wifi password is 84219375",
+        "Apt 1402, the code is on the fridge", "Room 1402, the password is on the fridge",
+        "Suite 1200, the door code is on the sign", "Door code is 4821, see you at 7", "Room 1402, wifi password is on the fridge",
     ):
         assert not is_sign_in_code(text), text

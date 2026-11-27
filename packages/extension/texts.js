@@ -48,8 +48,10 @@
   // Sign-in codes are never sent to Open Executive (the same patterns as
   // openexecutive/delegation/sign_in_codes.py, which drops any that come).
   const NUMBER = "(?<!\\d)(?<!\\d-)(?!(?:19|20)\\d\\d(?![\\d-]))(?:\\d{4,8}|\\d{3}[- ]\\d{3}|(?:\\d ){3,7}\\d)(?![\\d-])";
-  const CODE_WORD = "(?<!zip )(?<!area )(?<!postal )(?<!dress )(?<!promo )(?<!discount )\\b(?:codes?|passcodes?|passwords?|passwd|otp|pins?)\\b";
-  const CODE_NEAR = new RegExp(CODE_WORD + "[^\\d\\n]{0,25}" + NUMBER + "|" + NUMBER + "[^\\d\\n]{0,40}" + CODE_WORD, "i");
+  const CODE_WORD = "(?<!zip )(?<!area )(?<!postal )(?<!dress )(?<!promo )(?<!discount )(?<!gate )(?<!door )(?<!garage )(?<!alarm )(?<!lockbox )(?<!wifi )(?<!wi-fi )(?<!network )\\b(?:codes?|passcodes?|passwords?|passwd|otp|pins?)\\b";
+  // A number naming a place (apt 1402, suite 1200) is never a code before its word.
+  const NOT_A_PLACE = "(?<!apt )(?<!apt\\. )(?<!apartment )(?<!suite )(?<!ste )(?<!room )(?<!rm )(?<!unit )(?<!floor )(?<!building )(?<!bldg )(?<!lot )(?<!box )(?<!#)(?<!no\\. )";
+  const CODE_NEAR = new RegExp(CODE_WORD + "[^\\d\\n]{0,25}" + NUMBER + "|" + NOT_A_PLACE + NUMBER + "[^\\d\\n]{0,40}" + CODE_WORD, "i");
   const SIGN_IN_LINK = /\b(magic link|sign[- ]?in link|log[- ]?in link|is this you signing in|approve (?:this |the )?sign[- ]?in|tap to (?:sign|log) in|trying to sign in)\b/i;
   const ENTER_CODE = new RegExp("\\b(?:enter|type)\\s+" + NUMBER + "|\\buse\\s+" + NUMBER + "\\s+(?:to|for)\\s+(?:verify|confirm|sign|log|authenticat)", "i");
 
@@ -133,6 +135,8 @@
 
   // How far back a first look reads the list (Open Executive keeps 30 days).
   const KEEP = 30 * DAY;
+  // Seen-map mark for a row a full first look had no room for.
+  const WAITING = "~";
 
   /**
    * What to tell Open Executive about the list, given what it said before
@@ -156,19 +160,27 @@
       const row = T.fromRow(raw);
       if (!row || !row.snippet) continue;
       const print = T.hash(`${row.outgoing ? "1" : "0"}:${row.snippet}`);
+      // A row a full first look had no room for ("~") is still judged as a
+      // first look, so its old text never reads as new.
+      const kept = first ? "" : String(next[row.key] || "");
+      const look = first || kept === WAITING;
       // What was seen is "<fingerprint>.<count of changes>": the count tells
       // the same words again later ("ok") from the same report sent again.
-      const [beforePrint, beforeCount] = String((first ? "" : next[row.key]) || "").split(".");
+      const [beforePrint, beforeCount] = (kept === WAITING ? "" : kept).split(".");
       if (beforePrint === print) continue;
       const count = (parseInt(beforeCount, 10) || 0) + 1;
+      const before = look ? WAITING : next[row.key];
       next[row.key] = `${print}.${count}`;
       const shown = T.timeOf(row.time, now);
       // A first look can't date a row it can't read the time of: left out.
-      if (first && (shown === null || now - shown > KEEP)) continue;
+      if (look && (shown === null || now - shown > KEEP)) continue;
       if (T.isSignInCode(row.snippet)) continue;
       const toldBefore = Boolean(told && typeof told === "object" && String(told[row.key] || "").split(".")[0] === print);
-      const earlier = first && (toldBefore || !row.unread || row.outgoing || now - shown > DAY);
+      const earlier = look && (toldBefore || !row.unread || row.outgoing || now - shown > DAY);
       items.push({
+        // What was seen before (taken off before it goes): a row cut from a
+        // full report is put back to it, so the next report tells it.
+        before,
         // The same change, reported again (an answer that never came back),
         // is the same ref, so it is kept once.
         ref: `${row.key}:${print}:${count}`,
@@ -188,9 +200,15 @@
     // Forget conversations far down the list, so the map stays small.
     const keys = Object.keys(next);
     if (keys.length > 500) for (const k of keys.slice(0, keys.length - 500)) delete next[k];
-    // New texts first, so a long first look never crowds one out.
+    // New texts first, so a long first look never crowds one out. Rows past
+    // the 100 a report carries aren't counted as seen, so the next report
+    // tells them.
     items.sort((a, b) => Number(a.earlier) - Number(b.earlier));
-    return { items: items.slice(0, 100), seen: next };
+    for (const cut of items.slice(100)) {
+      if (cut.before === undefined) delete next[cut.conversation];
+      else next[cut.conversation] = cut.before;
+    }
+    return { items: items.slice(0, 100).map(({ before, ...item }) => item), seen: next };
   };
 
   /** The conversation key in a Google Messages address, or "". */

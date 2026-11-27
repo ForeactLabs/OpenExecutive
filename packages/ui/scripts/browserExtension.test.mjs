@@ -522,6 +522,20 @@ test("texts: a first look after an update tells what the old version told as ear
   assert.ok(texts.includes("await chrome.storage.local.remove(OLD_SEEN_KEY);"));
 });
 
+test("texts: rows past the 100 a report carries are told in the next one", () => {
+  const T = textsHelpers();
+  const now = Date.parse("2026-11-25T15:00:00");
+  const rows = Array.from({ length: 150 }, (_, i) => ({ key: `c${i}`, title: `P${i}`, snippet: `Hi ${i}`, unread: false, time: "Mon" }));
+  const first = T.changes(rows, null, now);
+  assert.equal(first.items.length, 100);
+  assert.ok(first.items.every((i) => !("before" in i)));
+  const second = T.changes(rows, first.seen, now + 1000);
+  assert.equal(second.items.length, 50);
+  // Still a first look for them: old texts, never new.
+  assert.ok(second.items.every((i) => i.earlier === true));
+  assert.equal(T.changes(rows, second.seen, now + 2000).items.length, 0);
+});
+
 test("texts: a sign-in code is never told, now or on a first look", () => {
   const T = textsHelpers();
   const now = Date.parse("2026-11-25T15:00:00");
@@ -532,6 +546,10 @@ test("texts: a sign-in code is never told, now or on a first look", () => {
     "Tap to sign in to your account",
     "Your PIN: 4821",
     "Your code is 1234",
+    "123 456 is your Instagram code. Don't share it.", "123456 is your Amazon OTP. Do not share it with anyone.",
+    "4821 is your Uber code",
+    "482913 is your Bank of America code", "123456 is your Wells Fargo SafePass code",
+    "482913 is the code for your account", "482913 - WhatsApp code",
     "482913 is your verification code", "G-482913 is your Google verification code",
     "Your Google code is G-482913", "Use 482913 to verify your account",
   ]) assert.equal(T.isSignInCode(code), true, code);
@@ -542,6 +560,9 @@ test("texts: a sign-in code is never told, now or on a first look", () => {
     "Can't log in to the portal, call me at 555-123-4567", "Please verify the invoice total, it is 12500",
     "zip code 94103", "Can you verify the address? 1600 Amphitheatre Pkwy, 94043",
     "Login meeting moved, dial 4155551234",
+    "Gate code is 4821", "Door code 1234#", "The wifi password is 84219375",
+    "Apt 1402, the code is on the fridge", "Room 1402, the password is on the fridge",
+    "Suite 1200, the door code is on the sign", "Door code is 4821, see you at 7", "Room 1402, wifi password is on the fridge",
   ]) {
     assert.equal(T.isSignInCode(plain), false, plain);
   }

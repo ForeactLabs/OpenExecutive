@@ -14,15 +14,27 @@ import re
 # a hyphen (Google's G-482913). Never part of a phone number (555-123-4567,
 # 4155551234) and never a year (2026).
 _NUMBER = r"(?<!\d)(?<!\d-)(?!(?:19|20)\d\d(?![\d-]))(?:\d{4,8}|\d{3}[- ]\d{3}|(?:\d ){3,7}\d)(?![\d-])"
-# A code word, not a zip, area, postal, dress, promo or discount code.
+# A code word, not a zip, area, postal, dress, promo or discount code, and
+# not a gate, door, garage, alarm, lockbox or wifi one, which people text
+# each other and ask about later ("what's the gate code Sam sent?").
 _CODE_WORD = (
     r"(?<!zip )(?<!area )(?<!postal )(?<!dress )(?<!promo )(?<!discount )"
+    r"(?<!gate )(?<!door )(?<!garage )(?<!alarm )(?<!lockbox )(?<!wifi )(?<!wi-fi )(?<!network )"
     r"\b(?:codes?|passcodes?|passwords?|passwd|otp|pins?)\b"
 )
 # The code close to its word, either way round: "code is 482913", "PIN: 4821",
-# "482913 is your verification code", "G-482913 is your Google verification code".
+# "482913 is your Bank of America code" (a number naming a place, never). A
+# gate, door or wifi code is left
+# out by its word (``_CODE_WORD``), so "Suite 1200, the door code is on the
+# sign" isn't one.
+# A number that names a place (apt 1402, suite 1200, room 12, #305) is not
+# a code that comes before its word: "Apt 1402, the code is on the fridge".
+_NOT_A_PLACE = (
+    r"(?<!apt )(?<!apt\. )(?<!apartment )(?<!suite )(?<!ste )(?<!room )(?<!rm )(?<!unit )(?<!floor )"
+    r"(?<!building )(?<!bldg )(?<!lot )(?<!box )(?<!#)(?<!no\. )"
+)
 _CODE_NEAR = re.compile(
-    _CODE_WORD + r"[^\d\n]{0,25}" + _NUMBER + "|" + _NUMBER + r"[^\d\n]{0,40}" + _CODE_WORD,
+    _CODE_WORD + r"[^\d\n]{0,25}" + _NUMBER + "|" + _NOT_A_PLACE + _NUMBER + r"[^\d\n]{0,40}" + _CODE_WORD,
     re.IGNORECASE,
 )
 # A link or prompt that signs someone in, with no code at all.
