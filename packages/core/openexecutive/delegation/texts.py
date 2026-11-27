@@ -328,6 +328,11 @@ def record(person_id: int, items: list[Incoming], *, db_path: Path | None = None
             ref, sender, words = _clip(item.ref, 300), _clip(item.sender, 200), _clip(item.text, MAX_TEXT)
             if echo is not None:
                 conn.execute(f"UPDATE {TEXT_SENDS_TABLE} SET echoed=1 WHERE id=?", (echo,))
+                # A send to a new number now has its conversation.
+                conn.execute(
+                    f"UPDATE {TEXT_SENDS_TABLE} SET conversation_id=? WHERE id=? AND conversation_id IS NULL",
+                    (conversation_id, echo),
+                )
                 # One row per send: the one its settle writes (``send:<id>``),
                 # whichever comes first, in the words it sent.
                 ref, sender = f"send:{echo}", ""

@@ -1330,3 +1330,15 @@ def test_an_older_conversations_table_gains_the_note_columns(tmp_path: Path, had
     tx.save_note(1, "tc_old", "Nothing needed.", db_path=path)
     (thread,) = tx.threads(1, db_path=path)
     assert (thread.who, thread.note, thread.status) == ("Dana Ruiz", "Nothing needed.", "read")
+
+
+def test_a_new_numbers_echo_moves_its_send_into_that_conversation(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    send = tx.queue_send(owner, "Hi, it's Olivia", to_number="+1 512 555 0100")
+    tx.record(owner, [_item("e", conv="new", title="+1 512 555 0100", sender="+1 512 555 0100",
+                            number="+1 512 555 0100", text="Hi, it's Olivia")])
+    tx.settle_send(owner, send.id, status=tx.SENT)
+    (thread,) = tx.threads(owner)
+    assert thread.status == "sent" and not thread.id.startswith("send-")
+    assert [(t.text, t.outgoing) for t in thread.texts] == [("Hi, it's Olivia", True)]

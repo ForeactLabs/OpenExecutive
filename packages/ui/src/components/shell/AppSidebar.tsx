@@ -87,7 +87,7 @@ export default function AppSidebar({
     mode,
     roleKind: role.role_kind,
     hasDepartments,
-    textsEnabled: useTextsNav(pathname),
+    textsEnabled: useTextsNav(),
   });
   const sections = groupBySection(destinations);
   const [folded, toggleFolded] = useFoldedSections();
@@ -349,8 +349,8 @@ function useFoldedSections(): [NavSectionKey[], (key: NavSectionKey) => void] {
 }
 
 /** Whether Texts belongs in this person's menu: on for the install and
- * turned on by them. Looked at on each move and when they flip it. */
-function useTextsNav(pathname: string): boolean {
+ * turned on by them. Looked at once, then again when they flip it. */
+function useTextsNav(): boolean {
   const [on, setOn] = useState(false);
   const [flips, setFlips] = useState(0);
   useEffect(() => {
@@ -364,7 +364,7 @@ function useTextsNav(pathname: string): boolean {
       .then((t) => setOn(Boolean(t?.available && t.enabled)))
       .catch(() => {});
     return () => ctl.abort();
-  }, [pathname, flips]);
+  }, [flips]);
   return on;
 }
 
