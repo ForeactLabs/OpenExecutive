@@ -644,6 +644,9 @@ test("texts: the press shows Google Messages without taking the focus, and focus
   // A workflow step keeps working on the page that was showing while the press shows Messages.
   assert.ok(show.indexOf("pressShowing = { windowId: win.id, tabId: back.tabId };") < show.indexOf("chrome.tabs.update(tab.id, { active: true })"));
   assert.ok(back.indexOf("pressShowing = null;") < back.indexOf("chrome.tabs.update(back.tabId"));
+  // A tab made active during the press is never put back behind the earlier one.
+  assert.ok(back.includes("if (back.tabId !== null && shown && shown.active) await chrome.tabs.update(back.tabId, { active: true })"));
+  assert.ok(!/\n  if \(back\.tabId !== null\) await chrome\.tabs\.update/.test(back));
   const own = bg.slice(bg.indexOf("async function ownTab"), bg.indexOf("async function ownTab") + 900);
   assert.ok(own.includes("return work.find((t) => t.active) || before || work[work.length - 1] || null;"));
   // A press as a real mouse makes it: the left button held while pressed.

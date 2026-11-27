@@ -583,7 +583,9 @@ async function putBack(tab, back) {
   const win = await chrome.windows.get(back.windowId).catch(() => null);
   // The person went to it meanwhile: leave it where they are.
   if (!win || (win.focused && !back.tookFocus)) return;
-  if (back.tabId !== null) await chrome.tabs.update(back.tabId, { active: true }).catch(() => undefined);
+  // A tab made active since (a workflow's step) stays: only Messages, still showing, gives way.
+  const shown = await chrome.tabs.get(tab.id).catch(() => null);
+  if (back.tabId !== null && shown && shown.active) await chrome.tabs.update(back.tabId, { active: true }).catch(() => undefined);
   if (back.minimized) await chrome.windows.update(back.windowId, { state: "minimized" }).catch(() => undefined);
   if (back.focusedId !== null) await chrome.windows.update(back.focusedId, { focused: true }).catch(() => undefined);
   back.done = true;
