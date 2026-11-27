@@ -12181,7 +12181,8 @@ delegation:
     scheduler hook (_maybe_read_mail_context -> maybe_look, every
     DELEGATION_INBOX_POLL_MINUTES per person, one task, not during a client
     slot) reads received_since from the read point in delegation_mail_context
-    (first look one day back, then 5 minutes of overlap), every tab but
+    (first look one day back, then 5 minutes of overlap; paged with the
+    email watch's _read_back_to so a busy day loses nothing), every tab but
     promotions, social and forums, never spam, trash, drafts, their own mail,
     the Executive's or our ghostwritten drafts. One classifier-model call per
     batch of 10 (GIST_PROMPT, forced note_emails tool, no other tools, the
@@ -12194,7 +12195,10 @@ delegation:
     (forget(source="email")). The same item from another source (a phone
     alert) within 30 minutes of the same match_key is dropped; a source
     whose item changes in place passes refresh=True (new words, updates+1,
-    new again). Acting: only act with a non-empty tie, claimed once
+    new again). A look that finds Act as me turned off by the time its
+    gists are written keeps nothing. Acting: wants_act is stored on the row
+    and waiting_to_act picks up any not acted on (a failed turn is tried on
+    the next look); only act with a non-empty tie, claimed once
     (claim_to_act), and never for mail that has a reply card or went to the
     Executive's own address too (those have their own turn); one unattended
     turn per look as the person (DelegationOverride inbox_work=True, so it

@@ -294,3 +294,60 @@ def test_an_all_team_look_is_the_teams_words(owner: Any, model: dict[str, Any]) 
     _look(owner, Mailbox(_msg("m1", sender="cfo@co.example", name="Cara Fo", sender_authenticated=True)))
     [(_, _prompt, off_team)] = model["acts"]
     assert off_team is False
+
+
+def test_a_busy_inbox_is_read_page_by_page(owner: Any, model: dict[str, Any]) -> None:
+    from openexecutive.monitoring.sources import mailbox as watch
+
+    promos = [
+        _msg(f"p{i}", sender="deals@shop.example", name="Shop", labels=("INBOX", "CATEGORY_PROMOTIONS"),
+             minutes_ago=i + 1)
+        for i in range(watch._READ_LIMIT)
+    ]
+    older = _msg("m1", minutes_ago=600)
+
+    class Paged(Mailbox):
+        async def received_since(
+            self, after: datetime, *, before: datetime | None = None, limit: int = 25,
+        ) -> list[Any]:
+            self.asked_since.append(after)
+            page = [m for m in self.messages if before is None or datetime.fromisoformat(m.received_at) < before]
+            return page[:limit]
+
+    _look(owner, Paged(*promos, older))
+    assert [i.item_key for i in noticed.recent(owner.id, now=NOW)] == ["m1"]
+
+
+def test_a_failed_turn_is_tried_again_on_the_next_look(owner: Any, monkeypatch: pytest.MonkeyPatch,
+                                                      model: dict[str, Any]) -> None:
+    calls: list[str] = []
+
+    async def failing(person: Any, client: Any, prompt: str, *, off_team: bool) -> None:
+        calls.append(prompt)
+        raise RuntimeError("model busy")
+
+    monkeypatch.setattr(mail_context, "_turn", failing)
+    client = Mailbox(_msg("m1"))
+    _look(owner, client)
+    assert len(calls) == 1
+    monkeypatch.setattr(mail_context, "_turn", lambda *a, **k: model["acts"].append(a) or asyncio.sleep(0))
+    _look(owner, client, NOW + timedelta(minutes=10))
+    assert len(model["acts"]) == 1
+    _look(owner, client, NOW + timedelta(minutes=20))
+    assert len(model["acts"]) == 1
+
+
+def test_turned_off_mid_look_keeps_nothing(owner: Any, monkeypatch: pytest.MonkeyPatch,
+                                           model: dict[str, Any]) -> None:
+    real = mail_context._call_model
+
+    async def off_then_gist(turn: str) -> dict[str, Any]:
+        set_enabled(owner.id, False, updated_by="test")
+        mail_context.forget(owner.id)
+        return await real(turn)
+
+    monkeypatch.setattr(mail_context, "_call_model", off_then_gist)
+    assert _look(owner, Mailbox(_msg("m1"))).status == "act_as_me_off"
+    assert noticed.recent(owner.id, now=NOW) == []
+    assert model["acts"] == []
+    assert mail_context.get_cursor(owner.id).read_through is None

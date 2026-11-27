@@ -87,6 +87,8 @@ _DDL: tuple[str, ...] = (
     "  acted_at TEXT,"
     # Times the source changed it in place (``noticed.note(refresh=True)``).
     "  updates INTEGER NOT NULL DEFAULT 0,"
+    # Something should be done because of it (``noticed.waiting_to_act``).
+    "  wants_act INTEGER NOT NULL DEFAULT 0,"
     "  UNIQUE(person_id, item_key)"
     ")",
     f"CREATE INDEX IF NOT EXISTS idx_{NOTICED_TABLE}_person_received "

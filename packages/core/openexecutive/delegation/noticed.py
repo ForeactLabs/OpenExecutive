@@ -64,6 +64,7 @@ class Noticed:
     received_at: str
     acted: bool
     updates: int = 0
+    wants_act: bool = False
 
 
 def _connect(db_path: Path | None = None) -> sqlite3.Connection:
@@ -112,6 +113,7 @@ def note(
     thread_id: str = "",
     received_at: datetime | None = None,
     refresh: bool = False,
+    wants_act: bool = False,
     now: datetime | None = None,
     db_path: Path | None = None,
 ) -> bool:
@@ -135,11 +137,11 @@ def note(
             if refresh:
                 cursor = conn.execute(
                     f"UPDATE {NOTICED_TABLE} SET subject = ?, gist = ?, tie = ?, match_key = ?, "  # noqa: S608
-                    "received_at = ?, acted_at = NULL, updates = updates + 1 "
+                    "received_at = ?, acted_at = NULL, updates = updates + 1, wants_act = ? "
                     "WHERE person_id = ? AND item_key = ? AND (subject != ? OR gist != ?)",
                     (
                         title, _one_line(gist, _GIST_CHARS), _one_line(tie, _TIE_CHARS), matched,
-                        _iso(arrived), person_id, key, title, _one_line(gist, _GIST_CHARS),
+                        _iso(arrived), int(wants_act), person_id, key, title, _one_line(gist, _GIST_CHARS),
                     ),
                 )
                 if cursor.rowcount > 0:
@@ -158,12 +160,12 @@ def note(
                     return False
             cursor = conn.execute(
                 f"INSERT OR IGNORE INTO {NOTICED_TABLE} (person_id, source, item_key, match_key, "  # noqa: S608
-                "sender_name, sender, subject, gist, tie, thread_id, received_at, noted_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "sender_name, sender, subject, gist, tie, thread_id, received_at, noted_at, wants_act) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     person_id, source, key, matched, name, _one_line(sender, 160).lower(), title,
                     _one_line(gist, _GIST_CHARS), _one_line(tie, _TIE_CHARS), _one_line(thread_id, 120),
-                    _iso(arrived), _iso(moment),
+                    _iso(arrived), _iso(moment), int(wants_act),
                 ),
             )
             conn.commit()
@@ -256,10 +258,22 @@ def recent(
             source=str(r["source"]), item_key=str(r["item_key"]), sender_name=str(r["sender_name"]),
             sender=str(r["sender"]), subject=str(r["subject"]), gist=str(r["gist"]), tie=str(r["tie"]),
             thread_id=str(r["thread_id"]), received_at=str(r["received_at"]), acted=r["acted_at"] is not None,
-            updates=int(r["updates"] or 0),
+            updates=int(r["updates"] or 0), wants_act=bool(r["wants_act"]),
         )
         for r in rows
     ]
+
+
+def waiting_to_act(
+    person_id: int, *, source: str | None = None, now: datetime | None = None, db_path: Path | None = None,
+) -> list[Noticed]:
+    """``person_id``'s items that something should be done about and that
+    nothing acted on yet (a new one, or one whose turn failed), oldest first."""
+    found = [
+        item for item in recent(person_id, source=source, limit=200, now=now, db_path=db_path)
+        if item.wants_act and not item.acted
+    ]
+    return list(reversed(found))
 
 
 def claim_to_act(
@@ -338,5 +352,5 @@ def forget(person_id: int, *, source: str | None = None, db_path: Path | None = 
 
 __all__ = [
     "EMAIL", "KEEP", "MATCH_WINDOW", "Noticed", "claim_to_act", "forget", "kept_keys", "match_key",
-    "note", "recent", "release", "set_gist",
+    "note", "recent", "release", "set_gist", "waiting_to_act",
 ]

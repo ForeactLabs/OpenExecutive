@@ -53,10 +53,8 @@ logger = logging.getLogger(__name__)
 
 FIRST_LOOK = timedelta(days=1)
 OVERLAP = timedelta(minutes=5)
-LIST_MAX = 50
 GIST_BATCH = 10
 BODY_CHARS = 1200
-ACT_MAX = 5
 MEETINGS_AHEAD = timedelta(hours=48)
 MEETINGS_MAX = 15
 TASKS_MAX = 15
@@ -400,6 +398,8 @@ async def look_person(person: Any, *, gmail: Any = None, now: datetime | None = 
                 return LookResult(status)
             try:
                 result = await _look(person, client, cursor, moment)
+                if result.status == "act_as_me_off":
+                    return result
             except GmailAuthError:
                 cursor.last_poll_at = moment.isoformat()
                 cursor.backoff_until = (moment + AUTH_RECHECK).isoformat()
@@ -441,7 +441,11 @@ async def _look(person: Any, client: Any, cursor: _Cursor, now: datetime) -> Loo
     exec_address = normalize_email(get_settings().exec_email_address)
     last = _parse(cursor.read_through)
     since = (last - OVERLAP) if last is not None else now - FIRST_LOOK
-    received = await client.received_since(since, limit=LIST_MAX)
+    # Every email since then, a page at a time (the email watch's reader),
+    # so a busy day never pushes older mail out of a single page.
+    from openexecutive.monitoring.sources.mailbox import _read_back_to
+
+    received = await _read_back_to(client, since)
     cursor.read_through = now.isoformat()
     result = LookResult("ok")
     fresh = [m for m in received if keep_reason(m, own=own, exec_address=exec_address)]
@@ -453,34 +457,52 @@ async def _look(person: Any, client: Any, cursor: _Cursor, now: datetime) -> Loo
         _Note(m, inbox.handling_relation(_relation(normalize_email(m.from_addr), contacts=contacts), m))
         for m in fresh if m.id not in kept
     ]
-    if not notes:
-        return result
-    known = await _known(person, client, now)
-    for start in range(0, len(notes), GIST_BATCH):
-        batch = notes[start:start + GIST_BATCH]
-        if not await gist(batch, known):
-            result.failed += len(batch)
+    if notes:
+        known = await _known(person, client, now)
+        for start in range(0, len(notes), GIST_BATCH):
+            batch = notes[start:start + GIST_BATCH]
+            if not await gist(batch, known):
+                result.failed += len(batch)
+    from openexecutive.delegation.settings import is_enabled
+
+    if not is_enabled(person.id):
+        # Turned off while it read: nothing is kept and the read point stays
+        # forgotten, so turning it on again starts from then.
+        return LookResult("act_as_me_off")
     for note in notes:
         m = note.message
         if noticed.note(
             person.id, source=noticed.EMAIL, item_key=m.id, sender_name=m.from_name or "",
             sender=m.from_addr or "", subject=m.subject or "", gist=note.gist, tie=note.tie,
             thread_id=m.thread_id or "", received_at=_parse(m.received_at) or now, now=now,
+            wants_act=note.act and _left_to_us(person, m, exec_address),
         ):
             result.kept += 1
-        else:
-            note.act = False  # kept already, or the same item came another way
-    to_act = [n for n in notes if n.act and _left_to_us(person, n.message, exec_address)]
-    if to_act:
-        claimed = set(noticed.claim_to_act(person.id, [n.message.id for n in to_act[:ACT_MAX]], now=now))
-        picked = [n for n in to_act if n.message.id in claimed]
-        if picked:
-            result.acted = len(picked)
-            # Every email of the look shared the gist call, so any one of them
-            # may have written what the picked ones say: the turn is outside
-            # words unless all of them are the team's.
-            _start_turn(person, client, picked, off_team=any(n.relation != "team" for n in notes))
+    # What this look found to act on, and any earlier one whose turn failed.
+    waiting = noticed.waiting_to_act(person.id, source=noticed.EMAIL, now=now)
+    claimed = set(noticed.claim_to_act(person.id, [item.item_key for item in waiting], now=now))
+    picked = [_from_kept(item) for item in waiting if item.item_key in claimed]
+    if picked:
+        result.acted = len(picked)
+        # Every email of the look shared the gist call, so any one of them
+        # may have written what the picked ones say: the turn is outside
+        # words unless all of them are the team's (one kept from an earlier
+        # look counts as outside).
+        this_look = {n.message.id for n in notes}
+        off_team = any(n.relation != "team" for n in notes) or any(p.message.id not in this_look for p in picked)
+        _start_turn(person, client, picked, off_team=off_team)
     return result
+
+
+def _from_kept(item: Any) -> _Note:
+    """A kept item as the turn reads it."""
+    from types import SimpleNamespace
+
+    message = SimpleNamespace(
+        id=item.item_key, thread_id=item.thread_id, from_name=item.sender_name, from_addr=item.sender,
+        subject=item.subject,
+    )
+    return _Note(message, relation="", gist=item.gist, tie=item.tie, act=True)
 
 
 def _left_to_us(person: Any, message: Any, exec_address: str) -> bool:
@@ -527,7 +549,7 @@ def prompt_for(person: Any, notes: list[_Note]) -> str:
         body = "\n".join([
             f"message_id: {one_line(m.id, 80)}",
             f"thread_id: {one_line(m.thread_id or '', 80)}",
-            f"From: {one_line(m.from_name or '', 80)} <{one_line(m.from_addr or '', 120)}> ({note.relation})",
+            f"From: {one_line(m.from_name or '', 80)} <{one_line(m.from_addr or '', 120)}>",
             f"Subject: {one_line(m.subject or '', 200)}",
             f"Says: {note.gist}",
             f"Ties to: {note.tie}",
@@ -561,7 +583,7 @@ async def _act(person: Any, client: Any, notes: list[_Note], *, off_team: bool) 
     try:
         await _turn(person, client, prompt_for(person, notes), off_team=off_team)
     except Exception:
-        # Not acted on: a later look may try it again.
+        # Not acted on: the next look picks it up again (waiting_to_act).
         logger.exception("mail_context: the turn for person %s failed", person.id)
         noticed.release(person.id, [n.message.id for n in notes])
 
