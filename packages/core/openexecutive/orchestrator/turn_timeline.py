@@ -147,7 +147,7 @@ def _is_cut_off(label: str) -> bool:
     return label == _clean(CUT_OFF_LABEL)
 
 
-def _held_round(step_tool: str, held_tool: str) -> bool:
+def _round_matches(step_tool: str, held_tool: str) -> bool:
     """Whether a round's tool is the held one (a connected app's comes cut
     short and cleaned in its activity)."""
     if not step_tool:
@@ -457,7 +457,7 @@ class TurnTimeline:
         for tool in dict.fromkeys(str(t) for t in held_tools if t):
             for step in self.steps[first_read + 1 :]:
                 if (
-                    _held_round(step.tool, tool)
+                    _round_matches(step.tool, tool)
                     and step.tool != "answer_card"
                     and not (step.acted or step.waits or step.stopped)
                 ):
