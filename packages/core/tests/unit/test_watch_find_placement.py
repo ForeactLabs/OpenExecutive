@@ -256,3 +256,10 @@ def test_only_what_was_shown_counts_as_already_reported(tmp_path: Path, monkeypa
     assert item is not None
     got = ms.recent_query_finds(item, since=datetime.now(UTC) - timedelta(days=1), db_path=db_path)
     assert sorted(title for _, title in got) == ["story 1", "story 2"]
+
+
+def test_an_unchanged_watch_card_is_still_looked_at_now_and_then(db: Path) -> None:
+    now = datetime.now(UTC)
+    card = _reviewed_card(db, watch=True, reviewed=now - timedelta(hours=30), seen=None)
+    settings = review.ReviewSettings(min_age_hours=0, interval_hours=6, max_per_scan=10)
+    assert card in [a.id for a in review.select_candidates(now, settings, db_path=db)]

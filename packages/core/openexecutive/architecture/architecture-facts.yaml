@@ -6955,8 +6955,9 @@ external_monitoring:
     (stopped in the reply). Before, "stop" only rewrote notes.
     Noise: an expired card (only unread cards expire) counts as half a
     dismissal (WatchNoise.recent_expired_unread).
-    Review: a watch's card already reviewed is a candidate again only after
-    a find joins it (last_seen_at after last_reviewed_at).
+    Review: a watch's card already reviewed is a candidate again after a
+    find joins it (last_seen_at after last_reviewed_at), else only every 4th
+    interval (its other evidence can still move).
     Chat tools: add_watchlist_entry defaults cadence to daily (15min for
     stock and vendor_status, real_time for mailbox) and lists overlapping
     company watches under overlaps (informational, never stops the add).

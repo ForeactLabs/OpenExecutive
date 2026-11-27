@@ -250,6 +250,12 @@ def _batches(candidates: list[Alert], size: int) -> list[list[Alert]]:
 # --------------------------------------------------------------------------- #
 
 
+# A watch's card with no new find is looked at again only every this many
+# review intervals: its other evidence (activity, related cards) can still
+# move, just rarely enough not to need every pass.
+_UNCHANGED_WATCH_CARD_INTERVALS = 4
+
+
 def _watch_card_unchanged_since(alert: Alert, reviewed: datetime) -> bool:
     """A watch's card that was reviewed once and has had no new find join it
     since. Another look would read the same card and say the same thing, so
@@ -286,7 +292,11 @@ def select_candidates(
             reviewed = parse_aware(a.last_reviewed_at)
             if reviewed is not None and now - reviewed < interval:
                 continue
-            if reviewed is not None and _watch_card_unchanged_since(a, reviewed):
+            if (
+                reviewed is not None
+                and now - reviewed < interval * _UNCHANGED_WATCH_CARD_INTERVALS
+                and _watch_card_unchanged_since(a, reviewed)
+            ):
                 continue
         out.append(a)
     out.sort(key=lambda a: parse_aware(a.created_at) or now)
