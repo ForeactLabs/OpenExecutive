@@ -732,6 +732,9 @@ async def _look_due(person_ids: list[int], now: datetime) -> None:
             continue
         if person is None or person.archived:
             forget(person_id)
+            # Look again only later, as for anyone who may no longer have it.
+            _save_cursor(_Cursor(person_id=person_id, last_poll_at=now.isoformat(),
+                                 backoff_until=(now + AUTH_RECHECK).isoformat()))
             continue
         await look_person(person, now=now)
 

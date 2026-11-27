@@ -273,6 +273,15 @@ def test_someone_who_may_no_longer_have_it_is_forgotten(owner: Any, monkeypatch:
     assert owner.id not in mail_context._due(later + timedelta(minutes=1))
 
 
+def test_an_archived_person_is_forgotten_and_not_due_every_tick(owner: Any, model: dict[str, Any]) -> None:
+    _look(owner, Mailbox(_msg("m1")))
+    people_store.archive_person(owner.id)
+    later = NOW + timedelta(minutes=10)
+    asyncio.run(mail_context._look_due([owner.id], later))
+    assert noticed.recent(owner.id, now=later) == []
+    assert owner.id not in mail_context._due(later + timedelta(minutes=1))
+
+
 def test_what_came_in_is_pruned_even_when_nothing_new_comes(owner: Any) -> None:
     noticed.note(owner.id, source=noticed.EMAIL, item_key="old", sender_name="Delta", subject="DL123",
                  received_at=NOW - timedelta(days=3), now=NOW - timedelta(days=3))
