@@ -90,6 +90,10 @@ def _differs(own: Any, shared: Any) -> bool:
         or len(own.stuck) != len(shared.stuck)
         or own.drafts != shared.drafts
         or len(own.conversations) != len(shared.conversations)
+        # The own-inbox gists, tied or not, and the count of the rest.
+        or tuple(own.inbox) != tuple(shared.inbox)
+        or tuple(own.inbox_others) != tuple(shared.inbox_others)
+        or own.inbox_others_total != shared.inbox_others_total
     )
 
 

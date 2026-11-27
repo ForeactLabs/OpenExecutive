@@ -305,6 +305,12 @@ def test_fingerprint_ignores_how_the_reflection_words_the_same_notes() -> None:
     assert brief_state.build_brief_fingerprint(**base, reflection_flags=new_card) != (
         brief_state.build_brief_fingerprint(**base, reflection_flags=tuesday)
     )
+    # A plain note, no card and no bold subject, is still news.
+    plain = "- Pine View counteroffer expires Friday noon; worth a call today"
+    assert brief_state.reflection_keys(plain) == ["note:pine view counteroffer expires"]
+    assert brief_state.build_brief_fingerprint(**base, reflection_flags=plain) != (
+        brief_state.build_brief_fingerprint(**base)
+    )
 
 
 def test_reflection_flags_since_reads_the_latest_reflection(

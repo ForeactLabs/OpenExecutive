@@ -610,13 +610,23 @@ _CARD_REF_RE = re.compile(r"\b(?:card|alert)\s*#?\s*(\d+)", re.IGNORECASE)
 _BOLD_SUBJECT_RE = re.compile(r"\*\*([^*\n]{2,120})\*\*")
 
 
+_BULLET_MARK_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s*")
+# Words that say how long or how much, not what a note is about: the
+# reflection rewrites them daily ("about 4 days", "still waiting").
+_NOTE_STOP_WORDS = frozenset({
+    "about", "still", "days", "hours", "weeks", "since", "today", "worth", "with",
+    "that", "this", "from", "have", "been", "your", "they", "their", "there",
+    "waiting", "nearly", "almost", "over", "more", "than", "just", "only",
+})
+
+
 def reflection_keys(text: str) -> list[str]:
     """What the reflection's "Flagged for the brief" notes are about, free of
     their wording: the cards they name (``card:220``) and, for a note that
     names no card, its bold subject with digits and punctuation taken out
-    (``note:regions lp buyout deadline``). Sorted, no repeats. A note with
-    neither is keyed by nothing: it is a rewording of what the board already
-    says, which the fingerprint holds on its own."""
+    (``note:regions lp buyout deadline``), and for a note with neither, its
+    first few content words (``note:pine view counteroffer expires``), so a
+    new plain note still counts as news. Sorted, no repeats."""
     keys: set[str] = set()
     for raw in re.split(r"\n\s*(?=[-*•])|\n{2,}", text or ""):
         cards = set(_CARD_REF_RE.findall(raw))
@@ -629,6 +639,13 @@ def reflection_keys(text: str) -> list[str]:
             words = " ".join(words.split())
             if words:
                 keys.add(f"note:{words}")
+            continue
+        plain = [
+            w for w in re.sub(r"[^a-z ]+", " ", _BULLET_MARK_RE.sub("", raw).lower()).split()
+            if len(w) > 3 and w not in _NOTE_STOP_WORDS
+        ]
+        if plain:
+            keys.add("note:" + " ".join(plain[:4]))
     return sorted(keys)
 
 

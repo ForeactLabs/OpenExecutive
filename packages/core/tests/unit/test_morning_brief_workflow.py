@@ -370,6 +370,12 @@ def test_a_private_row_past_the_top_groups_still_counts() -> None:
     shared = LiveSignals(inbound_total=11, keys=dict(keys))
     assert _differs(own, shared) is True
     assert _differs(shared, LiveSignals(inbound_total=11, keys=dict(keys))) is False
+    # Untied mail in the owner's own inbox is theirs too.
+    untied = LiveSignals(
+        inbound_total=11, keys=dict(keys),
+        inbox_others=("Chase: your statement is ready",), inbox_others_total=1,
+    )
+    assert _differs(untied, shared) is True
 
 
 # --------------------------------------------------------------------------- #
