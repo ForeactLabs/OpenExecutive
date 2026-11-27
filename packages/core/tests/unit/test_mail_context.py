@@ -579,6 +579,22 @@ def test_a_reply_watcher_still_deciding_is_waited_for(owner: Any, model: dict[st
     assert len(model["acts"]) == 1
 
 
+def test_unreadable_reply_cards_wait_and_act_on_the_next_look(owner: Any, monkeypatch: pytest.MonkeyPatch,
+                                                              model: dict[str, Any]) -> None:
+    real = inbox.get_watch
+
+    def broken(person_id: int) -> Any:
+        raise RuntimeError("db busy")
+
+    monkeypatch.setattr(inbox, "get_watch", broken)
+    _look(owner, Mailbox(_msg("m1", minutes_ago=1)))
+    assert model["acts"] == []
+    assert len(noticed.waiting_to_act(owner.id, source=noticed.EMAIL, now=NOW)) == 1
+    monkeypatch.setattr(inbox, "get_watch", real)
+    _look(owner, Mailbox(_msg("m1", minutes_ago=1)), NOW + timedelta(minutes=10))
+    assert len(model["acts"]) == 1
+
+
 def test_no_turn_once_act_as_me_went_off_after_the_claim(owner: Any, monkeypatch: pytest.MonkeyPatch,
                                                          model: dict[str, Any]) -> None:
     async def prepare_then_off(person: Any, client: Any, *, off_team: bool) -> tuple[Any, Any]:

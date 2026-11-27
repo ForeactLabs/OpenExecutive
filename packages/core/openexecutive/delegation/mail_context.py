@@ -659,8 +659,6 @@ def _left_to_us(message: Any, exec_address: str, replies: _Replies) -> bool:
     addressed = {a.strip().lower() for a in [*getattr(message, "to", []), *getattr(message, "cc", [])]}
     if exec_address and exec_address in addressed:
         return False
-    if not replies.ok:
-        return False
     if (replies.outcomes or {}).get(message.id) in (inbox.DRAFTED, inbox.SENT):
         return False
     return message.thread_id not in replies.card_threads
