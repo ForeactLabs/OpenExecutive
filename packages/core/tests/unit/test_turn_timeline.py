@@ -123,6 +123,19 @@ def test_a_step_with_no_chip_never_reads_as_done() -> None:
     assert done["steps"] == [{**done["steps"][0], "label": "Sending a message", "state": "tried", "kind": "do"}]
 
 
+def test_a_held_step_waits_once_not_twice() -> None:
+    # outside_content held the send: its activity came, no chip followed.
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Reading a web page", "tool": "read_web_page"})
+    tl.observe({"type": "activity", "label": "Messaging Dana", "tool": "message_person"})
+    done = tl.finish(("Message Dana",))
+    assert done is not None
+    assert [(s["label"], s["state"]) for s in done["steps"]] == [
+        ("Read a web page", "done"),
+        ("Message Dana", "waits"),
+    ]
+
+
 def test_a_meeting_sent_for_approval_waits() -> None:
     tl = TurnTimeline(Clock())
     tl.observe({"type": "action_taken", "tool": "create_calendar_event", "summary": "Sent for approval: Board sync", "target": "x1"})

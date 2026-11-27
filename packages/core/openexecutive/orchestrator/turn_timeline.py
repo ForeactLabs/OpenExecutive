@@ -328,10 +328,17 @@ class TurnTimeline:
         """Close the turn: steps held for the person's go are added as
         waiting, and nothing is current any more. The payload to save with
         the reply, or None when the turn took no steps."""
-        for words in held:
-            text = _clean(words)
-            if text:
-                self._add_step(Step(label=text, kind=DO, at=self._now(), waits=True, named=True))
+        texts = [t for t in (_clean(w) for w in held) if t]
+        # A held step's round already showed (its activity came, no chip
+        # followed): that step is the one waiting, not one that failed. The
+        # held tools are the turn's latest tries, so match from the end.
+        tries = [s for s in self.steps if s.tried]
+        for text, step in zip(reversed(texts), reversed(tries), strict=False):
+            step.label = text
+            step.named = True
+            step.waits = True
+        for text in texts[: max(0, len(texts) - len(tries))]:
+            self._add_step(Step(label=text, kind=DO, at=self._now(), waits=True, named=True))
         self.finished = True
         self.seconds = self._now()
         if not self.steps:
