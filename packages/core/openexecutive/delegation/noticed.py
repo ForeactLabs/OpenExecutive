@@ -237,10 +237,12 @@ def recent(
     source: str | None = None,
     words: str = "",
     limit: int = MAX_LISTED,
+    waiting: bool = False,
     now: datetime | None = None,
     db_path: Path | None = None,
 ) -> list[Noticed]:
-    """``person_id``'s items, newest first: since ``since`` (at most
+    """``person_id``'s items, newest first (``waiting``: only those to act
+    on that nothing acted on yet): since ``since`` (at most
     ``KEEP`` back), from ``source`` when given, holding all of ``words``
     in the sender, subject or gist when given."""
     moment = now or datetime.now(UTC)
@@ -252,6 +254,8 @@ def recent(
     if source:
         sql += "AND source = ? "
         params.append(source)
+    if waiting:
+        sql += "AND wants_act = 1 AND acted_at IS NULL "
     for word in words.lower().split()[:6]:
         sql += "AND LOWER(sender_name || ' ' || sender || ' ' || subject || ' ' || gist) LIKE ? "
         params.append(f"%{word}%")
@@ -284,10 +288,7 @@ def waiting_to_act(
 ) -> list[Noticed]:
     """``person_id``'s items that something should be done about and that
     nothing acted on yet (a new one, or one whose turn failed), oldest first."""
-    found = [
-        item for item in recent(person_id, source=source, limit=200, now=now, db_path=db_path)
-        if item.wants_act and not item.acted
-    ]
+    found = recent(person_id, source=source, limit=200, waiting=True, now=now, db_path=db_path)
     return list(reversed(found))
 
 

@@ -282,6 +282,15 @@ def test_an_archived_person_is_forgotten_and_not_due_every_tick(owner: Any, mode
     assert owner.id not in mail_context._due(later + timedelta(minutes=1))
 
 
+def test_an_item_to_act_on_is_not_lost_behind_newer_ones(owner: Any) -> None:
+    noticed.note(owner.id, source=noticed.EMAIL, item_key="act", sender_name="Delta", subject="DL123",
+                 tie="3pm", wants_act=True, received_at=NOW - timedelta(hours=5), now=NOW)
+    for n in range(210):
+        noticed.note(owner.id, source=noticed.EMAIL, item_key=f"r{n}", sender_name="Shop", subject=f"Receipt {n}",
+                     received_at=NOW - timedelta(minutes=n), now=NOW)
+    assert [i.item_key for i in noticed.waiting_to_act(owner.id, source=noticed.EMAIL, now=NOW)] == ["act"]
+
+
 def test_what_came_in_is_pruned_even_when_nothing_new_comes(owner: Any) -> None:
     noticed.note(owner.id, source=noticed.EMAIL, item_key="old", sender_name="Delta", subject="DL123",
                  received_at=NOW - timedelta(days=3), now=NOW - timedelta(days=3))
