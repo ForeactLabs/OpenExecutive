@@ -624,6 +624,10 @@ test("texts: the press shows Google Messages without taking the focus, and focus
   assert.ok(last.indexOf("check.x === last.x && check.y === last.y) await pressAt(target, check);") > last.indexOf("focusForPress(back, target)"));
   assert.ok(last.indexOf("await putBack(now, back);") > last.indexOf("await pressAt(target, check)"));
   const focus = bg.slice(bg.indexOf("async function focusForPress"), bg.indexOf("async function putBack"));
+  // A slow clear never gets a second press: the box must stay full for ~3 s first.
+  assert.ok(press.includes("after.full && (await staysFull(target, at))"));
+  const stays = bg.slice(bg.indexOf("async function staysFull"), bg.indexOf("async function pressInTab"));
+  assert.ok(stays.includes("if (!now || now.at !== at || !now.full) return false;") && stays.includes("i < 10"));
   // Never from another app (no Chrome window in front), which the focus couldn't go back to.
   assert.ok(focus.includes("if (!before || before.id === back.windowId) return false;"));
   assert.ok(focus.indexOf("return false;") < focus.indexOf("{ focused: true }"));
