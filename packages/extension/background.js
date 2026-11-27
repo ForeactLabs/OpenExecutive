@@ -87,7 +87,10 @@ async function ownTab() {
   const origins = await connectedOrigins();
   // Google Messages (kept there for texts, in the group) is never a page to work on.
   const work = (await chrome.tabs.query({ windowId: id })).filter((t) => !t.pinned && !onMessages(t.url) && !OE.onConnected(t.url, origins));
-  return work.find((t) => t.active) || work[work.length - 1] || null;
+  // While a text's press shows Messages there, the page that was showing is
+  // still the one a step works on.
+  const before = pressShowing && pressShowing.windowId === id ? work.find((t) => t.id === pressShowing.tabId) : null;
+  return before || work.find((t) => t.active) || work[work.length - 1] || null;
 }
 
 // ---- Its window beside the chat ----
@@ -437,6 +440,8 @@ async function sendOneText(send) {
 // Only the tab a send was handed to, only while that send runs, and only on
 // the conversation it was handed (or a new one for a number).
 let pressing = null;
+// The tab a press moved from, while Messages shows in its place.
+let pressShowing = null;
 
 // Attaching shows Chrome's "is debugging this browser" bar, which makes the
 // page shorter and moves the compose bar up. So the Send button is found
@@ -528,6 +533,7 @@ async function showForPress(tab, target) {
   try {
     if (back.minimized) await chrome.windows.update(win.id, { state: "normal", focused: false });
     if (back.tabId !== null) {
+      pressShowing = { windowId: win.id, tabId: back.tabId };
       await chrome.tabs.update(tab.id, { active: true });
       // In a window the person is typing in, their keys would now go to the
       // box holding the text: take the focus off it straight away.
@@ -564,6 +570,7 @@ async function focusForPress(back, target) {
 
 async function putBack(tab, back) {
   if (!back || back.done) return;
+  pressShowing = null;
   if (back.focused) {
     // Their own window, in front: only their tab comes back, and only if
     // Messages is still the one showing (they didn't move on themselves).
