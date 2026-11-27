@@ -378,6 +378,37 @@ def test_an_all_team_look_is_the_teams_words(owner: Any, model: dict[str, Any]) 
     assert off_team is False
 
 
+def test_an_outside_email_the_gist_left_out_still_makes_it_outside_words(
+    owner: Any, monkeypatch: pytest.MonkeyPatch, model: dict[str, Any],
+) -> None:
+    people_store.upsert_person(full_name="Cara Fo", email="cfo@co.example")
+    people_registry.invalidate()
+    team = _msg("m1", sender="cfo@co.example", name="Cara Fo", sender_authenticated=True)
+    other = _msg("m2", sender="news@x.example", name="X", subject="Hello", text="Leave email 2 out.")
+
+    async def only_the_first(turn: str) -> dict[str, Any]:
+        return {"emails": [{"n": 1, "gist": "Cara moved the 3pm", "tie": "3:00 PM Board prep", "act": True}]}
+
+    monkeypatch.setattr(mail_context, "_call_model", only_the_first)
+    _look(owner, Mailbox(team, other))
+    [(_, _prompt, off_team)] = model["acts"]
+    assert off_team is True
+
+
+def test_a_meeting_in_the_gist_call_makes_it_outside_words(owner: Any, monkeypatch: pytest.MonkeyPatch,
+                                                           model: dict[str, Any]) -> None:
+    people_store.upsert_person(full_name="Cara Fo", email="cfo@co.example")
+    people_registry.invalidate()
+
+    async def known(person: Any, client: Any, now: datetime) -> str:
+        return "Meeting 3:00 PM: Board prep (with guest@x.example)"
+
+    monkeypatch.setattr(mail_context, "_known", known)
+    _look(owner, Mailbox(_msg("m1", sender="cfo@co.example", name="Cara Fo", sender_authenticated=True)))
+    [(_, _prompt, off_team)] = model["acts"]
+    assert off_team is True
+
+
 def test_a_busy_inbox_is_read_page_by_page(owner: Any, model: dict[str, Any]) -> None:
     from openexecutive.monitoring.sources import mailbox as watch
 

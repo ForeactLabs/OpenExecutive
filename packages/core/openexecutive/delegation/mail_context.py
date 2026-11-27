@@ -476,8 +476,14 @@ async def _look(person: Any, client: Any, cursor: _Cursor, now: datetime) -> Loo
         for m in fresh if m.id not in kept
     ]
     unread: set[str] = set()
+    # Everything that went into the gist call this look, answered or not:
+    # any of it may have shaped what the others say.
+    gisted = list(notes)
+    outside_known = False
     if notes:
         known = await _known(person, client, now)
+        # A meeting's title and attendees can be written by someone outside.
+        outside_known = any(line.startswith("Meeting ") for line in known.splitlines())
         for start in range(0, len(notes), GIST_BATCH):
             batch = notes[start:start + GIST_BATCH]
             await gist(batch, known)
@@ -525,10 +531,14 @@ async def _look(person: Any, client: Any, cursor: _Cursor, now: datetime) -> Loo
         result.acted = len(picked)
         # Every email of the look shared the gist call, so any one of them
         # may have written what the picked ones say: the turn is outside
-        # words unless all of them are the team's (one kept from an earlier
-        # look counts as outside).
-        this_look = {n.message.id for n in notes}
-        off_team = any(n.relation != "team" for n in notes) or any(p.message.id not in this_look for p in picked)
+        # words unless all of them are the team's and no meeting was in the
+        # call (one kept from an earlier look counts as outside).
+        this_look = {n.message.id for n in gisted}
+        off_team = (
+            outside_known
+            or any(n.relation != "team" for n in gisted)
+            or any(p.message.id not in this_look for p in picked)
+        )
         _start_turn(person, client, picked, off_team=off_team)
     return result
 

@@ -12210,7 +12210,8 @@ delegation:
     audit scope (unscoped_audit_rows) and sets its own; one unattended
     turn per look as the person (DelegationOverride inbox_work=True, so it
     can read the mail; sender_off_team unless every email of the look is
-    from a verified teammate, since they share one gist call; an unverified
+    from a verified teammate (answered by the gist call or not) and no
+    meeting was in it, since they share one gist call; an unverified
     From is a stranger, inbox.handling_relation; the emails go in as
     email_quoted blocks so the content check reads them), whose
     every step goes through levels like any unattended run. Read by chat's
