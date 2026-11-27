@@ -70,8 +70,8 @@ export function StepsTimelineBody({ timeline, onClose }: { timeline: TurnTimelin
         <p>{summaryLine(timeline)}</p>
         {timeline.reads && timeline.reads.length > 0 && (
           <div className="mt-2.5 flex flex-wrap gap-1.5">
-            {timeline.reads.map((r) => (
-              <span key={r} className="rounded-full border border-line bg-surface-elevated px-2.5 py-0.5 text-xs font-medium text-fg">
+            {timeline.reads.map((r, i) => (
+              <span key={`${i}-${r}`} className="rounded-full border border-line bg-surface-elevated px-2.5 py-0.5 text-xs font-medium text-fg">
                 {r}
               </span>
             ))}
@@ -109,8 +109,8 @@ export function StepsTimelineBody({ timeline, onClose }: { timeline: TurnTimelin
                       ) : step.detail ? (
                         <p className="mt-0.5 text-sm text-fg-muted">{step.detail}</p>
                       ) : null}
-                      {step.found?.map((f) => (
-                        <p key={f} className="mt-0.5 text-sm text-fg">
+                      {step.found?.map((f, i) => (
+                        <p key={`${i}-${f}`} className="mt-0.5 text-sm text-fg">
                           {f}
                         </p>
                       ))}
