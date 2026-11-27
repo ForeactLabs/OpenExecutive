@@ -82,6 +82,8 @@ import type { RepeatOffer } from "@/lib/api";
 import { turnStatus } from "@/lib/turnStatus";
 import { isNearBottom, lastUserIndex, pinScrollTop, pinSpacerHeight } from "@/lib/chatPin";
 import { isImeComposing } from "@/lib/imeComposing";
+import StepsChip, { StepsPanel } from "@/components/StepsTimeline";
+import { timelineFrom, type TurnTimeline } from "@/lib/turnTimeline";
 
 interface ChatProps {
   onDebugEvent?: (event: DebugEvent) => void;
@@ -213,6 +215,11 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
   // and whether the reply itself is being written (answer text since the
   // last tool round).
   const [turnProgress, setTurnProgress] = useState<TurnProgress | null>(null);
+  // The running turn's "What I did" timeline (lib/turnTimeline.ts), and which
+  // one is open: the running turn's ("live", which becomes its reply's once
+  // the reply lands) or a reply's, by its index.
+  const [turnTimeline, setTurnTimeline] = useState<TurnTimeline | null>(null);
+  const [stepsOpen, setStepsOpen] = useState<"live" | number | null>(null);
   const [turnReads, setTurnReads] = useState<ReadCounts>({});
   const [liveLine, setLiveLine] = useState<string | null>(null);
   const [writingReply, setWritingReply] = useState(false);
@@ -646,6 +653,7 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
     setActivityLabel(null);
     setTurnSteps([]);
     setTurnProgress(null);
+    setTurnTimeline(null);
     setTurnReads({});
     setLiveLine(null);
     setWritingReply(false);
@@ -674,6 +682,7 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
     const turnActions: ActionTaken[] = [];
     // What the reply looked at; sent once, just before `done`.
     let turnSources: AnswerSources | undefined;
+    let turnDone: TurnTimeline | undefined;
     // Steps the turn held for an outside read; sent once, just before `done`.
     let turnHeld: string[] | undefined;
     let turnFlags: string[] | undefined;
@@ -771,6 +780,12 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
           setRepeatOffer({ offer: item.offer, sessionId: item.session_id });
         } else if (item.type === "sources") {
           turnSources = answerSourcesFrom(item);
+        } else if (item.type === "timeline") {
+          const t = timelineFrom(item);
+          if (t) {
+            turnDone = t;
+            setTurnTimeline(t);
+          }
         } else if (item.type === "held_steps") {
           turnHeld = item.steps.length > 0 ? item.steps : undefined;
         } else if (item.type === "flags") {
@@ -834,6 +849,7 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
             actions: turnActions.length > 0 ? turnActions : undefined,
             stopped: wasStopped || undefined,
             sources: turnSources,
+            steps: turnDone?.done ? turnDone : undefined,
             id: replyId,
             held_steps: turnHeld,
             flags: turnFlags,
@@ -1047,8 +1063,19 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
     inCommittee: committeePhase !== null,
     statusShown: status.show,
   });
+  const elapsedSeconds = Math.floor(turnClock.msSinceTurnStart / 1000);
+  const liveTimeline = isLoading && turnTimeline && !turnTimeline.done ? turnTimeline : null;
   const liveStatus =
-    liveKind === "steps" ? (
+    liveKind === "steps" && liveTimeline ? (
+      <div>
+        <StepsChip
+          timeline={liveTimeline}
+          elapsed={elapsedSeconds}
+          nowLabel={handingOver ? "Writing up what I have so far" : writingReply ? "Writing the answer" : null}
+          onOpen={() => setStepsOpen("live")}
+        />
+      </div>
+    ) : liveKind === "steps" ? (
       <TurnSteps
         progress={turnProgress}
         reads={turnReads}
@@ -1059,6 +1086,25 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
     ) : liveKind === "status" ? (
       <TurnStatusRow status={status} committeePhase={committeePhase} showMark={Boolean(streamingContent)} />
     ) : null;
+  // The open timeline: the running turn's until its reply lands, then that
+  // reply's; or the reply it was opened from.
+  const lastReply = messages.length > 0 && messages[messages.length - 1].role === "assistant" ? messages.length - 1 : -1;
+  const openIndex = stepsOpen === "live" ? (liveTimeline ? null : lastReply) : stepsOpen;
+  const openTimeline =
+    stepsOpen === "live" && liveTimeline
+      ? liveTimeline
+      : openIndex !== null && openIndex >= 0
+        ? timelineFrom(messages[openIndex]?.steps)
+        : null;
+  const stepsPanel = (
+    <StepsPanel
+      timeline={openTimeline}
+      elapsed={elapsedSeconds}
+      open={stepsOpen !== null && openTimeline !== null}
+      onClose={() => setStepsOpen(null)}
+    />
+  );
+
   // The ask the turn waits on, under the line.
   const liveSlot =
     liveStatus || (isLoading && handOverAsk) ? (
@@ -1381,6 +1427,8 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
                   }
                   stopped={msg.role === "assistant" ? msg.stopped : undefined}
                   sources={msg.role === "assistant" ? msg.sources : undefined}
+                  steps={msg.role === "assistant" ? timelineFrom(msg.steps) : undefined}
+                  onOpenSteps={() => setStepsOpen(i)}
                   feedback={msg.role === "assistant" && !member ? msg.feedback : undefined}
                   author={
                     shared && msg.role === "user" && msg.sender_name
@@ -1472,6 +1520,7 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
                 )
               )}
 
+              {stepsPanel}
               {/* Someone else's turn, as it happens. */}
               {othersTurn && (
                 <>

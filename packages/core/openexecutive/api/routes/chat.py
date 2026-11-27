@@ -33,6 +33,7 @@ from openexecutive.orchestrator.action_chips import drop_replaced
 from openexecutive.orchestrator.answer_sources import TurnSources
 from openexecutive.orchestrator.debug_events import DebugCollector
 from openexecutive.orchestrator.turn_inbox import TurnInbox
+from openexecutive.orchestrator.turn_timeline import TurnTimeline
 from openexecutive.workflows import turn_files
 from openexecutive.workflows.turn_files import bind as bind_turn_files
 
@@ -1778,6 +1779,10 @@ async def _run_chat_turn(
             action_chips: list[dict[str, Any]] = []
             # `turn_sources` as sent and saved once the reply is over.
             answer_sources: dict[str, Any] | None = None
+            # What the turn did, step by step: sent as it changes and saved
+            # with the reply for its "What I did" timeline.
+            timeline = TurnTimeline()
+            saved_steps: dict[str, Any] | None = None
 
             async def _persist_turn() -> None:
                 # Persist the turn on every terminal path — normal completion,
@@ -1833,6 +1838,7 @@ async def _run_chat_turn(
                     action_chips=json.dumps(action_chips) if action_chips else None,
                     stopped=stopped,
                     sources=json.dumps(answer_sources) if answer_sources else None,
+                    steps=json.dumps(saved_steps) if saved_steps else None,
                 )
                 # The Executive's own post-turn block (executive.py, after its
                 # `async for`) is what normally mirrors the turn into the live
@@ -1981,6 +1987,9 @@ async def _run_chat_turn(
                             ):
                                 chat_live.turn_event(session.session_id, live_key, item)
                             yield f"data: {json.dumps(item)}\n\n"
+                            timeline_evt = timeline.observe(item)
+                            if timeline_evt is not None:
+                                yield f"data: {json.dumps({**timeline_evt, 'session_id': session.session_id})}\n\n"
 
                         if stop_event is not None and stop_event.is_set():
                             stopped = True
@@ -2067,6 +2076,12 @@ async def _run_chat_turn(
 
             browser_needed = browser_tools.take_needed(session)
 
+            # What the turn held for an outside read, for Approve / Not now
+            # buttons under the reply (Approve sends the person's go), and
+            # as waiting steps on its timeline.
+            held_steps = outside_content.pending_held(session) if not (stopped or timed_out) else ()
+            saved_steps = timeline.finish(held_steps)
+
             if client_disconnected:
                 # Connection is gone, so we can't yield anything more — but we
                 # still persist whatever the Executive produced before the
@@ -2090,9 +2105,9 @@ async def _run_chat_turn(
                 sources_evt = {"type": "sources", "session_id": session.session_id, **answer_sources}
                 yield f"data: {json.dumps(sources_evt)}\n\n"
 
-            # What the turn held for an outside read, for Approve / Not now
-            # buttons under the reply (Approve sends the person's go).
-            held_steps = outside_content.pending_held(session) if not (stopped or timed_out) else ()
+            if saved_steps is not None and full_response:
+                steps_evt = {"type": "timeline", "session_id": session.session_id, **saved_steps}
+                yield f"data: {json.dumps(steps_evt)}\n\n"
             if held_steps:
                 held_evt = {"type": "held_steps", "session_id": session.session_id, "steps": list(held_steps)}
                 yield f"data: {json.dumps(held_evt)}\n\n"

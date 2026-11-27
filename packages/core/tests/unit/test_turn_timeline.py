@@ -1,0 +1,160 @@
+"""The "What I did" timeline a chat turn builds from its own events."""
+
+from __future__ import annotations
+
+import json
+
+from openexecutive.memory import session_store
+from openexecutive.memory.episodic import initialize_db
+from openexecutive.orchestrator.turn_timeline import (
+    DO,
+    LOOK,
+    WORK,
+    TurnTimeline,
+    from_saved,
+    kind_of,
+    past,
+    read_chips,
+)
+
+
+class Clock:
+    def __init__(self) -> None:
+        self.t = 100.0
+
+    def __call__(self) -> float:
+        return self.t
+
+
+def test_each_round_is_a_step_with_its_time_and_reads() -> None:
+    clock = Clock()
+    tl = TurnTimeline(clock)
+    clock.t = 103
+    evt = tl.observe({"type": "activity", "label": "Searching your email…", "tool": "search_my_email", "reads": {"email": 4}})
+    assert evt is not None and evt["type"] == "timeline"
+    step = evt["steps"][0]
+    assert step == {"label": "Searching your email", "kind": LOOK, "at": 3, "state": "current", "detail": "4 emails"}
+    assert evt["done"] is False
+
+
+def test_a_repeat_of_the_same_round_is_one_step() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Reading your email", "tool": "read_my_email", "reads": {"email": 1}})
+    tl.observe({"type": "activity", "label": "Reading your email", "tool": "read_my_email", "reads": {"email": 2}})
+    assert len(tl.steps) == 1
+    assert tl.steps[0].reads == {"email": 3}
+
+
+def test_an_unnamed_round_adds_no_step() -> None:
+    tl = TurnTimeline(Clock())
+    assert tl.observe({"type": "activity", "label": "Working…", "tool": ""}) is None
+    assert tl.steps == []
+
+
+def test_progress_names_the_step_and_adds_what_it_found() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Reading a file", "tool": "read_document"})
+    evt = tl.observe({
+        "type": "progress",
+        "task": "Checking hiring budget",
+        "now": "Reading the Q4 budget",
+        "found": ["$96k of sales headcount unspent"],
+    })
+    assert evt is not None
+    assert evt["task"] == "Checking hiring budget"
+    assert evt["steps"][0]["label"] == "Reading the Q4 budget"
+    assert evt["steps"][0]["found"] == ["$96k of sales headcount unspent"]
+    # The same finding sent again is not added twice.
+    assert tl.observe({"type": "progress", "found": ["$96k of sales headcount unspent"]}) is None
+
+
+def test_an_action_names_its_round_and_says_when_it_waits() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Messaging Dana", "tool": "message_person"})
+    tl.observe({
+        "type": "action_taken",
+        "tool": "message_person",
+        "summary": "Waiting for your approval",
+        "target": "Dana Park",
+        "decision_id": 42,
+    })
+    payload = tl.finish()
+    assert payload is not None
+    [step] = payload["steps"]
+    assert step["kind"] == DO
+    assert step["state"] == "waits"
+    assert step["card_id"] == 42
+    assert step["label"] == "Waiting for your approval: Dana Park"
+
+
+def test_finish_adds_held_steps_and_ends_the_current_one() -> None:
+    clock = Clock()
+    tl = TurnTimeline(clock)
+    tl.observe({"type": "activity", "label": "Checking your calendar", "tool": "my_calendar", "reads": {"calendar": 1}})
+    clock.t = 152
+    payload = tl.finish(("Send an email",))
+    assert payload is not None
+    assert payload["done"] is True
+    assert payload["seconds"] == 52
+    assert [s["state"] for s in payload["steps"]] == ["done", "waits"]
+    # A done step reads in the past tense.
+    assert payload["steps"][0]["label"] == "Checked your calendar"
+    assert payload["reads"] == ["Your calendar"]
+    # Nothing more is taken once it has finished.
+    assert tl.observe({"type": "activity", "label": "Reading", "tool": "x"}) is None
+
+
+def test_a_turn_with_no_steps_saves_nothing() -> None:
+    assert TurnTimeline(Clock()).finish() is None
+
+
+def test_other_events_and_junk_are_ignored() -> None:
+    tl = TurnTimeline(Clock())
+    assert tl.observe({"type": "chunk", "content": "hi"}) is None
+    assert tl.observe("text") is None
+    assert tl.observe({"type": "activity", "label": 5}) is None
+
+
+def test_kinds_past_tense_and_read_chips() -> None:
+    assert kind_of("consult_specialist") == WORK
+    assert kind_of("message_person") == DO
+    assert kind_of("search_my_email") == LOOK
+    assert past("Searching your email") == "Searched your email"
+    assert past("Dana's budget") == "Dana's budget"
+    assert read_chips({"email": 4, "file": 1, "calendar": 1, "person": 2}) == [
+        "4 emails", "1 file", "Your calendar", "2 people",
+    ]
+
+
+def test_from_saved_keeps_only_what_the_chat_shows() -> None:
+    saved = from_saved({
+        "task": "t",
+        "seconds": 9,
+        "steps": [
+            {"label": "Read a file", "kind": "look", "at": 1, "state": "current", "secret": "x"},
+            {"label": 3},
+            {"label": "Odd", "kind": "zzz", "state": "done"},
+        ],
+        "reads": ["1 file", 2],
+    })
+    assert saved is not None
+    assert saved["steps"][0] == {"label": "Read a file", "kind": "look", "at": 1, "state": "done"}
+    assert saved["steps"][1]["kind"] == LOOK
+    assert saved["reads"] == ["1 file"]
+    assert from_saved({"steps": []}) is None
+    assert from_saved("nope") is None
+
+
+def test_saved_with_the_reply_and_read_back(tmp_path) -> None:
+    db = tmp_path / "t.db"
+    initialize_db(db)
+    session_store.create_session("s1", "t", "2026-11-27T00:00:00+00:00", db_path=db)
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Reading your email", "tool": "read_my_email", "reads": {"email": 2}})
+    payload = tl.finish()
+    session_store.save_message("s1", "user", "hi", db_path=db)
+    session_store.save_message("s1", "assistant", "hello", db_path=db, steps=json.dumps(payload))
+    messages = session_store.load_messages("s1", db_path=db)
+    assert "steps" not in messages[0]
+    assert messages[1]["steps"]["steps"][0]["label"] == "Read your email"
+    assert messages[1]["steps"]["steps"][0]["detail"] == "2 emails"
