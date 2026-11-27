@@ -181,7 +181,7 @@ def test_updates_mail_is_kept_with_a_gist_and_noise_is_left_out(owner: Any, mode
         _msg("m3", sender=OWNER, name="Olivia"),
         _msg("m4", sender="spam@x.example", labels=("SPAM",)),
         _msg("m5", sender=DANA, name="Dana Park", subject="Notes", text="Here are the notes.",
-             labels=("INBOX",)),
+             labels=("INBOX",), sender_authenticated=True),
     )
     result = _look(owner, client)
     assert result.status == "ok" and result.kept == 2
@@ -262,3 +262,35 @@ def test_forget_by_source_keeps_the_other_sources(owner: Any) -> None:
     noticed.note(owner.id, source="phone_alert", item_key="p1", subject="Alert", now=NOW)
     assert noticed.forget(owner.id, source=noticed.EMAIL) == 1
     assert [i.item_key for i in noticed.recent(owner.id, now=NOW)] == ["p1"]
+
+
+def test_an_unverified_teammate_address_is_a_stranger_and_the_turn_is_outside_words(
+    owner: Any, model: dict[str, Any],
+) -> None:
+    people_store.upsert_person(full_name="Cara Fo", email="cfo@co.example")
+    people_registry.invalidate()
+    forged = _msg("m1", sender="cfo@co.example", name="Cara Fo", sender_authenticated=False)
+    _look(owner, Mailbox(forged))
+    assert "Sender: stranger" in model["turns"][0]
+    [(_, prompt, off_team)] = model["acts"]
+    assert off_team is True
+    # The turn's content check reads the email as quoted mail.
+    assert 'source="email_quoted"' in prompt
+
+
+def test_a_team_email_gisted_beside_an_outside_one_is_outside_words(owner: Any, model: dict[str, Any]) -> None:
+    people_store.upsert_person(full_name="Cara Fo", email="cfo@co.example")
+    people_registry.invalidate()
+    team = _msg("m1", sender="cfo@co.example", name="Cara Fo", sender_authenticated=True)
+    other = _msg("m2", sender="news@x.example", name="X", subject="Hello", text="Nothing here.")
+    _look(owner, Mailbox(team, other))
+    [(_, _prompt, off_team)] = model["acts"]
+    assert off_team is True
+
+
+def test_an_all_team_look_is_the_teams_words(owner: Any, model: dict[str, Any]) -> None:
+    people_store.upsert_person(full_name="Cara Fo", email="cfo@co.example")
+    people_registry.invalidate()
+    _look(owner, Mailbox(_msg("m1", sender="cfo@co.example", name="Cara Fo", sender_authenticated=True)))
+    [(_, _prompt, off_team)] = model["acts"]
+    assert off_team is False

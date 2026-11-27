@@ -80,7 +80,8 @@ GIST_PROMPT = (
     "password, link or email address.\n"
     "- tie: the one thing it is about that the assistant already knows, in a few "
     "words: a meeting in <known> (its time and title), a task in <known>, or the "
-    "sender when the email marks them as team or contact. Empty when it ties to "
+    "sender when the email marks them as team or contact (never one marked "
+    "stranger). Empty when it ties to "
     "nothing known.\n"
     "- act: true only when, because of that tie, something should be done now "
     "beyond knowing it: tell a meeting's people the person will be late, move or "
@@ -432,7 +433,7 @@ async def look_person(person: Any, *, gmail: Any = None, now: datetime | None = 
 
 async def _look(person: Any, client: Any, cursor: _Cursor, now: datetime) -> LookResult:
     from openexecutive.config import get_settings
-    from openexecutive.delegation import noticed
+    from openexecutive.delegation import inbox, noticed
     from openexecutive.delegation.gmail import normalize_email
 
     email = normalize_email(person.email)
@@ -446,8 +447,10 @@ async def _look(person: Any, client: Any, cursor: _Cursor, now: datetime) -> Loo
     fresh = [m for m in received if keep_reason(m, own=own, exec_address=exec_address)]
     kept = noticed.kept_keys(person.id, [m.id for m in fresh])
     contacts = bool(getattr(person, "is_principal", False))
+    # A sender the mail service couldn't verify is a stranger, whatever
+    # address they wrote in From (``inbox.handling_relation``).
     notes = [
-        _Note(m, _relation(normalize_email(m.from_addr), contacts=contacts))
+        _Note(m, inbox.handling_relation(_relation(normalize_email(m.from_addr), contacts=contacts), m))
         for m in fresh if m.id not in kept
     ]
     if not notes:
@@ -473,7 +476,10 @@ async def _look(person: Any, client: Any, cursor: _Cursor, now: datetime) -> Loo
         picked = [n for n in to_act if n.message.id in claimed]
         if picked:
             result.acted = len(picked)
-            _start_turn(person, client, picked)
+            # Every email of the look shared the gist call, so any one of them
+            # may have written what the picked ones say: the turn is outside
+            # words unless all of them are the team's.
+            _start_turn(person, client, picked, off_team=any(n.relation != "team" for n in notes))
     return result
 
 
@@ -526,7 +532,8 @@ def prompt_for(person: Any, notes: list[_Note]) -> str:
             f"Says: {note.gist}",
             f"Ties to: {note.tie}",
         ])
-        lines += [wrap_untrusted(body, source="email", author=one_line(m.from_addr or "", 120)), ""]
+        # Labelled as quoted mail, so the turn's content check reads it.
+        lines += [wrap_untrusted(body, source="email_quoted", author=one_line(m.from_addr or "", 120)), ""]
     lines += [
         f"For each, decide what {first} would want done now because of it, and do it with your "
         "tools: for example tell a meeting's attendees they will be late, move or add a calendar "
@@ -538,9 +545,9 @@ def prompt_for(person: Any, notes: list[_Note]) -> str:
     return "\n".join(lines)
 
 
-def _start_turn(person: Any, client: Any, notes: list[_Note]) -> None:
+def _start_turn(person: Any, client: Any, notes: list[_Note], *, off_team: bool) -> None:
     try:
-        task = asyncio.get_running_loop().create_task(_act(person, client, notes))
+        task = asyncio.get_running_loop().create_task(_act(person, client, notes, off_team=off_team))
     except RuntimeError:
         logger.info("mail_context: no event loop to act for person %s", person.id)
         return
@@ -548,11 +555,11 @@ def _start_turn(person: Any, client: Any, notes: list[_Note]) -> None:
     task.add_done_callback(_TURN_TASKS.discard)
 
 
-async def _act(person: Any, client: Any, notes: list[_Note]) -> None:
+async def _act(person: Any, client: Any, notes: list[_Note], *, off_team: bool) -> None:
     from openexecutive.delegation import noticed
 
     try:
-        await _turn(person, client, prompt_for(person, notes), off_team=any(n.relation != "team" for n in notes))
+        await _turn(person, client, prompt_for(person, notes), off_team=off_team)
     except Exception:
         # Not acted on: a later look may try it again.
         logger.exception("mail_context: the turn for person %s failed", person.id)

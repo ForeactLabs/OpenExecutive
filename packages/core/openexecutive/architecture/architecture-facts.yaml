@@ -12198,7 +12198,10 @@ delegation:
     (claim_to_act), and never for mail that has a reply card or went to the
     Executive's own address too (those have their own turn); one unattended
     turn per look as the person (DelegationOverride inbox_work=True, so it
-    can read the mail; sender_off_team unless every sender is team), whose
+    can read the mail; sender_off_team unless every email of the look is
+    from a verified teammate, since they share one gist call; an unverified
+    From is a stranger, inbox.handling_relation; the emails go in as
+    email_quoted blocks so the content check reads them), whose
     every step goes through levels like any unattended run. Read by chat's
     what_came_in tool (mail_read_tools, behind the mailbox fence, redacted
     in audit) and by live_signals.own_inbox (gists on the watcher's lines;
