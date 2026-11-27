@@ -3023,6 +3023,7 @@ async def _run_principal_brief(action: ScheduledAction, now: datetime) -> None:
         suppressed = False
         quiet = False
         private_to_principal = False
+        told_items: dict[str, str] | None = None
         # This run goes to the principal alone, so the brief may read what is
         # private to them (morning_brief.PRINCIPAL_DELIVERY).
         from openexecutive.workflows.morning_brief import PRINCIPAL_DELIVERY
@@ -3040,6 +3041,9 @@ async def _run_principal_brief(action: ScheduledAction, now: datetime) -> None:
                     suppressed = bool(event.data.get("suppressed"))
                     quiet = bool(event.data.get("quiet"))
                     private_to_principal = bool(event.data.get("private_to_principal"))
+                    raw_items = event.data.get("brief_items")
+                    if isinstance(raw_items, dict):
+                        told_items = {str(k): str(v) for k, v in raw_items.items()}
                 elif event.type == "error" and event.message:
                     raise RuntimeError(event.message)
         finally:
@@ -3116,6 +3120,12 @@ async def _run_principal_brief(action: ScheduledAction, now: datetime) -> None:
                 # where it was, like a quiet skip.
                 if fingerprint and artifact:
                     brief_state.record_delivered(kind, fingerprint, artifact)
+                    if told_items is not None:
+                        # What it told, item by item, for tomorrow's "still
+                        # open" split (briefing.brief_items).
+                        from openexecutive.briefing import brief_items
+
+                        brief_items.record(kind, told_items)
             else:
                 logger.warning("scheduler: %s NOT delivered — %s", kind, detail)
                 audit_log(
@@ -3135,6 +3145,9 @@ async def _run_principal_brief(action: ScheduledAction, now: datetime) -> None:
                 detail=f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__,
             )
 
+    if kind == "principal_brief_morning":
+        # Each teammate's own brief, right after the owner's.
+        await _send_teammate_briefs(now)
     if kind in _DIGEST_BRIEF_KINDS:
         # Everyone else who chose "In my briefs" gets theirs now, on its own:
         # only the principal has a brief to carry them.
@@ -3197,6 +3210,52 @@ async def _mark_held_sent(ids: list[int]) -> None:
     from openexecutive.people.held_messages import mark_sent_after_delivery
 
     await mark_sent_after_delivery(ids)
+
+
+async def _send_teammate_briefs(now: datetime) -> None:
+    """Every teammate's own morning brief (``briefing.teammate_brief``), one
+    after another, each to them alone. Nothing goes to someone with nothing
+    new. One teammate's failure never stops the next. Never raises."""
+    from openexecutive.audit import log_event as audit_log
+    from openexecutive.briefing import teammate_brief
+    from openexecutive.memory.episodic import BRIEF_DELIVERY_KIND
+    from openexecutive.orchestrator.schedule_tools import recorded_as
+    from openexecutive.people.store import list_people
+
+    try:
+        people = [p for p in list_people() if teammate_brief.gets_a_brief(p)]
+    except Exception:
+        logger.exception("scheduler: couldn't read the team for their briefs")
+        return
+    for person in people:
+        assert person.id is not None
+        try:
+            brief = await teammate_brief.write(person, now)
+            if brief is None:
+                continue
+            # A brief to its reader: its done row must not read as work
+            # done, or the next brief repeats it as news.
+            with recorded_as(BRIEF_DELIVERY_KIND):
+                delivery = await deliver_to_person(
+                    person, brief.text, label="Morning Brief",
+                    chat_only=teammate_brief.chat_only(person),
+                )
+            if delivery.ok:
+                teammate_brief.record_delivered(person.id, brief)
+            audit_log(
+                "scheduled_action",
+                f"teammate_brief_morning {'delivered' if delivery.ok else 'NOT delivered'} "
+                f"to person {person.id}",
+                actor="scheduler",
+                details={
+                    "phase": "delivered" if delivery.ok else "delivery_failed",
+                    "kind": teammate_brief.KIND, "person_id": person.id,
+                    "reason": delivery.reason,
+                },
+                private_to_person=person.id,
+            )
+        except Exception:
+            logger.exception("scheduler: person %s's brief failed", person.id)
 
 
 def _release_others_digests(now: datetime) -> None:

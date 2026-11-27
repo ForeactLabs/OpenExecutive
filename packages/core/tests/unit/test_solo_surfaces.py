@@ -637,13 +637,14 @@ def test_solo_brief_prompts_drop_the_team_sections() -> None:
     )
     from openexecutive.workflows.end_of_day_digest import _EOD_DIGEST_SOLO_SYSTEM
 
-    assert "**Waiting on**" in STANDALONE_BRIEF_SYSTEM
+    assert "PEOPLE YOU ARE WAITING ON" in STANDALONE_BRIEF_SYSTEM
     for prompt in (STANDALONE_BRIEF_SOLO_SYSTEM, BRIEFING_NARRATIVE_SOLO_SYSTEM):
         assert QUIET_PRINCIPAL in prompt
         assert "**Waiting on**" not in prompt
+        assert "PEOPLE YOU ARE WAITING ON" not in prompt
         assert "teams are stuck" not in prompt
         assert "departments / goals" not in prompt
-    for section in ("**Top call**", "**What changed**", "**Needs you**", "**Goals at risk**"):
+    for section in ("**Do today**", "**New since yesterday**", "**Still open**", "GOALS AT RISK BY AREA"):
         assert section in STANDALONE_BRIEF_SOLO_SYSTEM
     assert "**Next**" in _EOD_DIGEST_SOLO_SYSTEM and "named with its area" in _EOD_DIGEST_SOLO_SYSTEM
     assert "name the person and what's blocking" not in _EOD_DIGEST_SOLO_SYSTEM

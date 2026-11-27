@@ -932,16 +932,17 @@ def test_brief_context_renders_due_this_week_in_solo_only() -> None:
     assert "DUE THIS WEEK" not in quiet
 
 
-def test_solo_standalone_brief_prompt_has_a_due_section() -> None:
+def test_solo_standalone_brief_prompt_tells_what_is_due() -> None:
     from openexecutive.briefing.narrative import (
         BRIEFING_NARRATIVE_SOLO_SYSTEM,
         STANDALONE_BRIEF_SOLO_SYSTEM,
         STANDALONE_BRIEF_SYSTEM,
     )
 
-    assert "**Due this week**" in STANDALONE_BRIEF_SOLO_SYSTEM
+    # Due items are told under New since yesterday, not a part of their own.
     assert "DUE THIS WEEK" in STANDALONE_BRIEF_SOLO_SYSTEM
-    assert "Due this week" not in STANDALONE_BRIEF_SYSTEM
+    assert "**Due this week**" not in STANDALONE_BRIEF_SOLO_SYSTEM
+    assert "DUE THIS WEEK" not in STANDALONE_BRIEF_SYSTEM
     assert "what is due" in BRIEFING_NARRATIVE_SOLO_SYSTEM
 
 

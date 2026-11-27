@@ -626,6 +626,7 @@ def _audit(
     *,
     private: bool,
     held: list[str] | None = None,
+    private_to_person: int | None = None,
 ) -> None:
     """Audit a grounding pass. ``held`` (every held-back line) goes in the
     row's untruncated payload, which Home reads back; ``details`` keeps a
@@ -635,7 +636,8 @@ def _audit(
 
         full = {"held_back": [h[:_HELD_LINE_CHARS] for h in held[:_HELD_KEEP]]} if held else None
         log_event(
-            "grounding", summary, actor="executive", details=details, full=full, private=private
+            "grounding", summary, actor="executive", details=details, full=full, private=private,
+            private_to_person=private_to_person,
         )
     except Exception:
         logger.debug("grounding: audit failed", exc_info=True)
@@ -788,12 +790,17 @@ async def ground_brief(
     private: bool = False,
     system: str | None = None,
     surface: str = "brief",
+    held_note: bool = True,
+    private_to_person: int | None = None,
 ) -> tuple[str, BriefGrounding | None]:
     """Ground a brief or digest against the context it was written from.
 
     ``enforce``: one repair call when something is ungrounded (only when
     ``system`` is given), then drop the lines still ungrounded, drop headers
-    left empty, add the held-back note. ``report``: audit
+    left empty, add the held-back note (unless ``held_note`` is False: the
+    morning brief leaves it to the list in Memory, since a line about the
+    brief itself is not the reader's news). ``private_to_person`` keeps the
+    audit row to that one reader (a teammate's own brief). ``report``: audit
     only, text unchanged. ``off``: nothing. Never raises; on an internal
     error the text comes back unchanged."""
     mode = grounding_mode()
@@ -824,7 +831,7 @@ async def ground_brief(
                     report = check_text(out, sources, index=idx)
                 else:
                     out = HELD_BACK_ALL
-            if result.held and out != HELD_BACK_ALL:
+            if result.held and out != HELD_BACK_ALL and held_note:
                 n = len(result.held)
                 note = HELD_BACK_NOTE.format(n=n, s="" if n == 1 else "s")
                 out = f"{out}\n\n{note}"
@@ -842,6 +849,7 @@ async def ground_brief(
                 },
                 private=private,
                 held=result.held if mode == "enforce" else None,
+                private_to_person=private_to_person,
             )
         return out, result
     except Exception:

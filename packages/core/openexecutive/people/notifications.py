@@ -87,6 +87,9 @@ class NotificationSettings(BaseModel):
     delivery: Delivery = "instant"
     urgent_through: bool = True
     right_now: RightNowPings = "important"
+    # A teammate's own morning brief (``briefing.teammate_brief``): on by
+    # default; the owner's brief is set up with the company.
+    morning_brief: bool = True
     # IANA zone the quiet hours are read in; "" means the workspace's zone.
     timezone: str = Field(default="", max_length=64)
     updated_at: str = ""

@@ -5,6 +5,7 @@ import {
   crossesMidnight,
   digestDescription,
   heldLine,
+  morningBriefDescription,
   quietError,
   quietSummary,
   rightNowDescription,
@@ -81,4 +82,12 @@ test("the Right now choice is sent only when the backend has one", () => {
   assert.equal("right_now" in toUpdate(base, null), false);
   assert.match(rightNowDescription("important"), /needs you/);
   assert.match(rightNowDescription("off"), /^Nothing/);
+});
+
+test("a teammate's morning brief switch is sent only when the backend has one", () => {
+  const base = { quiet_hours: NIGHT, delivery: "instant", urgent_through: true, timezone: "" };
+  assert.equal(toUpdate({ ...base, morning_brief: false }, null).morning_brief, false);
+  assert.equal("morning_brief" in toUpdate(base, null), false);
+  assert.match(morningBriefDescription(true), /Nothing comes on a day with nothing new/);
+  assert.match(morningBriefDescription(false), /^Off/);
 });

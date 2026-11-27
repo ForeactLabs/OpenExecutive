@@ -268,7 +268,43 @@ def test_fingerprint_counts_the_live_world_only_when_given() -> None:
         **base, live_keys={**empty_live, "inbound": ["sam@x.com|renewal|1"]},
     )
     assert mail != legacy
-    assert brief_state.build_brief_fingerprint(**base, reflection_flags="- x") != legacy
+    assert brief_state.build_brief_fingerprint(
+        **base, reflection_flags="- **Regions LP buyout deadline:** x",
+    ) != legacy
+    # A note naming neither a card nor a subject rewords what the board holds.
+    assert brief_state.build_brief_fingerprint(**base, reflection_flags="- x") == legacy
+    # Chats with the Executive are background, never a reason to brief again.
+    assert brief_state.build_brief_fingerprint(
+        **base, live_keys={**empty_live, "conversations": ["Offer tracker"]},
+    ) == legacy
+
+
+def test_fingerprint_ignores_how_the_reflection_words_the_same_notes() -> None:
+    """Braden, 22-27 Nov: the reflection flagged the same two cards every
+    morning in new words, so no brief was ever "unchanged"."""
+    since = datetime.now(UTC) - timedelta(hours=12)
+    base = {"today_data": {}, "activity": [], "handled": [], "since": since}
+    monday = (
+        "- **Alert 255 (medium):** a draft DM to Annamarie has waited 3.5 days.\n"
+        "- **Pine View Crossing II LP buyout (card 220):** still awaiting your yes.\n"
+        "- **Regions LP buyout deadline:** execute before December 15, 2027."
+    )
+    tuesday = (
+        "- **Alert 255 (medium):** the draft DM is still waiting, now about 4 days. "
+        "Email is her reliable channel.\n"
+        "- **Pine View Crossing II LP buyout (card 220):** no answer yet.\n"
+        "- **Regions LP buyout deadline:** the $275K AHP loan timing still holds."
+    )
+    assert brief_state.reflection_keys(monday) == [
+        "card:220", "card:255", "note:regions lp buyout deadline",
+    ]
+    assert brief_state.build_brief_fingerprint(**base, reflection_flags=monday) == (
+        brief_state.build_brief_fingerprint(**base, reflection_flags=tuesday)
+    )
+    new_card = tuesday + "\n- **Card 261:** Josef sent the closing statement."
+    assert brief_state.build_brief_fingerprint(**base, reflection_flags=new_card) != (
+        brief_state.build_brief_fingerprint(**base, reflection_flags=tuesday)
+    )
 
 
 def test_reflection_flags_since_reads_the_latest_reflection(
