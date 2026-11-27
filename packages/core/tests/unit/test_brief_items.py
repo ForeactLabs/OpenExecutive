@@ -266,6 +266,11 @@ def test_an_empty_part_above_an_inline_part_is_dropped() -> None:
     assert brief_items.drop_empty_lines(text) == "**New since yesterday** — Dana sent the lease."
 
 
+def test_a_one_character_label_is_mentioned_only_as_a_word() -> None:
+    assert brief_items._mentioned("5", "Item 5 is due.")
+    assert not brief_items._mentioned("5", "Call Dana at 3:15.")
+
+
 def test_a_short_headline_still_counts_as_told() -> None:
     vat = _card(250, "Q3 VAT due")
     rendered = "- Q3 VAT due\nClose 4 buyouts\nJosef R"

@@ -115,7 +115,10 @@ async def write(person: Person, now: datetime | None = None) -> TeammateBrief | 
     now = now or datetime.now(UTC)
     kind = kind_for(pid)
     # Yesterday's brief kept for their quiet hours counts once it was sent.
-    await asyncio.to_thread(settle_kept, pid)
+    # One still waiting to go out is the one they get: a second written now
+    # would repeat it and arrive right behind it.
+    if await asyncio.to_thread(settle_kept, pid):
+        return None
     since = brief_state.since_for(kind, now)
     data = await asyncio.to_thread(_scoped_today, pid)
     if data is None:
@@ -232,7 +235,7 @@ def record_kept(person_id: int, brief: TeammateBrief, held_id: int) -> None:
         logger.exception("teammate_brief: couldn't keep person %s's brief", person_id)
 
 
-def settle_kept(person_id: int) -> None:
+def settle_kept(person_id: int) -> bool:
     """A kept brief that was sent since counts as delivered, as of when it
     was written (its window ends there); one that was dropped told nothing.
     Still waiting: left as it is.
@@ -241,7 +244,7 @@ def settle_kept(person_id: int) -> None:
     the next day's went straight out) does not take that newer brief's
     place: it only adds what it told that the newer one did not track, and
     leaves the window and fingerprint where the newer one set them.
-    Never raises."""
+    True while one is still waiting to go out. Never raises."""
     from openexecutive.alerts.lifecycle import parse_aware
     from openexecutive.briefing import brief_items, brief_state
     from openexecutive.people.held_messages import status
@@ -249,7 +252,7 @@ def settle_kept(person_id: int) -> None:
     try:
         entries = _read_kept(person_id)
         if not entries:
-            return
+            return False
         waiting: list[dict[str, Any]] = []
         sent: list[tuple[str, dict[str, Any]]] = []
         for entry in entries:
@@ -276,8 +279,10 @@ def settle_kept(person_id: int) -> None:
             ), at=as_of or None)
         if len(waiting) != len(entries):
             _write_kept(person_id, waiting)
+        return bool(waiting)
     except Exception:
         logger.exception("teammate_brief: couldn't settle person %s's kept brief", person_id)
+        return False
 
 
 __all__ = [

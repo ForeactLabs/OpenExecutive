@@ -214,9 +214,11 @@ def test_a_kept_brief_is_told_only_once_it_was_sent(
     assert brief is not None
     held_id = held_messages.hold(5, brief.text, source=teammate_brief.KIND, release_at=NOW)
     teammate_brief.record_kept(5, brief, held_id)
-    # Still waiting: nothing told, so the next brief tells it again.
-    teammate_brief.settle_kept(5)
+    # Still waiting: nothing told yet, and no second brief that would
+    # repeat it and arrive right behind it.
+    assert teammate_brief.settle_kept(5) is True
     assert brief_items.told(teammate_brief.KIND, 5) == {}
+    assert asyncio.run(teammate_brief.write(_person(5), NOW)) is None
     written_at = teammate_brief._read_kept(5)[0]["written_at"]
     held_messages.mark_sent([held_id])
     teammate_brief.settle_kept(5)

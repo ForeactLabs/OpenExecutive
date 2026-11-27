@@ -135,9 +135,12 @@ def _mentioned(text: object, said: str | None) -> bool:
         # A short headline ("Q3 VAT due", "W-9 for Bo"): its short tokens.
         words = [w for w in re.findall(r"[a-z0-9][a-z0-9'-]+", label) if w not in _SHORT_STOP][:6]
         whole = True
-    if not words:
-        return bool(label) and label in said.lower()
     lowered = said.lower()
+    if not words:
+        # Nothing but one-character tokens ("Q", "5"): the whole label, as words.
+        return bool(label) and re.search(
+            rf"(?<![a-z0-9]){re.escape(label)}(?![a-z0-9])", lowered,
+        ) is not None
     end = r"(?![a-z0-9])" if whole else ""
     hits = sum(1 for w in words if re.search(rf"(?<![a-z0-9]){re.escape(w)}{end}", lowered))
     return hits >= min(2, len(words))
