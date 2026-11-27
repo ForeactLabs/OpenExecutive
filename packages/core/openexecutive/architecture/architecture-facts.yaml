@@ -6947,7 +6947,7 @@ external_monitoring:
     a real story costs more than a repeat triage still catches), and reads a
     publish date into published_at so the age gate applies.
     Pages: only_counts_or_marks observes a change with no new links whose
-    only differences are bare counts and punctuation (no decimal, date or
+    only differences are bare counts moved by 25 percent or less, and punctuation (no decimal, date or
     time; no currency or rate mark on a changed number, and no money, rate,
     size, month, quarter or version word within 3 words of it)
     and sends nothing, unless every_change.

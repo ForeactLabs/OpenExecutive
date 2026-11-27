@@ -59,6 +59,11 @@ def test_the_same_story_reworded_is_caught() -> None:
         story_words("Acme Corp launches AI pricing product"),
         story_words("Acme Corp recalls AI pricing product"), subject=acme,
     )
+    assert not same_story(
+        story_words("Acme raises $50M Series B led by Sequoia"),
+        story_words("Acme raises Series C led by Sequoia"), subject=story_words("Acme"),
+    )
+    assert not same_story(story_words("Acme Model X recall widens"), story_words("Acme Model Y recall widens"))
     # A padded headline listing every topic is not every story.
     padded = story_words(
         "Acme breach lawsuit layoffs acquisition outage recall CEO resigns funding SEC probe pricing launch"
@@ -107,6 +112,9 @@ def test_only_a_count_changing_is_not_news() -> None:
     assert not only_counts_or_marks("Plans from 49 a month", "Plans from 59 a month")
     assert not only_counts_or_marks("Version 17 is out", "Version 18 is out")
     assert only_counts_or_marks("1,204 customers", "1,317 customers")
+    # A big jump is news, not a tick.
+    assert not only_counts_or_marks("We employ 200 people", "We employ 2,000 people")
+    assert not only_counts_or_marks("3 open incidents", "12 open incidents")
     # A page too long to compare whole is never called a count change.
     from openexecutive.monitoring.sources import page_watch
     filler = " ".join(["word"] * page_watch._MAX_DIFF_WORDS)

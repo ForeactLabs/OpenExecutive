@@ -306,7 +306,9 @@ def story_words(title: str) -> frozenset[str]:
     """The distinctive words of a headline, from its first
     ``_STORY_WORDS_MAX`` words only, so a padded title can't name every story."""
     words = _WORD_RE.findall(title.lower())[:_STORY_WORDS_MAX]
-    return frozenset(w for w in words if w not in _COMMON_WORDS and len(w) > 1)
+    # A single letter often tells two stories apart ("Series B" / "Series C",
+    # "Model X" / "Model Y"), so only the article goes.
+    return frozenset(w for w in words if w not in _COMMON_WORDS)
 
 
 def same_story(a: frozenset[str], b: frozenset[str], *, subject: frozenset[str] = frozenset()) -> bool:
@@ -320,7 +322,7 @@ def same_story(a: frozenset[str], b: frozenset[str], *, subject: frozenset[str] 
         return False
     numbers_a = {w for w in a if any(ch.isdigit() for ch in w)}
     numbers_b = {w for w in b if any(ch.isdigit() for ch in w)}
-    if numbers_a and numbers_b and numbers_a != numbers_b:
+    if numbers_a != numbers_b:
         return False
     # A headline far longer than the other is a different story however
     # much it shares: it would otherwise match everything it lists.

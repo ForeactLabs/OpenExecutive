@@ -513,6 +513,27 @@ _UNIT_WORDS = frozenset((
 _UNIT_WINDOW = 3
 
 
+# How far a count may move and still be a tick, not news (200 -> 2,000 is).
+_SMALL_STEP = 0.25
+
+
+def _small_steps(old: list[str], new: list[str]) -> bool:
+    """Each changed count moved by a little: the same number of counts on
+    both sides, each within ``_SMALL_STEP`` of the one it replaced."""
+    def counts(words: list[str]) -> list[int]:
+        out = []
+        for word in words:
+            core = word.strip(_EDGE_MARKS).replace(",", "")
+            if core.isdigit():
+                out.append(int(core))
+        return out
+
+    before, after = counts(old), counts(new)
+    if len(before) != len(after):
+        return False
+    return all(abs(b - a) <= max(1, _SMALL_STEP * max(a, b)) for a, b in zip(before, after, strict=True))
+
+
 def only_counts_or_marks(old: str, new: str) -> bool:
     """True when the two texts differ only in plain counts and punctuation:
     the same words in the same order once digits and marks are set aside,
@@ -546,6 +567,8 @@ def only_counts_or_marks(old: str, new: str) -> bool:
             continue
         changed = (*old_words[i1:i2], *new_words[j1:j2])
         if not all(counted(w) for w in changed):
+            return False
+        if not _small_steps(old_words[i1:i2], new_words[j1:j2]):
             return False
         around = (
             *old_words[max(0, i1 - _UNIT_WINDOW):i2 + _UNIT_WINDOW],
