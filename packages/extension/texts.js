@@ -49,7 +49,9 @@
   // openexecutive/delegation/sign_in_codes.py, which drops any that come).
   const NUMBER = "(?<!\\d)(?<!\\d-)(?!(?:19|20)\\d\\d(?![\\d-]))(?:\\d{4,8}|\\d{3}[- ]\\d{3}|(?:\\d ){3,7}\\d)(?![\\d-])";
   const CODE_WORD = "(?<!zip )(?<!area )(?<!postal )(?<!dress )(?<!promo )(?<!discount )(?<!gate )(?<!door )(?<!garage )(?<!alarm )(?<!lockbox )(?<!wifi )(?<!wi-fi )(?<!network )\\b(?:codes?|passcodes?|passwords?|passwd|otp|pins?)\\b";
-  const CODE_NEAR = new RegExp(CODE_WORD + "[^\\d\\n]{0,25}" + NUMBER + "|" + NUMBER + "[^\\d\\n]{0,40}" + CODE_WORD, "i");
+  // A number naming a place (apt 1402, suite 1200) is never a code before its word.
+  const NOT_A_PLACE = "(?<!apt )(?<!apt\\. )(?<!apartment )(?<!suite )(?<!ste )(?<!room )(?<!rm )(?<!unit )(?<!floor )(?<!building )(?<!bldg )(?<!lot )(?<!box )(?<!#)(?<!no\\. )";
+  const CODE_NEAR = new RegExp(CODE_WORD + "[^\\d\\n]{0,25}" + NUMBER + "|" + NOT_A_PLACE + NUMBER + "[^\\d\\n]{0,40}" + CODE_WORD, "i");
   const SIGN_IN_LINK = /\b(magic link|sign[- ]?in link|log[- ]?in link|is this you signing in|approve (?:this |the )?sign[- ]?in|tap to (?:sign|log) in|trying to sign in)\b/i;
   const ENTER_CODE = new RegExp("\\b(?:enter|type)\\s+" + NUMBER + "|\\buse\\s+" + NUMBER + "\\s+(?:to|for)\\s+(?:verify|confirm|sign|log|authenticat)", "i");
 

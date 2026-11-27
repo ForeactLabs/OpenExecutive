@@ -561,6 +561,7 @@ test("texts: a sign-in code is never told, now or on a first look", () => {
     "zip code 94103", "Can you verify the address? 1600 Amphitheatre Pkwy, 94043",
     "Login meeting moved, dial 4155551234",
     "Gate code is 4821", "Door code 1234#", "The wifi password is 84219375",
+    "Apt 1402, the code is on the fridge", "Room 1402, the password is on the fridge",
     "Suite 1200, the door code is on the sign", "Door code is 4821, see you at 7", "Room 1402, wifi password is on the fridge",
   ]) {
     assert.equal(T.isSignInCode(plain), false, plain);

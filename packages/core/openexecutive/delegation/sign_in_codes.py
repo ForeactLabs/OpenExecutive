@@ -23,11 +23,18 @@ _CODE_WORD = (
     r"\b(?:codes?|passcodes?|passwords?|passwd|otp|pins?)\b"
 )
 # The code close to its word, either way round: "code is 482913", "PIN: 4821",
-# "482913 is your Bank of America code". A gate, door or wifi code is left
+# "482913 is your Bank of America code" (a number naming a place, never). A
+# gate, door or wifi code is left
 # out by its word (``_CODE_WORD``), so "Suite 1200, the door code is on the
 # sign" isn't one.
+# A number that names a place (apt 1402, suite 1200, room 12, #305) is not
+# a code that comes before its word: "Apt 1402, the code is on the fridge".
+_NOT_A_PLACE = (
+    r"(?<!apt )(?<!apt\. )(?<!apartment )(?<!suite )(?<!ste )(?<!room )(?<!rm )(?<!unit )(?<!floor )"
+    r"(?<!building )(?<!bldg )(?<!lot )(?<!box )(?<!#)(?<!no\. )"
+)
 _CODE_NEAR = re.compile(
-    _CODE_WORD + r"[^\d\n]{0,25}" + _NUMBER + "|" + _NUMBER + r"[^\d\n]{0,40}" + _CODE_WORD,
+    _CODE_WORD + r"[^\d\n]{0,25}" + _NUMBER + "|" + _NOT_A_PLACE + _NUMBER + r"[^\d\n]{0,40}" + _CODE_WORD,
     re.IGNORECASE,
 )
 # A link or prompt that signs someone in, with no code at all.
