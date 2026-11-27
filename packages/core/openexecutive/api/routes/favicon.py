@@ -11,9 +11,10 @@ addresses only, every redirect checked, bodies capped. Only raster images
 are served back (PNG, ICO, GIF, JPEG, WebP, sniffed from their bytes, never
 SVG, which can carry script), with a ``default-src 'none'`` policy. An icon
 address a page names must be https on a public domain name, never an IP
-address or a port. Answers are kept in memory for a day (a miss for an
-hour), one lookup per site runs at a time and a few at once in all, each
-within a time limit, so a busy timeline costs one fetch per site.
+address or a port, and so must every redirect. Answers are kept in memory
+per person for a day (a miss for an hour); one lookup per site runs at a
+time, a few at once in all, each within a time limit, and past a short
+queue a new site gets no icon for now.
 """
 from __future__ import annotations
 
@@ -24,8 +25,9 @@ import time
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlsplit
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 
+from openexecutive.api.caller import identity_key
 from openexecutive.monitoring.sources._http import fetch_bounded
 from openexecutive.orchestrator.step_icons import site_of, valid_site
 
@@ -44,6 +46,8 @@ _CACHE_MAX_BYTES = 8_000_000
 # Lookups at once in all, and how long one may take.
 _AT_ONCE = 4
 _LOOKUP_S = 20.0
+# Sites being looked up or waiting for a turn, at most.
+_MAX_LOOKING = 8
 
 _cache: dict[str, tuple[bytes | None, str, float]] = {}
 _looking: dict[str, asyncio.Future[tuple[bytes, str] | None]] = {}
@@ -96,17 +100,25 @@ class _IconLinks(HTMLParser):
         self.found.append((rank, href))
 
 
-def _icon_address(base: str, href: str) -> str:
-    """``href`` resolved against ``base`` when it is an https address on a
-    public domain name with no port or sign-in, else ``""``."""
+def allowed(url: str) -> bool:
+    """Whether ``url`` is an https address on a public domain name with no
+    port or sign-in: every address fetched, redirects included."""
     try:
-        url = urljoin(base, href)
         parts = urlsplit(url)
         if parts.scheme != "https" or parts.port is not None or parts.username or parts.password:
-            return ""
+            return False
+    except ValueError:
+        return False
+    return bool(site_of(url))
+
+
+def _icon_address(base: str, href: str) -> str:
+    """``href`` resolved against ``base`` when ``allowed``, else ``""``."""
+    try:
+        url = urljoin(base, href)
     except ValueError:
         return ""
-    return url if site_of(url) else ""
+    return url if allowed(url) else ""
 
 
 def icon_links(page: str, base: str) -> list[str]:
@@ -125,7 +137,7 @@ def icon_links(page: str, base: str) -> list[str]:
 
 async def _image(url: str) -> tuple[bytes, str] | None:
     try:
-        body = await fetch_bounded(url, _ICON_MAX_BYTES)
+        body = await fetch_bounded(url, _ICON_MAX_BYTES, hop_ok=allowed)
     except Exception:
         return None
     kind = image_type(body)
@@ -139,10 +151,10 @@ async def find_icon(site: str) -> tuple[bytes, str] | None:
         if found:
             return found
         try:
-            page = (await fetch_bounded(f"https://{host}/", _PAGE_MAX_BYTES)).decode("utf-8", "replace")
+            page = await fetch_bounded(f"https://{host}/", _PAGE_MAX_BYTES, hop_ok=allowed)
         except Exception:
             continue
-        for link in icon_links(page, f"https://{host}/"):
+        for link in icon_links(page.decode("utf-8", "replace"), f"https://{host}/"):
             found = await _image(link)
             if found:
                 return found
@@ -158,36 +170,49 @@ async def _look_up(site: str) -> tuple[bytes, str] | None:
             return None
 
 
+class _Busy(Exception):
+    """Too many lookups are waiting: answer no icon now, and keep nothing."""
+
+
 async def _icon_once(site: str) -> tuple[bytes, str] | None:
-    """One lookup per site at a time: a second ask waits on the first."""
+    """One lookup per site at a time: a second ask waits on the first. Past
+    ``_MAX_LOOKING`` sites waiting, a new one is turned away at once."""
     running = _looking.get(site)
     if running is not None:
         return await asyncio.shield(running)
+    if len(_looking) >= _MAX_LOOKING:
+        raise _Busy
     task: asyncio.Future[tuple[bytes, str] | None] = asyncio.ensure_future(_look_up(site))
     _looking[site] = task
     task.add_done_callback(lambda _t: _looking.pop(site, None))
     return await asyncio.shield(task)
 
 
-def _keep(site: str, entry: tuple[bytes | None, str, float]) -> None:
+def _keep(key: str, entry: tuple[bytes | None, str, float]) -> None:
     """Cache ``entry``, dropping the oldest past the count or size cap."""
-    _cache.pop(site, None)
-    _cache[site] = entry
+    _cache.pop(key, None)
+    _cache[key] = entry
     while len(_cache) > _CACHE_MAX or sum(len(b or b"") for b, _k, _t in _cache.values()) > _CACHE_MAX_BYTES:
         _cache.pop(next(iter(_cache)))
 
 
 @router.get("/favicon/{site}")
-async def favicon(site: str) -> Response:
+async def favicon(site: str, request: Request) -> Response:
     site = site.lower()
     if not valid_site(site):
         raise HTTPException(status_code=404, detail="No icon")
+    # Kept per person: how fast an answer comes never says which sites
+    # someone else's steps were on.
+    key = f"{identity_key(request)}|{site}"
     now = time.monotonic()
-    cached = _cache.get(site)
+    cached = _cache.get(key)
     if cached is None or now - cached[2] > (_HIT_TTL_S if cached[0] else _MISS_TTL_S):
-        found = await _icon_once(site)
+        try:
+            found = await _icon_once(site)
+        except _Busy:
+            raise HTTPException(status_code=404, detail="No icon") from None
         cached = (found[0], found[1], now) if found else (None, "", now)
-        _keep(site, cached)
+        _keep(key, cached)
         if not found:
             logger.info("favicon.none")
     body, kind, _ = cached

@@ -123,3 +123,34 @@ def test_the_cache_keeps_to_its_size(monkeypatch: pytest.MonkeyPatch) -> None:
     favicon_route._keep("a.com", (b"x" * 20, "image/png", 0.0))
     favicon_route._keep("b.com", (b"y" * 20, "image/png", 0.0))
     assert list(favicon_route._cache) == ["b.com"]
+
+
+def test_every_hop_must_be_https_on_a_public_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[object] = []
+
+    async def fetch(url: str, max_bytes: int, **kw: object) -> bytes:
+        seen.append(kw.get("hop_ok"))
+        raise RuntimeError("404")
+
+    monkeypatch.setattr(favicon_route, "fetch_bounded", fetch)
+    _client().get("/favicon/example.com")
+    assert seen and all(hop is favicon_route.allowed for hop in seen)
+    assert favicon_route.allowed("https://cdn.example.com/i.png")
+    for bad in ("http://example.com/i.png", "https://203.0.113.9/i.png", "https://example.com:8081/i.png"):
+        assert not favicon_route.allowed(bad)
+
+
+def test_too_many_sites_waiting_gets_no_icon_and_keeps_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    asked = _serve(monkeypatch, {"https://example.com/favicon.ico": PNG})
+    monkeypatch.setattr(favicon_route, "_MAX_LOOKING", 0)
+    assert _client().get("/favicon/example.com").status_code == 404
+    assert asked == [] and favicon_route._cache == {}
+
+
+def test_each_person_has_their_own_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    asked = _serve(monkeypatch, {"https://example.com/favicon.ico": PNG})
+    keys = iter(["email:a@x.com", "email:b@x.com"])
+    monkeypatch.setattr(favicon_route, "identity_key", lambda _r: next(keys))
+    _client().get("/favicon/example.com")
+    _client().get("/favicon/example.com")
+    assert len(asked) == 2

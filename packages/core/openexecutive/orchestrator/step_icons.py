@@ -218,7 +218,7 @@ def valid_site(host: Any) -> bool:
     hyphens and dots, with a dot, ending in a name that starts with a
     letter): never an IP address in any spelling (``10.0.0.1``,
     ``0x7f.0x1``) or a single-label name like ``localhost``."""
-    if not isinstance(host, str) or not _HOST.match(host):
+    if not isinstance(host, str) or not _HOST.fullmatch(host):
         return False
     return host.rsplit(".", 1)[-1][:1].isalpha()
 

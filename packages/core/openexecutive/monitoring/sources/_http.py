@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
+from collections.abc import Callable
 from urllib.parse import urlparse
 
 import httpx
@@ -174,7 +175,11 @@ async def _get_pinned(
 
 
 async def fetch_bounded(
-    url: str, max_bytes: int, *, user_agent: str | None = None
+    url: str,
+    max_bytes: int,
+    *,
+    user_agent: str | None = None,
+    hop_ok: Callable[[str], bool] | None = None,
 ) -> bytes:
     """GET ``url`` with a body-size ceiling and tight redirect cap.
 
@@ -196,9 +201,14 @@ async def fetch_bounded(
     specific identifier — e.g. SEC EDGAR rejects/ratelimits the generic
     UA and asks callers to identify with a contact. Falls back to the
     module ``USER_AGENT`` when None.
+
+    ``hop_ok``, when given, must also pass every hop's address, the first
+    included (e.g. https only), or the hop raises :class:`BlockedTargetError`.
     """
     current = url
     for _hop in range(MAX_REDIRECTS + 1):
+        if hop_ok is not None and not hop_ok(current):
+            raise BlockedTargetError(f"refused {strip_url_query(current)}: not an allowed address")
         ips, reason = await asyncio.to_thread(_resolve_public, current)
         if not ips:
             raise BlockedTargetError(f"refused {strip_url_query(current)}: {reason}")

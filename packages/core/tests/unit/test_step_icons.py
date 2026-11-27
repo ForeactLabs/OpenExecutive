@@ -27,7 +27,7 @@ def test_site_of_keeps_only_public_names() -> None:
 
 def test_valid_site_never_takes_an_ip_in_any_spelling() -> None:
     assert step_icons.valid_site("papajohns.com") and step_icons.valid_site("123.example.com")
-    for bad in ("10.0.0.1", "0x7f.0x1", "127.1", "1.2.3.0x4", "localhost", "a.b-"):
+    for bad in ("10.0.0.1", "0x7f.0x1", "127.1", "1.2.3.0x4", "localhost", "a.b-", "example.com\n"):
         assert not step_icons.valid_site(bad)
 
 
