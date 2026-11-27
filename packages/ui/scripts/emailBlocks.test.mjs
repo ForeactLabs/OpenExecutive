@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { emailBlocks } from "../src/lib/emailBlocks.ts";
-import { htmlLinks } from "../src/lib/htmlLinks.ts";
+import { htmlLinks, opensInNewTab } from "../src/lib/htmlLinks.ts";
 
 const EMAIL = [
   "Hi,",
@@ -40,6 +40,31 @@ test("a reply's HTML link shows as a link, anything else as written", () => {
   // Code stays exactly as written.
   const code = 'Use:\n```html\n<a href="https://x.example/c">Book</a>\n```\nor `<a href="https://x.example/c">Book</a>`';
   assert.equal(htmlLinks(code), code);
+});
+
+test("an attribute list after a link is dropped, other braces stay", () => {
+  const url = "https://mail.google.com/mail/u/?authuser=a%40b.co#all/18f2";
+  assert.equal(htmlLinks(`[Open the Nov 16 email](${url}){target="_blank"}`), `[Open the Nov 16 email](${url})`);
+  assert.equal(htmlLinks(`[a](${url}){:target='_blank' rel=noopener}.`), `[a](${url}).`);
+  assert.equal(htmlLinks("[w](https://x.example/a_(b)){.ext #x}"), "[w](https://x.example/a_(b))");
+  assert.equal(htmlLinks('![c](https://x.example/c.png "C"){width=300}'), '![c](https://x.example/c.png "C")');
+  assert.equal(htmlLinks("[t](https://x.example/t 'T'){target=_blank}"), "[t](https://x.example/t 'T')");
+  assert.equal(htmlLinks('[s](<https://x.example/a b>){target="_blank"}'), "[s](<https://x.example/a b>)");
+  // A link turned from HTML loses it too.
+  assert.equal(htmlLinks('<a href="https://x.example/d">D</a>{target="_blank"}'), "[D](https://x.example/d)");
+  // Braces that aren't an attribute list, or not right after a link, stay.
+  assert.equal(htmlLinks("[a](https://x.example/) {target=\"_blank\"}"), "[a](https://x.example/) {target=\"_blank\"}");
+  assert.equal(htmlLinks("[a](https://x.example/){see below}"), "[a](https://x.example/){see below}");
+  assert.equal(htmlLinks("Use `[a](u){target=\"_blank\"}` in kramdown"), "Use `[a](u){target=\"_blank\"}` in kramdown");
+});
+
+test("only a link to another site opens in a new tab", () => {
+  for (const href of ["https://x.example/a", "HTTP://x.example/b", "http://x.example/c?u=1"]) {
+    assert.equal(opensInNewTab(href), true, href);
+  }
+  for (const href of ["/people", "/?card=220&u=https://x.example/", "#user-content-fn-1", "mailto:a@b.co", "javascript:x", "", undefined]) {
+    assert.equal(opensInNewTab(href), false, String(href));
+  }
 });
 
 test("a forwarded message reads as written, as the email sends it", () => {
