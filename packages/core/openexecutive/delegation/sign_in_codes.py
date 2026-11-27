@@ -51,10 +51,11 @@ _SIGN_IN_LINK = re.compile(
 # A Wi-Fi "code" is usually a hotel or airport portal's one-time code, so
 # only a Wi-Fi password counts.
 _PLACE = r"(?:gates?|doors?|garage|alarm|lock ?box|keypad|wi-?fi|building|lobby)"
-# The home code's own number goes with it ("Gate code is now 4821"), so
+# The home code's own number, a few words on in the same sentence, goes
+# with it ("Gate code for Saturday is 4821"), so
 # nothing left behind pairs with a later "code" ("Text me if the code
 # doesn't work").
-_HOME_TAIL = r"(?:\s*(?:[:=-]|\bis\b|\bwas\b)?\s*(?:now\s+|still\s+)?" + _NUMBER + r")?"
+_HOME_TAIL = r"(?:[^\d\n.!?]{0,25}?" + _NUMBER + r")?"
 _HOME_CODE = re.compile(
     r"(?:\b(?:gates?|doors?|garage|alarm|lock ?box|keypad|building|lobby)(?:\s+(?:entry|access|opener|door|alarm))*"
     r"\s+(?:codes?|passcodes?|passwords?|pins?)\b"

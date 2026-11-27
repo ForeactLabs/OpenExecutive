@@ -56,9 +56,10 @@
   // A gate, door or wifi code is kept, but only when the place word belongs
   // to the code ("The code for the gate is 4821", "Enter 4821 at the gate").
   const PLACE = "(?:gates?|doors?|garage|alarm|lock ?box|keypad|wi-?fi|building|lobby)";
-  // The home code's own number goes with it ("Gate code is now 4821"), so
+  // The home code's own number, a few words on in the same sentence, goes
+  // with it ("Gate code for Saturday is 4821"), so
   // nothing left behind pairs with a later "code".
-  const HOME_TAIL = "(?:\\s*(?:[:=-]|\\bis\\b|\\bwas\\b)?\\s*(?:now\\s+|still\\s+)?" + NUMBER + ")?";
+  const HOME_TAIL = "(?:[^\\d\\n.!?]{0,25}?" + NUMBER + ")?";
   const HOME_CODE = new RegExp(
     "(?:\\b(?:gates?|doors?|garage|alarm|lock ?box|keypad|building|lobby)(?:\\s+(?:entry|access|opener|door|alarm))*\\s+(?:codes?|passcodes?|passwords?|pins?)\\b" +
       // A Wi-Fi "code" is usually a portal's one-time code: only a Wi-Fi password counts.
