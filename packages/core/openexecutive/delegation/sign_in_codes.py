@@ -50,19 +50,23 @@ _SIGN_IN_LINK = re.compile(
 # "Enter 4821 at the gate"), never just appear somewhere in the text.
 # A Wi-Fi "code" is usually a hotel or airport portal's one-time code, so
 # only a Wi-Fi password counts.
-_PLACE = r"(?:gates?|doors?|garage|alarm|lock ?box|keypad|wi-?fi|building|lobby)"
-# The home code's own number, a few words on in the same sentence, goes
+_PLACE = r"(?:gates?|doors?|garage|alarm|lock ?box|keypad|building|lobby)"
+# The home code's own number, a few words on in the same clause (never
+# past another code word or a comma), goes
 # with it ("Gate code for Saturday is 4821"), so
 # nothing left behind pairs with a later "code" ("Text me if the code
 # doesn't work").
-_HOME_TAIL = r"(?:[^\d\n.!?]{0,25}?" + _NUMBER + r")?"
+_HOME_TAIL = (
+    r"(?:(?:(?!\b(?:codes?|passcodes?|passwords?|passwd|otp|pins?)\b)[^\d\n.!?,;]){0,25}?" + _NUMBER + r")?"
+)
 _HOME_CODE = re.compile(
     r"(?:\b(?:gates?|doors?|garage|alarm|lock ?box|keypad|building|lobby)(?:\s+(?:entry|access|opener|door|alarm))*"
     r"\s+(?:codes?|passcodes?|passwords?|pins?)\b"
     r"|\b(?:wi-?fi(?:\s+network)?|network)\s+(?:passwords?|pass|pw)\b"
     r"|\b(?:codes?|passcodes?|passwords?|pins?)\s+(?:for|to)\s+(?:the\s+|your\s+)?" + _PLACE + r"\b"
+    r"|\bpasswords?\s+(?:for|to)\s+(?:the\s+|your\s+)?wi-?fi\b"
     r"|\b(?:wi-?fi|network|ssid)\s*(?::|is)\s*(?!(?:your|the|a|my)\b)\S+\s+(?:password|pass|pw)\b)" + _HOME_TAIL
-    + r"|\b(?:codes?|passcodes?|pins?)\s+" + _NUMBER + r"\s+(?:for|to)\s+(?:the\s+|your\s+)?" + _PLACE + r"\b"
+    + r"|(?<!wifi )(?<!wi-fi )\b(?:codes?|passcodes?|pins?)\s+" + _NUMBER + r"\s+(?:for|to)\s+(?:the\s+|your\s+)?" + _PLACE + r"\b"
     r"|" + _NUMBER + r"\s+(?:at|on|into)\s+(?:the\s+)?" + _PLACE + r"\b",
     re.IGNORECASE,
 )

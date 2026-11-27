@@ -55,18 +55,20 @@
   const SIGN_IN_LINK = /\b(magic link|sign[- ]?in link|log[- ]?in link|is this you signing in|approve (?:this |the )?sign[- ]?in|tap to (?:sign|log) in|trying to sign in)\b/i;
   // A gate, door or wifi code is kept, but only when the place word belongs
   // to the code ("The code for the gate is 4821", "Enter 4821 at the gate").
-  const PLACE = "(?:gates?|doors?|garage|alarm|lock ?box|keypad|wi-?fi|building|lobby)";
-  // The home code's own number, a few words on in the same sentence, goes
+  const PLACE = "(?:gates?|doors?|garage|alarm|lock ?box|keypad|building|lobby)";
+  // The home code's own number, a few words on in the same clause (never
+  // past another code word or a comma), goes
   // with it ("Gate code for Saturday is 4821"), so
   // nothing left behind pairs with a later "code".
-  const HOME_TAIL = "(?:[^\\d\\n.!?]{0,25}?" + NUMBER + ")?";
+  const HOME_TAIL = "(?:(?:(?!\\b(?:codes?|passcodes?|passwords?|passwd|otp|pins?)\\b)[^\\d\\n.!?,;]){0,25}?" + NUMBER + ")?";
   const HOME_CODE = new RegExp(
     "(?:\\b(?:gates?|doors?|garage|alarm|lock ?box|keypad|building|lobby)(?:\\s+(?:entry|access|opener|door|alarm))*\\s+(?:codes?|passcodes?|passwords?|pins?)\\b" +
       // A Wi-Fi "code" is usually a portal's one-time code: only a Wi-Fi password counts.
       "|\\b(?:wi-?fi(?:\\s+network)?|network)\\s+(?:passwords?|pass|pw)\\b" +
       "|\\b(?:codes?|passcodes?|passwords?|pins?)\\s+(?:for|to)\\s+(?:the\\s+|your\\s+)?" + PLACE + "\\b" +
+      "|\\bpasswords?\\s+(?:for|to)\\s+(?:the\\s+|your\\s+)?wi-?fi\\b" +
       "|\\b(?:wi-?fi|network|ssid)\\s*(?::|is)\\s*(?!(?:your|the|a|my)\\b)\\S+\\s+(?:password|pass|pw)\\b)" + HOME_TAIL +
-      "|\\b(?:codes?|passcodes?|pins?)\\s+" + NUMBER + "\\s+(?:for|to)\\s+(?:the\\s+|your\\s+)?" + PLACE + "\\b" +
+      "|(?<!wifi )(?<!wi-fi )\\b(?:codes?|passcodes?|pins?)\\s+" + NUMBER + "\\s+(?:for|to)\\s+(?:the\\s+|your\\s+)?" + PLACE + "\\b" +
       "|" + NUMBER + "\\s+(?:at|on|into)\\s+(?:the\\s+)?" + PLACE + "\\b",
     "gi",
   );
