@@ -259,3 +259,23 @@ def test_a_kept_brief_sent_after_a_newer_one_does_not_replace_it(
     assert brief_items.told(teammate_brief.KIND, 5) == {**old.items, "newer:item": "s"}
     # The one still waiting stays kept.
     assert [e["held_id"] for e in teammate_brief._read_kept(5)] == [second]
+
+
+def test_a_kept_brief_that_was_dropped_tells_nothing(
+    board: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.briefing import brief_state
+    from openexecutive.people import held_messages
+
+    original = held_messages._connect
+    monkeypatch.setattr(held_messages, "_connect", lambda db_path=None: original(tmp_path / "held.db"))
+    brief = asyncio.run(teammate_brief.write(_person(5), NOW))
+    assert brief is not None
+    before = brief_state.last_delivered(teammate_brief.kind_for(5))
+    held_id = held_messages.hold(5, brief.text, source=teammate_brief.KIND, release_at=NOW)
+    teammate_brief.record_kept(5, brief, held_id)
+    held_messages._drop([held_id], NOW, None)
+    assert teammate_brief.settle_kept(5) is False
+    assert brief_items.told(teammate_brief.KIND, 5) == {}
+    assert teammate_brief._read_kept(5) == []
+    assert brief_state.last_delivered(teammate_brief.kind_for(5)) == before
