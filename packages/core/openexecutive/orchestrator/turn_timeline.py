@@ -140,6 +140,12 @@ def chip_follows(tool: str) -> bool:
     return extensions.has_chip(tool)
 
 
+def _same_app_tool(step_tool: str, chip_tool: str) -> bool:
+    """A connected app's chip and the round it came from: the activity names
+    the tool cut short and cleaned, the chip by its raw name."""
+    return "__" in step_tool and chip_tool.startswith(step_tool[:40])
+
+
 def read_chips(reads: dict[str, int]) -> list[str]:
     """What a turn read, counted by kind: "4 emails", "1 file", "Your calendar"."""
     out: list[str] = []
@@ -195,6 +201,8 @@ class Step:
     # it didn't go through. A tool that never makes a chip (send_text,
     # save_file) can't say either way, so its step reads as done.
     confirms: bool = False
+    # The round's tool, as its activity named it.
+    tool: str = ""
     # The turn was stopped (or timed out) while this step ran: it never
     # finished, so it neither reads as done nor as failed.
     stopped: bool = False
@@ -279,6 +287,7 @@ class TurnTimeline:
                 tool = str(item.get("tool") or "")
                 last.kind = kind_of(tool, label)
                 last.confirms = chip_follows(tool)
+                last.tool = tool
             for kind, n in reads.items():
                 last.reads[kind] = last.reads.get(kind, 0) + n
             return True
@@ -301,7 +310,14 @@ class TurnTimeline:
             return bool(reads)
         tool = str(item.get("tool") or "")
         self._add_step(
-            Step(label=label, kind=kind_of(tool, label), at=self._now(), reads=reads, confirms=chip_follows(tool))
+            Step(
+                label=label,
+                kind=kind_of(tool, label),
+                at=self._now(),
+                reads=reads,
+                confirms=chip_follows(tool),
+                tool=tool,
+            )
         )
         return True
 
@@ -346,8 +362,11 @@ class TurnTimeline:
         card_id = card if isinstance(card, int) and not isinstance(card, bool) else None
         waits = card_id is not None or summary.startswith(_WAITING)
         last = self.steps[-1] if self.steps else None
-        if last is not None and last.kind == DO and not last.acted and last.card_id is None and not last.found:
-            # The round that did it: name it by what it did.
+        if last is not None and not last.acted and last.card_id is None and not last.found and (
+            last.kind == DO or _same_app_tool(last.tool, str(item.get("tool") or ""))
+        ):
+            # The round that did it: name it by what it did. A connected
+            # app's read keeps its group (its chip says what it looked at).
             step = last
         else:
             step = Step(label=summary, kind=DO, at=self._now())

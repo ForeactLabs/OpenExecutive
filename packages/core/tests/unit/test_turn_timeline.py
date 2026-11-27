@@ -165,6 +165,15 @@ def test_a_held_text_waits_even_though_its_tool_makes_no_chip() -> None:
     assert [(s["label"], s["state"]) for s in done["steps"]] == [("Text Dana", "waits")]
 
 
+def test_a_connected_apps_read_stays_under_looked_at() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Searching Notion…", "tool": "notion__search"})
+    tl.observe({"type": "action_taken", "tool": "notion__search", "summary": "Searched Notion"})
+    done = tl.finish(())
+    assert done is not None
+    assert [(s["label"], s["kind"], s["state"]) for s in done["steps"]] == [("Searched Notion", "look", "done")]
+
+
 def test_a_held_step_waits_once_not_twice() -> None:
     # outside_content held the send: its activity came, no chip followed.
     tl = TurnTimeline(Clock())
