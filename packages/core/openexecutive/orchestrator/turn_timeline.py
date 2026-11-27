@@ -175,6 +175,9 @@ class Step:
     # The latest line a running tool said about itself (a workflow's steps):
     # shown as the step's detail when it read nothing.
     note: str = ""
+    # The turn was stopped (or timed out) while this step ran: it never
+    # finished, so it neither reads as done nor as failed.
+    stopped: bool = False
 
     @property
     def tried(self) -> bool:
@@ -183,15 +186,28 @@ class Step:
         never reads as done."""
         return self.kind == DO and not self.acted and not self.waits
 
+    def _state(self, current: bool) -> str:
+        if current:
+            return "current"
+        if self.waits:
+            return "waits"
+        if self.stopped:
+            return "stopped"
+        return "tried" if self.tried else "done"
+
     def as_dict(self, *, current: bool) -> dict[str, Any]:
         out: dict[str, Any] = {
             # Finished steps read in the past tense, the turn's own words
             # too; an action's summary and a waiting step already say what
             # happened.
-            "label": self.label if current or self.acted or self.waits or self.tried else past(self.label),
+            "label": (
+                self.label
+                if current or self.acted or self.waits or self.stopped or self.tried
+                else past(self.label)
+            ),
             "kind": self.kind,
             "at": self.at,
-            "state": "current" if current else ("waits" if self.waits else ("tried" if self.tried else "done")),
+            "state": self._state(current),
         }
         detail = ", ".join(read_chips(self.reads)) or self.note
         if detail:
@@ -338,10 +354,17 @@ class TurnTimeline:
             return None
         return self.event() if changed else None
 
-    def finish(self, held: tuple[str, ...] | list[str] = ()) -> dict[str, Any] | None:
+    def finish(
+        self, held: tuple[str, ...] | list[str] = (), *, interrupted: bool = False
+    ) -> dict[str, Any] | None:
         """Close the turn: steps held for the person's go are added as
-        waiting, and nothing is current any more. The payload to save with
-        the reply, or None when the turn took no steps."""
+        waiting, and nothing is current any more. On a stopped or timed-out
+        turn the step that was running is saved as stopped, not done. The
+        payload to save with the reply, or None when the turn took no steps."""
+        if interrupted and not self.finished and self.steps:
+            last = self.steps[-1]
+            if not (last.acted or last.waits):
+                last.stopped = True
         texts = [t for t in (_clean(w) for w in held) if t]
         # A held step's round already showed (its activity came, no chip
         # followed): that step is the one waiting, not one that failed. The
@@ -387,7 +410,7 @@ class TurnTimeline:
 
 _STEP_KEYS = {"label", "kind", "at", "state", "detail", "found", "card_id"}
 _KINDS = {LOOK, WORK, DO}
-_STATES = {"done", "current", "waits", "tried"}
+_STATES = {"done", "current", "waits", "tried", "stopped"}
 
 
 def from_saved(raw: Any) -> dict[str, Any] | None:

@@ -123,6 +123,27 @@ def test_a_step_with_no_chip_never_reads_as_done() -> None:
     assert done["steps"] == [{**done["steps"][0], "label": "Sending a message", "state": "tried", "kind": "do"}]
 
 
+def test_a_stopped_turn_saves_the_running_step_as_stopped() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Reading the calendar", "tool": "check_calendar"})
+    tl.observe({"type": "activity", "label": "Searching your email…", "tool": "search_my_email"})
+    done = tl.finish((), interrupted=True)
+    assert done is not None
+    first, last = done["steps"]
+    assert first["state"] == "done"
+    assert last["state"] == "stopped" and last["label"] == "Searching your email"
+    assert from_saved(done)["steps"][-1]["state"] == "stopped"
+
+
+def test_a_stopped_turn_keeps_a_finished_action_as_it_was() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Messaging Dana", "tool": "message_person"})
+    tl.observe({"type": "action_taken", "tool": "message_person", "summary": "Messaged Dana"})
+    done = tl.finish((), interrupted=True)
+    assert done is not None
+    assert done["steps"][-1]["state"] == "done"
+
+
 def test_a_held_step_waits_once_not_twice() -> None:
     # outside_content held the send: its activity came, no chip followed.
     tl = TurnTimeline(Clock())

@@ -83,3 +83,13 @@ test("a step that didn't go through is kept, never counted as done", () => {
   assert.equal(t.steps[0].state, "tried");
   assert.equal(summaryLine(t), "1 step didn't go through.");
 });
+
+test("a step cut off by Stop reads as stopped, not done", () => {
+  const t = timelineFrom({
+    ...done,
+    reads: [],
+    steps: [{ label: "Searching your email", kind: "look", at: 3, state: "stopped" }],
+  });
+  assert.equal(t.steps[0].state, "stopped");
+  assert.equal(summaryLine(t), "Stopped before it finished.");
+});

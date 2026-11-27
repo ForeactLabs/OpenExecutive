@@ -25,7 +25,7 @@ function StepMark({ step }: { step: TimelineStep }) {
       />
     );
   }
-  if (step.state === "tried") {
+  if (step.state === "tried" || step.state === "stopped") {
     return (
       <span
         className="flex h-6 w-6 items-center justify-center rounded-full bg-surface-overlay text-xs font-bold text-fg-muted"
@@ -94,7 +94,7 @@ export function StepsTimelineBody({ timeline, onClose }: { timeline: TurnTimelin
             <p className="mb-1.5 mt-3 ml-9 text-[11px] font-bold uppercase tracking-wider text-fg-subtle">{group.name}</p>
             <ol className="list-none p-0 m-0">
               {group.steps.map(({ step, index }) => {
-                const said = step.state === "current" ? "in progress" : step.state === "waits" ? (timeline.done ? "asked for your OK" : "waiting for your OK") : step.state === "tried" ? "didn't go through" : "done";
+                const said = step.state === "current" ? "in progress" : step.state === "waits" ? (timeline.done ? "asked for your OK" : "waiting for your OK") : step.state === "tried" ? "didn't go through" : step.state === "stopped" ? "stopped" : "done";
                 return (
                   <li key={index} className="relative flex gap-3 pb-3.5" aria-label={`${step.label} (${said})`}>
                     {index < total - 1 && (
@@ -116,6 +116,8 @@ export function StepsTimelineBody({ timeline, onClose }: { timeline: TurnTimelin
                         <p className="mt-0.5 text-sm text-fg-muted">Working on it…</p>
                       ) : step.state === "tried" ? (
                         <p className="mt-0.5 text-sm text-fg-muted">Didn&apos;t go through</p>
+                      ) : step.state === "stopped" ? (
+                        <p className="mt-0.5 text-sm text-fg-muted">Stopped before it finished</p>
                       ) : step.state === "waits" ? (
                         <p className="mt-0.5 text-sm text-fg-muted">{timeline.done ? "Asked for your OK" : "Waiting for your OK"}</p>
                       ) : step.detail ? (

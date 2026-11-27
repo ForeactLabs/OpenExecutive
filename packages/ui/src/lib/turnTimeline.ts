@@ -6,7 +6,8 @@
 
 export type StepKind = "look" | "work" | "do";
 // "tried": a step that would change something, with nothing saying it did.
-export type StepState = "done" | "current" | "waits" | "tried";
+// "stopped": the step running when the turn was stopped or timed out.
+export type StepState = "done" | "current" | "waits" | "tried" | "stopped";
 
 export interface TimelineStep {
   label: string;
@@ -32,7 +33,7 @@ export interface TurnTimeline {
 }
 
 const KINDS: readonly StepKind[] = ["look", "work", "do"];
-const STATES: readonly StepState[] = ["done", "current", "waits", "tried"];
+const STATES: readonly StepState[] = ["done", "current", "waits", "tried", "stopped"];
 
 function str(raw: unknown): string {
   return typeof raw === "string" ? raw.trim() : "";
@@ -159,6 +160,7 @@ export function summaryLine(t: TurnTimeline): string {
   }
   const tried = t.steps.filter((s) => s.state === "tried").length;
   if (tried > 0) parts.push(tried === 1 ? "1 step didn't go through." : `${tried} steps didn't go through.`);
+  if (t.steps.some((s) => s.state === "stopped")) parts.push("Stopped before it finished.");
   if (parts.length === 0) parts.push(t.done ? `Took ${stepCount(t.steps.length)}.` : "Working on it.");
   return parts.join(" ");
 }
