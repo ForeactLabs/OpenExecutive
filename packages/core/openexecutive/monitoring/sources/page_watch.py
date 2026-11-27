@@ -177,6 +177,15 @@ class PageWatchSource:
 
         # Changed — summarise (one diff pass), advance the baseline, emit one Signal.
         old_snapshot = prior.get("text_snapshot") or ""
+        if old_snapshot == snapshot and len(text) <= _MAX_TEXT_CHARS:
+            # Back to the text last reported (a count went 40, 48, 40): the
+            # hash moved since, the words did not. (A page longer than the
+            # snapshot can differ past it, so only the hash speaks there.)
+            store.upsert_page_watch_state(
+                item.slug, content_hash, snapshot, links=links, db_path=db_path,
+            )
+            observe(item, "No change on the page.")
+            return []
         pct, added, changes = _diff(old_snapshot, snapshot)
         # NOTE: at-most-once. We advance the stored baseline here, before the
         # pipeline inserts the Signal. If the process dies between this write

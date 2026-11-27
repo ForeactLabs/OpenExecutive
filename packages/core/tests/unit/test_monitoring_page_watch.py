@@ -550,3 +550,19 @@ async def test_a_count_that_grows_a_little_each_check_is_told_once_it_grew_a_lot
     # Now the baseline is the reported page.
     page.body = b"<body>We have 60 open roles</body>"
     assert await src.poll(item, db_path=db) == []
+
+
+@pytest.mark.asyncio
+async def test_a_count_back_where_it_was_is_no_change(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _Page(b"<body>3 people viewing</body>")
+    _install(monkeypatch, page)
+    src = PageWatchSource()
+    item = _make_item(target="https://acme.example/listing")
+    await src.poll(item, db_path=db)  # baseline
+    page.body = b"<body>4 people viewing</body>"
+    assert await src.poll(item, db_path=db) == []
+    page.body = b"<body>3 people viewing</body>"
+    assert await src.poll(item, db_path=db) == []
+    assert await src.poll(item, db_path=db) == []
