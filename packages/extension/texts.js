@@ -59,12 +59,12 @@
   const HOME_CODE = new RegExp(
     "\\b" + PLACE + "(?:\\s+(?:entry|access|opener|door|alarm))*\\s+(?:codes?|passcodes?|passwords?|pins?)\\b" +
       "|\\b(?:codes?|passcodes?|passwords?|pins?)\\s+(?:for|to)\\s+(?:the\\s+|your\\s+)?" + PLACE + "\\b" +
-      "|\\b(?:wi-?fi|network|ssid)\\s*(?::|is)\\s*\\S+\\s+(?:password|pass|pw)\\b" +
+      "|\\b(?:wi-?fi|network|ssid)\\s*(?::|is)\\s*(?!(?:your|the|a|my)\\b)\\S+\\s+(?:password|pass|pw)\\b" +
       "|" + NUMBER + "\\s+(?:at|on|into)\\s+(?:the\\s+)?" + PLACE + "\\b",
     "i",
   );
   // Words only a sign-in code has: with one, nothing keeps it.
-  const SIGN_IN_WORD = /\b(?:verif\w*|confirm\w*|sign[- ]?in|log[- ]?in|otp|one[- ]time|2fa|two[- ]factor|authenticat\w*|security code|(?:do not|don'?t|never) share)\b/i;
+  const SIGN_IN_WORD = /\b(?:verification|confirmation code|(?:to|and) (?:confirm|verify)|verify your|sign[- ]?in|log[- ]?in|otp|one[- ]time|2fa|two[- ]factor|authenticat\w*|security code|reset|recover\w*|(?:do not|don'?t|never) share)\b/i;
   const ENTER_CODE = new RegExp("\\b(?:enter|type)\\s+" + NUMBER + "|\\buse\\s+" + NUMBER + "\\s+(?:to|for)\\s+(?:verify|confirm|sign|log|authenticat)", "i");
 
   /** Whether the words read like a sign-in code or a sign-in link. */

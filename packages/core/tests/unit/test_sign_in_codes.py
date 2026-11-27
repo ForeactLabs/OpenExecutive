@@ -17,7 +17,7 @@ def test_codes_and_sign_in_links_are_found() -> None:
         "482913 is the code for your account", "482913 - WhatsApp code",
         "482913 is your verification code", "G-482913 is your Google verification code",
         "Your Google code is G-482913", "Use 482913 to verify your account",
-        "Your DoorDash verification code is 482913", "Your PlayStation Network verification code is 482913", "Wi-Fi login code: 482913", "PlayStation Network: your code is 482913", "Network Solutions code: 482913. Do not share it.", "Your Alarm.com code is 482913", "Enter 482913 to confirm your Wi-Fi account", "Your code is 482913. Never share it, not even with someone at your door",
+        "Your DoorDash verification code is 482913", "Your PlayStation Network verification code is 482913", "Wi-Fi login code: 482913", "Xfinity WiFi: Your password reset code is 482913", "Your wifi password reset code is 482913", "PlayStation Network: your code is 482913", "Network Solutions code: 482913. Do not share it.", "Your Alarm.com code is 482913", "Enter 482913 to confirm your Wi-Fi account", "Your code is 482913. Never share it, not even with someone at your door",
     ):
         assert is_sign_in_code(text), text
 
@@ -33,6 +33,6 @@ def test_ordinary_texts_are_not() -> None:
         "Gate code is 4821", "Door code 1234#", "The wifi password is 84219375",
         "Apt 1402, the code is on the fridge", "Room 1402, the password is on the fridge",
         "Suite 1200, the door code is on the sign", "Door code is 4821, see you at 7", "Room 1402, wifi password is on the fridge",
-        "The code for the gate is 4821", "The gate entry code is 4821", "Garage door opener code is 4821", "Wifi: HomeNet, password 84219375", "Wifi is HomeNet, password 84219375", "Network: HomeNet Password: 84219375", "Gate access code is 4821", "Building access code is 4821", "Enter 4821 at the gate",
+        "The code for the gate is 4821", "The gate entry code is 4821", "Garage door opener code is 4821", "Wifi: HomeNet, password 84219375", "Wifi is HomeNet, password 84219375", "Network: HomeNet Password: 84219375", "Gate access code is 4821", "Building access code is 4821", "Enter 4821 at the gate", "The code for the gate is 4821, can you confirm you got it?",
     ):
         assert not is_sign_in_code(text), text

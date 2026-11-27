@@ -52,15 +52,15 @@ _PLACE = r"(?:gates?|doors?|garage|alarm|lock ?box|keypad|wi-?fi|building|lobby)
 _HOME_CODE = re.compile(
     r"\b" + _PLACE + r"(?:\s+(?:entry|access|opener|door|alarm))*\s+(?:codes?|passcodes?|passwords?|pins?)\b"
     r"|\b(?:codes?|passcodes?|passwords?|pins?)\s+(?:for|to)\s+(?:the\s+|your\s+)?" + _PLACE + r"\b"
-    r"|\b(?:wi-?fi|network|ssid)\s*(?::|is)\s*\S+\s+(?:password|pass|pw)\b"
+    r"|\b(?:wi-?fi|network|ssid)\s*(?::|is)\s*(?!(?:your|the|a|my)\b)\S+\s+(?:password|pass|pw)\b"
     r"|" + _NUMBER + r"\s+(?:at|on|into)\s+(?:the\s+)?" + _PLACE + r"\b",
     re.IGNORECASE,
 )
 # Words only a sign-in code has: with one of them, nothing keeps it
 # ("Enter 482913 to confirm your Wi-Fi account").
 _SIGN_IN_WORD = re.compile(
-    r"\b(?:verif\w*|confirm\w*|sign[- ]?in|log[- ]?in|otp|one[- ]time|2fa|two[- ]factor|authenticat\w*|security code"
-    r"|(?:do not|don'?t|never) share)\b",
+    r"\b(?:verification|confirmation code|(?:to|and) (?:confirm|verify)|verify your|sign[- ]?in|log[- ]?in|otp"
+    r"|one[- ]time|2fa|two[- ]factor|authenticat\w*|security code|reset|recover\w*|(?:do not|don'?t|never) share)\b",
     re.IGNORECASE,
 )
 # "Enter 482913 to confirm", "Use 482913 to verify your account": a number
