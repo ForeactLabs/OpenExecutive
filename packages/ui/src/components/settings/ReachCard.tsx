@@ -204,7 +204,7 @@ export function ReachCard({
     {
       value: "when_asked",
       label: "When you ask",
-      line: `Ask in chat, “reply to Dana as me: yes to the 5th”, and the draft waits in your ${mailbox} Drafts. You send it.`,
+      line: `Ask in chat, “reply to Dana as me: yes to the 5th”, and the draft waits in your ${mailbox} Drafts. You send it. It also reads what reaches your inbox, so chat and your brief know what came in, and acts when an email changes a meeting or task of yours.`,
       reason: needsMailbox,
     },
     {
@@ -227,7 +227,7 @@ export function ReachCard({
   const stops = (to: ReachStep): string =>
     to === "when_asked"
       ? "It stops drafting replies to your inbox, and nothing more goes on its own as you."
-      : "It stops writing anything as you, and turns Read your calendar off too.";
+      : "It stops writing anything as you, stops reading what reaches your inbox and forgets what it noted, and turns Read your calendar off too.";
 
   return (
     <SettingsCard title="How far it goes as you" titleId="reach-label">
