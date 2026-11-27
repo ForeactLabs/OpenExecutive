@@ -128,13 +128,18 @@ def _mentioned(text: object, said: str | None) -> bool:
         return True
     label = " ".join(str(text or "").lower().split())
     words = [w for w in re.findall(r"[a-z][a-z'-]{3,}", label) if w not in _MENTION_STOP][:6]
+    # A long word may take an ending ("buyout" in "buyouts"); a short token
+    # ("vat", "bo") must be a whole word, or "private" would mention "VAT".
+    whole = False
     if not words:
         # A short headline ("Q3 VAT due", "W-9 for Bo"): its short tokens.
         words = [w for w in re.findall(r"[a-z0-9][a-z0-9'-]+", label) if w not in _SHORT_STOP][:6]
+        whole = True
     if not words:
         return bool(label) and label in said.lower()
     lowered = said.lower()
-    hits = sum(1 for w in words if w in lowered)
+    end = r"(?![a-z0-9])" if whole else ""
+    hits = sum(1 for w in words if re.search(rf"(?<![a-z0-9]){re.escape(w)}{end}", lowered))
     return hits >= min(2, len(words))
 
 

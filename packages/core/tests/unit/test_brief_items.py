@@ -250,3 +250,11 @@ def test_a_short_headline_still_counts_as_told() -> None:
     rendered = "- Q3 VAT due\nClose 4 buyouts\nJosef R"
     assert "card:250" in brief_items.item_states(_data(vat), rendered, {}, "1. File the Q3 VAT return today.")
     assert "card:250" not in brief_items.item_states(_data(vat), rendered, {}, "1. Call Dana.")
+    # A short token counts only as a whole word.
+    assert "card:250" not in brief_items.item_states(
+        _data(vat), rendered, {}, "Q3 board pack and the elevator vote."
+    )
+    lone = _card(251, "VAT due")
+    assert "card:251" not in brief_items.item_states(
+        _data(lone), "- VAT due", {}, "Reviewed the private equity deck."
+    )
