@@ -47,6 +47,8 @@ import { INVITE_CARDS_TIP, InviteCardItem, useInviteCards } from "./InviteCards"
 import { REPLIES_WAITING_TIP, ReplyCardItem, useReplyCards } from "./RepliesWaiting";
 import { CouncilMark } from "./BrandMark";
 import Icon from "./Icon";
+import MicButton from "./MicButton";
+import { joinDictation } from "@/lib/dictation";
 import { MonitoringPanelBody } from "./briefing/AwarenessPanels";
 import DoneForYou from "./briefing/DoneForYou";
 import TakeOn from "./briefing/TakeOn";
@@ -129,6 +131,14 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
   // Which tile's side panel (or the brief) is open.
   const [openPanel, setOpenPanel] = useState<PanelKey | null>(null);
   const [askText, setAskText] = useState("");
+  // The Ask box's mic, the same one as chat's: what was in the box when it
+  // started listening, the browser's guess at the latest words, and a
+  // message when the mic can't hear.
+  const askBaseRef = useRef<string | null>(null);
+  const [askDictating, setAskDictating] = useState(false);
+  const [askHeardPending, setAskHeardPending] = useState("");
+  const [askMicError, setAskMicError] = useState<string | null>(null);
+  const askInputRef = useRef<HTMLInputElement | null>(null);
 
   // Re-pull /today after a server-side mutation (e.g. a decision approve/reject)
   // so derived data — the narrative, per-person and department counts —
@@ -364,7 +374,7 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
   // Hand an Ask-box question to chat as the user's own words.
   const submitAsk = () => {
     const text = askText.trim();
-    if (!text || !onContinue) return;
+    if (!text || !onContinue || askDictating) return;
     onContinue(text);
   };
 
@@ -718,30 +728,59 @@ export default function Briefing({ onContinue, onOpenChat, showHeader = false, f
           </header>
 
           {onContinue && (
+            <div className="mb-6">
             <form
               onSubmit={(e) => {
                 e.preventDefault();
                 submitAsk();
               }}
-              className="ask-box mb-6 flex items-center gap-2 rounded-2xl p-2 pl-4 transition-shadow"
+              className="ask-box flex items-center gap-2 rounded-2xl p-2 pl-4 transition-shadow"
             >
               <input
+                ref={askInputRef}
                 type="text"
-                value={askText}
+                value={askDictating ? joinDictation(askText, askHeardPending) : askText}
                 onChange={(e) => setAskText(e.target.value)}
-                placeholder="Ask your Executive anything…"
+                readOnly={askDictating}
+                placeholder={askDictating ? "Listening… start talking" : "Ask your Executive anything…"}
                 aria-label="Ask your Executive"
                 className="min-w-0 flex-1 bg-transparent py-2 text-base text-fg placeholder:text-fg-muted focus:outline-none"
               />
+              {/* Talk instead of typing, as in chat: the words land in the box to send. */}
+              <MicButton
+                onLive={(settled, pending) => {
+                  if (askBaseRef.current === null) askBaseRef.current = askText;
+                  setAskDictating(true);
+                  setAskText(joinDictation(askBaseRef.current, settled));
+                  setAskHeardPending(pending);
+                }}
+                onText={(text) => {
+                  // The written-out words replace the live ones.
+                  const base = askBaseRef.current;
+                  askBaseRef.current = null;
+                  setAskDictating(false);
+                  setAskHeardPending("");
+                  setAskText((prev) => joinDictation(base ?? prev, text));
+                  setAskMicError(null);
+                  askInputRef.current?.focus();
+                }}
+                onError={setAskMicError}
+              />
               <button
                 type="submit"
-                disabled={!askText.trim()}
+                disabled={askDictating || !askText.trim()}
                 aria-label="Ask"
                 className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-accent-strong text-white transition-colors hover:bg-accent-strong/90 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Icon name="arrow-send" size="w-4 h-4" />
               </button>
             </form>
+            {askMicError && (
+              <p role="alert" className="mt-2 px-1 text-sm text-rose-700 dark:text-rose-300">
+                {askMicError}
+              </p>
+            )}
+            </div>
           )}
 
           {loading && <PageSpinner />}
