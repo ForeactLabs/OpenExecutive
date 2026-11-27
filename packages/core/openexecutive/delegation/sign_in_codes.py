@@ -19,7 +19,7 @@ _NUMBER = r"(?<!\d)(?<!\d-)(?!(?:19|20)\d\d(?![\d-]))(?:\d{4,8}|\d{3}[- ]\d{3}|(
 # each other and ask about later ("what's the gate code Sam sent?").
 _CODE_WORD = (
     r"(?<!zip )(?<!area )(?<!postal )(?<!dress )(?<!promo )(?<!discount )"
-    r"(?<!gate )(?<!door )(?<!garage )(?<!alarm )(?<!lockbox )(?<!wifi )(?<!wi-fi )(?<!network )"
+    r"(?<!gate )(?<!door )(?<!garage )(?<!alarm )(?<!lockbox )"
     r"\b(?:codes?|passcodes?|passwords?|passwd|otp|pins?)\b"
 )
 # The code close to its word, either way round: "code is 482913", "PIN: 4821",
@@ -48,9 +48,13 @@ _SIGN_IN_LINK = re.compile(
 # The place word must belong to the code ("The gate entry code is 4821",
 # "The code for the gate is 4821", "Wifi: HomeNet, password 84219375",
 # "Enter 4821 at the gate"), never just appear somewhere in the text.
+# A Wi-Fi "code" is usually a hotel or airport portal's one-time code, so
+# only a Wi-Fi password counts.
 _PLACE = r"(?:gates?|doors?|garage|alarm|lock ?box|keypad|wi-?fi|building|lobby)"
 _HOME_CODE = re.compile(
-    r"\b" + _PLACE + r"(?:\s+(?:entry|access|opener|door|alarm))*\s+(?:codes?|passcodes?|passwords?|pins?)\b"
+    r"\b(?:gates?|doors?|garage|alarm|lock ?box|keypad|building|lobby)(?:\s+(?:entry|access|opener|door|alarm))*"
+    r"\s+(?:codes?|passcodes?|passwords?|pins?)\b"
+    r"|\bwi-?fi(?:\s+network)?\s+(?:passwords?|pass|pw)\b"
     r"|\b(?:codes?|passcodes?|passwords?|pins?)\s+(?:for|to)\s+(?:the\s+|your\s+)?" + _PLACE + r"\b"
     r"|\b(?:wi-?fi|network|ssid)\s*(?::|is)\s*(?!(?:your|the|a|my)\b)\S+\s+(?:password|pass|pw)\b"
     r"|" + _NUMBER + r"\s+(?:at|on|into)\s+(?:the\s+)?" + _PLACE + r"\b",
@@ -78,6 +82,8 @@ def is_sign_in_code(text: str) -> bool:
     words = text or ""
     if _SIGN_IN_LINK.search(words):
         return True
-    if not _SIGN_IN_WORD.search(words) and _HOME_CODE.search(words):
-        return False
+    # Only the home code itself is left out: "Your code is 482913. Building
+    # code is 4821" still has a sign-in code in it.
+    if not _SIGN_IN_WORD.search(words):
+        words = _HOME_CODE.sub(" ", words)
     return bool(_ENTER_CODE.search(words) or _CODE_NEAR.search(words))

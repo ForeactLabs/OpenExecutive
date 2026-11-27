@@ -48,7 +48,7 @@
   // Sign-in codes are never sent to Open Executive (the same patterns as
   // openexecutive/delegation/sign_in_codes.py, which drops any that come).
   const NUMBER = "(?<!\\d)(?<!\\d-)(?!(?:19|20)\\d\\d(?![\\d-]))(?:\\d{4,8}|\\d{3}[- ]\\d{3}|(?:\\d ){3,7}\\d)(?![\\d-])";
-  const CODE_WORD = "(?<!zip )(?<!area )(?<!postal )(?<!dress )(?<!promo )(?<!discount )(?<!gate )(?<!door )(?<!garage )(?<!alarm )(?<!lockbox )(?<!wifi )(?<!wi-fi )(?<!network )\\b(?:codes?|passcodes?|passwords?|passwd|otp|pins?)\\b";
+  const CODE_WORD = "(?<!zip )(?<!area )(?<!postal )(?<!dress )(?<!promo )(?<!discount )(?<!gate )(?<!door )(?<!garage )(?<!alarm )(?<!lockbox )\\b(?:codes?|passcodes?|passwords?|passwd|otp|pins?)\\b";
   // A number naming a place (apt 1402, suite 1200) is never a code before its word.
   const NOT_A_PLACE = "(?<!apt )(?<!apt\\. )(?<!apartment )(?<!suite )(?<!ste )(?<!room )(?<!rm )(?<!unit )(?<!floor )(?<!building )(?<!bldg )(?<!lot )(?<!box )(?<!#)(?<!no\\. )";
   const CODE_NEAR = new RegExp(CODE_WORD + "[^\\d\\n]{0,25}" + NUMBER + "|" + NOT_A_PLACE + NUMBER + "[^\\d\\n]{0,40}" + CODE_WORD, "i");
@@ -57,11 +57,13 @@
   // to the code ("The code for the gate is 4821", "Enter 4821 at the gate").
   const PLACE = "(?:gates?|doors?|garage|alarm|lock ?box|keypad|wi-?fi|building|lobby)";
   const HOME_CODE = new RegExp(
-    "\\b" + PLACE + "(?:\\s+(?:entry|access|opener|door|alarm))*\\s+(?:codes?|passcodes?|passwords?|pins?)\\b" +
+    "\\b(?:gates?|doors?|garage|alarm|lock ?box|keypad|building|lobby)(?:\\s+(?:entry|access|opener|door|alarm))*\\s+(?:codes?|passcodes?|passwords?|pins?)\\b" +
+      // A Wi-Fi "code" is usually a portal's one-time code: only a Wi-Fi password counts.
+      "|\\bwi-?fi(?:\\s+network)?\\s+(?:passwords?|pass|pw)\\b" +
       "|\\b(?:codes?|passcodes?|passwords?|pins?)\\s+(?:for|to)\\s+(?:the\\s+|your\\s+)?" + PLACE + "\\b" +
       "|\\b(?:wi-?fi|network|ssid)\\s*(?::|is)\\s*(?!(?:your|the|a|my)\\b)\\S+\\s+(?:password|pass|pw)\\b" +
       "|" + NUMBER + "\\s+(?:at|on|into)\\s+(?:the\\s+)?" + PLACE + "\\b",
-    "i",
+    "gi",
   );
   // Words only a sign-in code has: with one, nothing keeps it.
   const SIGN_IN_WORD = /\b(?:verification|confirmation code|(?:to|and) (?:confirm|verify)|verify your|sign[- ]?in|log[- ]?in|otp|one[- ]time|2fa|two[- ]factor|authenticat\w*|security code|reset|recover\w*|(?:do not|don'?t|never) share)\b/i;
@@ -69,10 +71,11 @@
 
   /** Whether the words read like a sign-in code or a sign-in link. */
   T.isSignInCode = function (text) {
-    const s = String(text || "");
+    let s = String(text || "");
     if (SIGN_IN_LINK.test(s)) return true;
-    // A gate, door or wifi code, however it is worded, is kept.
-    if (!SIGN_IN_WORD.test(s) && HOME_CODE.test(s)) return false;
+    // A gate, door or wifi code is left out, and only it: "Your code is
+    // 482913. Building code is 4821" still has a sign-in code in it.
+    if (!SIGN_IN_WORD.test(s)) s = s.replace(HOME_CODE, " ");
     return ENTER_CODE.test(s) || CODE_NEAR.test(s);
   };
 

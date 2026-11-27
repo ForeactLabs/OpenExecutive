@@ -17,7 +17,7 @@ def test_codes_and_sign_in_links_are_found() -> None:
         "482913 is the code for your account", "482913 - WhatsApp code",
         "482913 is your verification code", "G-482913 is your Google verification code",
         "Your Google code is G-482913", "Use 482913 to verify your account",
-        "Your DoorDash verification code is 482913", "Your PlayStation Network verification code is 482913", "Wi-Fi login code: 482913", "Xfinity WiFi: Your password reset code is 482913", "Your wifi password reset code is 482913", "PlayStation Network: your code is 482913", "Network Solutions code: 482913. Do not share it.", "Your Alarm.com code is 482913", "Enter 482913 to confirm your Wi-Fi account", "Your code is 482913. Never share it, not even with someone at your door",
+        "Your DoorDash verification code is 482913", "Your PlayStation Network verification code is 482913", "Wi-Fi login code: 482913", "Your WiFi access code is 482913. Valid for 24 hours.", "Your Wi-Fi code is 482913", "Your code is 482913. Building code is 4821", "Xfinity WiFi: Your password reset code is 482913", "Your wifi password reset code is 482913", "PlayStation Network: your code is 482913", "Network Solutions code: 482913. Do not share it.", "Your Alarm.com code is 482913", "Enter 482913 to confirm your Wi-Fi account", "Your code is 482913. Never share it, not even with someone at your door",
     ):
         assert is_sign_in_code(text), text
 
