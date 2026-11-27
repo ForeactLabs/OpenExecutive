@@ -884,3 +884,41 @@ def test_a_source_that_limits_itself_always_waits(monkeypatch) -> None:
     # wait, they still wait, as their source has already read past them.
     ran, _ = _all_at_once(monkeypatch, bounded=False)
     assert all(ran)
+
+
+def test_on_card_hears_the_card_an_event_landed_on_even_when_it_joined_one(monkeypatch, db: Path) -> None:
+    """A producer learns which card holds its event: the new card, and the
+    same card when a repeat coalesces into it."""
+    from openexecutive.alerts import pipeline
+
+    _count_dispatches(monkeypatch)
+    _stub_triage(monkeypatch, dedup_key="k")
+    landed: list[int] = []
+
+    async def run():
+        _, first = await pipeline.evaluate_and_dispatch(
+            AlertEvent(source="stock", external_id="day1", body="x"), db_path=db, on_card=landed.append,
+        )
+        _, second = await pipeline.evaluate_and_dispatch(
+            AlertEvent(source="stock", external_id="day2", body="x"), db_path=db, on_card=landed.append,
+        )
+        return first, second
+
+    first, second = asyncio.run(run())
+    assert first is not None and second is None
+    assert landed == [first, first]
+
+
+def test_then_hears_a_failed_evaluation_as_no_card(monkeypatch) -> None:
+    from openexecutive.alerts import pipeline
+
+    async def boom(event, db_path=None, *, on_card=None):  # noqa: ARG001
+        raise RuntimeError("triage down")
+
+    monkeypatch.setattr(pipeline, "evaluate_and_dispatch", boom)
+    heard: list[tuple[str, int | None]] = []
+    asyncio.run(pipeline._evaluate_in_turn(
+        AlertEvent(source="rss", external_id="e", body="b"), None, None,
+        lambda decision, card: heard.append((decision.reason_if_suppressed or "", card)),
+    ))
+    assert heard == [("triage_error", None)]

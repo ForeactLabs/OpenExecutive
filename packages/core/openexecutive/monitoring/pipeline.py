@@ -47,6 +47,7 @@ from openexecutive.monitoring.models import (
     MODE_DRY_RUN,
     ORIGIN_RESEARCH_PROPOSED,
     OUTCOME_ALERTED,
+    OUTCOME_BRIEF_LINE,
     OUTCOME_FAILED,
     OUTCOME_HELD_BRIEF,
     OUTCOME_HELD_DIGEST,
@@ -56,10 +57,14 @@ from openexecutive.monitoring.models import (
     OUTCOME_SUPPRESSED_DRY_RUN,
     OUTCOME_SUPPRESSED_LOW_RELEVANCE,
     OUTCOME_SUPPRESSED_STALE,
+    OUTCOME_SUPPRESSED_TRIAGE,
     PAGE_WATCH_DIGEST_HOURS,
+    RELEVANCE_BRIEF,
+    RELEVANCE_CARD,
     SOURCE_KIND_PAGE_WATCH,
     SOURCE_KIND_QUERY,
     SOURCE_KIND_RSS,
+    TRIGGER_EVERY_CHANGE,
     TRIGGER_ONLY_BIG,
     Signal,
     WatchlistItem,
@@ -169,7 +174,8 @@ def _is_stale(signal: Signal, now: datetime, max_age_days: int) -> bool:
     """True when the upstream publish time is older than the age gate.
 
     Only signals that carry ``published_at`` can be judged; sources without
-    an upstream timestamp (stock, page_watch, query) always pass.
+    an upstream timestamp (stock, page_watch, a web search result with no
+    publish date) always pass.
     ``max_age_days <= 0`` disables the gate.
     """
     published = _published(signal)
@@ -236,6 +242,39 @@ def _only_big(item: WatchlistItem) -> bool:
     real ``true``), so the watch never holds back what its sentence says it
     tells you."""
     return (item.trigger_json or {}).get(TRIGGER_ONLY_BIG) is True
+
+
+def _every_change(item: WatchlistItem) -> bool:
+    """The watch asks for every change as a card (only a real ``true``)."""
+    return (item.trigger_json or {}).get(TRIGGER_EVERY_CHANGE) is True
+
+
+# Sources whose changes say nothing about how much they matter (a web hit, a
+# page diff, a feed post): the relevance read decides where each one shows.
+_PLACED_BY_RELEVANCE = frozenset({SOURCE_KIND_QUERY, SOURCE_KIND_PAGE_WATCH, SOURCE_KIND_RSS})
+
+
+def _relevance(enrichment: dict | None) -> float | None:
+    if not enrichment:
+        return None
+    try:
+        return float(enrichment.get("relevance_score"))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def placement(item: WatchlistItem, signal: Signal, enrichment: dict | None) -> str:
+    """Where a change that met its watch's trigger is shown: ``card``,
+    ``brief`` (one line in the next brief) or ``page`` (the watch's own page
+    only). Only changes from sources that can't judge themselves are placed
+    by the relevance read, and only when there is one; a watch that asks for
+    every change, and an email watch, always get a card."""
+    if mailbox.is_mailbox(item) or _every_change(item) or signal.source_kind not in _PLACED_BY_RELEVANCE:
+        return "card"
+    score = _relevance(enrichment)
+    if score is None or score >= RELEVANCE_CARD:
+        return "card"
+    return "brief" if score >= RELEVANCE_BRIEF else "page"
 
 
 def _graded_by_relevance(item: WatchlistItem, signal: Signal) -> bool:
@@ -386,14 +425,17 @@ async def promote_signal_to_alert(
     signal_id: int,
     db_path: Path | None = None,
     enrichment: dict | None = None,
+    covers: list[int] | None = None,
 ) -> bool:
     """Promote a stored signal into the alerts pipeline. True when scheduled.
 
     Schedules the triage evaluation as fire-and-forget so a slow LLM
     call cannot stall the scan loop. The signal row is marked
-    ``alerted`` immediately on schedule — the eventual
-    ``promoted_alert_id`` backfill (after triage runs) is left for a
-    later phase to avoid coupling the scan to evaluation latency.
+    ``alerted`` on schedule; once triage has run, ``_after_triage`` puts
+    the card it landed on (``promoted_alert_id``) on the row, or, when no
+    card holds it, marks it ``suppressed_triage`` with the reason, so the
+    row, the watch's last-check note and the audit say what really
+    happened. ``covers`` are the other rows a digest sends as this one.
 
     Caller is responsible for the dry-run / below-floor / dup gates;
     this entry point assumes the signal already cleared them.
@@ -401,8 +443,14 @@ async def promote_signal_to_alert(
     alert body.
     """
     event = _signal_to_alert_event(signal, item, enrichment)
+    sent = [signal_id, *(covers or [])]
     try:
-        schedule_evaluation(event)
+        schedule_evaluation(
+            event,
+            then=lambda decision, alert_id: _after_triage(
+                item, signal, sent, decision.reason_if_suppressed, alert_id, db_path=db_path,
+            ),
+        )
     except Exception:
         # Triage scheduling itself crashed — the signal was NOT alerted.
         # Record OUTCOME_FAILED so the audit trail doesn't lie about
@@ -440,6 +488,42 @@ async def promote_signal_to_alert(
         **mailbox.audit_privacy(item),
     )
     return True
+
+
+# Why triage raised no card, said to the person on the watch's page.
+_TRIAGE_WORDS: dict[str, str] = {
+    "duplicate": "It repeats something you already have, so no new card.",
+}
+_TRIAGE_DEFAULT_WORDS = "It didn't look worth a card, so it is only noted here."
+
+
+def _after_triage(
+    item: WatchlistItem,
+    signal: Signal,
+    signal_ids: list[int],
+    reason: str,
+    alert_id: int | None,
+    *,
+    db_path: Path | None = None,
+) -> None:
+    """Record where a sent-on find ended up once triage has run."""
+    reason = (reason or "").strip()
+    store.note_triage_outcome(signal_ids, alert_id=alert_id, reason=reason, db_path=db_path)
+    if alert_id is not None:
+        return
+    for signal_id in signal_ids:
+        _audit_suppressed(signal_id, item, signal, OUTCOME_SUPPRESSED_TRIAGE, reason=reason)
+    if item.id is None:
+        return
+    words = _TRIAGE_WORDS.get(reason.split(":", 1)[0].strip().lower(), "")
+    if not words:
+        words = "You muted this topic, so no card." if reason.lower().startswith("muted") else _TRIAGE_DEFAULT_WORDS
+    try:
+        store.set_last_check_note(
+            item.id, f"Noticed: {_note_summary(signal.normalized_summary)}. {words}", db_path=db_path,
+        )
+    except Exception:
+        logger.exception("monitoring.pipeline: last-check note failed for %r", item.slug)
 
 
 # --------------------------------------------------------------------- #
@@ -549,14 +633,15 @@ async def _flush_page_watch_digests(
             continue
         signal, enrichment = _digest_signal(item, held)
         newest_id = int(held[-1]["id"])
+        rest = [int(row["id"]) for row in held[:-1]]
         if not await promote_signal_to_alert(
-            signal, item, signal_id=newest_id, db_path=db_path, enrichment=enrichment,
+            signal, item, signal_id=newest_id, db_path=db_path, enrichment=enrichment, covers=rest,
         ):
             # The newest row is marked failed; the rest stay held and go
             # out with the next digest.
             continue
-        for row in held[:-1]:
-            store.mark_signal_processed(int(row["id"]), OUTCOME_ALERTED, db_path=db_path)
+        for row_id in rest:
+            store.mark_signal_processed(row_id, OUTCOME_ALERTED, db_path=db_path)
         sent += 1
     return sent
 
@@ -632,6 +717,8 @@ def _audit_suppressed(
     item: WatchlistItem,
     signal: Signal,
     outcome: str,
+    *,
+    reason: str = "",
 ) -> None:
     """Symmetric audit emission for a suppressed signal — pairs with
     ``external_signal_received`` so a reader sees both 'noticed' and
@@ -649,14 +736,16 @@ def _audit_suppressed(
             "severity_hint": signal.severity_hint.value,
             "dedup_key": signal.dedup_key,
             "outcome": outcome,
+            **({"reason": reason[:80]} if reason else {}),
         },
         **mailbox.audit_privacy(item),
     )
 
 
-def _note_for_brief(item: WatchlistItem, signal: Signal) -> None:
-    """A quiet watch's find, for the next brief to report (it reads this
-    audit row as something handled since the last one)."""
+def _note_for_brief(item: WatchlistItem, signal: Signal, *, quiet: bool = True) -> None:
+    """A find for the next brief to report, from a quiet watch or one the
+    relevance read placed there (the brief reads this audit row as something
+    handled since the last one)."""
     from openexecutive.monitoring.describe import watch_title
 
     try:
@@ -666,7 +755,7 @@ def _note_for_brief(item: WatchlistItem, signal: Signal) -> None:
     summary = _without_links(collapse_whitespace(signal.normalized_summary))[:200]
     audit_log(
         EVENT_QUIET_FIND,
-        f"Quiet watch on {label}: {summary}",
+        f"Quiet watch on {label}: {summary}" if quiet else f"Noticed on {label}: {summary}",
         actor="external_monitor",
         details={
             "watchlist_id": item.id,
@@ -912,7 +1001,9 @@ _NOTE_SUMMARY_CHARS = 140
 _HELD_WORDS: dict[str, str] = {
     OUTCOME_SUPPRESSED_DRY_RUN: "It is watching quietly, so it did not tell you.",
     OUTCOME_SUPPRESSED_BELOW_FLOOR: "Not a big change, so it stayed quiet.",
-    OUTCOME_SUPPRESSED_LOW_RELEVANCE: "Not close enough to your company, so it stayed quiet.",
+    OUTCOME_SUPPRESSED_LOW_RELEVANCE: "Not close enough to your company, so it is only noted here.",
+    OUTCOME_BRIEF_LINE: "Might matter to your company, so it goes in your next brief.",
+    OUTCOME_SUPPRESSED_TRIAGE: _TRIAGE_DEFAULT_WORDS,
     OUTCOME_SUPPRESSED_BY_NOTES: "You told it to skip this, so it stayed quiet.",
     OUTCOME_HELD_DIGEST: "It already told you today, so this waits for the next summary.",
     OUTCOME_HELD_BRIEF: "It is watching quietly, so this goes in your next brief.",
@@ -1228,6 +1319,18 @@ async def _poll_one_watchlist_item(
             )
             if not should_promote:
                 continue
+
+        where = placement(item, signal, enrichment_payload)
+        if where == "page":
+            _suppress(
+                signal_id, item, signal, OUTCOME_SUPPRESSED_LOW_RELEVANCE,
+                tally=tally, db_path=db_path,
+            )
+            continue
+        if where == "brief":
+            _suppress(signal_id, item, signal, OUTCOME_BRIEF_LINE, tally=tally, db_path=db_path)
+            _note_for_brief(item, signal, quiet=False)
+            continue
 
         if _hold_for_digest(item, now):
             # The watch already alerted inside the digest window: keep this

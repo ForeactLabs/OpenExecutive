@@ -33,6 +33,7 @@ from openexecutive.monitoring.models import (
     RESEARCH_ORIGINS,
     SOURCE_KIND_MAILBOX,
     SOURCE_KIND_PAGE_WATCH,
+    SOURCE_KIND_QUERY,
     is_valid_cadence,
     is_valid_mode,
 )
@@ -151,9 +152,13 @@ ADD_WATCHLIST_ENTRY_TOOL: dict[str, Any] = {
                     "are matched as written, so list the few ways the "
                     "subject could say it. "
                     "Add 'only_big': true (any type but stock) only when the "
-                    "principal wants to hear about big changes only. The "
-                    "trigger is the one filter: whatever meets it is told to "
-                    "them. Pass {} for the per-adapter default."
+                    "principal wants to hear about big changes only. For "
+                    "rss, page_watch and query, a change that meets the "
+                    "trigger comes as a card when it is close to the "
+                    "company, a line in the brief when it may be, and is "
+                    "kept on the watch's page otherwise; add "
+                    "'every_change': true only when they want every change "
+                    "as a card. Pass {} for the per-adapter default."
                 ),
             },
             "cadence": {
@@ -161,7 +166,8 @@ ADD_WATCHLIST_ENTRY_TOOL: dict[str, Any] = {
                 "enum": ["real_time", "15min", "hourly", "daily", "weekly"],
                 "description": (
                     "How often to check. Never faster than the source "
-                    "allows. Defaults to '15min' ('real_time' for mailbox)."
+                    "allows. Defaults to 'daily' ('15min' for stock and "
+                    "vendor_status, 'real_time' for mailbox)."
                 ),
             },
             "for_goal_id": {
@@ -701,6 +707,37 @@ def _for_ids(tool: str, tool_input: dict[str, Any]) -> dict[str, int | None] | s
     return out
 
 
+# How often a watch made in chat is checked when the request names no pace:
+# a price or a status page moves within minutes, an inbox right away, and
+# a page, feed or search is read once a day, like a research watch.
+_FAST_CADENCE = {SOURCE_KIND_MAILBOX: "real_time", "stock": "15min", "vendor_status": "15min"}
+
+
+def _default_cadence(signal_type: str) -> str:
+    return _FAST_CADENCE.get(signal_type, "daily")
+
+
+def _overlapping(signal_type: str, target: str) -> list[dict[str, str]]:
+    """The company's watches that already watch the same thing: the same
+    source, or for a web search a query of mostly the same words. Said back
+    so the Executive can offer to fold them into one; never a reason not to
+    add the new one."""
+    from openexecutive.monitoring.sources.query import same_story, story_words
+
+    want = normalize_target(signal_type, target)
+    words = story_words(target)
+    out: list[dict[str, str]] = []
+    for other in ms.list_watchlist(signal_type=signal_type):
+        if mailbox.set_by(other) is not None or mailbox.is_mailbox(other):
+            continue
+        same = normalize_target(other.signal_type, other.target) == want or (
+            signal_type == SOURCE_KIND_QUERY and same_story(words, story_words(other.target))
+        )
+        if same:
+            out.append({"slug": other.slug, "title": watch_title(other)})
+    return out[:5]
+
+
 async def handle_add_watchlist_entry(tool_input: dict[str, Any]) -> str:
     from openexecutive.delegation.lockdown import outside_reach_reason, outside_reach_refusal
 
@@ -720,7 +757,7 @@ async def handle_add_watchlist_entry(tool_input: dict[str, Any]) -> str:
             return watch
         config, trigger, words = watch
 
-    cadence = str(tool_input.get("cadence") or ("real_time" if signal_type == SOURCE_KIND_MAILBOX else "15min"))
+    cadence = str(tool_input.get("cadence") or _default_cadence(signal_type))
     if not is_valid_cadence(cadence):
         return _err(tool, f"unknown cadence {cadence!r}")
 
@@ -741,6 +778,7 @@ async def handle_add_watchlist_entry(tool_input: dict[str, Any]) -> str:
         # name runs into it, and trying names can't find it.
         slug = mailbox.own_slug(slug)
 
+    overlaps = [] if signal_type == SOURCE_KIND_MAILBOX else _overlapping(signal_type, target)
     try:
         new_id = ms.insert_watchlist_item(
             slug=slug,
@@ -782,6 +820,9 @@ async def handle_add_watchlist_entry(tool_input: dict[str, Any]) -> str:
         "signal_type": signal_type,
         "mode": mode,
         **words,
+        # Watches already on the same thing: tell the person and offer to
+        # keep one (remove_watchlist_entry), so one story isn't told twice.
+        **({"overlaps": overlaps} if overlaps else {}),
     })
 
 

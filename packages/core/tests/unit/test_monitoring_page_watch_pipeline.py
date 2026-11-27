@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from openexecutive.alerts.models import AlertSeverity
+from openexecutive.alerts.models import AlertSeverity, TriageDecision
 from openexecutive.alerts.store import initialize_db as initialize_alerts_db
 from openexecutive.memory.episodic import initialize_db as initialize_episodic_db
 from openexecutive.monitoring import pipeline as mp
@@ -16,8 +16,11 @@ from openexecutive.monitoring import store as ms
 from openexecutive.monitoring.enrichment import SignalEnrichment
 from openexecutive.monitoring.models import (
     OUTCOME_ALERTED,
+    OUTCOME_BRIEF_LINE,
     OUTCOME_HELD_DIGEST,
     OUTCOME_SUPPRESSED_BELOW_FLOOR,
+    OUTCOME_SUPPRESSED_LOW_RELEVANCE,
+    OUTCOME_SUPPRESSED_TRIAGE,
     Signal,
     WatchlistItem,
 )
@@ -85,7 +88,7 @@ def _relevance(monkeypatch: pytest.MonkeyPatch, score: float) -> None:
 
 def _promotions(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
     promoted: list[Any] = []
-    monkeypatch.setattr(mp, "schedule_evaluation", lambda event: promoted.append(event))
+    monkeypatch.setattr(mp, "schedule_evaluation", lambda event, **_: promoted.append(event))
     return promoted
 
 
@@ -101,7 +104,7 @@ async def test_relevant_page_change_reaches_the_person(
     db: Path, page_source: _FakePageWatch, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     promoted = _promotions(monkeypatch)
-    _relevance(monkeypatch, 0.6)
+    _relevance(monkeypatch, 0.8)
     wl_id = _watch(db)
     page_source.signals = [_change("a", "Harbor Lane Coffee buys a regional roaster")]
 
@@ -116,12 +119,51 @@ async def test_relevant_page_change_reaches_the_person(
 
 
 @pytest.mark.asyncio
-async def test_a_small_page_change_still_reaches_the_person(
+async def test_a_far_page_change_is_only_noted_on_the_watch(
     db: Path, page_source: _FakePageWatch, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     promoted = _promotions(monkeypatch)
     _relevance(monkeypatch, 0.2)
     wl_id = _watch(db)
+    page_source.signals = [_change("a", "Menu text changed on the page")]
+
+    await mp.run_external_monitor_scan(db_path=db)
+
+    assert promoted == []
+    [row] = ms.list_signals_for_watchlist(wl_id, db_path=db)
+    assert row["processed_outcome"] == OUTCOME_SUPPRESSED_LOW_RELEVANCE
+    item = ms.get_watchlist_item(wl_id, db_path=db)
+    assert item is not None
+    assert item.last_check_note is not None
+    assert "only noted here" in item.last_check_note
+
+
+@pytest.mark.asyncio
+async def test_a_middling_page_change_goes_in_the_brief(
+    db: Path, page_source: _FakePageWatch, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    promoted = _promotions(monkeypatch)
+    noted: list[tuple[str, str]] = []
+    monkeypatch.setattr(mp, "audit_log", lambda kind, summary, **_: noted.append((kind, summary)))
+    _relevance(monkeypatch, 0.5)
+    wl_id = _watch(db)
+    page_source.signals = [_change("a", "Harbor Lane Coffee opens a second shop")]
+
+    await mp.run_external_monitor_scan(db_path=db)
+
+    assert promoted == []
+    [row] = ms.list_signals_for_watchlist(wl_id, db_path=db)
+    assert row["processed_outcome"] == OUTCOME_BRIEF_LINE
+    assert any(kind == mp.EVENT_QUIET_FIND and summary.startswith("Noticed on ") for kind, summary in noted)
+
+
+@pytest.mark.asyncio
+async def test_a_watch_asking_for_every_change_gets_a_card(
+    db: Path, page_source: _FakePageWatch, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    promoted = _promotions(monkeypatch)
+    _relevance(monkeypatch, 0.2)
+    wl_id = _watch(db, trigger={"every_change": True})
     page_source.signals = [_change("a", "Menu text changed on the page")]
 
     await mp.run_external_monitor_scan(db_path=db)
@@ -252,3 +294,46 @@ def test_a_digest_says_what_a_rewrite_replaced_and_what_was_only_added() -> None
     assert "new text: Holiday sale" in signal.normalized_summary
     signal, _ = mp._digest_signal(item, [row(1, {"added_text": "Holiday sale", "changes": 'added "Holiday sale"'})])
     assert "new text: Holiday sale" in signal.normalized_summary
+
+
+def _triage_after(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    thens: list[Any] = []
+    monkeypatch.setattr(mp, "schedule_evaluation", lambda event, *, then=None: thens.append(then))
+    return thens
+
+
+@pytest.mark.asyncio
+async def test_the_card_a_find_landed_on_is_kept_on_its_row(
+    db: Path, page_source: _FakePageWatch, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    thens = _triage_after(monkeypatch)
+    _relevance(monkeypatch, 0.9)
+    wl_id = _watch(db)
+    page_source.signals = [_change("a", "Harbor Lane Coffee buys a regional roaster")]
+    await mp.run_external_monitor_scan(db_path=db)
+
+    [then] = thens
+    then(TriageDecision(alert=True, dedup_key="watch:page-news"), 247)
+    [row] = ms.list_signals_for_watchlist(wl_id, db_path=db)
+    assert (row["processed_outcome"], row["promoted_alert_id"]) == (OUTCOME_ALERTED, 247)
+
+
+@pytest.mark.asyncio
+async def test_a_find_triage_turns_down_says_so(
+    db: Path, page_source: _FakePageWatch, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    thens = _triage_after(monkeypatch)
+    _relevance(monkeypatch, 0.9)
+    wl_id = _watch(db)
+    page_source.signals = [_change("a", "Harbor Lane Coffee buys a regional roaster")]
+    await mp.run_external_monitor_scan(db_path=db)
+
+    [then] = thens
+    then(TriageDecision(alert=False, dedup_key="k", reason_if_suppressed="duplicate"), None)
+    [row] = ms.list_signals_for_watchlist(wl_id, db_path=db)
+    assert row["processed_outcome"] == OUTCOME_SUPPRESSED_TRIAGE
+    assert row["promoted_alert_id"] is None
+    item = ms.get_watchlist_item(wl_id, db_path=db)
+    assert item is not None and item.last_check_note is not None
+    assert item.last_check_note.startswith("Noticed: ")
+    assert "Told you" not in item.last_check_note

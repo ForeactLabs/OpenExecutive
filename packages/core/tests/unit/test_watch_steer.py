@@ -142,6 +142,29 @@ def test_reply_updates_notes_closes_cards_and_can_be_undone(
     assert alert_store.get_alert(aid, db_path=db).status == "unread"  # type: ignore[union-attr]
 
 
+def test_saying_stop_turns_the_watch_off(
+    client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wid = _watch(db)
+    aid = _card(db, "Acme repo added nine specialists")
+    _plan(monkeypatch, {
+        "notes": "- Acme launches.", "reply": "Done. I've stopped watching this.",
+        "close_card_ids": [], "stop_watch": True,
+    })
+
+    res = client.post(f"/alerts/{aid}/say", json={"text": "Stop telling me about this."})
+    assert res.status_code == 200, res.text
+    assert res.json()["stopped"] is True
+    item = ms.get_watchlist_item(wid, db_path=db)
+    assert item is not None and item.enabled is False
+
+
+def test_parse_plan_stops_only_on_a_real_true() -> None:
+    assert steer.parse_plan({"notes": "- a", "reply": "ok", "stop_watch": True}, allowed_ids=set()).stop_watch
+    assert not steer.parse_plan({"notes": "- a", "reply": "ok", "stop_watch": "yes"}, allowed_ids=set()).stop_watch
+    assert not steer.parse_plan({"notes": "- a", "reply": "ok"}, allowed_ids=set()).stop_watch
+
+
 def test_a_card_whose_watch_is_gone_is_refused(
     client: TestClient, db: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -414,7 +437,7 @@ async def test_a_check_stays_quiet_on_what_the_notes_skip_and_says_why(
     db: Path, fake_source, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     promoted: list[Any] = []
-    monkeypatch.setattr(mp, "schedule_evaluation", lambda e: promoted.append(e))
+    monkeypatch.setattr(mp, "schedule_evaluation", lambda e, **_: promoted.append(e))
     monkeypatch.setattr(mp, "build_company_context", lambda db_path=None: "CTX")
 
     async def fake_enrich(signal, item, *, company_ctx):
@@ -448,7 +471,7 @@ async def test_a_skip_without_notes_is_ignored(
     db: Path, fake_source, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     promoted: list[Any] = []
-    monkeypatch.setattr(mp, "schedule_evaluation", lambda e: promoted.append(e))
+    monkeypatch.setattr(mp, "schedule_evaluation", lambda e, **_: promoted.append(e))
     monkeypatch.setattr(mp, "build_company_context", lambda db_path=None: "CTX")
 
     async def fake_enrich(signal, item, *, company_ctx):

@@ -43,7 +43,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import UTC, datetime
+import re
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +68,22 @@ _DEFAULT_POLL_MINUTES = 360
 _DEFAULT_MAX_RESULTS = 5
 _MAX_RESULTS_CEILING = 10
 
+# How far back a story counts as already reported: a search words the same
+# story differently each time, and finds it again on other sites, so a find
+# is matched against the company's web search finds over this window by its
+# link and by its headline, and the search is shown the recent headlines.
+_REPORTED_WINDOW_DAYS = 30
+_REPORTED_TITLES_SHOWN = 30
+# Two headlines share this much of their distinctive words: the same story.
+_SAME_STORY_OVERLAP = 0.6
+_WORD_RE = re.compile(r"[a-z0-9]+")
+_COMMON_WORDS = frozenset((
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "have",
+    "in", "is", "it", "its", "of", "on", "or", "that", "the", "to", "was", "were",
+    "with", "new", "how", "why", "what", "who",
+))
+_PUBLISHED_FORMATS = ("%Y-%m-%d", "%B %d, %Y", "%b %d, %Y", "%d %B %Y", "%d %b %Y")
+
 # Web-search-backed calls can run long; mirror the research turn's ceiling.
 _QUERY_TIMEOUT_SECONDS = 300.0
 
@@ -84,6 +101,11 @@ _QUERY_SYSTEM_PROMPT = (
     "named, whether a claim or credit is right, when it was published), "
     "search for it and put the answer in the summary. Never leave the "
     "principal a check to do; say plainly what is still unknown.\n"
+    "- Give each result's publish date (YYYY-MM-DD) in published. Leave "
+    "out a story first published more than a couple of weeks ago, however "
+    "recently a site repeated it.\n"
+    "- Leave out any story listed as already reported, even when another "
+    "site words it differently.\n"
     "- An empty results list is the correct answer when nothing new and "
     "relevant turned up."
 )
@@ -123,7 +145,7 @@ EMIT_QUERY_RESULTS_TOOL: dict[str, Any] = {
                         },
                         "published": {
                             "type": "string",
-                            "description": "Publish date if known (else empty).",
+                            "description": "When the story was first published, YYYY-MM-DD (else empty).",
                         },
                     },
                     "required": ["title", "url", "summary"],
@@ -187,8 +209,10 @@ class QuerySource:
 
         tools: list[dict[str, Any]] = [EMIT_QUERY_RESULTS_TOOL, web_search]
         max_results = _coerce_max_results(item.config_json.get("max_results"))
+        reported = _reported(item, db_path=db_path)
         user_content = _build_user_content(
             query, item.config_json, max_results, notes=item.notes,
+            reported=[title for _, title in reported if title][:_REPORTED_TITLES_SHOWN],
         )
 
         agent = _QueryResearchAgent()
@@ -217,12 +241,22 @@ class QuerySource:
         # would let a run of dropped results (no URL / SSRF-rejected) at the
         # front silently starve the cap and emit fewer than max_results even
         # when valid results exist further down.
+        links = {link for link, _ in reported if link}
+        titles = [story_words(title) for _, title in reported if title]
         for raw in results:
             if len(signals) >= max_results:
                 break
             signal = _result_to_signal(raw, item, label)
-            if signal is not None:
-                signals.append(signal)
+            if signal is None:
+                continue
+            words = story_words(str(signal.raw_payload.get("title") or ""))
+            if signal.provenance_url in links or any(same_story(words, seen) for seen in titles):
+                # Already reported, by this search or another: one story is
+                # told once, however it is worded or wherever it reappears.
+                continue
+            links.add(signal.provenance_url)
+            titles.append(words)
+            signals.append(signal)
         return signals
 
     def matches_trigger(self, signal: Signal, item: WatchlistItem) -> bool:
@@ -255,13 +289,69 @@ def _coerce_max_results(value: Any) -> int:
     return max(1, min(n, _MAX_RESULTS_CEILING))
 
 
+def _reported(item: WatchlistItem, *, db_path: Path | None = None) -> list[tuple[str, str]]:
+    from openexecutive.monitoring import store
+
+    since = datetime.now(UTC) - timedelta(days=_REPORTED_WINDOW_DAYS)
+    try:
+        return store.recent_query_finds(item, since=since, db_path=db_path)
+    except Exception:
+        logger.exception("query: reading recent finds failed for %r", item.slug)
+        return []
+
+
+def story_words(title: str) -> frozenset[str]:
+    return frozenset(w for w in _WORD_RE.findall(title.lower()) if w not in _COMMON_WORDS and len(w) > 1)
+
+
+def same_story(a: frozenset[str], b: frozenset[str]) -> bool:
+    """Two headlines name the same story: most of their distinctive words
+    are shared (of the shorter one, so a longer rewording still matches)."""
+    if len(a) < 3 or len(b) < 3:
+        return False
+    return len(a & b) / min(len(a), len(b)) >= _SAME_STORY_OVERLAP
+
+
+def published_at(raw: object) -> str | None:
+    """A result's publish date as ISO 8601 (UTC midnight), or None when it
+    is missing or can't be read. With it, the scan's age limit applies."""
+    text = " ".join(str(raw or "").split()).strip().rstrip(".")
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        parsed = None
+        for fmt in _PUBLISHED_FORMATS:
+            try:
+                parsed = datetime.strptime(text, fmt)
+                break
+            except ValueError:
+                continue
+    if parsed is None:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC).isoformat()
+
+
 def _build_user_content(
     query: str, config: dict[str, Any], max_results: int, *, notes: str = "",
+    reported: list[str] | None = None,
 ) -> str:
     parts = [
         f"Standing query to monitor:\n{query}",
         f"\nReport at most {max_results} distinct, high-signal results.",
     ]
+    if reported:
+        # Headlines found earlier from the open web: fenced like the notes,
+        # read only as what not to report again.
+        close = "</already_reported>"
+        fenced = "\n".join("- " + no_tags(scrub_block_line(t, close))[:200] for t in reported)
+        parts.append(
+            "\nAlready reported in the last month (don't report these "
+            f"stories again):\n<already_reported>\n{fenced}\n{close}"
+        )
     if notes.strip():
         # What the person told this watch (often by replying to one of its
         # cards: monitoring/steer.py). Fenced: it is their words, read as
@@ -373,6 +463,7 @@ def _result_to_signal(
             "summary": summary_text[:1000],
             "published": str(raw.get("published") or ""),
         },
+        published_at=published_at(raw.get("published")),
         provenance_url=canonical,
         severity_hint=AlertSeverity.LOW,
         dedup_key=_make_dedup_key(item.slug, canonical),

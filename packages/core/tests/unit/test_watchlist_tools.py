@@ -465,3 +465,31 @@ async def test_a_new_watch_brings_the_next_scan_forward(db: Path) -> None:
     assert datetime.fromisoformat(run_at) >= before
     # A scan already due sooner is never pushed later.
     assert pipeline.scan_soon(datetime.now(UTC) + timedelta(minutes=5), db_path=db) is False
+
+
+@pytest.mark.asyncio
+async def test_a_new_watch_checks_daily_unless_it_is_fast_moving(db: Path) -> None:
+    await wt.handle_add_watchlist_entry({"slug": "news-acme", "signal_type": "query", "target": "acme launches"})
+    await wt.handle_add_watchlist_entry({"slug": "stock-acme", "signal_type": "stock", "target": "ACME"})
+    query = ms.get_watchlist_item_by_slug("news-acme")
+    stock = ms.get_watchlist_item_by_slug("stock-acme")
+    assert query is not None and query.cadence == "daily"
+    assert stock is not None and stock.cadence == "15min"
+
+
+@pytest.mark.asyncio
+async def test_a_watch_that_overlaps_one_already_there_says_so(db: Path) -> None:
+    await wt.handle_add_watchlist_entry({
+        "slug": "news-open-executive", "signal_type": "query", "target": "Open Executive news coverage",
+    })
+    result = json.loads(await wt.handle_add_watchlist_entry({
+        "slug": "query-open-executive-mentions", "signal_type": "query",
+        "target": "Open Executive coverage news",
+    }))
+    assert result["ok"] is True
+    assert [o["slug"] for o in result["overlaps"]] == ["news-open-executive"]
+
+    other = json.loads(await wt.handle_add_watchlist_entry({
+        "slug": "news-initech", "signal_type": "query", "target": "Initech pricing",
+    }))
+    assert "overlaps" not in other

@@ -1503,8 +1503,8 @@ class Settings(BaseSettings):
     # #80). 0 disables the gate. A timestamp more than a day in the FUTURE
     # is deferred instead (skipped, not recorded, re-judged once the date
     # passes) so a feed can't mute an announcement by post-dating it.
-    # Sources without an upstream timestamp (stock, page_watch, query) are
-    # unaffected.
+    # Sources without an upstream timestamp (stock, page_watch, a web search
+    # result with no publish date) are unaffected.
     external_monitor_max_signal_age_days: int = Field(
         7, ge=0, le=MAX_SIGNAL_AGE_DAYS, alias="EXTERNAL_MONITOR_MAX_SIGNAL_AGE_DAYS"
     )

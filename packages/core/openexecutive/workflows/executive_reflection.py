@@ -515,19 +515,25 @@ def _render_reflection_context(
         parts.append("")
 
     if external_signals:
-        parts.append("EXTERNAL SIGNALS OVERNIGHT (last 24h):")
+        from openexecutive.orchestrator.content_trust import wrap_untrusted
+
+        # What the watch list showed the person this week: a card, or a line
+        # in their brief. Kept past the card's expiry, with the initiative
+        # each one touched, so a find isn't forgotten because nobody opened
+        # its card. The words are the watched source's, so they are fenced.
+        lines: list[str] = []
         for s in external_signals[:10]:
-            # Outcome is None for unprocessed rows, otherwise one of
-            # the OUTCOME_* constants. Showing it lets the model know
-            # which signals actually surfaced (alerted) vs were
-            # suppressed (dry_run / below_floor / dup) — it should
-            # mostly care about the alerted ones.
-            outcome = s.get("processed_outcome") or "pending"
-            parts.append(
-                f"- [{s.get('severity_hint', '?')} {s.get('source_kind', '?')}] "
-                f"{(s.get('normalized_summary') or '')[:160]} "
-                f"-> {outcome}"
+            shown = "card" if s.get("processed_outcome") == "alerted" else "brief line"
+            enrichment = s.get("enrichment") or {}
+            touches = str(enrichment.get("matched_initiative") or "").strip()
+            day = str(s.get("captured_at") or "")[:10]
+            lines.append(
+                f"- {day + ' ' if day else ''}[{s.get('source_kind', '?')}, {shown}] "
+                f"{(s.get('normalized_summary') or '')[:160]}"
+                + (f" (touches: {touches[:80]})" if touches else "")
             )
+        parts.append("FOUND ON THE WATCH LIST (last 7 days, shown as a card or a brief line):")
+        parts.append(wrap_untrusted("\n".join(lines), source="watch list"))
         parts.append("")
 
     if len(parts) == 1:
@@ -719,17 +725,16 @@ class ExecutiveReflectionWorkflow(Workflow):
             logger.exception("reflection: alerts list failed")
             recent_alerts = []
 
-        # External signals (last 24h, alerted only) — surface alongside
-        # org state so the model can synthesize across own-system and
-        # outside-world signals on the same pass. Restricting to
-        # `processed_outcome='alerted'` keeps the prompt budget on
-        # signals that actually surfaced; dry_run / below_floor / dup
-        # rows would otherwise dominate the section on quiet days.
+        # What the watch list showed the person in the last 7 days (a card
+        # or a brief line), so the pass can synthesize across own-system and
+        # outside-world signals, and a find outlives its card. Only what was
+        # shown: a find kept on its watch's page, or one triage made no card
+        # of, is left out.
         try:
             from openexecutive.monitoring import store as monitoring_store
             external_signals = monitoring_store.list_recent_signals(
-                since=datetime.now(UTC) - timedelta(hours=24),
-                outcomes=["alerted"],
+                since=datetime.now(UTC) - timedelta(days=7),
+                outcomes=["alerted", "brief_line"],
                 limit=10,
             )
         except Exception:

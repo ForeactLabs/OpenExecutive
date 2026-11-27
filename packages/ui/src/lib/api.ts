@@ -6655,7 +6655,9 @@ export interface WatchlistItem {
 export interface WatchNoise {
   recent_alerts: number;
   recent_dismissed: number;
-  /** At least 6 of the last 8 were dismissed: ask whether to make it quieter. */
+  /** Cards that expired without being opened. Each counts as half a dismissal. */
+  recent_expired_unread?: number;
+  /** At least 6 of the last 8 were dismissed (an unopened one counts half): ask whether to make it quieter. */
   noisy: boolean;
 }
 
@@ -6969,6 +6971,8 @@ export interface SayResult {
   approval: AlertApproval | null;
   // Other cards a correction to a watch closed with this one.
   closed_alert_ids?: number[];
+  /** They asked to stop the watch, and it is now off. */
+  stopped?: boolean;
 }
 
 // "Or tell me…" on any card: an answer, "ask Dan instead", "yes, send it

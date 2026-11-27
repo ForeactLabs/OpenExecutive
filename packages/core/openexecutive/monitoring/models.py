@@ -98,6 +98,15 @@ EXPLICIT_DECLINE_REASONS = frozenset({
 # and it is part of the "Tells you when" sentence the person reads, so what
 # holds a change back is always what the watch says about itself.
 TRIGGER_ONLY_BIG = "only_big"
+# Trigger key for the sources a relevance read grades (web search, page
+# change, feed): every change that meets the trigger comes as a card. Without
+# it, the relevance read decides where a change shows: a card when it is
+# close to the company (RELEVANCE_CARD and up), a line in the next brief when
+# it may be (RELEVANCE_BRIEF and up), and only on the watch's own page below
+# that. Nothing is dropped either way; it is where a find is shown.
+TRIGGER_EVERY_CHANGE = "every_change"
+RELEVANCE_CARD = 0.7
+RELEVANCE_BRIEF = 0.4
 
 # Watchlist row "cadence" hints — used by the briefing/digest layer in
 # PR-C to decide whether a signal surfaces real-time vs in a digest.
@@ -230,13 +239,17 @@ OUTCOME_ALERTED = "alerted"
 OUTCOME_SUPPRESSED_DRY_RUN = "suppressed_dry_run"
 OUTCOME_SUPPRESSED_BELOW_FLOOR = "suppressed_below_floor"  # see note below
 OUTCOME_SUPPRESSED_DUP = "suppressed_dup"
+# Sent on, and the triage review raised no card for it (it repeated an open
+# one, its topic is muted, or it was not worth a card): its reason is kept
+# on the row (``triage_reason`` in enrichment_json) so the watch page and the
+# audit say what happened.
 OUTCOME_SUPPRESSED_TRIAGE = "suppressed_triage"
 # Held back because the watch asks for big changes only (TRIGGER_ONLY_BIG)
 # and this one was not graded big. The name predates that: it used to mean
 # "under the row's severity floor", a second filter that no longer exists.
-# Captured + enriched, but the capture-time relevance score fell below the
-# configured floor (external_monitor_enrichment_min_relevance). Recorded, not
-# promoted — the gate is opt-in (default threshold 0.0 = off) until calibrated.
+# Captured + enriched, and the capture-time relevance read put it below
+# RELEVANCE_BRIEF (or under external_monitor_enrichment_min_relevance):
+# recorded, and shown on the watch's own page only.
 OUTCOME_SUPPRESSED_LOW_RELEVANCE = "suppressed_low_relevance"
 # Captured + enriched, and the watch's notes (what the person told it, often
 # from a reply on one of its cards: monitoring/steer.py) say to skip a change
@@ -259,6 +272,9 @@ OUTCOME_HELD_DIGEST = "held_digest"
 # A watch set to Watch quietly (MODE_DRY_RUN, not a suggestion): never a card;
 # the change goes in the next brief instead (``EVENT_QUIET_FIND``).
 OUTCOME_HELD_BRIEF = "held_brief"
+# A change the relevance read put between RELEVANCE_BRIEF and RELEVANCE_CARD:
+# one line in the next brief (``EVENT_QUIET_FIND``), not a card.
+OUTCOME_BRIEF_LINE = "brief_line"
 # The audit row a quiet watch's find writes; the brief reads it as one of the
 # things it handled (briefing.brief_state.HANDLED_EVENT_KINDS).
 EVENT_QUIET_FIND = "watch_found_quietly"
@@ -268,6 +284,7 @@ _VALID_OUTCOMES = frozenset({
     OUTCOME_ALERTED,
     OUTCOME_HELD_DIGEST,
     OUTCOME_HELD_BRIEF,
+    OUTCOME_BRIEF_LINE,
     OUTCOME_SUPPRESSED_BASELINE,
     OUTCOME_SUPPRESSED_STALE,
     OUTCOME_SUPPRESSED_DRY_RUN,

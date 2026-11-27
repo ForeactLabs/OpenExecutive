@@ -250,6 +250,18 @@ def _batches(candidates: list[Alert], size: int) -> list[list[Alert]]:
 # --------------------------------------------------------------------------- #
 
 
+def _watch_card_unchanged_since(alert: Alert, reviewed: datetime) -> bool:
+    """A watch's card that was reviewed once and has had no new find join it
+    since. Another look would read the same card and say the same thing, so
+    it waits until a find coalesces into it (which moves ``last_seen_at``)."""
+    from openexecutive.briefing.ranking import watch_slug_of
+
+    if watch_slug_of(alert) is None:
+        return False
+    seen = parse_aware(alert.last_seen_at) or parse_aware(alert.created_at)
+    return seen is not None and seen <= reviewed
+
+
 def select_candidates(
     now: datetime,
     settings: ReviewSettings,
@@ -258,7 +270,8 @@ def select_candidates(
     db_path: Path | None = None,
 ) -> list[Alert]:
     """Live alerts worth a second look: old enough, not recently reviewed,
-    not an exempt source. Oldest first, capped at ``max_per_scan``."""
+    not an exempt source, and not a watch's card already reviewed with no new
+    find since. Oldest first, capped at ``max_per_scan``."""
     live = lifecycle.list_live_alerts(limit=500, db_path=db_path, now=now, whole_board=True)
     min_age = timedelta(hours=max(0, settings.min_age_hours))
     interval = timedelta(hours=max(0, settings.interval_hours))
@@ -272,6 +285,8 @@ def select_candidates(
         if not ignore_interval:
             reviewed = parse_aware(a.last_reviewed_at)
             if reviewed is not None and now - reviewed < interval:
+                continue
+            if reviewed is not None and _watch_card_unchanged_since(a, reviewed):
                 continue
         out.append(a)
     out.sort(key=lambda a: parse_aware(a.created_at) or now)

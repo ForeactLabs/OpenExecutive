@@ -40,6 +40,7 @@ from openexecutive.monitoring.models import (
     OUTCOME_ALERTED,
     OUTCOME_HELD_DIGEST,
     OUTCOME_SUPPRESSED_BASELINE,
+    OUTCOME_SUPPRESSED_TRIAGE,
     SOURCE_KIND_MAILBOX,
     Signal,
     WatchlistDecline,
@@ -1236,6 +1237,82 @@ def update_signal_enrichment(
             "UPDATE external_signals SET enrichment_json = ? WHERE id = ?",
             (json.dumps(enrichment), signal_id),
         )
+
+
+def note_triage_outcome(
+    signal_ids: list[int],
+    *,
+    alert_id: int | None,
+    reason: str = "",
+    db_path: Path | None = None,
+) -> None:
+    """Record what triage did with signals sent on as one event: the card
+    they are on, or (no card) why not, kept as ``triage_reason`` beside the
+    relevance read."""
+    if not signal_ids:
+        return
+    now = datetime.now(UTC).isoformat()
+    marks = ", ".join("?" * len(signal_ids))
+    with _get_conn(db_path) as conn:
+        if alert_id is not None:
+            conn.execute(
+                "UPDATE external_signals SET processed_at = ?, processed_outcome = ?, "
+                f"promoted_alert_id = ? WHERE id IN ({marks})",
+                (now, OUTCOME_ALERTED, alert_id, *signal_ids),
+            )
+            return
+        conn.execute(
+            "UPDATE external_signals SET processed_at = ?, processed_outcome = ?, "
+            "enrichment_json = json_set(CASE WHEN json_valid(enrichment_json) "
+            "THEN enrichment_json ELSE '{}' END, '$.triage_reason', ?) "
+            f"WHERE id IN ({marks})",
+            (now, OUTCOME_SUPPRESSED_TRIAGE, reason[:80], *signal_ids),
+        )
+
+
+def recent_query_finds(
+    item: WatchlistItem,
+    *,
+    since: datetime,
+    limit: int = 200,
+    db_path: Path | None = None,
+) -> list[tuple[str, str]]:
+    """``(link, title)`` of web search finds since ``since``, newest first:
+    this watch's own, and every company-wide web search watch's (never
+    another person's own watch), so a story one search already reported
+    isn't reported again as new by it or by another."""
+    resolved = _resolve_db_path(db_path)
+    if not resolved.exists():
+        return []
+    from openexecutive.monitoring import mailbox
+
+    ids = {
+        i.id
+        for i in list_watchlist(every_watch=True, db_path=db_path)
+        if i.id is not None and i.signal_type == item.signal_type
+        and (i.id == item.id or mailbox.set_by(i) is None)
+    }
+    if item.id is not None:
+        ids.add(item.id)
+    if not ids:
+        return []
+    marks = ", ".join("?" * len(ids))
+    with _get_conn(db_path) as conn:
+        rows = conn.execute(
+            "SELECT raw_payload_json FROM external_signals "
+            f"WHERE watchlist_id IN ({marks}) AND captured_at >= ? "
+            "ORDER BY captured_at DESC LIMIT ?",
+            (*sorted(ids), since.isoformat(), limit),
+        ).fetchall()
+    out: list[tuple[str, str]] = []
+    for row in rows:
+        try:
+            payload = json.loads(row["raw_payload_json"] or "{}")
+        except (TypeError, ValueError):
+            continue
+        if isinstance(payload, dict):
+            out.append((str(payload.get("link") or ""), str(payload.get("title") or "")))
+    return out
 
 
 def list_recent_signals(

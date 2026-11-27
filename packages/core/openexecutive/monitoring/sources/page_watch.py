@@ -51,6 +51,7 @@ from openexecutive.monitoring.models import (
     PAGE_WATCH_FETCH_KEY,
     PAGE_WATCH_FETCH_LEGACY_XCRAWL,
     SOURCE_KIND_PAGE_WATCH,
+    TRIGGER_EVERY_CHANGE,
     Signal,
     WatchlistItem,
 )
@@ -193,6 +194,16 @@ class PageWatchSource:
         # with no stored links (written before they were kept) reports none
         # as new, or every link on the page would read as news.
         new_links = new_headline_links(prior.get("links") or [], links)
+        if (
+            not new_links
+            and (item.trigger_json or {}).get(TRIGGER_EVERY_CHANGE) is not True
+            and only_counts_or_marks(old_snapshot, snapshot)
+        ):
+            # A counter ticking ("was 14, now 15"), a star count or a curly
+            # quote turned straight says nothing new; the baseline has moved
+            # on, so the next real change is compared with the page as it is.
+            observe(item, "Only a count or punctuation changed on the page.")
+            return []
         snippet = _without_links(added[:_SUMMARY_SNIPPET_CHARS].strip())
         label = item.config_json.get("label") or _host_label(item.target)
         # Words replaced or removed say what the page used to say too.
@@ -479,6 +490,35 @@ def _strip_blocks(markup: str) -> str:
             i = n if gt == -1 else gt + 1
         out.append(" ")
     return "".join(out)
+
+
+_LETTERS_RE = re.compile(r"[^a-z]+")
+# A number that carries one of these is a price or a rate: always a change.
+_MONEY_OR_RATE = frozenset("$€£¥%")
+
+
+def only_counts_or_marks(old: str, new: str) -> bool:
+    """True when the two texts differ only in plain numbers and punctuation:
+    the same words in the same order once digits and marks are set aside,
+    and no changed number is a price or a rate ("$15", "4%")."""
+    old_words = old.split()[:_MAX_DIFF_WORDS]
+    new_words = new.split()[:_MAX_DIFF_WORDS]
+    if old_words == new_words:
+        return False
+
+    def letters(words: list[str]) -> list[str]:
+        return [w for w in (_LETTERS_RE.sub("", word.lower()) for word in words) if w]
+
+    if letters(old_words) != letters(new_words):
+        return False
+    sm = difflib.SequenceMatcher(None, old_words, new_words, autojunk=False)
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            continue
+        for word in (*old_words[i1:i2], *new_words[j1:j2]):
+            if any(ch in _MONEY_OR_RATE for ch in word):
+                return False
+    return True
 
 
 def _diff(old: str, new: str) -> tuple[int, str, str]:

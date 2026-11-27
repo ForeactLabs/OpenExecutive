@@ -5,6 +5,7 @@ import logging
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -273,16 +274,36 @@ def _as_written_decision(event: AlertEvent) -> TriageDecision:
     )
 
 
+# Told which card an event ended up on: the new card, or the open one it
+# folded into. Not called when no card holds it.
+OnCard = Callable[[int], None]
+# Told how an evaluation ended: the decision, and the card the event is on
+# (None when no card holds it).
+AfterEvaluation = Callable[[TriageDecision, int | None], None]
+
+
 async def evaluate_and_dispatch(
     event: AlertEvent,
     db_path: Path | None = None,
+    *,
+    on_card: OnCard | None = None,
 ) -> tuple[TriageDecision, int | None]:
     """Run triage on a single event and dispatch the alert.
 
     Returns (decision, alert_id). alert_id is None when the alert is
-    suppressed or a duplicate.
+    suppressed or a duplicate. ``on_card`` hears the id of the card the
+    event is on, a new one or an open one it folded into, so its producer
+    can say where it went (a watch's find: ``monitoring.pipeline``).
     """
     path = db_path or store.DB_PATH
+
+    def _landed(card_id: int | None) -> None:
+        if on_card is None or card_id is None:
+            return
+        try:
+            on_card(card_id)
+        except Exception:
+            logger.exception("alerts.pipeline: on_card failed for alert=%s", card_id)
 
     if not await _wait_for_slot(bounded=event.source not in PERSONAL_SOURCES):
         logger.warning(
@@ -388,6 +409,7 @@ async def evaluate_and_dispatch(
             "alerts.pipeline coalesced source=%s ext_id=%s into alert=%d raised=%s",
             event.source, event.external_id, existing_id, raised,
         )
+        _landed(existing_id)
         if not (raised and decision.severity.value in _REDISPATCH_SEVERITIES):
             return decision, None
         alert = store.get_alert(existing_id, db_path=path)
@@ -430,7 +452,9 @@ async def evaluate_and_dispatch(
     alert = store.get_alert(alert_id, db_path=path)
     if alert is None:
         logger.error("alerts.pipeline could not re-read alert id=%s", alert_id)
+        _landed(alert_id)
         return decision, alert_id
+    _landed(alert.superseded_by_alert_id or alert_id)
     if alert.superseded_by_alert_id is not None:
         # It joined an open card on its topic (alerts.one_card). A grave one
         # (a fraud warning), or a message passed on to its reader, still
@@ -518,8 +542,11 @@ def schedule_chat_message_evaluation(
     )
 
 
-def schedule_evaluation(event: AlertEvent) -> None:
+def schedule_evaluation(event: AlertEvent, *, then: AfterEvaluation | None = None) -> None:
     """Fire-and-forget evaluation. Safe to call from sync or async context.
+
+    ``then`` hears how it ended, once: the decision and the card the event
+    is on (None when none holds it, or when the evaluation itself failed).
 
     Mirrors memory.episodic.schedule_extraction's GC-safe pattern, including
     its audit-context snapshot: the triage model call happens in a task that
@@ -537,13 +564,13 @@ def schedule_evaluation(event: AlertEvent) -> None:
     audit_sid, audit_tid = get_active_ids()
     try:
         loop = asyncio.get_running_loop()
-        task = loop.create_task(_evaluate_in_turn(event, audit_sid, audit_tid))
+        task = loop.create_task(_evaluate_in_turn(event, audit_sid, audit_tid, then))
         _background_tasks.add(task)
         task.add_done_callback(_background_tasks.discard)
     except RuntimeError:
         threading.Thread(
             target=lambda: asyncio.run(
-                _evaluate_in_turn(event, audit_sid, audit_tid)
+                _evaluate_in_turn(event, audit_sid, audit_tid, then)
             ),
             daemon=True,
         ).start()
@@ -553,8 +580,11 @@ async def _evaluate_in_turn(
     event: AlertEvent,
     audit_session_id: str | None,
     audit_turn_id: str | None,
+    then: AfterEvaluation | None = None,
 ) -> None:
-    """Re-bind the scheduling caller's audit ids, then evaluate."""
+    """Re-bind the scheduling caller's audit ids, then evaluate. ``then``
+    hears how it ended, a failed evaluation too (no card), so its producer
+    never reads an event as on a card it never reached."""
     from openexecutive.audit.context import get_active_ids, set_turn
 
     # Per-field fallback — see memory.episodic.extract_and_store for why a
@@ -563,9 +593,27 @@ async def _evaluate_in_turn(
     effective_session = audit_session_id if audit_session_id is not None else ambient_session
     effective_turn = audit_turn_id if audit_turn_id is not None else ambient_turn
 
-    if (effective_session, effective_turn) == (ambient_session, ambient_turn):
-        await evaluate_and_dispatch(event)
+    landed: list[int] = []
+    on_card = landed.append if then is not None else None
+    decision: TriageDecision | None = None
+    try:
+        if (effective_session, effective_turn) == (ambient_session, ambient_turn):
+            decision, _ = await evaluate_and_dispatch(event, on_card=on_card)
+        else:
+            with set_turn(session_id=effective_session, turn_id=effective_turn):
+                decision, _ = await evaluate_and_dispatch(event, on_card=on_card)
+    except Exception:
+        if then is None:
+            raise
+        logger.exception(
+            "alerts.pipeline: evaluation failed source=%s ext_id=%s", event.source, event.external_id,
+        )
+    if then is None:
         return
-
-    with set_turn(session_id=effective_session, turn_id=effective_turn):
-        await evaluate_and_dispatch(event)
+    try:
+        then(
+            decision or TriageDecision(alert=False, dedup_key="", reason_if_suppressed="triage_error"),
+            landed[-1] if landed else None,
+        )
+    except Exception:
+        logger.exception("alerts.pipeline: after-evaluation hook failed")
