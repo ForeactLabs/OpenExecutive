@@ -59,7 +59,8 @@
   const HOME_CODE = new RegExp(
     "\\b(?:gates?|doors?|garage|alarm|lock ?box|keypad|building|lobby)(?:\\s+(?:entry|access|opener|door|alarm))*\\s+(?:codes?|passcodes?|passwords?|pins?)\\b" +
       // A Wi-Fi "code" is usually a portal's one-time code: only a Wi-Fi password counts.
-      "|\\bwi-?fi(?:\\s+network)?\\s+(?:passwords?|pass|pw)\\b" +
+      "|\\b(?:wi-?fi(?:\\s+network)?|network)\\s+(?:passwords?|pass|pw)\\b" +
+      "|\\b(?:codes?|passcodes?|pins?)\\s+" + NUMBER + "\\s+(?:for|to)\\s+(?:the\\s+|your\\s+)?" + PLACE + "\\b" +
       "|\\b(?:codes?|passcodes?|passwords?|pins?)\\s+(?:for|to)\\s+(?:the\\s+|your\\s+)?" + PLACE + "\\b" +
       "|\\b(?:wi-?fi|network|ssid)\\s*(?::|is)\\s*(?!(?:your|the|a|my)\\b)\\S+\\s+(?:password|pass|pw)\\b" +
       "|" + NUMBER + "\\s+(?:at|on|into)\\s+(?:the\\s+)?" + PLACE + "\\b",

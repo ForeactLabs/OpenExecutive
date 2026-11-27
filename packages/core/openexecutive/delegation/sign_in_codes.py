@@ -54,7 +54,8 @@ _PLACE = r"(?:gates?|doors?|garage|alarm|lock ?box|keypad|wi-?fi|building|lobby)
 _HOME_CODE = re.compile(
     r"\b(?:gates?|doors?|garage|alarm|lock ?box|keypad|building|lobby)(?:\s+(?:entry|access|opener|door|alarm))*"
     r"\s+(?:codes?|passcodes?|passwords?|pins?)\b"
-    r"|\bwi-?fi(?:\s+network)?\s+(?:passwords?|pass|pw)\b"
+    r"|\b(?:wi-?fi(?:\s+network)?|network)\s+(?:passwords?|pass|pw)\b"
+    r"|\b(?:codes?|passcodes?|pins?)\s+" + _NUMBER + r"\s+(?:for|to)\s+(?:the\s+|your\s+)?" + _PLACE + r"\b"
     r"|\b(?:codes?|passcodes?|passwords?|pins?)\s+(?:for|to)\s+(?:the\s+|your\s+)?" + _PLACE + r"\b"
     r"|\b(?:wi-?fi|network|ssid)\s*(?::|is)\s*(?!(?:your|the|a|my)\b)\S+\s+(?:password|pass|pw)\b"
     r"|" + _NUMBER + r"\s+(?:at|on|into)\s+(?:the\s+)?" + _PLACE + r"\b",
