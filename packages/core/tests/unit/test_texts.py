@@ -1282,3 +1282,16 @@ def test_conversations_route_is_the_callers_own(client: TestClient, ids: dict[st
     assert row["texts"] == [{"sender": "Dana Ruiz", "text": "Running late?", "outgoing": False, "at": row["texts"][0]["at"]}]
     _on(ids["teammate"])
     assert client.get("/delegation/texts/conversations", headers=TEAMMATE).json()["conversations"] == []
+
+
+def test_a_new_send_brings_an_old_conversation_into_the_list(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("old", conv="dana", text="Hi", at=NOW - timedelta(days=20))])
+    tx.record(owner, [_item("new", conv="sam", title="Sam", sender="Sam", text="Hey")])
+    dana = next(c for c in tx.conversations(owner) if c.who == "Dana Ruiz")
+    with tx._connect() as conn:
+        conn.execute(f"UPDATE {tx.TEXT_CONVERSATIONS_TABLE} SET updated_at=? WHERE id=?",
+                     (tx._iso(NOW - timedelta(days=20)), dana.id))
+    tx.queue_send(owner, "Running late", conversation_id=dana.id)
+    assert [t.who for t in tx.threads(owner, limit=1)] == ["Dana Ruiz"]

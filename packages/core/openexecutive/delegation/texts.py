@@ -831,8 +831,12 @@ def threads(person_id: int, *, limit: int = 50, per: int = 20, db_path: Path | N
     its own row until the browser says which conversation it went to."""
     out: list[Thread] = []
     with _connect(db_path) as conn:
+        # Latest by whatever happened last: a text in, a send, or a note.
         convs = conn.execute(
-            f"SELECT * FROM {TEXT_CONVERSATIONS_TABLE} WHERE person_id=? ORDER BY updated_at DESC LIMIT ?",
+            f"SELECT c.* FROM {TEXT_CONVERSATIONS_TABLE} c WHERE c.person_id=? ORDER BY MAX("
+            "c.updated_at, COALESCE(c.note_at, ''), "
+            f"COALESCE((SELECT MAX(s.created_at) FROM {TEXT_SENDS_TABLE} s WHERE s.conversation_id=c.id), '')"
+            ") DESC LIMIT ?",
             (person_id, limit),
         ).fetchall()
         for c in convs:
