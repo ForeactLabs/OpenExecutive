@@ -291,6 +291,19 @@ def test_what_came_in_is_pruned_even_when_nothing_new_comes(owner: Any) -> None:
     assert noticed.kept_keys(owner.id, ["old", "new"]) == {"new"}
 
 
+def test_an_email_the_gist_left_out_is_read_again(owner: Any, monkeypatch: pytest.MonkeyPatch,
+                                                  model: dict[str, Any]) -> None:
+    async def partial(turn: str) -> dict[str, Any]:
+        return {"emails": [{"n": 1, "gist": "Box delivered", "tie": "", "act": False}]}
+
+    monkeypatch.setattr(mail_context, "_call_model", partial)
+    client = Mailbox(_msg("m1", minutes_ago=30), _msg("m2", minutes_ago=10))
+    result = _look(owner, client)
+    assert result.failed == 1
+    assert len(noticed.recent(owner.id, now=NOW)) == 1
+    assert mail_context.get_cursor(owner.id).failures == 1
+
+
 def test_nothing_is_read_with_act_as_me_off(owner: Any, model: dict[str, Any]) -> None:
     set_enabled(owner.id, False, updated_by="test")
     client = Mailbox(_msg("m1"))

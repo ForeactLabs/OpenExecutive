@@ -133,6 +133,7 @@ class _Note:
     gist: str = ""
     tie: str = ""
     act: bool = False
+    answered: bool = False  # the gist call wrote an entry for it
 
 
 @dataclass
@@ -352,6 +353,7 @@ async def gist(notes: list[_Note], known: str) -> bool:
         note.gist = clean_gist(str(entry.get("gist") or ""))
         # Written from other people's email too, so no link or address.
         note.tie = one_line(clean_gist(str(entry.get("tie") or "")), 120)
+        note.answered = True
         # It acts only on what ties to something known.
         note.act = entry.get("act") is True and bool(note.tie)
     return True
@@ -478,9 +480,11 @@ async def _look(person: Any, client: Any, cursor: _Cursor, now: datetime) -> Loo
         known = await _known(person, client, now)
         for start in range(0, len(notes), GIST_BATCH):
             batch = notes[start:start + GIST_BATCH]
-            if not await gist(batch, known):
-                result.failed += len(batch)
-                unread.update(n.message.id for n in batch)
+            await gist(batch, known)
+            # Failed, or left out of the answer: read again, not kept bare.
+            missed = [n.message.id for n in batch if not n.answered]
+            result.failed += len(missed)
+            unread.update(missed)
     if unread:
         # Not kept yet, and the read point stays at the oldest of them, so
         # the next look (after a backoff) gists them again rather than
