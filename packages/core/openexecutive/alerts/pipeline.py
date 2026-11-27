@@ -380,13 +380,15 @@ async def evaluate_and_dispatch(
 
     # A replay of the SAME upstream event (webhook retry, re-poll) is a
     # no-op, exactly as before: the (source, external_id) row already exists.
-    if event.external_id and store.get_alert_by_external(
-        event.source, event.external_id, db_path=path
-    ) is not None:
+    replayed = store.get_alert_by_external(event.source, event.external_id, db_path=path) if event.external_id else None
+    if replayed is not None:
         logger.info(
             "alerts.pipeline duplicate suppressed source=%s ext_id=%s",
             event.source, event.external_id,
         )
+        # Already on that card: say so to whoever sent it.
+        if replayed.id is not None:
+            _landed(replayed.id)
         return decision, None
 
     # Coalesce a repeat of an open alert into the existing row instead of
@@ -447,6 +449,9 @@ async def evaluate_and_dispatch(
             event.source,
             event.external_id,
         )
+        raced = store.get_alert_by_external(event.source, event.external_id, db_path=path) if event.external_id else None
+        if raced is not None and raced.id is not None:
+            _landed(raced.id)
         return decision, None
 
     alert = store.get_alert(alert_id, db_path=path)

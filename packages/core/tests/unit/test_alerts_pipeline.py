@@ -922,3 +922,20 @@ def test_then_hears_a_failed_evaluation_as_no_card(monkeypatch) -> None:
         lambda decision, card: heard.append((decision.reason_if_suppressed or "", card)),
     ))
     assert heard == [("triage_error", None)]
+
+
+def test_on_card_hears_the_card_a_replayed_event_is_already_on(monkeypatch, db: Path) -> None:
+    from openexecutive.alerts import pipeline
+
+    _count_dispatches(monkeypatch)
+    _stub_triage(monkeypatch, dedup_key="k")
+    landed: list[int] = []
+
+    async def run():
+        event = AlertEvent(source="stock", external_id="same", body="x")
+        _, first = await pipeline.evaluate_and_dispatch(event, db_path=db)
+        await pipeline.evaluate_and_dispatch(event, db_path=db, on_card=landed.append)
+        return first
+
+    first = asyncio.run(run())
+    assert first is not None and landed == [first]
