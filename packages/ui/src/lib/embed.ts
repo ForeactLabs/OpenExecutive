@@ -94,6 +94,7 @@ export const APP_ROUTES = [
   "skills",
   "take-on",
   "tasks",
+  "texts",
   "today",
   "watchlist",
 ] as const;
