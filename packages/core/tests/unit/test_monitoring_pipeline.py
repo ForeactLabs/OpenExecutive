@@ -247,7 +247,7 @@ def test_scan_promotes_signal_to_alert(
     # Stub alerts.schedule_evaluation so we don't fire a real triage LLM.
     monkeypatch.setattr(
         "openexecutive.monitoring.pipeline.schedule_evaluation",
-        lambda event: promoted.append(event),
+        lambda event, **_: promoted.append(event),
     )
 
     wl_id = ms.insert_watchlist_item(
@@ -284,7 +284,7 @@ def test_dry_run_mode_suppresses_promotion(
     promoted: list[Any] = []
     monkeypatch.setattr(
         "openexecutive.monitoring.pipeline.schedule_evaluation",
-        lambda event: promoted.append(event),
+        lambda event, **_: promoted.append(event),
     )
 
     ms.insert_watchlist_item(
@@ -311,7 +311,7 @@ def test_a_quiet_watch_find_goes_in_the_brief(
     brief (read as handled), never a card; a suggestion stays silent."""
     promoted: list[Any] = []
     noted: list[tuple[str, str]] = []
-    monkeypatch.setattr("openexecutive.monitoring.pipeline.schedule_evaluation", promoted.append)
+    monkeypatch.setattr("openexecutive.monitoring.pipeline.schedule_evaluation", lambda e, **_: promoted.append(e))
     monkeypatch.setattr(
         "openexecutive.monitoring.pipeline.audit_log",
         lambda event_type, summary, **kw: noted.append((event_type, summary)),
@@ -340,7 +340,7 @@ def test_a_watch_tells_you_whatever_its_severity(
     promoted: list[Any] = []
     monkeypatch.setattr(
         "openexecutive.monitoring.pipeline.schedule_evaluation",
-        lambda event: promoted.append(event),
+        lambda event, **_: promoted.append(event),
     )
     _patch_settings(monkeypatch, external_monitor_enrichment_enabled=False)
 
@@ -367,7 +367,7 @@ def test_only_big_changes_holds_back_a_small_one(
     promoted: list[Any] = []
     monkeypatch.setattr(
         "openexecutive.monitoring.pipeline.schedule_evaluation",
-        lambda event: promoted.append(event),
+        lambda event, **_: promoted.append(event),
     )
     _patch_settings(monkeypatch, external_monitor_enrichment_enabled=False)
 
@@ -425,7 +425,7 @@ def test_only_big_counts_only_a_real_true(
     promoted: list[Any] = []
     monkeypatch.setattr(
         "openexecutive.monitoring.pipeline.schedule_evaluation",
-        lambda event: promoted.append(event),
+        lambda event, **_: promoted.append(event),
     )
     _patch_settings(monkeypatch, external_monitor_enrichment_enabled=False)
     _insert_feed(db, "loose", trigger={"only_big": value})
@@ -516,7 +516,7 @@ def test_dedup_key_collision_is_silent(
     promoted: list[Any] = []
     monkeypatch.setattr(
         "openexecutive.monitoring.pipeline.schedule_evaluation",
-        lambda event: promoted.append(event),
+        lambda event, **_: promoted.append(event),
     )
 
     _insert_feed(db, "vendor")
@@ -545,7 +545,7 @@ def _install_promotion_recorder(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
     promoted: list[Any] = []
     monkeypatch.setattr(
         "openexecutive.monitoring.pipeline.schedule_evaluation",
-        lambda event: promoted.append(event),
+        lambda event, **_: promoted.append(event),
     )
     return promoted
 
@@ -2016,7 +2016,7 @@ def test_ceiling_caps_signal_severity_hint(
     external_signals with severity_hint='medium'."""
     monkeypatch.setattr(
         "openexecutive.monitoring.pipeline.schedule_evaluation",
-        lambda event: None,
+        lambda event, **_: None,
     )
     ms.insert_watchlist_item(
         slug="cap-test", signal_type="vendor_status",
@@ -2038,7 +2038,7 @@ def test_schedule_evaluation_failure_records_failed_outcome(
     """If schedule_evaluation raises, the signal must NOT be recorded as
     'alerted' — that would silently lose signals during an alerts
     outage."""
-    def boom(event: Any) -> None:
+    def boom(event: Any, **_: Any) -> None:
         raise RuntimeError("triage pipeline down")
     monkeypatch.setattr(
         "openexecutive.monitoring.pipeline.schedule_evaluation", boom
@@ -2062,7 +2062,7 @@ def test_max_signals_per_scan_cap_enforced(
     """Cost guard — exceeding max_signals_per_scan stops writes mid-list."""
     monkeypatch.setattr(
         "openexecutive.monitoring.pipeline.schedule_evaluation",
-        lambda event: None,
+        lambda event, **_: None,
     )
     _patch_settings(monkeypatch, external_monitor_max_signals_per_scan=2)
 

@@ -402,7 +402,7 @@ async def test_legacy_marker_on_unsaved_item_does_not_rebaseline_forever(
     """An item with no id cannot have its marker cleared, so it must be
     compared normally — otherwise it would re-baseline on every poll and
     never report a change."""
-    holder = SimpleNamespace(body=b"<html><body>v1</body></html>", calls=0)
+    holder = SimpleNamespace(body=b"<html><body>Old plan</body></html>", calls=0)
     _install_httpx(monkeypatch, holder)
     item = WatchlistItem(
         id=None, slug="page-noid", signal_type="page_watch",
@@ -410,7 +410,7 @@ async def test_legacy_marker_on_unsaved_item_does_not_rebaseline_forever(
     )
     src = PageWatchSource()
     assert await src.poll(item, db_path=db) == []             # first baseline
-    holder.body = b"<html><body>v2</body></html>"
+    holder.body = b"<html><body>New plan</body></html>"
     assert len(await src.poll(item, db_path=db)) == 1         # change reported
 
 

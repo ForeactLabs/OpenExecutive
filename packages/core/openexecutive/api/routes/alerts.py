@@ -866,6 +866,9 @@ def reopen_alert(alert_id: int, request: Request) -> Alert:
     return updated
 
 
+STOPPED_WORDS = "I've turned this watch off. You can turn it back on from the watch list."
+
+
 class SteerResponse(BaseModel):
     """What changed when the person corrected a watch on its card."""
 
@@ -875,6 +878,8 @@ class SteerResponse(BaseModel):
     notes: str
     previous_notes: str
     closed_alert_ids: list[int]
+    # The reply asked to stop the watch, and it was turned off.
+    stopped: bool = False
 
 
 def _watch_cards_to_offer(
@@ -944,6 +949,12 @@ async def _steer(alert_id: int, text: str, request: Request) -> SteerResponse:
         raise HTTPException(
             status_code=409, detail="The watch just changed. Try again."
         )
+    stopped = False
+    if plan.stop_watch and item.enabled:
+        # Turned off the way the watch page's switch does; its page turns it
+        # back on.
+        monitoring_store.set_enabled(item.id, False)
+        stopped = True
     still_offered = {a.id for a in _watch_cards_to_offer(slug, alert_id, request)}
     closed: list[int] = []
     # Closed as dismissed so the card's Undo (reopen) works, but without the
@@ -967,19 +978,24 @@ async def _steer(alert_id: int, text: str, request: Request) -> SteerResponse:
             "watchlist_id": item.id,
             "watchlist_slug": slug,
             "closed_alert_ids": closed,
+            "stopped": stopped,
             "by": api_caller.actor(request),
         },
         # An email watch's rows are its owner's alone, like every other row
         # about it.
         **mailbox.audit_privacy(item),
     )
+    # Said in our own words, whatever the model wrote, so turning a watch
+    # off is never silent.
+    reply = f"{plan.reply} {STOPPED_WORDS}".strip() if stopped else plan.reply
     return SteerResponse(
-        reply=plan.reply,
+        reply=reply,
         watch_slug=slug,
         watch_title=watch_title(item),
         notes=plan.notes,
         previous_notes=item.notes,
         closed_alert_ids=closed,
+        stopped=stopped,
     )
 
 
@@ -1005,6 +1021,8 @@ class SayResponse(BaseModel):
     # Other cards a correction to a watch closed with this one, for the
     # page to take down.
     closed_alert_ids: list[int] = []
+    # The person asked to stop the watch, and it is now off.
+    stopped: bool = False
 
 
 SAY_MAX_CHARS = 500
@@ -1098,6 +1116,7 @@ async def say_on_card(alert_id: int, body: SayBody, request: Request) -> SayResp
         return SayResponse(
             reply=steered.reply, card=_card(),
             closed_alert_ids=[i for i in steered.closed_alert_ids if i != alert_id],
+            stopped=steered.stopped,
         )
 
     if not _may_approve(existing, request):

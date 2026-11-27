@@ -51,6 +51,7 @@ from openexecutive.monitoring.models import (
     PAGE_WATCH_FETCH_KEY,
     PAGE_WATCH_FETCH_LEGACY_XCRAWL,
     SOURCE_KIND_PAGE_WATCH,
+    TRIGGER_EVERY_CHANGE,
     Signal,
     WatchlistItem,
 )
@@ -193,6 +194,16 @@ class PageWatchSource:
         # with no stored links (written before they were kept) reports none
         # as new, or every link on the page would read as news.
         new_links = new_headline_links(prior.get("links") or [], links)
+        if (
+            not new_links
+            and (item.trigger_json or {}).get(TRIGGER_EVERY_CHANGE) is not True
+            and only_counts_or_marks(old_snapshot, snapshot)
+        ):
+            # A counter ticking ("was 14, now 15"), a star count or a curly
+            # quote turned straight says nothing new; the baseline has moved
+            # on, so the next real change is compared with the page as it is.
+            observe(item, "Only a count or punctuation changed on the page.")
+            return []
         snippet = _without_links(added[:_SUMMARY_SNIPPET_CHARS].strip())
         label = item.config_json.get("label") or _host_label(item.target)
         # Words replaced or removed say what the page used to say too.
@@ -479,6 +490,101 @@ def _strip_blocks(markup: str) -> str:
             i = n if gt == -1 else gt + 1
         out.append(" ")
     return "".join(out)
+
+
+_LETTERS_RE = re.compile(r"[^a-z]+")
+# A number that carries one of these is a price or a rate: always a change.
+_MONEY_OR_RATE = frozenset("$€£¥₹%")
+# A bare count: digits, with thousands commas.
+_COUNT_RE = re.compile(r"\d{1,3}(?:,\d{3})+|\d+")
+_EDGE_MARKS = ".,;:!?()[]{}\"'“”‘’"
+# Words that make a number near them news: money, a rate, a price or plan,
+# a size, a date, a version. Only a number with none of these nearby is a plain count.
+_UNIT_WORDS = frozenset((
+    "usd", "eur", "gbp", "jpy", "cad", "aud", "inr", "chf", "dollars", "euros", "pounds",
+    "percent", "pct", "per", "apr", "apy", "bps", "mo", "month", "months", "monthly",
+    "yr", "year", "years", "yearly", "annually", "k", "m", "bn", "thousand", "million", "billion", "trillion",
+    "jan", "january", "feb", "february", "mar", "march", "april", "may", "jun",
+    "june", "jul", "july", "aug", "august", "sep", "sept", "september", "oct", "october",
+    "nov", "november", "dec", "december", "q1", "q2", "q3", "q4",
+    "version", "v", "release", "build", "series", "round",
+    "price", "prices", "priced", "pricing", "cost", "costs", "fee", "fees", "rate", "rates",
+    "plan", "plans", "tier", "tiers", "seat", "seats", "user", "users", "points", "pts",
+    "starter", "basic", "pro", "plus", "premium", "team", "business", "enterprise",
+    "trial", "salary", "wage", "pay", "rent", "deposit", "discount", "off",
+))
+# How many words either side of a changed number are read for those words.
+_UNIT_WINDOW = 3
+
+
+# How far a count may move and still be a tick, not news (200 -> 2,000 is).
+_SMALL_STEP = 0.25
+
+
+def _small_steps(old: list[str], new: list[str]) -> bool:
+    """Each changed count moved by a little: the same number of counts on
+    both sides, each within ``_SMALL_STEP`` of the one it replaced."""
+    def counts(words: list[str]) -> list[int]:
+        out = []
+        for word in words:
+            core = word.strip(_EDGE_MARKS).replace(",", "")
+            if core.isdigit():
+                out.append(int(core))
+        return out
+
+    before, after = counts(old), counts(new)
+    if len(before) != len(after):
+        return False
+    return all(abs(b - a) <= max(1, _SMALL_STEP * max(a, b)) for a, b in zip(before, after, strict=True))
+
+
+def only_counts_or_marks(old: str, new: str) -> bool:
+    """True when the two texts differ only in plain counts and punctuation:
+    the same words in the same order once digits and marks are set aside,
+    every changed number a bare count ("25", "1,204"; not a date, a time or
+    a decimal), and nothing within a few words of it saying it is money, a
+    rate, a size, a date or a version ("$", "USD", "%", "a month",
+    "million", "June", "Version")."""
+    old_words = old.split()
+    new_words = new.split()
+    # Past what can be compared, a change could hide anywhere: tell it.
+    if old_words == new_words or max(len(old_words), len(new_words)) > _MAX_DIFF_WORDS:
+        return False
+
+    def letters(words: list[str]) -> list[str]:
+        return [w for w in (_LETTERS_RE.sub("", word.lower()) for word in words) if w]
+
+    if letters(old_words) != letters(new_words):
+        return False
+
+    def counted(word: str) -> bool:
+        core = word.strip(_EDGE_MARKS)
+        return not any(ch.isdigit() for ch in core) or _COUNT_RE.fullmatch(core) is not None
+
+    def money_or_rate(word: str) -> bool:
+        low = word.lower()
+        return any(ch in _MONEY_OR_RATE for ch in word) or low.strip(_EDGE_MARKS) in _UNIT_WORDS or "/" in low
+
+    sm = difflib.SequenceMatcher(None, old_words, new_words, autojunk=False)
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            continue
+        changed = (*old_words[i1:i2], *new_words[j1:j2])
+        if not all(counted(w) for w in changed):
+            return False
+        if not _small_steps(old_words[i1:i2], new_words[j1:j2]):
+            return False
+        # Only a moved number needs its neighbours read; a mark alone
+        # ("team's" to "team’s") has none to be money.
+        if not any(ch.isdigit() for w in changed for ch in w):
+            continue
+        around = (
+            *old_words[max(0, i1 - _UNIT_WINDOW):i2 + _UNIT_WINDOW],
+            *new_words[max(0, j1 - _UNIT_WINDOW):j2 + _UNIT_WINDOW],
+        )
+        if any(money_or_rate(w) for w in around):
+            return False
+    return True
 
 
 def _diff(old: str, new: str) -> tuple[int, str, str]:

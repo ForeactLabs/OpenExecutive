@@ -2,7 +2,9 @@
 
 The watch detail page asks "only tell you about bigger changes?" when most
 of a watch's recent alerts were dismissed: at least ``NOISE_MIN_DISMISSED``
-of its last ``NOISE_WINDOW`` alerts. Raising the bar or picking "keep as is"
+of its last ``NOISE_WINDOW`` alerts. A card that expired unread (only unread
+cards expire) counts as half a dismissal: nobody opened it, so it was likely
+noise too, but less surely than one turned down. Raising the bar or picking "keep as is"
 quiets the question by remembering the newest alert at that moment
 (``config_json[NUDGE_AFTER_KEY]``); only alerts after it count again, so the
 question comes back only if a fresh run of alerts is dismissed too.
@@ -20,14 +22,18 @@ NOISE_WINDOW = 8
 NOISE_MIN_DISMISSED = 6
 NUDGE_AFTER_KEY = "_noise_nudge_after_alert_id"
 _DISMISSED = "dismissed"
+_EXPIRED = "expired"
+_EXPIRED_WEIGHT = 0.5
 
 
 class WatchNoise(BaseModel):
     """The watch's last alerts (up to ``NOISE_WINDOW``) since the question
-    was last answered, and how many of them were dismissed."""
+    was last answered, how many of them were dismissed, and how many
+    expired without being opened."""
 
     recent_alerts: int = 0
     recent_dismissed: int = 0
+    recent_expired_unread: int = 0
     noisy: bool = False
 
 
@@ -43,10 +49,12 @@ def watch_noise(item: WatchlistItem, *, db_path: Path | None = None) -> WatchNoi
         item.id, after_alert_id=_after_id(item), limit=NOISE_WINDOW, db_path=db_path,
     )
     dismissed = sum(1 for _id, status in rows if status == _DISMISSED)
+    expired = sum(1 for _id, status in rows if status == _EXPIRED)
     return WatchNoise(
         recent_alerts=len(rows),
         recent_dismissed=dismissed,
-        noisy=dismissed >= NOISE_MIN_DISMISSED,
+        recent_expired_unread=expired,
+        noisy=dismissed + _EXPIRED_WEIGHT * expired >= NOISE_MIN_DISMISSED,
     )
 
 

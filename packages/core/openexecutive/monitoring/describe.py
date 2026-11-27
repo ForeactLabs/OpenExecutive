@@ -33,6 +33,7 @@ from openexecutive.monitoring.models import (
     MODE_ACTIVE,
     MODE_DRY_RUN,
     SOURCE_KIND_MAILBOX,
+    TRIGGER_EVERY_CHANGE,
     TRIGGER_ONLY_BIG,
     WatchlistItem,
     is_valid_cadence,
@@ -66,6 +67,9 @@ _CONTEXT_ITEMS_MAX = 15
 
 _URL_TYPES = frozenset({"rss", "vendor_status", "page_watch"})
 _KEYWORD_TYPES = frozenset({"rss", "vendor_status", "page_watch", "query"})
+# The kinds whose changes the relevance read places (card, brief or page):
+# only these can ask for every change as a card.
+_EVERY_CHANGE_TYPES = frozenset({"rss", "page_watch", "query"})
 _TICKER_RE = re.compile(r"\A[A-Z0-9][A-Z0-9.\-^=]{0,11}\Z")
 _FORM_RE = re.compile(r"\A[0-9A-Z][0-9A-Z/\-]{0,9}\Z")
 
@@ -145,7 +149,8 @@ SYSTEM = (
     "keywords narrows it to items that mention one of them. For edgar, forms "
     "lists the filing types (default 8-K, 10-K, 10-Q). Leave it empty when "
     "the person set no condition. Add only_big: true only when they ask to "
-    "hear about big or major things only.\n"
+    "hear about big or major things only. Add every_change: true (feeds, "
+    "pages and searches) only when they ask for every change as a card.\n"
     "- cadence: how often they want to hear. real_time only when they ask for "
     "right away; otherwise 15min for stocks and status pages, daily for "
     "searches, pages and feeds, unless they said otherwise.\n"
@@ -180,6 +185,7 @@ def _tool() -> dict[str, Any]:
             "forms": {"type": "array", "items": {"type": "string"}},
             "from": {"type": "array", "items": {"type": "string"}},
             TRIGGER_ONLY_BIG: {"type": "boolean"},
+            TRIGGER_EVERY_CHANGE: {"type": "boolean"},
         },
     }
     properties["cannot"] = {
@@ -331,6 +337,8 @@ def clean_trigger(signal_type: str, raw: object) -> dict[str, Any]:
         return {}
     if raw.get(TRIGGER_ONLY_BIG) is True:
         out[TRIGGER_ONLY_BIG] = True
+    if raw.get(TRIGGER_EVERY_CHANGE) is True and signal_type in _EVERY_CHANGE_TYPES:
+        out[TRIGGER_EVERY_CHANGE] = True
     return out
 
 
@@ -478,6 +486,8 @@ def trigger_line(signal_type: str, trigger: dict[str, Any]) -> str:
     line = _trigger_base(signal_type, trigger, quoted, mention)
     if trigger.get(TRIGGER_ONLY_BIG) is True and signal_type != "stock":
         line += ", and only when it is a big change"
+    if trigger.get(TRIGGER_EVERY_CHANGE) is True and signal_type in _EVERY_CHANGE_TYPES:
+        line += ", every one as a card"
     return line
 
 
