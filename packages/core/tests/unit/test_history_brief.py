@@ -220,7 +220,7 @@ def test_a_note_falling_due_unsuppresses_an_unchanged_brief(
 
 def test_both_brief_prompts_say_how_to_use_the_notes() -> None:
     for prompt in (briefing_narrative.STANDALONE_BRIEF_SYSTEM, briefing_narrative.STANDALONE_BRIEF_SOLO_SYSTEM):
-        assert "FROM YOUR NOTES" in prompt and "**From your notes**" in prompt
+        assert "FROM YOUR NOTES" in prompt and "**Do today**" in prompt
 
 
 # --------------------------------------------------------------------------- #

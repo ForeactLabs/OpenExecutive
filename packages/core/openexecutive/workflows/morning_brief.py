@@ -90,6 +90,10 @@ def _differs(own: Any, shared: Any) -> bool:
         or len(own.stuck) != len(shared.stuck)
         or own.drafts != shared.drafts
         or len(own.conversations) != len(shared.conversations)
+        # The own-inbox gists, tied or not, and the count of the rest.
+        or tuple(own.inbox) != tuple(shared.inbox)
+        or tuple(own.inbox_others) != tuple(shared.inbox_others)
+        or own.inbox_others_total != shared.inbox_others_total
     )
 
 
@@ -340,6 +344,12 @@ class MorningBriefWorkflow(Workflow):
 
         handled = brief_state.handled_since(since)
         pending_suggestions = brief_state.pending_watch_suggestions()
+        # What the last delivered brief told the principal, item by item, and
+        # what this one would: an item told before and unchanged is one
+        # closing "Still open" line, not a sentence again (briefing.brief_items).
+        from openexecutive.briefing import brief_items
+
+        told = await asyncio.to_thread(brief_items.told, BRIEF_KIND)
         fingerprint = brief_state.build_brief_fingerprint(
             today_data=today_data, activity=activity, handled=handled, since=since,
             pending_watch_suggestions=pending_suggestions, mode=mode,
@@ -384,6 +394,10 @@ class MorningBriefWorkflow(Workflow):
                 "suppressed": suppressed,
                 "since": since.isoformat(),
                 "private_to_principal": private_used,
+                # Recorded with the fingerprint, only once it is delivered.
+                # Until the context is rendered (and on a suppressed day,
+                # which tells nothing new) it is what was already told.
+                "brief_items": told,
             },
         )
 
@@ -433,6 +447,7 @@ class MorningBriefWorkflow(Workflow):
                 # The principal's own brief lines go only on the delivery to
                 # them alone, never a brief someone else started.
                 requests_of=today_route.principal_id() if private_ok else None,
+                told=told,
             )
             # standalone=True → the enumerated DM brief (no cards beside it),
             # not the /today header synthesis.
@@ -457,7 +472,12 @@ class MorningBriefWorkflow(Workflow):
             artifact_text, context=rendered, kind=BRIEF_KIND, private=private_used,
             system=STANDALONE_BRIEF_SOLO_SYSTEM if mode == "solo" else STANDALONE_BRIEF_SYSTEM,
             surface="morning brief",
+            # The held-back lines are listed in Memory; a line about the brief
+            # itself is not the reader's news.
+            held_note=False,
         )
+        # Lines that only say a part is empty, or talk about the brief itself.
+        artifact_text = brief_items.drop_empty_lines(artifact_text)
         held = len(grounding.held) if grounding and grounding.mode == "enforce" else 0
         # Any card still named by its number is named by its headline, linked
         # to it on Home (delivery rewrites the link for Slack).
@@ -471,6 +491,19 @@ class MorningBriefWorkflow(Workflow):
         from openexecutive.alerts.card_refs import keep_app_links
 
         artifact_text = keep_app_links(artifact_text)
+        # What this brief told: what its context showed and the brief itself
+        # mentions, so an item cut by a list's limit, the word limit or
+        # grounding stays news for the next one.
+        yield WorkflowEvent(
+            type="result",
+            data={
+                "brief_fingerprint": fingerprint,
+                "suppressed": False,
+                "since": since.isoformat(),
+                "private_to_principal": private_used,
+                "brief_items": brief_items.item_states(today_data, rendered, told, artifact_text),
+            },
+        )
 
         yield WorkflowEvent(
             type="step_done",

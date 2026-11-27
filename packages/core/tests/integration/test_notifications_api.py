@@ -212,3 +212,13 @@ def test_right_now_pings_round_trip_and_survive_an_older_page(client: TestClient
     assert client.put(
         "/notifications/settings", headers=OWNER, json=_body(right_now="loud")
     ).status_code == 422
+
+
+def test_a_teammate_turns_their_morning_brief_off_and_an_older_page_keeps_it(
+    client: TestClient,
+) -> None:
+    assert client.get("/notifications/settings", headers=SARA).json()["morning_brief"] is True
+    res = client.put("/notifications/settings", headers=SARA, json=_body(morning_brief=False))
+    assert res.status_code == 200 and res.json()["morning_brief"] is False
+    # A page that doesn't send it keeps the stored choice.
+    assert client.put("/notifications/settings", headers=SARA, json=_body()).json()["morning_brief"] is False

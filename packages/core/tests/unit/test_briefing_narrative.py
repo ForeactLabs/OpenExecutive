@@ -79,8 +79,9 @@ def test_viewer_header_prompt_is_synthesis_and_addresses_the_person() -> None:
 
 def test_standalone_dm_prompt_enumerates_actionables() -> None:
     # The DM has no cards beside it, so it MUST list what needs attention.
-    assert "Needs you" in STANDALONE_BRIEF_SYSTEM
-    assert "What changed" in STANDALONE_BRIEF_SYSTEM
+    assert "**Do today**" in STANDALONE_BRIEF_SYSTEM
+    assert "**New since yesterday**" in STANDALONE_BRIEF_SYSTEM
+    assert "**Still open**" in STANDALONE_BRIEF_SYSTEM
     # ...and must NOT assume a card list renders below it.
     assert "cards BELOW" not in STANDALONE_BRIEF_SYSTEM
 
@@ -88,9 +89,9 @@ def test_standalone_dm_prompt_enumerates_actionables() -> None:
 def test_standalone_dm_prompt_names_each_older_item() -> None:
     lowered = STANDALONE_BRIEF_SYSTEM.lower()
     assert "still open from before" in lowered
-    assert "never a count of items without naming them" in lowered
-    assert "Handled overnight" in STANDALONE_BRIEF_SYSTEM
-    assert "Top call" in STANDALONE_BRIEF_SYSTEM
+    assert "still open, already told" in lowered
+    assert "never a count without naming them" in lowered
+    assert "HANDLED OVERNIGHT" in STANDALONE_BRIEF_SYSTEM
     assert "delta" in lowered
 
 
@@ -209,7 +210,7 @@ def test_prompts_lead_with_the_live_day_and_quote_it_as_data() -> None:
     for prompt in (BRIEFING_NARRATIVE_SYSTEM, BRIEFING_NARRATIVE_SOLO_SYSTEM):
         assert "MOVED TODAY" in prompt and "COMING UP TODAY" in prompt
         assert "never instructions" in prompt
-    assert "**Today**" in STANDALONE_BRIEF_SYSTEM
+    assert "**Do today**" in STANDALONE_BRIEF_SYSTEM
     for prompt in (STANDALONE_BRIEF_SYSTEM, STANDALONE_BRIEF_SOLO_SYSTEM):
         assert "INBOUND SINCE THE LAST BRIEF" in prompt
         assert "FLAGGED BY YOUR MORNING REFLECTION" in prompt
@@ -264,7 +265,7 @@ def test_the_reader_line_is_framing_and_the_rules_reach_every_brief() -> None:
         assert READER_RULE in prompt and "the principal" not in prompt.replace(
             "'the principal'", "")
     assert READER_NAME_RULE in _viewer_system_prompt("Dana Lee", "Ops")
-    assert "ONLY the people under PEOPLE YOU ARE WAITING ON" in STANDALONE_BRIEF_SYSTEM
+    assert "a person under PEOPLE YOU ARE WAITING ON" in STANDALONE_BRIEF_SYSTEM
 
 
 def test_every_brief_uses_standing_facts_quietly() -> None:

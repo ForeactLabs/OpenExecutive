@@ -580,10 +580,20 @@ def build_brief_fingerprint(
         calendar = today_data.get("today_calendar")
         if isinstance(calendar, dict) and calendar.get("hash"):
             payload["calendar"] = str(calendar["hash"])
-    if live_keys and any(live_keys.values()):
-        payload["live"] = live_keys
+    # The reader's chats with the Executive are background, never news (the
+    # brief is told not to report them), so a chat alone must not make a
+    # day "changed". The end-of-day digest leaves them out the same way.
+    live = {k: v for k, v in (live_keys or {}).items() if k != "conversations"}
+    if any(live.values()):
+        payload["live"] = live
     if reflection_flags:
-        payload["reflection_flags"] = reflection_flags
+        # Keyed on what the notes are about, not their words: the reflection
+        # rewrites the same point every morning ("3.5 days", then "about 4
+        # days"), which made every brief "changed" and the one-liner never
+        # went out.
+        keys = reflection_keys(reflection_flags)
+        if keys:
+            payload["reflection_flags"] = keys
     if teammate_changes:
         payload["teammate_changes"] = teammate_changes
     if owner_notes:
@@ -592,6 +602,51 @@ def build_brief_fingerprint(
         payload["getting_started"] = sorted(getting_started)
     blob = json.dumps(payload, sort_keys=True, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+# A card the reflection's notes name ("card 220", "Alert 255", "#220").
+_CARD_REF_RE = re.compile(r"\b(?:card|alert)\s*#?\s*(\d+)", re.IGNORECASE)
+# A note's bold subject ("**Regions LP buyout deadline:**").
+_BOLD_SUBJECT_RE = re.compile(r"\*\*([^*\n]{2,120})\*\*")
+
+
+_BULLET_MARK_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s*")
+# Words that say how long or how much, not what a note is about: the
+# reflection rewrites them daily ("about 4 days", "still waiting").
+_NOTE_STOP_WORDS = frozenset({
+    "about", "still", "days", "hours", "weeks", "since", "today", "worth", "with",
+    "that", "this", "from", "have", "been", "your", "they", "their", "there",
+    "waiting", "nearly", "almost", "over", "more", "than", "just", "only",
+})
+
+
+def reflection_keys(text: str) -> list[str]:
+    """What the reflection's "Flagged for the brief" notes are about, free of
+    their wording: the cards they name (``card:220``) and, for a note that
+    names no card, its bold subject with digits and punctuation taken out
+    (``note:regions lp buyout deadline``), and for a note with neither, its
+    first few content words (``note:pine view counteroffer expires``), so a
+    new plain note still counts as news. Sorted, no repeats."""
+    keys: set[str] = set()
+    for raw in re.split(r"\n\s*(?=[-*•])|\n{2,}", text or ""):
+        cards = set(_CARD_REF_RE.findall(raw))
+        if cards:
+            keys.update(f"card:{c}" for c in cards)
+            continue
+        subject = _BOLD_SUBJECT_RE.search(raw)
+        if subject:
+            words = re.sub(r"[^a-z ]+", " ", subject.group(1).lower())
+            words = " ".join(words.split())
+            if words:
+                keys.add(f"note:{words}")
+            continue
+        plain = [
+            w for w in re.sub(r"[^a-z ]+", " ", _BULLET_MARK_RE.sub("", raw).lower()).split()
+            if len(w) > 3 and w not in _NOTE_STOP_WORDS
+        ]
+        if plain:
+            keys.add("note:" + " ".join(plain[:4]))
+    return sorted(keys)
 
 
 _FLAGGED_RE = re.compile(
@@ -679,6 +734,7 @@ __all__ = [
     "pending_watch_suggestions",
     "record_delivered",
     "record_delivery_outcome",
+    "reflection_keys",
     "rewritten_lines",
     "rewritten_since",
     "scope_for",

@@ -3023,6 +3023,7 @@ async def _run_principal_brief(action: ScheduledAction, now: datetime) -> None:
         suppressed = False
         quiet = False
         private_to_principal = False
+        told_items: dict[str, str] | None = None
         # This run goes to the principal alone, so the brief may read what is
         # private to them (morning_brief.PRINCIPAL_DELIVERY).
         from openexecutive.workflows.morning_brief import PRINCIPAL_DELIVERY
@@ -3040,6 +3041,9 @@ async def _run_principal_brief(action: ScheduledAction, now: datetime) -> None:
                     suppressed = bool(event.data.get("suppressed"))
                     quiet = bool(event.data.get("quiet"))
                     private_to_principal = bool(event.data.get("private_to_principal"))
+                    raw_items = event.data.get("brief_items")
+                    if isinstance(raw_items, dict):
+                        told_items = {str(k): str(v) for k, v in raw_items.items()}
                 elif event.type == "error" and event.message:
                     raise RuntimeError(event.message)
         finally:
@@ -3116,6 +3120,12 @@ async def _run_principal_brief(action: ScheduledAction, now: datetime) -> None:
                 # where it was, like a quiet skip.
                 if fingerprint and artifact:
                     brief_state.record_delivered(kind, fingerprint, artifact)
+                    if told_items is not None:
+                        # What it told, item by item, for tomorrow's "still
+                        # open" split (briefing.brief_items).
+                        from openexecutive.briefing import brief_items
+
+                        brief_items.record(kind, told_items)
             else:
                 logger.warning("scheduler: %s NOT delivered — %s", kind, detail)
                 audit_log(
@@ -3149,6 +3159,12 @@ async def _run_principal_brief(action: ScheduledAction, now: datetime) -> None:
         logger.info("scheduler: %s not chained — the workspace is now in team mode", kind)
     else:
         _enqueue_next_principal_brief(kind, after=_chain_after(action))
+    if kind == "principal_brief_morning":
+        # Each teammate's own brief, right after the owner's, once the
+        # owner's row is done and chained: one model call each must not hold
+        # it "running", where a restart would run the owner's brief again.
+        # A restart mid-way only leaves the rest unsent, so news tomorrow.
+        await _send_teammate_briefs(now)
 
 
 # The briefs that carry held messages ("In my briefs", people.notifications).
@@ -3197,6 +3213,99 @@ async def _mark_held_sent(ids: list[int]) -> None:
     from openexecutive.people.held_messages import mark_sent_after_delivery
 
     await mark_sent_after_delivery(ids)
+
+
+async def _send_teammate_briefs(now: datetime) -> None:
+    """Every teammate's own morning brief (``briefing.teammate_brief``), one
+    after another, each to them alone. Nothing goes to someone with nothing
+    new. One teammate's failure never stops the next. Never raises."""
+    from openexecutive.audit import log_event as audit_log
+    from openexecutive.briefing import teammate_brief
+    from openexecutive.memory.episodic import BRIEF_DELIVERY_KIND
+    from openexecutive.orchestrator.schedule_tools import recorded_as
+    from openexecutive.people.store import list_people
+
+    try:
+        people = [p for p in list_people() if teammate_brief.gets_a_brief(p)]
+    except Exception:
+        logger.exception("scheduler: couldn't read the team for their briefs")
+        return
+    for person in people:
+        assert person.id is not None
+        try:
+            if _on_leave(person, now):
+                continue  # their brief waits for them to be back, as news
+            chat_only = teammate_brief.chat_only(person)
+            if not delivery_order(person, email_ready=not chat_only):
+                continue  # nothing reaches them: no brief written for nobody
+            brief = await teammate_brief.write(person, now)
+            if brief is None:
+                continue
+            quiet_until = _teammate_quiet_until(person, now)
+            if quiet_until is not None:
+                # Their quiet hours: it goes when they end, as their other
+                # messages do (people.held_messages), and it is told.
+                from openexecutive.people.held_messages import hold
+
+                hold(person.id, brief.text, source=teammate_brief.KIND, release_at=quiet_until, now=now)
+                teammate_brief.record_delivered(person.id, brief)
+                audit_log(
+                    "scheduled_action",
+                    f"teammate_brief_morning kept for person {person.id} until their quiet hours end",
+                    actor="scheduler",
+                    details={
+                        "phase": "after_quiet_hours", "kind": teammate_brief.KIND,
+                        "person_id": person.id, "release_at": quiet_until.isoformat(),
+                    },
+                    private_to_person=person.id,
+                )
+                continue
+            # A brief to its reader: its done row must not read as work
+            # done, or the next brief repeats it as news.
+            with recorded_as(BRIEF_DELIVERY_KIND):
+                delivery = await deliver_to_person(
+                    person, brief.text, label="Morning Brief", chat_only=chat_only,
+                )
+            if delivery.ok:
+                teammate_brief.record_delivered(person.id, brief)
+            audit_log(
+                "scheduled_action",
+                f"teammate_brief_morning {'delivered' if delivery.ok else 'NOT delivered'} "
+                f"to person {person.id}",
+                actor="scheduler",
+                details={
+                    "phase": "delivered" if delivery.ok else "delivery_failed",
+                    "kind": teammate_brief.KIND, "person_id": person.id,
+                    "reason": delivery.reason,
+                },
+                private_to_person=person.id,
+            )
+        except Exception:
+            logger.exception("scheduler: person %s's brief failed", person.id)
+
+
+def _on_leave(person: Any, now: datetime) -> bool:
+    leave = getattr(person, "on_leave_until", None)
+    return leave is not None and now.astimezone(UTC).date() <= leave
+
+
+def _teammate_quiet_until(person: Any, now: datetime) -> datetime | None:
+    """When a teammate's own quiet hours end, while ``now`` is inside them;
+    None otherwise (or when their settings can't be read)."""
+    from openexecutive.people.notifications import (
+        get_notification_settings,
+        in_quiet_hours,
+        quiet_hours_end,
+    )
+
+    try:
+        settings = get_notification_settings(person.id)
+        if not in_quiet_hours(settings, now):
+            return None
+        return quiet_hours_end(settings, now)
+    except Exception:
+        logger.exception("scheduler: couldn't read person %s's quiet hours", person.id)
+        return None
 
 
 def _release_others_digests(now: datetime) -> None:

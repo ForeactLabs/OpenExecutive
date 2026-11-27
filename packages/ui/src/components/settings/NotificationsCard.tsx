@@ -11,6 +11,7 @@ import {
   DELIVERY_LABEL,
   digestDescription,
   heldLine,
+  morningBriefDescription,
   quietError,
   quietSummary,
   RIGHT_NOW_LABEL,
@@ -78,7 +79,9 @@ export default function NotificationsCard() {
   const draftError = quietError(quiet);
 
   async function save(
-    change: Partial<Pick<NotificationSettings, "quiet_hours" | "delivery" | "urgent_through" | "right_now" | "timezone">>,
+    change: Partial<
+      Pick<NotificationSettings, "quiet_hours" | "delivery" | "urgent_through" | "right_now" | "morning_brief" | "timezone">
+    >,
   ) {
     setBusy(true);
     setError(null);
@@ -249,6 +252,22 @@ export default function NotificationsCard() {
           />
         }
       />
+
+      {!current.gets_briefs && typeof current.morning_brief === "boolean" && (
+        <SettingsCard
+          title="Morning brief"
+          titleId="morning-brief-label"
+          description={morningBriefDescription(current.morning_brief)}
+          action={
+            <Switch
+              checked={current.morning_brief}
+              labelledBy="morning-brief-label"
+              disabled={busy}
+              onChange={(morning_brief) => void save({ morning_brief })}
+            />
+          }
+        />
+      )}
 
       {current.gets_briefs && current.right_now && (
         <SettingsCard

@@ -13,7 +13,7 @@ Routes:
                                  them, and whether they get the briefs
   PUT  /notifications/settings — replace them: {quiet_hours: {enabled, start,
                                  end, days}, delivery, urgent_through,
-                                 right_now, timezone}
+                                 right_now, morning_brief, timezone}
 """
 from __future__ import annotations
 
@@ -44,13 +44,16 @@ class NotificationsOut(BaseModel):
     urgent_through: bool
     # A chat message when Right now changes (the principal's alone).
     right_now: RightNowPings
+    # A teammate's own morning brief (the owner's always comes).
+    morning_brief: bool
     # The zone they chose ("" for the workspace's), and the one in effect.
     timezone: str
     effective_timezone: str
     # Messages waiting for their quiet hours to end or their next brief.
     held_count: int
     # Whether the morning and end-of-day briefs go to them (the principal);
-    # anyone else's held messages go out on their own when the briefs do.
+    # anyone else gets their own morning brief (``morning_brief``) and their
+    # held messages on their own when the briefs go out.
     gets_briefs: bool
     updated_at: str
 
@@ -63,6 +66,7 @@ class NotificationsUpdate(BaseModel):
     urgent_through: bool
     # Optional so an older page that doesn't send it keeps the stored choice.
     right_now: RightNowPings | None = None
+    morning_brief: bool | None = None
     timezone: str = Field(default="", max_length=64)
 
 
@@ -104,6 +108,7 @@ def _out(person: Person, settings: NotificationSettings) -> NotificationsOut:
         delivery=settings.delivery,
         urgent_through=settings.urgent_through,
         right_now=settings.right_now,
+        morning_brief=settings.morning_brief,
         timezone=settings.timezone,
         effective_timezone=str(zone_for(settings)),
         held_count=held_count(person.id),
@@ -129,6 +134,9 @@ def update_notifications(request: Request, body: NotificationsUpdate) -> Notific
             delivery=body.delivery,
             urgent_through=body.urgent_through,
             right_now=body.right_now or before.right_now,
+            morning_brief=(
+                before.morning_brief if body.morning_brief is None else body.morning_brief
+            ),
             timezone=body.timezone,
         )
     except ValueError as exc:
@@ -165,6 +173,7 @@ def update_notifications(request: Request, body: NotificationsUpdate) -> Notific
             "delivery": saved.delivery,
             "urgent_through": saved.urgent_through,
             "right_now": saved.right_now,
+            "morning_brief": saved.morning_brief,
         },
     )
     return _out(person, saved)

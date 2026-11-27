@@ -288,6 +288,36 @@ def test_run_principal_brief_does_not_record_on_delivery_failure(
     assert outcome is not None and (outcome.reason, outcome.channel) == ("send_failed", None)
 
 
+def _items_brief_workflow():  # type: ignore[no-untyped-def]
+    from openexecutive.workflows.base import WorkflowEvent
+    from openexecutive.workflows.morning_brief import MorningBriefInput, MorningBriefWorkflow
+
+    class _Items(MorningBriefWorkflow):
+        async def run(self, inputs, store):  # type: ignore[override]
+            yield WorkflowEvent(type="result", data={
+                "brief_fingerprint": "fp", "suppressed": False,
+                "brief_items": {"card:220": "s1"},
+            })
+            yield WorkflowEvent(type="artifact", content="BRIEF")
+            yield WorkflowEvent(type="done")
+
+        def input_model(self):  # type: ignore[override]
+            return MorningBriefInput
+
+    return _Items()
+
+
+@pytest.mark.parametrize("ok", [True, False])
+def test_what_a_brief_told_is_kept_only_once_it_is_delivered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ok: bool,
+) -> None:
+    from openexecutive.briefing import brief_items
+
+    _run_brief(tmp_path, monkeypatch, deliver_ok=ok, workflow=_items_brief_workflow())
+    told = brief_items.told("principal_brief_morning")
+    assert told == ({"card:220": "s1"} if ok else {})
+
+
 def _failing_brief_workflow(event: str):  # type: ignore[no-untyped-def]
     from openexecutive.workflows.base import WorkflowEvent
     from openexecutive.workflows.morning_brief import MorningBriefInput, MorningBriefWorkflow
@@ -829,3 +859,22 @@ def test_a_delivered_brief_is_recorded_as_a_brief_not_as_work_done(
     }
     # The outbound guard still sees both sends to the recipient.
     assert len(episodic.recent_sends_for_channel_ref("telegram", "42", "2000-01-01")) == 2
+
+
+def test_teammates_briefs_go_once_the_owners_row_is_done(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    order: list[str] = []
+    real_done = runner.mark_action_done
+
+    def _done(action_id: int) -> None:
+        order.append("done")
+        real_done(action_id)
+
+    async def _teammates(now: datetime) -> None:
+        order.append("teammates")
+
+    monkeypatch.setattr(runner, "mark_action_done", _done)
+    monkeypatch.setattr(runner, "_send_teammate_briefs", _teammates)
+    _run_brief(tmp_path, monkeypatch)
+    assert order == ["done", "teammates"]

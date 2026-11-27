@@ -117,6 +117,36 @@ async def test_morning_brief_passes_window_and_emits_fingerprint(
 
 
 @pytest.mark.asyncio
+async def test_a_card_told_yesterday_unchanged_is_a_closing_line_not_news(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.briefing import brief_items
+
+    captured: dict[str, object] = {}
+
+    async def _synth(**kw: object) -> str:
+        captured.update(kw)
+        return "**Do today**\n1. Renew Acme.\n\n**New since yesterday**\n- Nothing new in your inbox."
+
+    monkeypatch.setattr(briefing_narrative, "synthesize_briefing_narrative", _synth)
+    _stub_aggregators(monkeypatch)
+
+    first = [e async for e in MorningBriefWorkflow().run(MorningBriefInput(), MagicMock())]
+    # The last result carries what the rendered context showed.
+    items = [e for e in first if e.type == "result"][-1].data["brief_items"]
+    assert set(items) == {"card:1"}
+    assert "STILL OPEN, CHANGED OR NOT TOLD BEFORE" in str(captured["rendered_context"])
+    # The filler line is gone, and its heading with it.
+    artifact = next(e for e in first if e.type == "artifact").content
+    assert "New since yesterday" not in artifact and "Renew Acme" in artifact
+
+    brief_items.record("principal_brief_morning", items)
+    [e async for e in MorningBriefWorkflow().run(MorningBriefInput(force_full=True), MagicMock())]
+    context = str(captured["rendered_context"])
+    assert "STILL OPEN, ALREADY TOLD" in context and "CHANGED OR NOT TOLD" not in context
+
+
+@pytest.mark.asyncio
 async def test_morning_brief_suppressed_when_fingerprint_unchanged(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -340,6 +370,12 @@ def test_a_private_row_past_the_top_groups_still_counts() -> None:
     shared = LiveSignals(inbound_total=11, keys=dict(keys))
     assert _differs(own, shared) is True
     assert _differs(shared, LiveSignals(inbound_total=11, keys=dict(keys))) is False
+    # Untied mail in the owner's own inbox is theirs too.
+    untied = LiveSignals(
+        inbound_total=11, keys=dict(keys),
+        inbox_others=("Chase: your statement is ready",), inbox_others_total=1,
+    )
+    assert _differs(untied, shared) is True
 
 
 # --------------------------------------------------------------------------- #
@@ -426,7 +462,8 @@ async def test_morning_brief_holds_back_a_fabricated_colleague_and_cites_figures
     assert "'Marcus Lee', '52'" in repair.calls[0]["messages"][0]["content"]  # type: ignore[index]
     assert "Marcus" not in artifact
     assert "- Renew Acme lease for 48 units" in artifact
-    assert "_I left out 1 line " in artifact
+    # The held-back line is listed in Memory, never told in the brief itself.
+    assert "I left out" not in artifact
     assert "[1]" not in artifact and "**Sources**" not in artifact
     step = next(e for e in events if e.type == "step_done" and e.step_id == "synthesize")
     assert "1 line(s) held back" in step.summary
