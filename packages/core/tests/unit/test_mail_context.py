@@ -234,16 +234,29 @@ def test_a_tie_never_carries_a_link_or_address(owner: Any, monkeypatch: pytest.M
     assert "evil.example" not in item.tie and item.tie.startswith("3pm meeting")
 
 
-def test_a_failed_gist_still_keeps_who_and_what(owner: Any, monkeypatch: pytest.MonkeyPatch,
-                                                model: dict[str, Any]) -> None:
+def test_a_failed_gist_is_read_again_after_a_backoff(owner: Any, monkeypatch: pytest.MonkeyPatch,
+                                                     model: dict[str, Any]) -> None:
+    real = mail_context._call_model
+
     async def broken(turn: str) -> dict[str, Any]:
         raise RuntimeError("model busy")
 
     monkeypatch.setattr(mail_context, "_call_model", broken)
-    result = _look(owner, Mailbox(_msg("m1")))
+    client = Mailbox(_msg("m1"))
+    result = _look(owner, client)
     assert result.failed == 1 and result.acted == 0
-    item = noticed.recent(owner.id, now=NOW)[0]
-    assert (item.subject, item.gist) == ("Flight DL123 update", "")
+    assert noticed.recent(owner.id, now=NOW) == []  # not kept without its gist
+    cursor = mail_context.get_cursor(owner.id)
+    assert cursor.failures == 1 and cursor.backoff_until is not None
+    assert mail_context._parse(cursor.read_through) == NOW - timedelta(minutes=20)
+
+    monkeypatch.setattr(mail_context, "_call_model", real)
+    later = NOW + timedelta(minutes=10)
+    _look(owner, client, later)
+    (item,) = noticed.recent(owner.id, now=later)
+    assert item.gist.startswith("Delta: DL123") and item.tie == "3:00 PM Board prep"
+    assert len(model["acts"]) == 1
+    assert mail_context.get_cursor(owner.id).failures == 0
 
 
 def test_nothing_is_read_with_act_as_me_off(owner: Any, model: dict[str, Any]) -> None:

@@ -331,7 +331,7 @@ async def _call_model(turn: str) -> dict[str, Any]:
 
 async def gist(notes: list[_Note], known: str) -> bool:
     """Fill each note's gist, tie and act from one model call. False when
-    the call failed (the notes keep sender and subject alone). Never raises."""
+    the call failed (the look then keeps none of them and reads them again). Never raises."""
     from openexecutive.delegation.ghostwriter import clean_gist, one_line
 
     try:
@@ -413,8 +413,13 @@ async def look_person(person: Any, *, gmail: Any = None, now: datetime | None = 
                 cursor.backoff_until = (moment + _backoff(cursor.failures)).isoformat()
                 _save_cursor(cursor)
                 return LookResult("error")
-            cursor.failures = 0
-            cursor.backoff_until = None
+            if result.failed:
+                # The gist model failed for some: try again after a backoff.
+                cursor.failures += 1
+                cursor.backoff_until = (moment + _backoff(cursor.failures)).isoformat()
+            else:
+                cursor.failures = 0
+                cursor.backoff_until = None
             cursor.last_poll_at = moment.isoformat()
             _save_cursor(cursor)
             logger.info("mail_context: look %s", result.counts())
@@ -461,12 +466,21 @@ async def _look(person: Any, client: Any, cursor: _Cursor, now: datetime) -> Loo
         _Note(m, inbox.handling_relation(_relation(normalize_email(m.from_addr), contacts=contacts), m))
         for m in fresh if m.id not in kept
     ]
+    unread: set[str] = set()
     if notes:
         known = await _known(person, client, now)
         for start in range(0, len(notes), GIST_BATCH):
             batch = notes[start:start + GIST_BATCH]
             if not await gist(batch, known):
                 result.failed += len(batch)
+                unread.update(n.message.id for n in batch)
+    if unread:
+        # Not kept yet, and the read point stays at the oldest of them, so
+        # the next look (after a backoff) gists them again rather than
+        # keeping them without what they say or tie to.
+        oldest = min((_parse(n.message.received_at) or now for n in notes if n.message.id in unread), default=now)
+        cursor.read_through = min(oldest, now).isoformat()
+        notes = [n for n in notes if n.message.id not in unread]
     from openexecutive.delegation.settings import is_enabled
 
     if not is_enabled(person.id):
