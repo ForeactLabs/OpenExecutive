@@ -226,7 +226,7 @@ export function ReachCard({
 
   const stops = (to: ReachStep): string =>
     to === "when_asked"
-      ? "It stops drafting replies to your inbox, and nothing more goes on its own as you."
+      ? "It stops drafting replies to your inbox. It still reads what comes in and acts on an email that changes a meeting or task of yours, with Approvals deciding what goes on its own."
       : "It stops writing anything as you, stops reading what reaches your inbox and forgets what it noted, and turns Read your calendar off too.";
 
   return (
