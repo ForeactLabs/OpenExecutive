@@ -162,8 +162,6 @@ async def look(person_id: int) -> bool:
         before = await asyncio.to_thread(texts.last_send_id, person_id)
         try:
             said = await _turn(person, prompt, off_team=off_team)
-            # Its last line says what it did: the Texts page shows it.
-            await asyncio.to_thread(texts.save_note, person_id, conv.id, last_line(said))
         except Exception as exc:
             # A failed turn (the model busy, the gateway down) leaves them
             # new, unless it already texted back: then a second look would
@@ -171,6 +169,13 @@ async def look(person_id: int) -> bool:
             if await asyncio.to_thread(texts.last_send_id, person_id) == before:
                 await asyncio.to_thread(texts.mark_handled, person_id, mine, handled=False)
             failed = failed or exc
+            continue
+        # Its last line says what it did: the Texts page shows it. A note
+        # that can't be kept never makes the turn run again.
+        try:
+            await asyncio.to_thread(texts.save_note, person_id, conv.id, last_line(said))
+        except Exception:
+            logger.exception("texts_watch: couldn't keep the note on conversation %s", conv.id)
     if failed is not None:
         raise failed
     return True

@@ -460,8 +460,11 @@ def _add_text_send_log_id(conn: sqlite3.Connection) -> None:
 def _add_text_conversation_note(conn: sqlite3.Connection) -> None:
     """Give a text conversations table made before ``note`` existed the columns."""
     columns = {row[1] for row in conn.execute(f"PRAGMA table_info({TEXT_CONVERSATIONS_TABLE})")}
+    # Each column on its own, so one added before a crash never stops the other.
     if "note" not in columns:
         conn.execute(f"ALTER TABLE {TEXT_CONVERSATIONS_TABLE} ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+        conn.commit()
+    if "note_at" not in columns:
         conn.execute(f"ALTER TABLE {TEXT_CONVERSATIONS_TABLE} ADD COLUMN note_at TEXT")
         conn.commit()
 
