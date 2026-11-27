@@ -63,6 +63,8 @@ async function newWindowTab(url) {
 // minimized, beside the person's own. While Chrome is open it also keeps an
 // Open Executive tab pinned there (unless they turned that off or closed the
 // window), so a workflow can reach the browser without them opening one.
+// Google Messages, kept for texts, sits there in the "Open Executive" group
+// and, like the pinned tab, is never a page a step works on.
 
 async function ownWindowId() {
   const { ownWindowId: id } = await chrome.storage.session.get("ownWindowId");
@@ -83,7 +85,8 @@ async function ownTab() {
   const id = await ownWindowId();
   if (id === null) return null;
   const origins = await connectedOrigins();
-  const work = (await chrome.tabs.query({ windowId: id })).filter((t) => !t.pinned && !OE.onConnected(t.url, origins));
+  // Google Messages (kept there for texts, in the group) is never a page to work on.
+  const work = (await chrome.tabs.query({ windowId: id })).filter((t) => !t.pinned && !onMessages(t.url) && !OE.onConnected(t.url, origins));
   return work.find((t) => t.active) || work[work.length - 1] || null;
 }
 
@@ -230,7 +233,8 @@ chrome.windows.onRemoved.addListener((id) => {
 //
 // While the person has Texts on in Open Executive (an Open Executive tab's
 // relay says so, ``textsOn``), a Google Messages tab stays open: theirs if
-// they have one, else one it keeps pinned in its own window. texts.js on that
+// they have one, else one it keeps in its own window, in the "Open Executive"
+// tab group so they can find it. texts.js on that
 // page says what it shows, which goes on to Open Executive through an Open
 // Executive tab, signed in as them; a text Open Executive asks to send is
 // typed there.
@@ -265,11 +269,21 @@ async function keepTexts() {
     return null;
   }
   const have = await messagesTab();
-  if (have) return have;
   const id = await ownWindowId();
+  if (have) {
+    // Its own tab (the one it opened, or the one in its own window, which an
+    // update forgets) goes in the "Open Executive" group, so the person can
+    // find it and tell what it is. Never one of theirs.
+    if ((have.id === textsTabId || (id !== null && have.windowId === id)) && have.groupId === -1) {
+      if (have.pinned) await chrome.tabs.update(have.id, { pinned: false }).catch(() => undefined);
+      await intoGroup(have).catch(() => undefined);
+      await chrome.storage.session.set({ textsTabId: have.id });
+    }
+    return have;
+  }
   let tab;
   if (id !== null) {
-    tab = await chrome.tabs.create({ windowId: id, url: MESSAGES, pinned: true, active: false });
+    tab = await chrome.tabs.create({ windowId: id, url: MESSAGES, active: false });
   } else {
     // A window of its own only as keepConnected would open one: never once
     // the person closed it or turned staying connected off, and never into
@@ -279,8 +293,8 @@ async function keepTexts() {
     if (stayConnected === false || ownClosed === true || !(await chrome.tabs.query({})).length) return null;
     const win = await makeOwnWindow(MESSAGES);
     tab = win.tabs && win.tabs[0];
-    if (tab) await chrome.tabs.update(tab.id, { pinned: true });
   }
+  if (tab) await intoGroup(tab).catch(() => undefined);
   if (tab) await chrome.storage.session.set({ textsTabId: tab.id });
   return tab || null;
 }
@@ -430,30 +444,64 @@ let pressing = null;
 // it is then. Same order as SEND in texts.js: the first selector with a
 // button on screen, and only an enabled one.
 const SEND_SPOT = `(() => {
+  const box = document.querySelector('[data-e2e-message-input-box], mws-message-compose textarea, mws-message-compose [contenteditable="true"]');
+  const full = Boolean(box && String(box.value !== undefined && box.tagName === "TEXTAREA" ? box.value : box.textContent || "").trim());
   for (const sel of ["[data-e2e-send-text-button]", "mws-message-send-button button", 'button[aria-label^="Send" i]']) {
     const shown = [...document.querySelectorAll(sel)].filter((b) => b.getClientRects().length > 0);
     if (!shown.length) continue;
     const b = shown.find((x) => !x.disabled);
     if (!b) return null;
     const r = b.getBoundingClientRect();
-    return { x: r.left + r.width / 2, y: r.top + r.height / 2, h: innerHeight, at: location.origin + location.pathname };
+    const x = r.left + r.width / 2;
+    const y = r.top + r.height / 2;
+    const under = document.elementFromPoint(x, y);
+    return { x, y, h: innerHeight, hit: Boolean(under && (under === b || b.contains(under))), full, at: location.origin + location.pathname };
   }
   return null;
 })()`;
 
-// The page it reads is checked in the same reading as the spot it clicks:
-// if the person opened another conversation meanwhile, nothing is pressed.
-async function sendSpot(target, at) {
+async function readSpot(target) {
+  const got = await chrome.debugger.sendCommand(target, "Runtime.evaluate", { expression: SEND_SPOT, returnByValue: true }).catch(() => null);
+  return got && got.result ? got.result.value || null : null;
+}
+
+const pause = (ms) => new Promise((ok) => setTimeout(ok, ms));
+
+// Where to press, once the page has stopped moving. Attaching makes Chrome
+// show its "debugging" bar, which shrinks the page a moment later and moves
+// the Send button up: pressing where it was misses it. So wait for the page
+// to get shorter (or ~2.5 s, when no bar comes), then for three equal
+// readings with the button really under that spot. The page it reads is
+// checked in the same reading as the spot it clicks: if the person opened
+// another conversation meanwhile, nothing is pressed.
+async function sendSpot(target, at, settle = true) {
+  const start = await readSpot(target);
+  if (!start || start.at !== at) return null;
+  if (settle) {
+    for (let i = 0; i < 25; i++) {
+      await pause(100);
+      const now = await readSpot(target);
+      if (now && now.at !== at) return null;
+      if (now && now.h < start.h) break;
+    }
+  }
   let last = null;
-  for (let i = 0; i < 12; i++) {
-    const got = await chrome.debugger.sendCommand(target, "Runtime.evaluate", { expression: SEND_SPOT, returnByValue: true }).catch(() => null);
-    const spot = got && got.result ? got.result.value : null;
+  let same = 0;
+  for (let i = 0; i < 20; i++) {
+    const spot = await readSpot(target);
     if (spot && spot.at !== at) return null;
-    if (spot && last && spot.x === last.x && spot.y === last.y && spot.h === last.h) return spot;
+    same = spot && spot.hit && last && spot.x === last.x && spot.y === last.y && spot.h === last.h ? same + 1 : 0;
+    if (same >= 2) return spot;
     last = spot;
-    await new Promise((ok) => setTimeout(ok, 150));
+    await pause(150);
   }
   return null;
+}
+
+async function pressAt(target, spot) {
+  for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
+    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { type, x: spot.x, y: spot.y, button: type === "mouseMoved" ? "none" : "left", clickCount: type === "mouseMoved" ? 0 : 1 });
+  }
 }
 
 async function pressInTab(tab, x, y) {
@@ -478,9 +526,17 @@ async function pressInTab(tab, x, y) {
   try {
     const spot = await sendSpot(target, at);
     if (!spot) return { ok: false };
-    for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
-      if (type === "mousePressed") started = true;
-      await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { type, x: spot.x, y: spot.y, button: type === "mouseMoved" ? "none" : "left", clickCount: type === "mouseMoved" ? 0 : 1 });
+    started = true;
+    await pressAt(target, spot);
+    // Missed anyway (the page moved under the press): the words are still
+    // in the box and the button is somewhere else now. Press once more
+    // there. Never when the box emptied, which is what a send does, so a
+    // text that went is never sent twice.
+    await pause(1500);
+    const after = await readSpot(target);
+    if (after && after.at === at && after.full && (after.x !== spot.x || after.y !== spot.y)) {
+      const again = await sendSpot(target, at, false);
+      if (again && again.full) await pressAt(target, again);
     }
     return { ok: true };
   } catch {
@@ -836,7 +892,7 @@ async function run(step, relayTab, late = { on: false }) {
     const tab = await targetTab(own, side);
     if (!tab) return { ok: false, error: own ? NO_PAGE : "No browser window is open." };
     let tabs = await chrome.tabs.query({ windowId: tab.windowId });
-    if (own) tabs = tabs.filter((t) => !t.pinned && !OE.onConnected(t.url, origins));
+    if (own) tabs = tabs.filter((t) => !t.pinned && !onMessages(t.url) && !OE.onConnected(t.url, origins));
     return {
       ok: true,
       tabs: tabs.map((t) => ({
@@ -853,7 +909,7 @@ async function run(step, relayTab, late = { on: false }) {
     if (!tab) return { ok: false, error: "No tab with that id. List the tabs again." };
     if (own) {
       // Only its own window's tabs, and the person's view stays where it is.
-      if (tab.windowId !== (await ownWindowId()) || tab.pinned) {
+      if (tab.windowId !== (await ownWindowId()) || tab.pinned || onMessages(tab.url)) {
         return { ok: false, error: "No tab with that id. List the tabs again." };
       }
       await chrome.tabs.update(tab.id, { active: true });

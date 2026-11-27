@@ -506,6 +506,70 @@ test("texts: the same words again later are a new text", () => {
   assert.notEqual(c.items[0].ref, a.items[0].ref);
 });
 
+test("texts: a first look after an update tells everything as earlier", () => {
+  const T = textsHelpers();
+  const now = Date.parse("2026-11-25T15:00:00");
+  const rows = [{ key: "kai", title: "Kai", snippet: "Here", unread: true, time: "5 min" }];
+  // What the old key saw was told already: answering it again would be a second turn.
+  const out = T.changes(rows, null, now, true);
+  assert.equal(out.items.length, 1);
+  assert.equal(out.items[0].earlier, true);
+  assert.equal(out.items[0].outgoing, true);
+  const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
+  assert.ok(texts.includes("const updated = !(stored && typeof stored === \"object\") && Boolean(kept[OLD_SEEN_KEY]);"));
+  assert.ok(texts.includes("await chrome.storage.local.remove(OLD_SEEN_KEY);"));
+});
+
+test("texts: a sign-in code is never told, now or on a first look", () => {
+  const T = textsHelpers();
+  const now = Date.parse("2026-11-25T15:00:00");
+  for (const code of [
+    "AT&T: Your verification code is 482913",
+    "Enter 4 8 2 9 1 3 to confirm",
+    "Your sign-in code: 123-456",
+    "Tap to sign in to your account",
+  ]) assert.equal(T.isSignInCode(code), true, code);
+  for (const plain of ["Running late, there by 2:30", "Lunch Friday?", "Call me at 4", "Gate code changed"]) {
+    assert.equal(T.isSignInCode(plain), false, plain);
+  }
+  const rows = [
+    { key: "att", title: "AT&T", snippet: "Your verification code is 482913", unread: true, time: "Now" },
+    { key: "kai", title: "Kai", snippet: "Here", unread: true, time: "Now" },
+  ];
+  const first = T.changes(rows, null, now);
+  assert.deepEqual([...first.items.map((i) => i.conversation)], ["kai"]);
+  const later = T.changes([{ ...rows[0], snippet: "Use 991234 to log in" }], first.seen, now);
+  assert.equal(later.items.length, 0);
+});
+
+test("texts: Google Messages goes in the Open Executive tab group, and is never a page a step works on", () => {
+  const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
+  const keep = bg.slice(bg.indexOf("async function keepTexts"), bg.indexOf("const TEXTS_ALARM"));
+  assert.ok(keep.includes("await intoGroup(have)"));
+  assert.ok(keep.includes("if (tab) await intoGroup(tab)"));
+  assert.ok(!keep.includes("pinned: true"));
+  // Only its own tab: the one it opened, or the one in its own window.
+  assert.ok(keep.includes("have.id === textsTabId || (id !== null && have.windowId === id)"));
+  const own = bg.slice(bg.indexOf("async function ownTab"), bg.indexOf("// ---- Its window beside the chat"));
+  assert.ok(own.includes("!onMessages(t.url)"));
+  assert.ok(bg.includes("if (own) tabs = tabs.filter((t) => !t.pinned && !onMessages(t.url)"));
+  assert.ok(bg.includes("tab.pinned || onMessages(tab.url)"));
+});
+
+test("texts: the press waits for the debugging bar, presses only where the button is, and once more only if it missed", () => {
+  const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
+  const spot = bg.slice(bg.indexOf("const SEND_SPOT"), bg.indexOf("async function readSpot"));
+  assert.ok(spot.includes("document.elementFromPoint(x, y)"));
+  const settle = bg.slice(bg.indexOf("async function sendSpot"), bg.indexOf("async function pressAt"));
+  assert.ok(settle.includes("if (now && now.h < start.h) break;"));
+  assert.ok(settle.includes("spot.hit"));
+  assert.ok(settle.includes("if (same >= 2) return spot;"));
+  const press = bg.slice(bg.indexOf("async function pressInTab"), bg.indexOf("function waitLoaded"));
+  // Again only when the words are still in the box and the button moved.
+  assert.ok(press.includes("after.full && (after.x !== spot.x || after.y !== spot.y)"));
+  assert.ok(press.includes("if (again && again.full) await pressAt(target, again);"));
+});
+
 test("texts: off forgets what was seen, so on again is a first look", () => {
   const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
   assert.ok(texts.includes("await chrome.storage.local.remove(SEEN_KEY);"));
@@ -526,7 +590,7 @@ test("texts: new texts count as seen only once the site took them", () => {
   const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
   const report = texts.slice(texts.indexOf("async function report"), texts.indexOf("let timer = null"));
   const send = report.indexOf('type: "texts_seen"');
-  const save = report.lastIndexOf("chrome.storage.local.set({ [SEEN_KEY]: seen })");
+  const save = report.lastIndexOf("await keepSeen(seen)");
   assert.ok(send > 0 && save > send);
   assert.ok(report.includes("(answer && answer.ok === true) || !items.length"));
   assert.ok(!report.includes("[SEEN_KEY]: out.seen"));
@@ -613,13 +677,13 @@ test("texts: Send is a real press, only in the tab and conversation the send was
   assert.ok(press.includes("const conversation = pressing.conversation;"));
   // The button is found again after attaching (the debugging bar moves it), and the click goes there.
   assert.ok(press.indexOf("const spot = await sendSpot(target, at);") > press.indexOf("chrome.debugger.attach"));
-  assert.ok(press.includes("x: spot.x, y: spot.y"));
+  assert.ok(press.includes("await pressAt(target, spot);") && bg.includes("x: spot.x, y: spot.y"));
   // The page is checked in the same reading as the spot that gets clicked, and a new number must stay on its conversation.
   assert.ok(bg.includes("at: location.origin + location.pathname") && bg.includes("if (spot && spot.at !== at) return null;"));
   assert.ok(press.includes("const spot = await sendSpot(target, at);"));
   assert.ok(press.includes("if (!conversation && !/\\/web\\/conversations\\/(?!new$)[^/]+$/.test(at)) return { ok: false };"));
   // A press that started may have gone, even if a later step failed.
-  assert.ok(press.includes('if (type === "mousePressed") started = true;') && press.includes("return { ok: false, maybe: started };"));
+  assert.ok(press.indexOf("started = true;") < press.indexOf("await pressAt(target, spot);") && press.includes("return { ok: false, maybe: started };"));
   assert.ok(press.includes("endsWith(`/${encodeURIComponent(conversation)}`)"));
   assert.ok(press.includes("await chrome.debugger.detach(target)"));
   assert.ok(press.indexOf("finally") < press.indexOf("chrome.debugger.detach"));

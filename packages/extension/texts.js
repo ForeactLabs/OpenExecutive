@@ -3,7 +3,7 @@
 // Google Messages for web (messages.google.com) shows the texts on the
 // person's Android phone once they pair it, and sends from that phone. When
 // they turn on Texts in Open Executive, the background keeps this page open,
-// pinned in the extension's own window. This script:
+// in the extension's own window, in the "Open Executive" tab group. This script:
 //
 // - tells the background what the page shows: whether it is paired, and each
 //   conversation whose latest text changed since it last said (the
@@ -43,6 +43,19 @@
     const x = String(a || "").replace(/\D/g, "").slice(-10);
     const y = String(b || "").replace(/\D/g, "").slice(-10);
     return x.length >= 7 && x === y;
+  };
+
+  // Sign-in codes are never sent to Open Executive (the same patterns as
+  // openexecutive/delegation/sign_in_codes.py, which drops any that come).
+  const CODE_WORDS = /\b(codes?|passcodes?|passwords?|passwd|otp|one[- ]time|verification|verify|sign(?:ing)?[- ]?in|log(?:ging)?[- ]?in|2fa|mfa|pins?|tokens?|authenticat\w*)\b/i;
+  const CODE_DIGITS = /(?<!\d)(\d{4,10}|\d{3}[- ]\d{3}|(?:\d ){3,7}\d)(?!\d)/;
+  const SIGN_IN_LINK = /\b(magic link|sign[- ]?in link|log[- ]?in link|is this you signing in|approve (?:this |the )?sign[- ]?in|tap to (?:sign|log) in|trying to sign in)\b/i;
+  const ENTER_CODE = /\b(enter|use|type)\s+(\d{4,10}|(?:\d ){3,7}\d)\b/i;
+
+  /** Whether the words read like a sign-in code or a sign-in link. */
+  T.isSignInCode = function (text) {
+    const s = String(text || "");
+    return SIGN_IN_LINK.test(s) || ENTER_CODE.test(s) || (CODE_WORDS.test(s) && CODE_DIGITS.test(s));
   };
 
   /** One line of text, at most `max` characters. */
@@ -128,9 +141,11 @@
    * on. Only unread ones from the last day count as new; the rest go as
    * `earlier` (kept to read, never answered as if they just came). Each text
    * carries the time the list shows, or now when it can't be read (it
-   * changed while the page was watching). Returns { items, seen }.
+   * changed while the page was watching). `allEarlier`: a first look after
+   * an update forgot what was seen, so nothing in it is new (each was told
+   * before). A sign-in code is never told. Returns { items, seen }.
    */
-  T.changes = function (rows, seen, now) {
+  T.changes = function (rows, seen, now, allEarlier) {
     const first = seen === null || typeof seen !== "object";
     const next = first ? {} : { ...seen };
     const items = [];
@@ -147,7 +162,8 @@
       const shown = T.timeOf(row.time, now);
       // A first look can't date a row it can't read the time of: left out.
       if (first && (shown === null || now - shown > KEEP)) continue;
-      const earlier = first && (!row.unread || row.outgoing || now - shown > DAY);
+      if (T.isSignInCode(row.snippet)) continue;
+      const earlier = first && (allEarlier === true || !row.unread || row.outgoing || now - shown > DAY);
       items.push({
         // The same change, reported again (an answer that never came back),
         // is the same ref, so it is kept once.
@@ -228,9 +244,15 @@
   // ---- Telling the background ----
 
   // Renamed when a first look began reading earlier texts, so an update
-  // reads them once too. The old key is dropped.
+  // reads them once too: as earlier, since what the old key saw was told
+  // already (answering it again would be a second turn on the same text).
+  // The old key is dropped once the new one is kept.
   const SEEN_KEY = "textsSeen2";
-  void chrome.storage.local.remove("textsSeen").catch(() => {});
+  const OLD_SEEN_KEY = "textsSeen";
+  async function keepSeen(seen) {
+    await chrome.storage.local.set({ [SEEN_KEY]: seen });
+    await chrome.storage.local.remove(OLD_SEEN_KEY);
+  }
   let reporting = false;
   let lastReport = 0;
   // What the last report said about pairing: a change goes at once, so the
@@ -265,8 +287,10 @@
       let items = [];
       let seen = null;
       if (isPaired) {
-        const stored = (await chrome.storage.local.get(SEEN_KEY))[SEEN_KEY];
-        const out = T.changes(listRows(), stored && typeof stored === "object" ? stored : null, now);
+        const kept = await chrome.storage.local.get([SEEN_KEY, OLD_SEEN_KEY]);
+        const stored = kept[SEEN_KEY];
+        const updated = !(stored && typeof stored === "object") && Boolean(kept[OLD_SEEN_KEY]);
+        const out = T.changes(listRows(), stored && typeof stored === "object" ? stored : null, now, updated);
         items = out.items;
         seen = out.seen;
       }
@@ -274,7 +298,7 @@
       // site hasn't taken yet goes sooner, at most every 10 seconds.
       const wait = isPaired === lastPaired ? 60000 : 10000;
       if (!items.length && !force && now - lastReport < wait) {
-        if (seen) await chrome.storage.local.set({ [SEEN_KEY]: seen });
+        if (seen) await keepSeen(seen);
         return;
       }
       lastReport = now;
@@ -288,7 +312,7 @@
       }
       // Only what the site took counts as seen: with no Open Executive tab
       // to take them (or a failed one), the same texts go again next time.
-      if (seen && ((answer && answer.ok === true) || !items.length)) await chrome.storage.local.set({ [SEEN_KEY]: seen });
+      if (seen && ((answer && answer.ok === true) || !items.length)) await keepSeen(seen);
     } finally {
       reporting = false;
       if (again) soon();

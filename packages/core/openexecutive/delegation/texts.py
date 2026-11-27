@@ -22,7 +22,9 @@ shown, the extension reads nothing, the Executive isn't offered the text
 tools, and what was kept is dropped when the API starts (``tidy``). Each
 person's own switch is kept, so turning it back on resumes it.
 
-Texts older than ``KEEP_DAYS`` are dropped.
+Texts older than ``KEEP_DAYS`` are dropped. Sign-in codes are never kept
+(``sign_in_codes``): the extension doesn't send them, and one that comes
+anyway is dropped here.
 """
 from __future__ import annotations
 
@@ -47,6 +49,7 @@ from openexecutive.delegation.schema import (
     TEXTS_TABLE,
     ensure_schema,
 )
+from openexecutive.delegation.sign_in_codes import is_sign_in_code
 from openexecutive.utils import db
 
 KEEP_DAYS = 30
@@ -192,7 +195,16 @@ def tidy(*, db_path: Path | None = None) -> None:
                 conn.execute(f"DELETE FROM {table}")
             return
         _prune(conn, None)
+        _drop_codes(conn)
     expire_all(db_path=db_path)
+
+
+def _drop_codes(conn: sqlite3.Connection) -> None:
+    """Drop sign-in codes kept before they were left out (``record``)."""
+    rows = conn.execute(f"SELECT id, text FROM {TEXTS_TABLE} WHERE outgoing=0").fetchall()
+    codes = [(int(r["id"]),) for r in rows if is_sign_in_code(str(r["text"] or ""))]
+    if codes:
+        conn.executemany(f"DELETE FROM {TEXTS_TABLE} WHERE id=?", codes)
 
 
 def _prune(conn: sqlite3.Connection, person_id: int | None) -> None:
@@ -297,6 +309,9 @@ def record(person_id: int, items: list[Incoming], *, db_path: Path | None = None
             if not str(item.conversation or "").strip() or not str(item.ref or "").strip():
                 continue
             if item.at < cutoff:
+                continue
+            # A sign-in code is never kept, nor its conversation touched.
+            if is_sign_in_code(item.text):
                 continue
             conversation_id = _upsert_conversation(conn, person_id, item, now)
             # Which way a text went: only a text the Executive itself just sent
