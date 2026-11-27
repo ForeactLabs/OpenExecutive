@@ -301,6 +301,9 @@ class TurnTimeline:
             self.reads[kind] = self.reads.get(kind, 0) + n
         last = self.steps[-1] if self.steps else None
         unnamed = not label or label == _clean(FALLBACK_LABEL)
+        if not unnamed and not item.get("tool") and _is_cut_off(label):
+            # The executive's own line for a round cut short: no step's.
+            return False
         if last is not None and last.awaits_round:
             if unnamed and not reads:
                 # A round that only called show_progress: the next one does
@@ -317,9 +320,6 @@ class TurnTimeline:
             for kind, n in reads.items():
                 last.reads[kind] = last.reads.get(kind, 0) + n
             return True
-        if not unnamed and not item.get("tool") and _is_cut_off(label):
-            # The executive's own line for a round cut short: no step's.
-            return False
         if not unnamed and not item.get("tool") and last is not None:
             # A line a running tool says about itself (a workflow's steps
             # while run_workflow runs): the step it belongs to, not a new one.

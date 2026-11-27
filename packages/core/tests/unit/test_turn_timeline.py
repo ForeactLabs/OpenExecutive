@@ -216,6 +216,18 @@ def test_the_cut_off_line_is_no_steps_detail() -> None:
     assert "detail" not in tl.payload()["steps"][0]
 
 
+def test_a_cut_off_round_leaves_the_named_step_to_the_retry() -> None:
+    from openexecutive.orchestrator.executive import CUT_OFF_LABEL
+
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "progress", "now": "Drafting the board memo"})
+    tl.observe({"type": "activity", "label": CUT_OFF_LABEL, "tool": ""})
+    tl.observe({"type": "activity", "label": "Writing a draft…", "tool": "draft_artifact"})
+    steps = tl.payload()["steps"]
+    assert len(steps) == 1
+    assert steps[0]["label"] == "Drafting the board memo"
+
+
 def test_a_held_step_waits_once_not_twice() -> None:
     # outside_content held the send: its activity came, no chip followed.
     tl = TurnTimeline(Clock())

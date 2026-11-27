@@ -170,6 +170,8 @@ export default function StepsChip({
   const now = timeline.done ? null : nowLabel || chip.now;
   const { count } = chip;
   const running = !timeline.done;
+  // A step that was stopped or didn't go through: no green tick.
+  const unsettled = timeline.steps.some((s) => s.state === "stopped" || s.state === "tried");
   return (
     <button
       type="button"
@@ -179,6 +181,10 @@ export default function StepsChip({
     >
       {running ? (
         <span className="ml-0.5 inline-block h-3.5 w-3.5 flex-shrink-0 rounded-full border-2 border-accent border-r-transparent animate-spin" aria-hidden="true" />
+      ) : unsettled ? (
+        <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-surface-overlay text-[10px] font-bold text-fg-muted" aria-hidden="true">
+          –
+        </span>
       ) : (
         <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-emerald-500 text-[10px] text-white" aria-hidden="true">
           ✓
