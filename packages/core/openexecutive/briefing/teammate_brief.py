@@ -232,7 +232,10 @@ def record_kept(person_id: int, brief: TeammateBrief, held_id: int) -> None:
         })
         _write_kept(person_id, entries)
     except Exception:
-        logger.exception("teammate_brief: couldn't keep person %s's brief", person_id)
+        # It still goes out when their quiet hours end: told a little early
+        # beats the next brief retelling all of it.
+        logger.exception("teammate_brief: couldn't keep person %s's brief; counted as told now", person_id)
+        record_delivered(person_id, brief)
 
 
 # How long a kept brief still waiting holds back the next one. Past this

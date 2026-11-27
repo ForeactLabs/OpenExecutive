@@ -337,3 +337,17 @@ def test_two_kept_briefs_sent_together_keep_both_told(
     held_messages.mark_sent(ids)
     teammate_brief.settle_kept(5)
     assert brief_items.told(teammate_brief.KIND, 5) == {"card:1": "a", "card:2": "b"}
+
+
+def test_a_brief_that_could_not_be_kept_counts_as_told_now(
+    board: dict[str, Any], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    brief = asyncio.run(teammate_brief.write(_person(5), NOW))
+    assert brief is not None
+
+    def _fail(*_a: Any, **_kw: Any) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(teammate_brief, "_write_kept", _fail)
+    teammate_brief.record_kept(5, brief, 1)
+    assert brief_items.told(teammate_brief.KIND, 5) == brief.items
