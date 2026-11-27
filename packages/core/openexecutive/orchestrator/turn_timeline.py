@@ -46,6 +46,7 @@ _PAST: dict[str, str] = {
     "Checking": "Checked",
     "Comparing": "Compared",
     "Consulting": "Consulted",
+    "Copying": "Copied",
     "Creating": "Created",
     "Drafting": "Drafted",
     "Editing": "Edited",
@@ -106,7 +107,7 @@ def past(label: str) -> str:
 # built-in list can't name): it goes under Did, and when its tool makes
 # chips (chip_follows) it reads as done only once one says so.
 _WRITE_VERBS = frozenset({
-    "Accepting", "Adding", "Archiving", "Booking", "Cancelling", "Creating",
+    "Accepting", "Adding", "Archiving", "Booking", "Cancelling", "Copying", "Creating",
     "Declining", "Deleting", "Drafting", "Editing", "Forwarding", "Inviting",
     "Messaging", "Moving", "Posting", "Removing", "Replying", "Saving",
     "Scheduling", "Sending", "Sharing", "Updating", "Uploading",
@@ -413,8 +414,13 @@ class TurnTimeline:
         # A held step's round already showed (its activity came, no chip
         # followed): that step is the one waiting, not one that failed. The
         # held tools are the turn's latest tries, so match from the end.
-        # Any write with no chip yet, whether or not its tool makes chips.
-        tries = [s for s in self.steps if s.kind == DO and not s.acted and not s.waits and not s.stopped]
+        # Any write with no chip yet, whether or not its tool makes chips,
+        # and any connected app's round with none (a write whose label
+        # doesn't say so, "Using … · Notion").
+        tries = [
+            s for s in self.steps
+            if (s.kind == DO or "__" in s.tool) and not s.acted and not s.waits and not s.stopped
+        ]
         for text, step in zip(reversed(texts), reversed(tries), strict=False):
             step.label = text
             step.named = True

@@ -174,6 +174,17 @@ def test_a_connected_apps_read_stays_under_looked_at() -> None:
     assert [(s["label"], s["kind"], s["state"]) for s in done["steps"]] == [("Searched Notion", "look", "done")]
 
 
+def test_a_held_app_write_waits_on_its_own_round() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Messaging Dana…", "tool": "message_person"})
+    tl.observe({"type": "activity", "label": "Reading a web page…", "tool": "fetch_url"})
+    tl.observe({"type": "activity", "label": "Using append block · Notion…", "tool": "notion__append_block"})
+    done = tl.finish(("Add to the Notion page",))
+    assert done is not None
+    assert [s["state"] for s in done["steps"]] == ["tried", "done", "waits"]
+    assert done["steps"][2]["label"] == "Add to the Notion page"
+
+
 def test_a_held_step_waits_once_not_twice() -> None:
     # outside_content held the send: its activity came, no chip followed.
     tl = TurnTimeline(Clock())
