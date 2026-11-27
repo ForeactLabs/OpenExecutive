@@ -53,9 +53,18 @@
   const NOT_A_PLACE = "(?<!apt )(?<!apt\\. )(?<!apartment )(?<!suite )(?<!ste )(?<!room )(?<!rm )(?<!unit )(?<!floor )(?<!building )(?<!bldg )(?<!lot )(?<!box )(?<!#)(?<!no\\. )";
   const CODE_NEAR = new RegExp(CODE_WORD + "[^\\d\\n]{0,25}" + NUMBER + "|" + NOT_A_PLACE + NUMBER + "[^\\d\\n]{0,40}" + CODE_WORD, "i");
   const SIGN_IN_LINK = /\b(magic link|sign[- ]?in link|log[- ]?in link|is this you signing in|approve (?:this |the )?sign[- ]?in|tap to (?:sign|log) in|trying to sign in)\b/i;
-  const HOME = /\b(?:gates?|doors?|garage|alarm|lock ?box|keypad|wi-?fi|ssid|router|network|building|lobby)\b/i;
-  // Words only a sign-in code has: with one, a place word doesn't keep it.
-  const SIGN_IN_WORD = /\b(?:verif\w*|sign[- ]?in|log[- ]?in|otp|one[- ]time|2fa|two[- ]factor|authenticat\w*|security code)\b/i;
+  // A gate, door or wifi code is kept, but only when the place word belongs
+  // to the code ("The code for the gate is 4821", "Enter 4821 at the gate").
+  const PLACE = "(?:gates?|doors?|garage|alarm|lock ?box|keypad|wi-?fi|building|lobby)";
+  const HOME_CODE = new RegExp(
+    "\\b" + PLACE + "(?:\\s+(?:entry|access|opener|door|alarm))*\\s+(?:codes?|passcodes?|passwords?|pins?)\\b" +
+      "|\\b(?:codes?|passcodes?|passwords?|pins?)\\s+(?:for|to)\\s+(?:the\\s+|your\\s+)?" + PLACE + "\\b" +
+      "|\\b(?:wi-?fi|network|ssid)\\s*(?::|is)\\s*\\S+\\s+(?:password|pass|pw)\\b" +
+      "|" + NUMBER + "\\s+(?:at|on|into)\\s+(?:the\\s+)?" + PLACE + "\\b",
+    "i",
+  );
+  // Words only a sign-in code has: with one, nothing keeps it.
+  const SIGN_IN_WORD = /\b(?:verif\w*|confirm\w*|sign[- ]?in|log[- ]?in|otp|one[- ]time|2fa|two[- ]factor|authenticat\w*|security code|(?:do not|don'?t|never) share)\b/i;
   const ENTER_CODE = new RegExp("\\b(?:enter|type)\\s+" + NUMBER + "|\\buse\\s+" + NUMBER + "\\s+(?:to|for)\\s+(?:verify|confirm|sign|log|authenticat)", "i");
 
   /** Whether the words read like a sign-in code or a sign-in link. */
@@ -63,7 +72,7 @@
     const s = String(text || "");
     if (SIGN_IN_LINK.test(s)) return true;
     // A gate, door or wifi code, however it is worded, is kept.
-    if (HOME.test(s) && !SIGN_IN_WORD.test(s)) return false;
+    if (!SIGN_IN_WORD.test(s) && HOME_CODE.test(s)) return false;
     return ENTER_CODE.test(s) || CODE_NEAR.test(s);
   };
 

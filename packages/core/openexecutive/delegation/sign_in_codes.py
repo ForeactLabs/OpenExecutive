@@ -43,17 +43,24 @@ _SIGN_IN_LINK = re.compile(
     r"tap to (?:sign|log) in|trying to sign in)\b",
     re.IGNORECASE,
 )
-# A gate, door, garage, alarm, lockbox or wifi code, however it is worded
-# ("The code for the gate is 4821", "Wifi: HomeNet, password 84219375"), is
-# something people text each other and ask about later: never dropped.
-_HOME = re.compile(
-    r"\b(?:gates?|doors?|garage|alarm|lock ?box|keypad|wi-?fi|ssid|router|network|building|lobby)\b",
+# A gate, door, garage, alarm, lockbox or wifi code, however it is worded,
+# is something people text each other and ask about later: never dropped.
+# The place word must belong to the code ("The gate entry code is 4821",
+# "The code for the gate is 4821", "Wifi: HomeNet, password 84219375",
+# "Enter 4821 at the gate"), never just appear somewhere in the text.
+_PLACE = r"(?:gates?|doors?|garage|alarm|lock ?box|keypad|wi-?fi|building|lobby)"
+_HOME_CODE = re.compile(
+    r"\b" + _PLACE + r"(?:\s+(?:entry|access|opener|door|alarm))*\s+(?:codes?|passcodes?|passwords?|pins?)\b"
+    r"|\b(?:codes?|passcodes?|passwords?|pins?)\s+(?:for|to)\s+(?:the\s+|your\s+)?" + _PLACE + r"\b"
+    r"|\b(?:wi-?fi|network|ssid)\s*(?::|is)\s*\S+\s+(?:password|pass|pw)\b"
+    r"|" + _NUMBER + r"\s+(?:at|on|into)\s+(?:the\s+)?" + _PLACE + r"\b",
     re.IGNORECASE,
 )
-# Words only a sign-in code has: with one of them, a place word ("Your
-# PlayStation Network verification code is 482913") doesn't keep it.
+# Words only a sign-in code has: with one of them, nothing keeps it
+# ("Enter 482913 to confirm your Wi-Fi account").
 _SIGN_IN_WORD = re.compile(
-    r"\b(?:verif\w*|sign[- ]?in|log[- ]?in|otp|one[- ]time|2fa|two[- ]factor|authenticat\w*|security code)\b",
+    r"\b(?:verif\w*|confirm\w*|sign[- ]?in|log[- ]?in|otp|one[- ]time|2fa|two[- ]factor|authenticat\w*|security code"
+    r"|(?:do not|don'?t|never) share)\b",
     re.IGNORECASE,
 )
 # "Enter 482913 to confirm", "Use 482913 to verify your account": a number
@@ -71,6 +78,6 @@ def is_sign_in_code(text: str) -> bool:
     words = text or ""
     if _SIGN_IN_LINK.search(words):
         return True
-    if _HOME.search(words) and not _SIGN_IN_WORD.search(words):
+    if not _SIGN_IN_WORD.search(words) and _HOME_CODE.search(words):
         return False
     return bool(_ENTER_CODE.search(words) or _CODE_NEAR.search(words))
