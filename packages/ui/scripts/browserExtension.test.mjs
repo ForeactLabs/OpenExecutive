@@ -528,8 +528,14 @@ test("texts: a sign-in code is never told, now or on a first look", () => {
     "Enter 4 8 2 9 1 3 to confirm",
     "Your sign-in code: 123-456",
     "Tap to sign in to your account",
+    "Your PIN: 4821",
+    "Your code is 1234",
   ]) assert.equal(T.isSignInCode(code), true, code);
-  for (const plain of ["Running late, there by 2:30", "Lunch Friday?", "Call me at 4", "Gate code changed"]) {
+  for (const plain of [
+    "Running late, there by 2:30", "Lunch Friday?", "Call me at 4", "Gate code changed",
+    "Can we use 2000 from the budget?", "Dress code for the 2026 gala is black tie",
+    "Login meeting moved to 1030", "Sign in sheet for the 2026 offsite", "Enter 2026 in the year box",
+  ]) {
     assert.equal(T.isSignInCode(plain), false, plain);
   }
   const rows = [
