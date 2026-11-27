@@ -206,16 +206,21 @@ class TurnTimeline:
         for kind, n in reads.items():
             self.reads[kind] = self.reads.get(kind, 0) + n
         last = self.steps[-1] if self.steps else None
+        unnamed = not label or label == _clean(FALLBACK_LABEL)
         if last is not None and last.awaits_round:
+            if unnamed and not reads:
+                # A round that only called show_progress: the next one does
+                # the work it named.
+                return False
             # The round show_progress named: keep its words, take the tool's
             # kind and what it read.
             last.awaits_round = False
-            if label and label != _clean(FALLBACK_LABEL):
+            if not unnamed:
                 last.kind = kind_of(str(item.get("tool") or ""))
             for kind, n in reads.items():
                 last.reads[kind] = last.reads.get(kind, 0) + n
             return True
-        if not label or label == _clean(FALLBACK_LABEL):
+        if unnamed:
             # An unnamed round says nothing new, but what it read still counts.
             if reads and last is not None:
                 for kind, n in reads.items():

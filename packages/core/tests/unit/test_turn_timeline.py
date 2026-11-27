@@ -6,6 +6,7 @@ import json
 
 from openexecutive.memory import session_store
 from openexecutive.memory.episodic import initialize_db
+from openexecutive.orchestrator.activity_labels import FALLBACK_LABEL
 from openexecutive.orchestrator.turn_timeline import (
     DO,
     LOOK,
@@ -91,6 +92,16 @@ def test_progress_on_the_first_round_names_it() -> None:
     evt = tl.observe({"type": "activity", "label": "Reading a file", "tool": "read_document"})
     assert evt is not None
     assert [s["label"] for s in evt["steps"]] == ["Reading the Q4 budget"]
+
+
+def test_a_round_that_only_shows_progress_leaves_its_step_to_the_next() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "progress", "now": "Checking your inbox"})
+    # show_progress alone: the executive's fallback activity for that round.
+    assert tl.observe({"type": "activity", "label": FALLBACK_LABEL, "tool": ""}) is None
+    evt = tl.observe({"type": "activity", "label": "Reading your email", "tool": "read_my_email", "reads": {"email": 3}})
+    assert evt is not None
+    assert [(s["label"], s.get("detail")) for s in evt["steps"]] == [("Checking your inbox", "3 emails")]
 
 
 def test_a_meeting_sent_for_approval_waits() -> None:
