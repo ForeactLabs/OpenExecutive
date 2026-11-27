@@ -1461,6 +1461,8 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
               ) : (
                 liveSlot && (
                   <div className="flex gap-4 mb-8">
+                    {/* While it works, the bare mark in the accent colour; a
+                        written reply's avatar (Message) keeps its circle. */}
                     <div className="flex-shrink-0 mt-1">
                       <CouncilMark consulting className="w-7 h-7 text-accent" />
                     </div>
