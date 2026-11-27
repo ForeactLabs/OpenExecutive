@@ -87,10 +87,11 @@ async function ownTab() {
   const origins = await connectedOrigins();
   // Google Messages (kept there for texts, in the group) is never a page to work on.
   const work = (await chrome.tabs.query({ windowId: id })).filter((t) => !t.pinned && !onMessages(t.url) && !OE.onConnected(t.url, origins));
-  // While a text's press shows Messages there, the page that was showing is
-  // still the one a step works on.
+  // While a text's press shows Messages there (so no work tab is active),
+  // the page that was showing is still the one a step works on. A tab the
+  // workflow itself made active since wins.
   const before = pressShowing && pressShowing.windowId === id ? work.find((t) => t.id === pressShowing.tabId) : null;
-  return before || work.find((t) => t.active) || work[work.length - 1] || null;
+  return work.find((t) => t.active) || before || work[work.length - 1] || null;
 }
 
 // ---- Its window beside the chat ----

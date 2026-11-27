@@ -645,7 +645,7 @@ test("texts: the press shows Google Messages without taking the focus, and focus
   assert.ok(show.indexOf("pressShowing = { windowId: win.id, tabId: back.tabId };") < show.indexOf("chrome.tabs.update(tab.id, { active: true })"));
   assert.ok(back.indexOf("pressShowing = null;") < back.indexOf("chrome.tabs.update(back.tabId"));
   const own = bg.slice(bg.indexOf("async function ownTab"), bg.indexOf("async function ownTab") + 900);
-  assert.ok(own.includes("return before || work.find((t) => t.active)"));
+  assert.ok(own.includes("return work.find((t) => t.active) || before || work[work.length - 1] || null;"));
   // A press as a real mouse makes it: the left button held while pressed.
   const at = bg.slice(bg.indexOf("async function pressAt"), bg.indexOf("async function showForPress"));
   assert.ok(at.includes('buttons: type === "mousePressed" ? 1 : 0') && at.includes('pointerType: "mouse"'));
