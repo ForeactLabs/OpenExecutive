@@ -302,6 +302,17 @@ def initialize_db(db_path: Path | None = None) -> None:
                 if "duplicate column" not in str(exc).lower():
                     raise
 
+        # Additive migration: the steps an assistant reply took, for the
+        # chat's "What I did" timeline (orchestrator/turn_timeline.py).
+        # Nullable JSON TEXT {"task", "seconds", "steps": [...], "reads"};
+        # legacy rows stay NULL.
+        if "steps" not in _cm_existing:
+            try:
+                conn.execute("ALTER TABLE chat_messages ADD COLUMN steps TEXT")
+            except sqlite3.OperationalError as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise
+
         # Additive migration: flag an assistant message the user stopped
         # mid-stream, so the "Stopped" marker survives a reload instead of a
         # truncated reply reading as a complete one. Legacy rows default to 0.

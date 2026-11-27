@@ -82,6 +82,8 @@ import type { RepeatOffer } from "@/lib/api";
 import { turnStatus } from "@/lib/turnStatus";
 import { isNearBottom, lastUserIndex, pinScrollTop, pinSpacerHeight } from "@/lib/chatPin";
 import { isImeComposing } from "@/lib/imeComposing";
+import StepsChip, { StepsPanel } from "@/components/StepsTimeline";
+import { timelineFrom, type TurnTimeline } from "@/lib/turnTimeline";
 
 interface ChatProps {
   onDebugEvent?: (event: DebugEvent) => void;
@@ -213,6 +215,13 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
   // and whether the reply itself is being written (answer text since the
   // last tool round).
   const [turnProgress, setTurnProgress] = useState<TurnProgress | null>(null);
+  // The running turn's "What I did" timeline (lib/turnTimeline.ts), and which
+  // one is open: the running turn's ("live", which becomes its reply's once
+  // the reply lands) or a reply's, by its index.
+  const [turnTimeline, setTurnTimeline] = useState<TurnTimeline | null>(null);
+  // "live" keeps the index its reply will land at, so a turn that ends with no
+  // reply (stopped, failed) never shows an older reply's steps.
+  const [stepsOpen, setStepsOpen] = useState<{ live: number } | number | null>(null);
   const [turnReads, setTurnReads] = useState<ReadCounts>({});
   const [liveLine, setLiveLine] = useState<string | null>(null);
   const [writingReply, setWritingReply] = useState(false);
@@ -364,10 +373,23 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
     setLiveState(EMPTY_LIVE);
     setSettling(null);
     setClosed(null);
+    setStepsOpen(null);
     setSharing(false);
     if (initialSessionId && endsOnReply(initialMessages)) loadFollowup(initialSessionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSessionId]);
+
+  // Once the turn has ended, a panel opened on it settles on its reply, or
+  // closes when it left none, so a later reply (a teammate's) never opens it.
+  // (Adjusted while rendering, when the turn's loading flag drops.)
+  const [stepsTurnLoading, setStepsTurnLoading] = useState(isLoading);
+  if (stepsTurnLoading !== isLoading) {
+    setStepsTurnLoading(isLoading);
+    if (!isLoading && stepsOpen !== null && typeof stepsOpen === "object") {
+      const reply = messages.findIndex((m, j) => j >= stepsOpen.live && m.role === "assistant");
+      setStepsOpen(reply < 0 ? null : reply);
+    }
+  }
 
   // Who is in this chat. Read when it opens, after its first turn names it,
   // and whenever someone joins or leaves.
@@ -408,6 +430,9 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
         return;
       }
       setMessages(fresh);
+      // The saved list can line up differently from the shown one: a panel
+      // open on a reply by its place could now show another reply's steps.
+      setStepsOpen((open) => (typeof open === "number" ? null : open));
     } catch {
       // Kept as shown; the next turn or reconnect reads it again.
     }
@@ -646,6 +671,10 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
     setActivityLabel(null);
     setTurnSteps([]);
     setTurnProgress(null);
+    setTurnTimeline(null);
+    // A new turn closes the panel: Try again or Edit drops the last reply, and
+    // the new one would land where the open one was.
+    setStepsOpen(null);
     setTurnReads({});
     setLiveLine(null);
     setWritingReply(false);
@@ -674,6 +703,7 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
     const turnActions: ActionTaken[] = [];
     // What the reply looked at; sent once, just before `done`.
     let turnSources: AnswerSources | undefined;
+    let turnDone: TurnTimeline | undefined;
     // Steps the turn held for an outside read; sent once, just before `done`.
     let turnHeld: string[] | undefined;
     let turnFlags: string[] | undefined;
@@ -771,6 +801,12 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
           setRepeatOffer({ offer: item.offer, sessionId: item.session_id });
         } else if (item.type === "sources") {
           turnSources = answerSourcesFrom(item);
+        } else if (item.type === "timeline") {
+          const t = timelineFrom(item);
+          if (t) {
+            turnDone = t;
+            setTurnTimeline(t);
+          }
         } else if (item.type === "held_steps") {
           turnHeld = item.steps.length > 0 ? item.steps : undefined;
         } else if (item.type === "flags") {
@@ -834,6 +870,7 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
             actions: turnActions.length > 0 ? turnActions : undefined,
             stopped: wasStopped || undefined,
             sources: turnSources,
+            steps: turnDone?.done ? turnDone : undefined,
             id: replyId,
             held_steps: turnHeld,
             flags: turnFlags,
@@ -866,6 +903,7 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
               actions: turnActions.length > 0 ? turnActions : undefined,
               stopped: true,
               sources: turnSources,
+              steps: turnDone?.done ? turnDone : undefined,
             },
           ]);
         } else if (queuedRef.current.length > 0) {
@@ -1047,8 +1085,19 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
     inCommittee: committeePhase !== null,
     statusShown: status.show,
   });
+  const elapsedSeconds = Math.floor(turnClock.msSinceTurnStart / 1000);
+  const liveTimeline = isLoading && turnTimeline && !turnTimeline.done ? turnTimeline : null;
   const liveStatus =
-    liveKind === "steps" ? (
+    liveKind === "steps" && liveTimeline ? (
+      <div>
+        <StepsChip
+          timeline={liveTimeline}
+          elapsed={elapsedSeconds}
+          nowLabel={handingOver ? "Writing up what I have so far" : writingReply ? "Writing the answer" : null}
+          onOpen={() => setStepsOpen({ live: messages.length })}
+        />
+      </div>
+    ) : liveKind === "steps" ? (
       <TurnSteps
         progress={turnProgress}
         reads={turnReads}
@@ -1059,6 +1108,31 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
     ) : liveKind === "status" ? (
       <TurnStatusRow status={status} committeePhase={committeePhase} showMark={Boolean(streamingContent)} />
     ) : null;
+  // The open timeline: the running turn's until its reply lands, then that
+  // reply's; or the reply it was opened from.
+  const liveOpen = stepsOpen !== null && typeof stepsOpen === "object";
+  // While the turn streams, its own timeline, even once the finished one has
+  // come and the reply is not in the list yet.
+  const runningTimeline = isLoading ? turnTimeline : null;
+  // The turn's reply is the first one from where it was opened: messages the
+  // person queued while it ran land just before it.
+  const liveReply = liveOpen ? messages.findIndex((m, i) => i >= stepsOpen.live && m.role === "assistant") : -1;
+  const openIndex = liveOpen ? (runningTimeline || liveReply < 0 ? null : liveReply) : stepsOpen;
+  const openTimeline =
+    liveOpen && runningTimeline
+      ? runningTimeline
+      : openIndex !== null && openIndex >= 0
+        ? timelineFrom(messages[openIndex]?.steps)
+        : null;
+  const stepsPanel = (
+    <StepsPanel
+      timeline={openTimeline}
+      elapsed={elapsedSeconds}
+      open={stepsOpen !== null && openTimeline !== null}
+      onClose={() => setStepsOpen(null)}
+    />
+  );
+
   // The ask the turn waits on, under the line.
   const liveSlot =
     liveStatus || (isLoading && handOverAsk) ? (
@@ -1381,6 +1455,8 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
                   }
                   stopped={msg.role === "assistant" ? msg.stopped : undefined}
                   sources={msg.role === "assistant" ? msg.sources : undefined}
+                  steps={msg.role === "assistant" ? timelineFrom(msg.steps) : undefined}
+                  onOpenSteps={() => setStepsOpen(i)}
                   feedback={msg.role === "assistant" && !member ? msg.feedback : undefined}
                   author={
                     shared && msg.role === "user" && msg.sender_name
@@ -1474,6 +1550,7 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
                 )
               )}
 
+              {stepsPanel}
               {/* Someone else's turn, as it happens. */}
               {othersTurn && (
                 <>

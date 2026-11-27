@@ -1,0 +1,428 @@
+"""The "What I did" timeline a chat turn builds from its own events."""
+
+from __future__ import annotations
+
+import json
+
+from openexecutive.memory import session_store
+from openexecutive.memory.episodic import initialize_db
+from openexecutive.orchestrator.activity_labels import FALLBACK_LABEL
+from openexecutive.orchestrator.turn_timeline import (
+    DO,
+    LOOK,
+    WORK,
+    TurnTimeline,
+    from_saved,
+    kind_of,
+    past,
+    read_chips,
+)
+
+
+class Clock:
+    def __init__(self) -> None:
+        self.t = 100.0
+
+    def __call__(self) -> float:
+        return self.t
+
+
+def test_each_round_is_a_step_with_its_time_and_reads() -> None:
+    clock = Clock()
+    tl = TurnTimeline(clock)
+    clock.t = 103
+    evt = tl.observe({"type": "activity", "label": "Searching your email…", "tool": "search_my_email", "reads": {"email": 4}})
+    assert evt is not None and evt["type"] == "timeline"
+    step = evt["steps"][0]
+    assert step == {"label": "Searching your email", "kind": LOOK, "at": 3, "state": "current", "detail": "4 emails"}
+    assert evt["done"] is False
+
+
+def test_a_repeat_of_the_same_round_is_one_step() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Reading your email", "tool": "read_my_email", "reads": {"email": 1}})
+    tl.observe({"type": "activity", "label": "Reading your email", "tool": "read_my_email", "reads": {"email": 2}})
+    assert len(tl.steps) == 1
+    assert tl.steps[0].reads == {"email": 3}
+
+
+def test_an_unnamed_round_adds_no_step() -> None:
+    tl = TurnTimeline(Clock())
+    assert tl.observe({"type": "activity", "label": "Working…", "tool": ""}) is None
+    assert tl.steps == []
+
+
+def test_progress_names_the_round_it_comes_before() -> None:
+    # The executive sends show_progress before the activity of the round it
+    # describes, so ``now`` names the next round and ``found`` goes on the
+    # work done so far.
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Searching your email", "tool": "search_my_email"})
+    evt = tl.observe({
+        "type": "progress",
+        "task": "Checking hiring budget",
+        "now": "Comparing the LOI with Dana's email",
+        "found": ["$96k of sales headcount unspent"],
+    })
+    assert evt is not None
+    assert evt["task"] == "Checking hiring budget"
+    assert [s["label"] for s in evt["steps"]] == ["Searched your email", "Comparing the LOI with Dana's email"]
+    assert evt["steps"][0]["found"] == ["$96k of sales headcount unspent"]
+    assert evt["steps"][1]["state"] == "current"
+    # That round's activity fills in the named step, it does not add one.
+    evt = tl.observe({"type": "activity", "label": "Reading a file", "tool": "read_document", "reads": {"file": 1}})
+    assert evt is not None
+    assert [s["label"] for s in evt["steps"]] == ["Searched your email", "Comparing the LOI with Dana's email"]
+    assert evt["steps"][1]["kind"] == "look"
+    assert evt["steps"][1]["state"] == "current"
+    assert evt["steps"][1]["detail"] == "1 file"
+    # The next round is a new step again.
+    evt = tl.observe({"type": "activity", "label": "Running the numbers", "tool": "calculate"})
+    assert evt is not None
+    assert evt["steps"][-1]["label"] == "Running the numbers"
+    # Once done, the turn's own words read in the past tense too.
+    assert evt["steps"][1]["label"] == "Compared the LOI with Dana's email"
+    # The same finding sent again is not added twice.
+    assert tl.observe({"type": "progress", "found": ["$96k of sales headcount unspent"]}) is None
+
+
+def test_progress_on_the_first_round_names_it() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "progress", "now": "Reading the Q4 budget"})
+    evt = tl.observe({"type": "activity", "label": "Reading a file", "tool": "read_document"})
+    assert evt is not None
+    assert [s["label"] for s in evt["steps"]] == ["Reading the Q4 budget"]
+
+
+def test_a_round_that_only_shows_progress_leaves_its_step_to_the_next() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "progress", "now": "Checking your inbox"})
+    # show_progress alone: the executive's fallback activity for that round.
+    assert tl.observe({"type": "activity", "label": FALLBACK_LABEL, "tool": ""}) is None
+    evt = tl.observe({"type": "activity", "label": "Reading your email", "tool": "read_my_email", "reads": {"email": 3}})
+    assert evt is not None
+    assert [(s["label"], s.get("detail")) for s in evt["steps"]] == [("Checking your inbox", "3 emails")]
+
+
+def test_a_running_tools_own_lines_stay_on_its_step() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Running the weekly report", "tool": "run_workflow"})
+    for line in ("Pulling the numbers", "Sending the weekly report"):
+        assert tl.observe({"type": "activity", "label": line, "tool": ""}) is not None
+    steps = tl.payload()["steps"]
+    assert len(steps) == 1
+    assert steps[0]["detail"] == "Sending the weekly report"
+
+
+def test_a_step_with_no_chip_never_reads_as_done() -> None:
+    # message_person failed (no action_taken): the step says it tried.
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Sending a message", "tool": "message_person"})
+    done = tl.finish(())
+    assert done is not None
+    assert done["steps"] == [{**done["steps"][0], "label": "Sending a message", "state": "tried", "kind": "do"}]
+
+
+def test_a_stopped_turn_saves_the_running_step_as_stopped() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Reading the calendar", "tool": "check_calendar"})
+    tl.observe({"type": "activity", "label": "Searching your email…", "tool": "search_my_email"})
+    done = tl.finish((), interrupted=True)
+    assert done is not None
+    first, last = done["steps"]
+    assert first["state"] == "done"
+    assert last["state"] == "stopped" and last["label"] == "Searching your email"
+    assert from_saved(done)["steps"][-1]["state"] == "stopped"
+
+
+def test_a_stopped_turn_keeps_a_finished_action_as_it_was() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Messaging Dana", "tool": "message_person"})
+    tl.observe({"type": "action_taken", "tool": "message_person", "summary": "Messaged Dana"})
+    done = tl.finish((), interrupted=True)
+    assert done is not None
+    assert done["steps"][-1]["state"] == "done"
+
+
+def test_a_write_whose_tool_never_makes_a_chip_is_not_called_failed() -> None:
+    # send_text and save_file send no action_taken even when they work.
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Sending a text…", "tool": "send_text"})
+    tl.observe({"type": "activity", "label": "Saving the file…", "tool": "save_file"})
+    done = tl.finish(())
+    assert done is not None
+    assert [(s["label"], s["state"], s["kind"]) for s in done["steps"]] == [
+        ("Sent a text", "done", "do"),
+        ("Saved the file", "done", "do"),
+    ]
+
+
+def test_a_held_text_waits_even_though_its_tool_makes_no_chip() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Reading a web page…", "tool": "read_document"})
+    tl.observe({"type": "activity", "label": "Sending a text…", "tool": "send_text"})
+    done = tl.finish(("A step",), held_tools=("send_text",))
+    assert done is not None
+    assert [(s["label"], s["state"]) for s in done["steps"]][-1] == ("Sending a text", "waits")
+    assert len(done["steps"]) == 2
+
+
+def test_only_the_held_tools_rounds_after_the_first_read_wait() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Sending a text…", "tool": "send_text"})
+    tl.observe({"type": "activity", "label": "Reading a web page…", "tool": "read_document"})
+    tl.observe({"type": "activity", "label": "Saving the file…", "tool": "save_file"})
+    tl.observe({"type": "activity", "label": "Texting Sam…", "tool": "send_text"})
+    done = tl.finish(("A step",), held_tools=("send_text",))
+    assert done is not None
+    assert [(s["label"], s["state"]) for s in done["steps"]] == [
+        ("Sent a text", "done"),
+        ("Read a web page", "done"),
+        ("Saved the file", "done"),
+        ("Texting Sam", "waits"),
+    ]
+
+
+def test_a_connected_apps_read_stays_under_looked_at() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Searching Notion…", "tool": "notion__search"})
+    tl.observe({"type": "action_taken", "tool": "notion__search", "summary": "Searched Notion"})
+    done = tl.finish(())
+    assert done is not None
+    assert [(s["label"], s["kind"], s["state"]) for s in done["steps"]] == [("Searched Notion", "look", "done")]
+
+
+def test_a_held_app_write_waits_on_its_own_round() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Messaging Dana…", "tool": "message_person"})
+    tl.observe({"type": "activity", "label": "Reading a web page…", "tool": "read_document"})
+    tl.observe({"type": "activity", "label": "Using append block · Notion…", "tool": "notion__append_block"})
+    done = tl.finish(("A connected-app step",), held_tools=("notion__append_block",))
+    assert done is not None
+    assert [s["state"] for s in done["steps"]] == ["tried", "done", "waits"]
+    assert done["steps"][2]["label"] == "Using append block · Notion"
+
+
+def test_a_company_read_before_a_sent_text_is_not_the_outside_read() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Searching your files…", "tool": "google_workspace__search_drive_files"})
+    tl.observe({"type": "activity", "label": "Sending a text…", "tool": "send_text"})
+    tl.observe({"type": "activity", "label": "Reading a web page…", "tool": "run_executive_research"})
+    tl.observe({"type": "activity", "label": "Sending a text…", "tool": "send_text"})
+    done = tl.finish(("A step",), held_tools=("send_text",))
+    assert done is not None
+    assert [s["state"] for s in done["steps"]] == ["done", "done", "done", "waits"]
+
+
+def test_a_hold_never_takes_over_the_approved_cards_step() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Doing what you approved", "tool": "answer_card"})
+    tl.observe({"type": "activity", "label": "Reading a web page…", "tool": "read_document"})
+    tl.observe({"type": "activity", "label": "Messaging Sara…", "tool": "message_person"})
+    done = tl.finish(("A step", "Send an email"), held_tools=("message_person", "answer_card", "send_email"))
+    assert done is not None
+    assert [(s["label"], s["state"]) for s in done["steps"]] == [
+        ("Doing what you approved", "tried"),
+        ("Read a web page", "done"),
+        ("Messaging Sara", "waits"),
+        ("Send an email", "waits"),
+    ]
+
+
+def test_two_held_rounds_of_one_tool_both_wait() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Reading a web page…", "tool": "read_document"})
+    tl.observe({"type": "activity", "label": "Messaging Dana…", "tool": "send_slack_dm"})
+    tl.observe({"type": "activity", "label": "Messaging Sam…", "tool": "send_slack_dm"})
+    done = tl.finish(("A step",), held_tools=("send_slack_dm",))
+    assert done is not None
+    assert [(s["label"], s["state"]) for s in done["steps"]] == [
+        ("Read a web page", "done"),
+        ("Messaging Dana", "waits"),
+        ("Messaging Sam", "waits"),
+    ]
+
+
+def test_a_held_write_with_a_read_after_it_waits_once() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Reading the email…", "tool": "google_workspace__get_gmail_message"})
+    tl.observe(
+        {"type": "activity", "label": "Sending an email…", "tool": "google_workspace__send_gmail_message"}
+    )
+    tl.observe({"type": "activity", "label": "Checking your calendar…", "tool": "check_calendar"})
+    done = tl.finish(("Send an email",), held_tools=("google_workspace__send_gmail_message",))
+    assert done is not None
+    assert [s["state"] for s in done["steps"]] == ["done", "waits", "done"]
+    assert done["steps"][1]["label"] == "Sending an email"
+
+
+def test_a_step_finished_before_the_reply_started_is_not_stopped() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Searching your email…", "tool": "search_my_email"})
+    tl.wrote()
+    done = tl.finish((), interrupted=True)
+    assert done is not None
+    assert done["steps"][-1]["state"] == "done"
+
+
+def test_the_cut_off_line_is_no_steps_detail() -> None:
+    from openexecutive.orchestrator.executive import CUT_OFF_LABEL
+
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Checking your calendar…", "tool": "check_calendar"})
+    assert tl.observe({"type": "activity", "label": CUT_OFF_LABEL, "tool": ""}) is None
+    assert "detail" not in tl.payload()["steps"][0]
+
+
+def test_a_cut_off_round_leaves_the_named_step_to_the_retry() -> None:
+    from openexecutive.orchestrator.executive import CUT_OFF_LABEL
+
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "progress", "now": "Drafting the board memo"})
+    tl.observe({"type": "activity", "label": CUT_OFF_LABEL, "tool": ""})
+    tl.observe({"type": "activity", "label": "Writing a draft…", "tool": "draft_artifact"})
+    steps = tl.payload()["steps"]
+    assert len(steps) == 1
+    assert steps[0]["label"] == "Drafting the board memo"
+
+
+def test_a_held_step_waits_once_not_twice() -> None:
+    # outside_content held the send: its activity came, no chip followed.
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Reading a web page", "tool": "read_document"})
+    tl.observe({"type": "activity", "label": "Messaging Dana", "tool": "message_person"})
+    done = tl.finish(("A step",), held_tools=("message_person",))
+    assert done is not None
+    assert [(s["label"], s["state"]) for s in done["steps"]] == [
+        ("Read a web page", "done"),
+        ("Messaging Dana", "waits"),
+    ]
+
+
+def test_a_step_whose_outcome_is_unknown_can_be_taken_back() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Doing what you approved", "tool": "answer_card"})
+    evt = tl.drop_last()
+    assert evt is not None and evt["steps"] == []
+    assert tl.finish(()) is None
+
+
+def test_a_meeting_sent_for_approval_waits() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "action_taken", "tool": "create_calendar_event", "summary": "Sent for approval: Board sync", "target": "x1"})
+    done = tl.finish(())
+    assert done is not None
+    steps = done["steps"]
+    assert steps[0]["state"] == "waits"
+    assert steps[0]["label"] == "Sent for approval: Board sync"
+
+
+def test_an_action_names_its_round_and_says_when_it_waits() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Messaging Dana", "tool": "message_person"})
+    tl.observe({
+        "type": "action_taken",
+        "tool": "message_person",
+        "summary": "Waiting for your approval",
+        "target": "Dana Park",
+        "decision_id": 42,
+    })
+    payload = tl.finish()
+    assert payload is not None
+    [step] = payload["steps"]
+    assert step["kind"] == DO
+    assert step["state"] == "waits"
+    assert step["card_id"] == 42
+    # The summary alone: a target is often an id.
+    assert step["label"] == "Waiting for your approval"
+
+
+def test_finish_adds_held_steps_and_ends_the_current_one() -> None:
+    clock = Clock()
+    tl = TurnTimeline(clock)
+    tl.observe({"type": "activity", "label": "Checking your calendar", "tool": "my_calendar", "reads": {"calendar": 1}})
+    clock.t = 152
+    payload = tl.finish(("Send an email",))
+    assert payload is not None
+    assert payload["done"] is True
+    assert payload["seconds"] == 52
+    assert [s["state"] for s in payload["steps"]] == ["done", "waits"]
+    # A done step reads in the past tense.
+    assert payload["steps"][0]["label"] == "Checked your calendar"
+    assert payload["reads"] == ["Your calendar"]
+    # Nothing more is taken once it has finished.
+    assert tl.observe({"type": "activity", "label": "Reading", "tool": "x"}) is None
+
+
+def test_a_turn_with_no_steps_saves_nothing() -> None:
+    assert TurnTimeline(Clock()).finish() is None
+
+
+def test_other_events_and_junk_are_ignored() -> None:
+    tl = TurnTimeline(Clock())
+    assert tl.observe({"type": "chunk", "content": "hi"}) is None
+    assert tl.observe("text") is None
+    assert tl.observe({"type": "activity", "label": 5}) is None
+
+
+def test_kinds_past_tense_and_read_chips() -> None:
+    assert kind_of("consult_specialist") == WORK
+    assert kind_of("message_person") == DO
+    assert kind_of("search_my_email") == LOOK
+    # A connected app's write, named by its label.
+    assert kind_of("google_workspace__send_gmail_message", "Sending an email") == DO
+    assert kind_of("google_workspace__search_gmail", "Searching your email") == LOOK
+
+
+def test_a_connected_apps_send_that_failed_never_reads_as_sent() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Sending an email…", "tool": "google_workspace__send_gmail_message"})
+    done = tl.finish(())
+    assert done is not None
+    assert [(s["label"], s["state"]) for s in done["steps"]] == [("Sending an email", "tried")]
+    # When it worked, its chip names the same step: one step, done.
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Sending an email…", "tool": "google_workspace__send_gmail_message"})
+    tl.observe({"type": "action_taken", "tool": "call_tool", "summary": "Sent an email to Dana"})
+    done = tl.finish(())
+    assert done is not None
+    assert [(s["label"], s["state"]) for s in done["steps"]] == [("Sent an email to Dana", "done")]
+    assert past("Searching your email") == "Searched your email"
+    assert past("Dana's budget") == "Dana's budget"
+    assert read_chips({"email": 4, "file": 1, "calendar": 1, "person": 2}) == [
+        "4 emails", "1 file", "Your calendar", "2 people",
+    ]
+
+
+def test_from_saved_keeps_only_what_the_chat_shows() -> None:
+    saved = from_saved({
+        "task": "t",
+        "seconds": 9,
+        "steps": [
+            {"label": "Read a file", "kind": "look", "at": 1, "state": "current", "secret": "x"},
+            {"label": 3},
+            {"label": "Odd", "kind": "zzz", "state": "done"},
+        ],
+        "reads": ["1 file", 2],
+    })
+    assert saved is not None
+    assert saved["steps"][0] == {"label": "Read a file", "kind": "look", "at": 1, "state": "done"}
+    assert saved["steps"][1]["kind"] == LOOK
+    assert saved["reads"] == ["1 file"]
+    assert from_saved({"steps": []}) is None
+    assert from_saved("nope") is None
+
+
+def test_saved_with_the_reply_and_read_back(tmp_path) -> None:
+    db = tmp_path / "t.db"
+    initialize_db(db)
+    session_store.create_session("s1", "t", "2026-11-27T00:00:00+00:00", db_path=db)
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Reading your email", "tool": "read_my_email", "reads": {"email": 2}})
+    payload = tl.finish()
+    session_store.save_message("s1", "user", "hi", db_path=db)
+    session_store.save_message("s1", "assistant", "hello", db_path=db, steps=json.dumps(payload))
+    messages = session_store.load_messages("s1", db_path=db)
+    assert "steps" not in messages[0]
+    assert messages[1]["steps"]["steps"][0]["label"] == "Read your email"
+    assert messages[1]["steps"]["steps"][0]["detail"] == "2 emails"

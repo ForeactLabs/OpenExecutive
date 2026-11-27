@@ -431,6 +431,21 @@ def pending_held(session: Any) -> tuple[str, ...]:
         return ()
 
 
+def pending_held_tools(session: Any) -> tuple[str, ...]:
+    """The tool names behind ``pending_held``, each once, for the chat's own
+    record of the turn (orchestrator/turn_timeline): never shown as they
+    are. Empty whenever ``pending_held`` is. Never raises."""
+    try:
+        if not pending_held(session):
+            return ()
+        speaker = getattr(session, "caller_person_id", None)
+        key = f"{session.session_id}|{speaker if speaker is not None else ''}"
+        stored = _HELD.get(key)
+        return tuple(str(t) for t in stored[0]) if stored is not None else ()
+    except Exception:
+        return ()
+
+
 # Held steps as a person reads them (``step_words``). Only these names are
 # shown: a gateway tool name is whatever the model asked for, and text read
 # from outside can steer it, so an unknown one gets its app's generic label.
@@ -492,6 +507,32 @@ def _reads(tool_name: str, tool_input: Any) -> bool:
         return True
     try:
         return source_of(tool_name, tool_input) is not None
+    except Exception:
+        return True
+
+
+def may_read_outside(tool_name: str) -> bool:
+    """Whether a tool, known only by name (a chat round's activity), can
+    read outside content or the speaker's own mail: what has to come before
+    a step is held. A search or listing of the company's own Drive or
+    OneDrive does not. Never raises."""
+    try:
+        from openexecutive.orchestrator.extensions import reads_outside
+        from openexecutive.orchestrator.mail_read_tools import (
+            MAIL_READ_TOOLS,
+            SAVE_MY_EMAIL_ATTACHMENT,
+        )
+
+        name = str(tool_name or "")
+        if not name:
+            return False
+        if name != SAVE_MY_EMAIL_ATTACHMENT and name in {t["name"] for t in MAIL_READ_TOOLS}:
+            return True
+        if name in _FETCH_TOOLS:
+            return True
+        if "__" in name:
+            return gateway_call_reads(name) and name not in _COMPANY_LISTINGS
+        return bool(reads_outside(name))
     except Exception:
         return True
 

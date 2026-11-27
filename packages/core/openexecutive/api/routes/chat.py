@@ -33,6 +33,7 @@ from openexecutive.orchestrator.action_chips import drop_replaced
 from openexecutive.orchestrator.answer_sources import TurnSources
 from openexecutive.orchestrator.debug_events import DebugCollector
 from openexecutive.orchestrator.turn_inbox import TurnInbox
+from openexecutive.orchestrator.turn_timeline import TurnTimeline
 from openexecutive.workflows import turn_files
 from openexecutive.workflows.turn_files import bind as bind_turn_files
 
@@ -188,11 +189,13 @@ def _rename_session_in_background(
 # Steps approved from a chat that were still running when the turn was
 # stopped or ran out of time: they finish on their own (strong references,
 # as `_rename_tasks`).
-_approving_tasks: set[asyncio.Future[str]] = set()
+_approving_tasks: set[asyncio.Future[Any]] = set()
 class _ApprovedNote(NamedTuple):
     """What the turn reads about the card it approved."""
 
     text: str
+    # The step went through (``decisions.ChatApprovalNote.done``).
+    done: bool = False
 
 
 # What the turn shows while an approved step runs.
@@ -251,7 +254,8 @@ async def _approve_card_in_turn(
             _approving_tasks.add(approving)
             approving.add_done_callback(_approving_tasks.discard)
     if approving.done():
-        yield _ApprovedNote(approving.result())
+        result = approving.result()
+        yield _ApprovedNote(result, bool(getattr(result, "done", False)))
 
 
 def _stop_owner_key(request: Request, caller_person_id: int | None) -> str:
@@ -1686,6 +1690,10 @@ async def _run_chat_turn(
         persisted: dict[str, int] = {}
         chunk_count = 0
         exec_t0 = time.monotonic()
+        # What the turn did, step by step: sent as it changes and saved with
+        # the reply for its "What I did" timeline. Timed from the turn's start,
+        # an approved card's step included.
+        timeline = TurnTimeline()
         timed_out = False
         client_disconnected = False
         stopped = False
@@ -1714,6 +1722,16 @@ async def _run_chat_turn(
                 # deadline hold while it runs (the step itself finishes on its
                 # own and its card says how it went).
                 approved: str | None = None
+                approved_done = False
+                # A page in another app never approves (no step to show).
+                # Nor does a turn stopped before it began.
+                approving_evt = None if session.from_host or (
+                    stop_event is not None and stop_event.is_set()
+                ) else timeline.observe(
+                    {"type": "activity", "label": APPROVING_LABEL, "tool": "answer_card"}
+                )
+                if approving_evt is not None:
+                    yield f"data: {json.dumps({**approving_evt, 'session_id': session.session_id})}\n\n"
                 async for evt in _approve_card_in_turn(
                     approve_card, approve_input, request, session,
                     stop_event=stop_event,
@@ -1722,8 +1740,23 @@ async def _run_chat_turn(
                 ):
                     if isinstance(evt, _ApprovedNote):
                         approved = evt.text
+                        approved_done = evt.done
                     else:
                         yield evt
+                if approving_evt is not None and approved is None:
+                    # Still running as the turn moves on (stopped, or out of
+                    # time): it may yet work, and its card will say.
+                    dropped_evt = timeline.drop_last()
+                    if dropped_evt is not None:
+                        yield f"data: {json.dumps({**dropped_evt, 'session_id': session.session_id})}\n\n"
+                if approved_done:
+                    # Only a step that went through reads as done; a refused
+                    # or failed one stays as tried ("didn't go through").
+                    did_evt = timeline.observe(
+                        {"type": "action_taken", "tool": "answer_card", "summary": "Did what you approved"}
+                    )
+                    if did_evt is not None:
+                        yield f"data: {json.dumps({**did_evt, 'session_id': session.session_id})}\n\n"
                 if approved is not None:
                     turn_page_block = "\n\n".join(
                         part for part in (page_context_block, f"THE CARD THEY JUST APPROVED:\n{approved}") if part
@@ -1778,6 +1811,7 @@ async def _run_chat_turn(
             action_chips: list[dict[str, Any]] = []
             # `turn_sources` as sent and saved once the reply is over.
             answer_sources: dict[str, Any] | None = None
+            saved_steps: dict[str, Any] | None = None
 
             async def _persist_turn() -> None:
                 # Persist the turn on every terminal path — normal completion,
@@ -1833,6 +1867,7 @@ async def _run_chat_turn(
                     action_chips=json.dumps(action_chips) if action_chips else None,
                     stopped=stopped,
                     sources=json.dumps(answer_sources) if answer_sources else None,
+                    steps=json.dumps(saved_steps) if saved_steps else None,
                 )
                 # The Executive's own post-turn block (executive.py, after its
                 # `async for`) is what normally mirrors the turn into the live
@@ -1954,6 +1989,8 @@ async def _run_chat_turn(
                             else:
                                 full_response += item
                                 chunk_count += 1
+                                if item.strip():
+                                    timeline.wrote()
                                 live_evt = {
                                     "type": "chunk",
                                     "content": item,
@@ -1981,6 +2018,9 @@ async def _run_chat_turn(
                             ):
                                 chat_live.turn_event(session.session_id, live_key, item)
                             yield f"data: {json.dumps(item)}\n\n"
+                            timeline_evt = timeline.observe(item)
+                            if timeline_evt is not None:
+                                yield f"data: {json.dumps({**timeline_evt, 'session_id': session.session_id})}\n\n"
 
                         if stop_event is not None and stop_event.is_set():
                             stopped = True
@@ -2067,6 +2107,17 @@ async def _run_chat_turn(
 
             browser_needed = browser_tools.take_needed(session)
 
+            # What the turn held for an outside read, for Approve / Not now
+            # buttons under the reply (Approve sends the person's go), and
+            # as waiting steps on its timeline.
+            held_steps = outside_content.pending_held(session) if not (stopped or timed_out) else ()
+            held_tools = outside_content.pending_held_tools(session) if held_steps else ()
+            saved_steps = timeline.finish(
+                held_steps,
+                held_tools=held_tools,
+                interrupted=stopped or timed_out or client_disconnected,
+            )
+
             if client_disconnected:
                 # Connection is gone, so we can't yield anything more — but we
                 # still persist whatever the Executive produced before the
@@ -2090,9 +2141,9 @@ async def _run_chat_turn(
                 sources_evt = {"type": "sources", "session_id": session.session_id, **answer_sources}
                 yield f"data: {json.dumps(sources_evt)}\n\n"
 
-            # What the turn held for an outside read, for Approve / Not now
-            # buttons under the reply (Approve sends the person's go).
-            held_steps = outside_content.pending_held(session) if not (stopped or timed_out) else ()
+            if saved_steps is not None and (full_response or action_chips):
+                steps_evt = {"type": "timeline", "session_id": session.session_id, **saved_steps}
+                yield f"data: {json.dumps(steps_evt)}\n\n"
             if held_steps:
                 held_evt = {"type": "held_steps", "session_id": session.session_id, "steps": list(held_steps)}
                 yield f"data: {json.dumps(held_evt)}\n\n"
