@@ -57,7 +57,8 @@ from ._agent_loop_fakes import FinalMsg, ScriptedProvider, TextBlock, ToolUseBlo
 # And again: an email reply may quote a draft signed by the sender for them to send.
 # And again: Doing what was asked (a figure that looks off goes through, with the doubt said).
 # And again: a typed address goes through whatever name shows on it, and a repeat is sent, not asked about.
-TEAM_PERSONA_SHA256 = "1a9aeaca1077728fd34b7a50403b44358f662579bc48e09f8c11bfc7ea52e880"
+# And again: Format asks for plain Markdown links, with no {target="_blank"} after them.
+TEAM_PERSONA_SHA256 = "5f3bd93494d9fc2da3f51dad7a80e2becc95c1fedffa8d682f5c8dc8491f5bcf"
 
 SOLO_HEADINGS = (
     "## You Work for One Person",

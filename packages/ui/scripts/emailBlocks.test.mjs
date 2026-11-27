@@ -48,6 +48,8 @@ test("an attribute list after a link is dropped, other braces stay", () => {
   assert.equal(htmlLinks(`[a](${url}){:target='_blank' rel=noopener}.`), `[a](${url}).`);
   assert.equal(htmlLinks("[w](https://x.example/a_(b)){.ext #x}"), "[w](https://x.example/a_(b))");
   assert.equal(htmlLinks('![c](https://x.example/c.png "C"){width=300}'), '![c](https://x.example/c.png "C")');
+  assert.equal(htmlLinks("[t](https://x.example/t 'T'){target=_blank}"), "[t](https://x.example/t 'T')");
+  assert.equal(htmlLinks('[s](<https://x.example/a b>){target="_blank"}'), "[s](<https://x.example/a b>)");
   // A link turned from HTML loses it too.
   assert.equal(htmlLinks('<a href="https://x.example/d">D</a>{target="_blank"}'), "[D](https://x.example/d)");
   // Braces that aren't an attribute list, or not right after a link, stay.

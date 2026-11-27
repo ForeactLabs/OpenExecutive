@@ -12,7 +12,7 @@ const ANCHOR = /<a\s+[^>]*?href\s*=\s*["'](https?:\/\/[^"'\s<>]+)["'][^>]*>([^<>
 // only `.class`, `#id` and `name=value` pairs, so ordinary braces in
 // prose stay.
 const ATTR = String.raw`(?:[.#][\w-]+|[\w-]+\s*=\s*(?:"[^"\n]*"|'[^'\n]*'|[^\s{}"']+))`;
-const LINK_ATTRS = new RegExp(String.raw`(\]\([^\s()]*(?:\([^\s()]*\)[^\s()]*)*(?:\s+"[^"\n]*")?\))\{:?\s*${ATTR}(?:\s+${ATTR})*\s*\}`, "g");
+const LINK_ATTRS = new RegExp(String.raw`(\]\((?:<[^<>\n]*>|[^\s()]*(?:\([^\s()]*\)[^\s()]*)*)(?:\s+(?:"[^"\n]*"|'[^'\n]*'))?\))\{:?\s*${ATTR}(?:\s+${ATTR})*\s*\}`, "g");
 
 // Code (fenced blocks and `inline` spans) stays exactly as written.
 const CODE = /(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`)/g;
