@@ -219,7 +219,9 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
   // one is open: the running turn's ("live", which becomes its reply's once
   // the reply lands) or a reply's, by its index.
   const [turnTimeline, setTurnTimeline] = useState<TurnTimeline | null>(null);
-  const [stepsOpen, setStepsOpen] = useState<"live" | number | null>(null);
+  // "live" keeps the index its reply will land at, so a turn that ends with no
+  // reply (stopped, failed) never shows an older reply's steps.
+  const [stepsOpen, setStepsOpen] = useState<{ live: number } | number | null>(null);
   const [turnReads, setTurnReads] = useState<ReadCounts>({});
   const [liveLine, setLiveLine] = useState<string | null>(null);
   const [writingReply, setWritingReply] = useState(false);
@@ -654,6 +656,7 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
     setTurnSteps([]);
     setTurnProgress(null);
     setTurnTimeline(null);
+    setStepsOpen((open) => (typeof open === "number" ? open : null));
     setTurnReads({});
     setLiveLine(null);
     setWritingReply(false);
@@ -1072,7 +1075,7 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
           timeline={liveTimeline}
           elapsed={elapsedSeconds}
           nowLabel={handingOver ? "Writing up what I have so far" : writingReply ? "Writing the answer" : null}
-          onOpen={() => setStepsOpen("live")}
+          onOpen={() => setStepsOpen({ live: messages.length })}
         />
       </div>
     ) : liveKind === "steps" ? (
@@ -1088,10 +1091,14 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
     ) : null;
   // The open timeline: the running turn's until its reply lands, then that
   // reply's; or the reply it was opened from.
-  const lastReply = messages.length > 0 && messages[messages.length - 1].role === "assistant" ? messages.length - 1 : -1;
-  const openIndex = stepsOpen === "live" ? (liveTimeline ? null : lastReply) : stepsOpen;
+  const liveOpen = stepsOpen !== null && typeof stepsOpen === "object";
+  const openIndex = liveOpen
+    ? liveTimeline || messages[stepsOpen.live]?.role !== "assistant"
+      ? null
+      : stepsOpen.live
+    : stepsOpen;
   const openTimeline =
-    stepsOpen === "live" && liveTimeline
+    liveOpen && liveTimeline
       ? liveTimeline
       : openIndex !== null && openIndex >= 0
         ? timelineFrom(messages[openIndex]?.steps)
