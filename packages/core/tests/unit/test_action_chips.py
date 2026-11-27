@@ -420,6 +420,7 @@ _KNOWN_READ_ONLY_TOOLS: frozenset[str] = frozenset({
     "read_my_email_attachment",
     "my_email_awaiting_reply",
     "my_email_read_before",
+    "what_came_in",
     # app_control — a list of what the person may change
     "find_in_app",
 })
