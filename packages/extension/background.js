@@ -519,7 +519,7 @@ async function pressAt(target, spot) {
 // stays in their own window) with the tab showing, then put back the way it
 // was. If the person went to it meanwhile (its window took the focus), it is
 // left where they are.
-async function showForPress(tab) {
+async function showForPress(tab, target) {
   const win = await chrome.windows.get(tab.windowId, { populate: true }).catch(() => null);
   if (!win) return null;
   const shown = (win.tabs || []).find((t) => t.active) || null;
@@ -527,13 +527,20 @@ async function showForPress(tab) {
   // Whatever step fails, what was changed is still put back.
   try {
     if (back.minimized) await chrome.windows.update(win.id, { state: "normal", focused: false });
-    if (back.tabId !== null) await chrome.tabs.update(tab.id, { active: true });
+    if (back.tabId !== null) {
+      await chrome.tabs.update(tab.id, { active: true });
+      // In a window the person is typing in, their keys would now go to the
+      // box holding the text: take the focus off it straight away.
+      await chrome.debugger.sendCommand(target, "Runtime.evaluate", { expression: UNFOCUS }).catch(() => null);
+    }
     await pause(400);
   } catch {
     // Put back by the caller.
   }
   return back;
 }
+
+const UNFOCUS = `(() => { const a = document.activeElement; if (a && a !== document.body && a.blur) a.blur(); })()`;
 
 // Only when the press didn't go from behind their windows: the window comes
 // in front for that one press, and the focus goes straight back after it.
@@ -546,7 +553,15 @@ async function focusForPress(back) {
 }
 
 async function putBack(tab, back) {
-  if (!back || back.focused || back.done) return;
+  if (!back || back.done) return;
+  if (back.focused) {
+    // Their own window, in front: only their tab comes back, and only if
+    // Messages is still the one showing (they didn't move on themselves).
+    const now = await chrome.tabs.get(tab.id).catch(() => null);
+    if (back.tabId !== null && now && now.active) await chrome.tabs.update(back.tabId, { active: true }).catch(() => undefined);
+    back.done = true;
+    return;
+  }
   const win = await chrome.windows.get(back.windowId).catch(() => null);
   // The person went to it meanwhile: leave it where they are.
   if (!win || (win.focused && !back.tookFocus)) return;
@@ -568,13 +583,12 @@ async function pressInTab(tab, x, y) {
   // the send opened, the page it was on when it asked for the press.
   if (!conversation && !/\/web\/conversations\/(?!new$)[^/]+$/.test(at)) return { ok: false };
   const target = { tabId: tab.id };
-  const back = await showForPress(now).catch(() => null);
   try {
     await chrome.debugger.attach(target, "1.3");
   } catch {
-    await putBack(now, back).catch(() => undefined);
     return { ok: false };
   }
+  const back = await showForPress(now, target).catch(() => null);
   // Once the press has started it may have gone, even if a step after fails.
   let started = false;
   try {

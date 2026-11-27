@@ -607,8 +607,9 @@ test("texts: the press waits for the debugging bar, presses only where the butto
 test("texts: the press shows Google Messages without taking the focus, and focuses it only for one last press", () => {
   const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
   const press = bg.slice(bg.indexOf("async function pressInTab"), bg.indexOf("function waitLoaded"));
-  // Shown before attaching, put back after detaching, and after a failed attach too.
-  assert.ok(press.indexOf("await showForPress(now)") < press.indexOf("chrome.debugger.attach"));
+  // Shown once attached (so the box can be unfocused at once), put back after detaching.
+  assert.ok(press.indexOf("await showForPress(now, target)") > press.indexOf("chrome.debugger.attach"));
+  assert.ok(press.indexOf("await showForPress(now, target)") < press.indexOf("await sendSpot(target, at)"));
   assert.ok(press.lastIndexOf("await putBack(now, back)") > press.indexOf("chrome.debugger.detach"));
   const show = bg.slice(bg.indexOf("async function showForPress"), bg.indexOf("async function focusForPress"));
   // Never focused: what the person types stays in their own window.
@@ -623,7 +624,12 @@ test("texts: the press shows Google Messages without taking the focus, and focus
   assert.ok(press.includes("after.full"));
   const back = bg.slice(bg.indexOf("async function putBack"), bg.indexOf("async function pressInTab"));
   // Left alone when it was in front already, put back once, and left where they are if they went to it.
-  assert.ok(back.includes("if (!back || back.focused || back.done) return;"));
+  assert.ok(back.includes("if (!back || back.done) return;"));
+  // In their own window in front, only their tab comes back.
+  assert.ok(back.includes("if (back.tabId !== null && now && now.active) await chrome.tabs.update(back.tabId, { active: true })"));
+  // Switching tabs under them takes the focus off the box holding the text straight away.
+  assert.ok(show.indexOf("{ expression: UNFOCUS }") > show.indexOf("chrome.tabs.update(tab.id, { active: true })"));
+  assert.ok(show.indexOf("{ expression: UNFOCUS }") < show.indexOf("await pause(400)"));
   assert.ok(back.includes("if (!win || (win.focused && !back.tookFocus)) return;"));
   assert.ok(back.includes('{ state: "minimized" }') && back.includes("back.focusedId") && back.includes("back.done = true;"));
   // A press as a real mouse makes it: the left button held while pressed.
