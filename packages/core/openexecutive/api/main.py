@@ -1001,6 +1001,10 @@ def create_app() -> FastAPI:
     app.include_router(workspace.router, tags=["workspace"])
     app.include_router(notifications.router, tags=["notifications"])
     app.include_router(watchlist.router, tags=["watchlist"])
+    # A website's own icon, for the "What I did" timeline's site steps.
+    from openexecutive.api.routes import favicon as favicon_route
+
+    app.include_router(favicon_route.router, tags=["chat"])
     # The browser extension's relay: steps the Executive takes in the
     # person's own browser (browser.relay).
     from openexecutive.api.routes import browser as browser_route

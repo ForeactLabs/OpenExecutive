@@ -667,6 +667,17 @@ HANDED_WAITING = (
 )
 
 
+def _ran_on(name: str, url: Any) -> None:
+    """Tell the chat's timeline the site a step that ran was on, from the
+    page the browser reports, for that site's icon on the step."""
+    from openexecutive.orchestrator import step_icons, turn_live
+
+    if step_icons.on_page(name):
+        site = step_icons.site_of(url)
+        if site:
+            turn_live.post({"type": "step_site", "site": site})
+
+
 def _site(url: Any) -> str:
     from urllib.parse import urlsplit
 
@@ -1007,6 +1018,7 @@ def _handler(name: str) -> Any:
             return json.dumps({"error": str(result.get("error") or "That didn't work in the browser.")})
         out = _fit({k: v for k, v in result.items() if k not in ("ok", "screenshot")})
         out.setdefault("done", True)
+        _ran_on(name, result.get("url"))
         shot = result.get("screenshot")
         if name == "browser_look" and isinstance(shot, dict):
             # The picture rides beside the answer (``orchestrator.tool_images``):

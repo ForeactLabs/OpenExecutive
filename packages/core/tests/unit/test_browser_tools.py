@@ -1005,3 +1005,20 @@ def test_an_answer_body_has_room_for_a_full_screenshot_and_the_page_text() -> No
     # A look carries a screenshot up to tool_images' cap plus the page text
     # and elements: a full one must not be turned away as too large.
     assert route.MAX_BODY >= tool_images.MAX_DATA_CHARS + 2 * 60_000
+
+
+def test_a_step_that_ran_tells_the_timeline_its_site() -> None:
+    from openexecutive.browser import tools as browser_tools
+    from openexecutive.orchestrator import turn_live
+
+    async def go() -> list[dict]:
+        feed = turn_live.Feed()
+        with feed.bound():
+            browser_tools._ran_on("browser_navigate", "https://www.papajohns.com/order")
+            browser_tools._ran_on("browser_look", "http://10.0.0.1/")
+            browser_tools._ran_on("browser_tabs", "https://example.com/")
+        done: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        done.set_result(None)
+        return [e async for e in feed.until(done)]
+
+    assert asyncio.run(go()) == [{"type": "step_site", "site": "papajohns.com"}]

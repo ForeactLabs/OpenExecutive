@@ -93,3 +93,19 @@ test("a step cut off by Stop reads as stopped, not done", () => {
   assert.equal(t.steps[0].state, "stopped");
   assert.equal(summaryLine(t), "Stopped before it finished.");
 });
+
+test("a step keeps a known picture and a real site, and drops anything else", () => {
+  const t = timelineFrom({
+    steps: [
+      { label: "Opened papajohns.com", kind: "look", at: 1, state: "done", icon: "web", site: "papajohns.com" },
+      { label: "Odd", kind: "look", at: 2, state: "done", icon: "<img>", site: "127.0.0.1" },
+      { label: "Path", kind: "look", at: 3, state: "done", icon: "mail", site: "evil.com/../x" },
+    ],
+  });
+  assert.equal(t.steps[0].icon, "web");
+  assert.equal(t.steps[0].site, "papajohns.com");
+  assert.equal(t.steps[1].icon, undefined);
+  assert.equal(t.steps[1].site, undefined);
+  assert.equal(t.steps[2].icon, "mail");
+  assert.equal(t.steps[2].site, undefined);
+});

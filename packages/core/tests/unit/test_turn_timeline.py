@@ -34,7 +34,7 @@ def test_each_round_is_a_step_with_its_time_and_reads() -> None:
     evt = tl.observe({"type": "activity", "label": "Searching your email…", "tool": "search_my_email", "reads": {"email": 4}})
     assert evt is not None and evt["type"] == "timeline"
     step = evt["steps"][0]
-    assert step == {"label": "Searching your email", "kind": LOOK, "at": 3, "state": "current", "detail": "4 emails"}
+    assert step == {"label": "Searching your email", "kind": LOOK, "at": 3, "state": "current", "detail": "4 emails", "icon": "mail"}
     assert evt["done"] is False
 
 
@@ -426,3 +426,76 @@ def test_saved_with_the_reply_and_read_back(tmp_path) -> None:
     assert "steps" not in messages[0]
     assert messages[1]["steps"]["steps"][0]["label"] == "Read your email"
     assert messages[1]["steps"]["steps"][0]["detail"] == "2 emails"
+
+
+def test_a_step_shows_what_it_touched() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Checking your calendar…", "tool": "my_calendar"})
+    tl.observe({"type": "activity", "label": "Consulting specialists…", "tool": "consult_specialist"})
+    tl.observe({"type": "activity", "label": "Updating the deal", "tool": "hubspot__update_deal"})
+    tl.observe({"type": "activity", "label": "Searching mail", "tool": "google_workspace__search_gmail_messages"})
+    icons = [s.get("icon") for s in tl.payload()["steps"]]
+    assert icons == ["calendar", "think", "app", "mail"]
+
+
+def test_a_browser_round_names_the_site_and_the_rounds_on_its_page_keep_it() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Opening a tab…", "tool": "browser_open_tab"})
+    # The browser says where the step went once it ran.
+    tl.observe({"type": "step_site", "site": "papajohns.com"})
+    tl.observe({"type": "activity", "label": "Looking at the page…", "tool": "browser_look"})
+    tl.observe({"type": "activity", "label": "Clicking…", "tool": "browser_click"})
+    tl.observe({"type": "activity", "label": "Switching tabs…", "tool": "browser_switch_tab"})
+    tl.observe({"type": "activity", "label": "Looking at the page…", "tool": "browser_look"})
+    steps = tl.finish()["steps"]
+    assert [(s["label"], s["icon"], s.get("site")) for s in steps] == [
+        ("Opened papajohns.com", "web", "papajohns.com"),
+        ("Looked at papajohns.com", "page", "papajohns.com"),
+        ("Clicked", "click", "papajohns.com"),
+        ("Switched tabs", "web", None),
+        ("Looked at the page", "page", None),
+    ]
+
+
+def test_an_address_the_model_asked_for_is_never_the_site() -> None:
+    # A step that waits for the person's OK, or that failed, never ran: the
+    # site it would have opened is not shown (nor fetched for its icon).
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "step_site", "site": "example.com"})
+    tl.observe({"type": "activity", "label": "Opening a tab…", "tool": "browser_open_tab", "site": "attacker.test"})
+    tl.observe({"type": "activity", "label": "Looking at the page…", "tool": "browser_look"})
+    steps = tl.finish()["steps"]
+    assert [s.get("site") for s in steps] == [None, None]
+    assert tl.observe({"type": "step_site", "site": "127.0.0.1"}) is None
+
+
+def test_only_a_step_that_ran_shows_its_site() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Opening a tab…", "tool": "browser_open_tab"})
+    tl.observe({"type": "step_site", "site": "papajohns.com"})
+    tl.observe({"type": "activity", "label": "Clicking…", "tool": "browser_click"})
+    steps = tl.finish(held_tools=["browser_click"])["steps"]
+    assert steps[0].get("site") == "papajohns.com"
+    assert all(s.get("site") is None for s in steps if s["state"] != "done")
+
+
+def test_a_named_round_on_a_page_takes_its_site() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "progress", "now": "Opening Papa Johns specialty pizzas"})
+    tl.observe({"type": "activity", "label": "Opening a tab…", "tool": "browser_open_tab"})
+    tl.observe({"type": "step_site", "site": "papajohns.com"})
+    step = tl.finish()["steps"][0]
+    assert step["label"] == "Opened Papa Johns specialty pizzas"
+    assert (step["icon"], step["site"]) == ("web", "papajohns.com")
+
+
+def test_a_saved_step_keeps_only_a_known_icon_and_a_real_site() -> None:
+    saved = from_saved({"steps": [
+        {"label": "a", "kind": "look", "icon": "mail", "site": "papajohns.com"},
+        {"label": "b", "kind": "look", "icon": "<script>", "site": "127.0.0.1"},
+        {"label": "c", "kind": "look", "site": "localhost"},
+    ]})
+    assert saved is not None
+    a, b, c = saved["steps"]
+    assert (a["icon"], a["site"]) == ("mail", "papajohns.com")
+    assert "icon" not in b and "site" not in b and "site" not in c
