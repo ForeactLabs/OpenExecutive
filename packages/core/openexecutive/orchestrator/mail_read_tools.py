@@ -276,8 +276,9 @@ WHAT_CAME_IN_TOOL: dict[str, Any] = {
     "description": (
         "What reached the person you are speaking with in the last two days, "
         "newest first: each email in their own inbox (in Gmail every tab but "
-        "promotions and social, in Outlook Focused and Other; so deliveries, bank and card alerts, travel changes, "
-        "receipts and notes from people), with who it is from, its subject, a "
+        "promotions, social and forums, in Outlook Focused and Other; so "
+        "deliveries, bank and card alerts, travel changes, receipts and notes "
+        "from people; search their mailbox for anything else), with who it is from, its subject, a "
         "one-line gist of what it says and what it ties to that you know (a "
         "meeting, a task, someone on the team). Use it first when they ask what "
         "came in, whether something arrived or was answered, or about a "
