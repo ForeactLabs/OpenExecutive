@@ -290,11 +290,14 @@ def _says_nothing(text: str) -> bool:
         return False
     if "](" in body:  # a line with a link points at something real
         return False
+    # A line naming someone ("Sara wants the conversation log") is news.
+    if _NAMES_SOMETHING.search(body):
+        return False
     if _SELF_TALK.search(body):
         return True
-    # A line that goes on past the empty part ("No change from Acme since
-    # Friday; Dana still needs your sign-off") carries news: keep it.
-    if _MORE_CLAUSES.search(body) or _NAMES_SOMETHING.search(body):
+    # A line that goes on past the empty part ("no change since Friday; the
+    # sign-off is due at noon") carries news: keep it.
+    if _MORE_CLAUSES.search(body):
         return False
     return bool(_EMPTY_LINE.match(body))
 

@@ -88,8 +88,10 @@ def _activity(person_id: int, since: datetime, departments: list[str]) -> list[d
             exclude_workflows=today_route.RHYTHM_WORKFLOWS, viewer=person_id,
         ).items
     ]
+    # Their departments' items, and what was done for them with no
+    # department (the viewer filter already kept only theirs).
     depts = set(departments)
-    return [a for a in items if a.get("department") in depts]
+    return [a for a in items if a.get("department") is None or a.get("department") in depts]
 
 
 async def write(person: Person, now: datetime | None = None) -> TeammateBrief | None:

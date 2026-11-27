@@ -138,7 +138,7 @@ def test_the_scheduler_sends_each_teammate_their_own(monkeypatch: pytest.MonkeyP
 
 
 def test_a_teammate_in_quiet_hours_gets_it_when_they_end(monkeypatch: pytest.MonkeyPatch) -> None:
-    people = [_person(5), _person(6, on_leave_until=NOW.date())]
+    people = [_person(5, slack_user_id="U5"), _person(6, slack_user_id="U6", on_leave_until=NOW.date())]
     monkeypatch.setattr("openexecutive.people.store.list_people", lambda: people)
     monkeypatch.setattr(teammate_brief, "gets_a_brief", lambda p: True)
     monkeypatch.setattr("openexecutive.audit.log_event", lambda *a, **k: None)
@@ -165,3 +165,39 @@ def test_a_teammate_in_quiet_hours_gets_it_when_they_end(monkeypatch: pytest.Mon
     asyncio.run(runner._send_teammate_briefs(NOW))
     assert written == [5]  # the one on leave is not written to
     assert held == [(5, later)] and recorded == [5]
+
+
+def test_nobody_is_written_a_brief_nothing_can_reach(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Imported teammates with no chat app who never used the Executive.
+    monkeypatch.setattr("openexecutive.people.store.list_people", lambda: [_person(8), _person(9)])
+    monkeypatch.setattr(teammate_brief, "gets_a_brief", lambda p: True)
+
+    written: list[int | None] = []
+
+    async def _write(person: Person, now: datetime) -> None:
+        written.append(person.id)  # the loop logs a raise, so record instead
+
+    monkeypatch.setattr(teammate_brief, "write", _write)
+    asyncio.run(runner._send_teammate_briefs(NOW))
+    assert written == []
+    # Someone who chose email is written to.
+    monkeypatch.setattr(
+        "openexecutive.people.store.list_people",
+        lambda: [_person(8, preferred_channel="email", email="p8@example.com")],
+    )
+    asyncio.run(runner._send_teammate_briefs(NOW))
+    assert written == [8]
+
+
+def test_what_was_done_for_them_with_no_department_reaches_them(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from openexecutive.api.routes import today as today_route
+
+    rows = [{"title": "Nudged Dana's vendor", "department": None},
+            {"title": "Ops check-in", "department": "ops"},
+            {"title": "Sales check-in", "department": "sales"}]
+    items = [SimpleNamespace(model_dump=lambda r=r: r) for r in rows]
+    monkeypatch.setattr(today_route, "_build_activity", lambda *a, **kw: SimpleNamespace(items=items))
+    got = teammate_brief._activity(5, NOW, ["ops"])
+    assert [a["title"] for a in got] == ["Nudged Dana's vendor", "Ops check-in"]

@@ -3235,6 +3235,9 @@ async def _send_teammate_briefs(now: datetime) -> None:
         try:
             if _on_leave(person, now):
                 continue  # their brief waits for them to be back, as news
+            chat_only = teammate_brief.chat_only(person)
+            if not delivery_order(person, email_ready=not chat_only):
+                continue  # nothing reaches them: no brief written for nobody
             brief = await teammate_brief.write(person, now)
             if brief is None:
                 continue
@@ -3261,8 +3264,7 @@ async def _send_teammate_briefs(now: datetime) -> None:
             # done, or the next brief repeats it as news.
             with recorded_as(BRIEF_DELIVERY_KIND):
                 delivery = await deliver_to_person(
-                    person, brief.text, label="Morning Brief",
-                    chat_only=teammate_brief.chat_only(person),
+                    person, brief.text, label="Morning Brief", chat_only=chat_only,
                 )
             if delivery.ok:
                 teammate_brief.record_delivered(person.id, brief)
