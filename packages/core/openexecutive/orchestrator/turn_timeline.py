@@ -5,9 +5,10 @@ Each tool round's ``activity`` becomes a step (a repeat of the step already
 showing is the same step), ``progress`` gives the turn its task, names the
 current step in the turn's own words and adds what it found to it, and an
 ``action_taken`` chip names the step that did something, or says it waits on
-the person's OK. Each change is sent to the chat as one ``timeline`` event
-carrying the whole picture, so the web and the phone show the same timeline
-while the turn runs; the last one is saved with the reply
+the person's OK. Each change is sent to the stream of the person who asked
+as one ``timeline`` event carrying the whole picture, so their chat shows it
+while the turn runs (someone else watching the turn live sees it once the
+reply is saved); the last one is saved with the reply
 (``chat_messages.steps``), so a reopened chat still shows it.
 
 Nothing here decides anything: it only records what the turn reported.

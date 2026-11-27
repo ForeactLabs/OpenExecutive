@@ -2105,7 +2105,7 @@ async def _run_chat_turn(
                 sources_evt = {"type": "sources", "session_id": session.session_id, **answer_sources}
                 yield f"data: {json.dumps(sources_evt)}\n\n"
 
-            if saved_steps is not None and full_response:
+            if saved_steps is not None and (full_response or action_chips):
                 steps_evt = {"type": "timeline", "session_id": session.session_id, **saved_steps}
                 yield f"data: {json.dumps(steps_evt)}\n\n"
             if held_steps:
