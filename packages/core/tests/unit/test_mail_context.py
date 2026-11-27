@@ -249,6 +249,13 @@ def test_the_first_look_goes_back_a_day_and_then_from_where_it_got_to(owner: Any
     assert client.asked_since[1] == NOW - mail_context.OVERLAP
 
 
+def test_a_look_after_a_long_gap_goes_back_no_further_than_it_keeps(owner: Any, model: dict[str, Any]) -> None:
+    client = Mailbox()
+    _look(owner, client)
+    _look(owner, client, NOW + timedelta(days=7))
+    assert client.asked_since[1] == NOW + timedelta(days=7) - noticed.KEEP
+
+
 def test_due_follows_the_poll_interval(owner: Any, model: dict[str, Any]) -> None:
     assert mail_context._due(NOW) == [owner.id]
     _look(owner, Mailbox())

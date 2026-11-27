@@ -176,6 +176,26 @@ def test_turning_it_off_forgets_the_emails_it_opened(
     assert len(mail_reads.recent(ids["teammate"], "ben@co.example")) == 1
 
 
+def test_turning_it_off_forgets_what_came_in(
+    client: TestClient, ids: dict[str, int], gmail: dict[str, str]
+) -> None:
+    from openexecutive.delegation import mail_context, noticed
+
+    for person_id in (ids["principal"], ids["teammate"]):
+        noticed.note(person_id, source=noticed.EMAIL, item_key=f"m{person_id}", sender_name="Delta",
+                     sender="alerts@delta.example", subject="DL123", gist="Delayed 90 minutes")
+        cursor = mail_context.get_cursor(person_id)
+        cursor.read_through = "2026-11-27T15:00:00+00:00"
+        mail_context._save_cursor(cursor)
+    gmail["status"] = "connected"
+    client.put("/delegation", json={"enabled": True}, headers=OWNER)
+    client.put("/delegation", json={"enabled": False}, headers=OWNER)
+    assert noticed.recent(ids["principal"]) == []
+    assert mail_context.get_cursor(ids["principal"]).read_through is None
+    assert len(noticed.recent(ids["teammate"])) == 1
+    assert mail_context.get_cursor(ids["teammate"]).read_through is not None
+
+
 def test_extra_fields_are_rejected(client: TestClient, ids: dict[str, int]) -> None:
     resp = client.put("/delegation", json={"enabled": False, "person_id": 99}, headers=OWNER)
     assert resp.status_code == 422

@@ -441,7 +441,9 @@ async def _look(person: Any, client: Any, cursor: _Cursor, now: datetime) -> Loo
     own = {email, *(normalize_email(a) for a in await client.send_as_addresses())}
     exec_address = normalize_email(get_settings().exec_email_address)
     last = _parse(cursor.read_through)
-    since = (last - OVERLAP) if last is not None else now - FIRST_LOOK
+    # Never further back than the store keeps (a mailbox that was away a
+    # week would otherwise gist mail nothing then shows).
+    since = max((last - OVERLAP) if last is not None else now - FIRST_LOOK, now - noticed.KEEP)
     # Every email since then, a page at a time (the email watch's reader),
     # so a busy day never pushes older mail out of a single page.
     from openexecutive.monitoring.sources.mailbox import _read_back_to
