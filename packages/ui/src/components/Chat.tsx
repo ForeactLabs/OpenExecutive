@@ -1092,14 +1092,17 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
   // The open timeline: the running turn's until its reply lands, then that
   // reply's; or the reply it was opened from.
   const liveOpen = stepsOpen !== null && typeof stepsOpen === "object";
+  // While the turn streams, its own timeline, even once the finished one has
+  // come and the reply is not in the list yet.
+  const runningTimeline = isLoading ? turnTimeline : null;
   const openIndex = liveOpen
-    ? liveTimeline || messages[stepsOpen.live]?.role !== "assistant"
+    ? runningTimeline || messages[stepsOpen.live]?.role !== "assistant"
       ? null
       : stepsOpen.live
     : stepsOpen;
   const openTimeline =
-    liveOpen && liveTimeline
-      ? liveTimeline
+    liveOpen && runningTimeline
+      ? runningTimeline
       : openIndex !== null && openIndex >= 0
         ? timelineFrom(messages[openIndex]?.steps)
         : null;
