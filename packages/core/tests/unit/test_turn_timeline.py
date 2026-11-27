@@ -198,6 +198,24 @@ def test_kinds_past_tense_and_read_chips() -> None:
     assert kind_of("consult_specialist") == WORK
     assert kind_of("message_person") == DO
     assert kind_of("search_my_email") == LOOK
+    # A connected app's write, named by its label.
+    assert kind_of("google_workspace__send_gmail_message", "Sending an email") == DO
+    assert kind_of("google_workspace__search_gmail", "Searching your email") == LOOK
+
+
+def test_a_connected_apps_send_that_failed_never_reads_as_sent() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Sending an email…", "tool": "google_workspace__send_gmail_message"})
+    done = tl.finish(())
+    assert done is not None
+    assert [(s["label"], s["state"]) for s in done["steps"]] == [("Sending an email", "tried")]
+    # When it worked, its chip names the same step: one step, done.
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Sending an email…", "tool": "google_workspace__send_gmail_message"})
+    tl.observe({"type": "action_taken", "tool": "call_tool", "summary": "Sent an email to Dana"})
+    done = tl.finish(())
+    assert done is not None
+    assert [(s["label"], s["state"]) for s in done["steps"]] == [("Sent an email to Dana", "done")]
     assert past("Searching your email") == "Searched your email"
     assert past("Dana's budget") == "Dana's budget"
     assert read_chips({"email": 4, "file": 1, "calendar": 1, "person": 2}) == [

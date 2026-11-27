@@ -101,10 +101,24 @@ def past(label: str) -> str:
     return f"{done}{sep}{rest}" if done else label
 
 
-def kind_of(tool: str) -> str:
-    """Which group a round's tool puts its step in."""
+# A round whose label starts with one of these changes something, whatever
+# its tool is called (a connected app's or an extension's write, which the
+# built-in list can't name): it reads as done only once a chip says so.
+_WRITE_VERBS = frozenset({
+    "Accepting", "Adding", "Archiving", "Booking", "Cancelling", "Creating",
+    "Declining", "Deleting", "Drafting", "Editing", "Forwarding", "Inviting",
+    "Messaging", "Moving", "Posting", "Removing", "Replying", "Saving",
+    "Scheduling", "Sending", "Sharing", "Updating", "Uploading",
+})
+
+
+def kind_of(tool: str, label: str = "") -> str:
+    """Which group a round's tool (and its label) puts its step in."""
     name = (tool or "").lower()
     if tool in SIDE_EFFECTING_TOOLS:
+        return DO
+    first = (label or "").split(" ", 1)[0]
+    if first in _WRITE_VERBS:
         return DO
     if any(word in name for word in _WORK_WORDS):
         return WORK
@@ -226,7 +240,7 @@ class TurnTimeline:
             # kind and what it read.
             last.awaits_round = False
             if not unnamed:
-                last.kind = kind_of(str(item.get("tool") or ""))
+                last.kind = kind_of(str(item.get("tool") or ""), label)
             for kind, n in reads.items():
                 last.reads[kind] = last.reads.get(kind, 0) + n
             return True
@@ -247,7 +261,7 @@ class TurnTimeline:
             for kind, n in reads.items():
                 last.reads[kind] = last.reads.get(kind, 0) + n
             return bool(reads)
-        self._add_step(Step(label=label, kind=kind_of(str(item.get("tool") or "")), at=self._now(), reads=reads))
+        self._add_step(Step(label=label, kind=kind_of(str(item.get("tool") or ""), label), at=self._now(), reads=reads))
         return True
 
     def _progress(self, item: dict[str, Any]) -> bool:
