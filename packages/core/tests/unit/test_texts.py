@@ -130,6 +130,23 @@ def test_you_at_the_start_never_makes_a_text_theirs(ids: dict[str, int]) -> None
     assert "You:" in texts_watch.prompt_for(people_store.get_person(owner), [(conv, tx.texts(conv.id)[-1])])
 
 
+def test_earlier_texts_from_a_first_look_are_kept_to_read_never_answered(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    # What the list already showed when texts turned on: there to read
+    # ("what was Casey's last text?"), not a new text to answer.
+    fresh = tx.record(owner, [_item("casey:1", conv="casey", title="Casey", sender="Casey",
+                                    text="See you then", at=NOW - timedelta(days=3), earlier=True)])
+    assert fresh == [] and tx.unhandled(owner) == []
+    (conv,) = tx.conversations(owner)
+    assert conv.title == "Casey"
+    (text,) = tx.texts(conv.id)
+    assert text.text == "See you then" and text.outgoing is False
+    # A new text in that conversation later is answered as usual.
+    assert len(tx.record(owner, [_item("casey:2", conv="casey", title="Casey", sender="Casey",
+                                       text="Still on?")])) == 1
+
+
 def test_old_and_future_texts(ids: dict[str, int]) -> None:
     owner = ids["principal"]
     _on(owner)
@@ -315,12 +332,16 @@ def test_the_browser_reports_texts_and_takes_what_to_send(
     assert client.put("/delegation/texts", json={"enabled": True}, headers=OWNER).json()["enabled"] is True
     body = client.post("/delegation/texts/seen", json={"paired": True, "items": [item]}, headers=OWNER).json()
     assert body == {"enabled": True, "received": 1} and noticed == [ids["principal"]]
+    # A text from before texts were on is taken, and wakes nothing.
+    earlier = {**item, "ref": "ana:1", "conversation": "ana", "title": "Ana", "sender": "Ana", "earlier": True}
+    body = client.post("/delegation/texts/seen", json={"paired": True, "items": [earlier]}, headers=OWNER).json()
+    assert body == {"enabled": True, "received": 0} and noticed == [ids["principal"]]
     state = client.get("/delegation/texts", headers=OWNER).json()
-    assert state["paired"] is True and state["conversations"] == 1 and state["available"] is True
+    assert state["paired"] is True and state["conversations"] == 2 and state["available"] is True
     # The teammate sees nothing of the owner's.
     assert client.get("/delegation/texts", headers=TEAMMATE).json()["conversations"] == 0
 
-    (conv,) = tx.conversations(ids["principal"])
+    conv = next(c for c in tx.conversations(ids["principal"]) if c.title == "Dana")
     send = tx.queue_send(ids["principal"], "Friday works.", conversation_id=conv.id)
     assert client.get("/delegation/texts/next?wait=0", headers=TEAMMATE).json()["send"] is None
     got = client.get("/delegation/texts/next?wait=0", headers=OWNER).json()

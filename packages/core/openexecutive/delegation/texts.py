@@ -232,6 +232,9 @@ class Incoming:
     # so only the Executive's own sends count as outgoing (``_echo_of``). It
     # only skips the turn on that text (kept as already looked at).
     outgoing: bool = False
+    # Already in the list when the browser first looked (texts just turned
+    # on): kept to read, never answered as if it just came.
+    earlier: bool = False
 
 
 @dataclass(frozen=True)
@@ -316,9 +319,9 @@ def record(person_id: int, items: list[Incoming], *, db_path: Path | None = None
                 # skips the turn on it: the worst a stranger typing "You:"
                 # gets is no reply on its own (it is still kept and read).
                 (person_id, conversation_id, ref, sender, words, int(outgoing), _iso(min(item.at, now)),
-                 int(outgoing or item.outgoing)),
+                 int(outgoing or item.outgoing or item.earlier)),
             )
-            if cur.rowcount and cur.lastrowid is not None and not outgoing and not item.outgoing:
+            if cur.rowcount and cur.lastrowid is not None and not (outgoing or item.outgoing or item.earlier):
                 fresh.append(int(cur.lastrowid))
         conn.execute(
             f"DELETE FROM {TEXTS_TABLE} WHERE person_id=? AND id NOT IN "

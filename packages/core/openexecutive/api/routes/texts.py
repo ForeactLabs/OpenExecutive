@@ -62,6 +62,7 @@ class TextItemIn(BaseModel):
     number: str = Field(default="", max_length=40)
     is_group: bool = False
     outgoing: bool = False
+    earlier: bool = False
 
 
 class SeenIn(BaseModel):
@@ -155,7 +156,7 @@ async def seen(request: Request, body: SeenIn) -> SeenOut:
             tx.Incoming(
                 ref=i.ref, conversation=i.conversation, title=i.title, sender=i.sender, text=i.text,
                 at=i.at if i.at.tzinfo else i.at.replace(tzinfo=UTC), number=i.number, is_group=i.is_group,
-                outgoing=i.outgoing,
+                outgoing=i.outgoing, earlier=i.earlier,
             )
             for i in body.items
         ]

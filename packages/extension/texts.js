@@ -11,8 +11,8 @@
 // - types and sends a text the background asks for, in a conversation or to
 //   a new number, and says whether it went.
 //
-// It reads only the conversation list and the conversation it was asked to
-// send in, and it sends only what the background hands it (a text the
+// It reads only the conversation list (each conversation's latest text) and
+// the conversation it was asked to send in, and it sends only what the background hands it (a text the
 // person's Approvals let go). Plain script (no modules).
 
 (function () {
@@ -117,13 +117,18 @@
     return t > now + DAY ? Date.parse(`${s} ${new Date(now).getFullYear() - 1}`) : t;
   };
 
+  // How far back a first look reads the list (Open Executive keeps 30 days).
+  const KEEP = 30 * DAY;
+
   /**
    * What to tell Open Executive about the list, given what it said before
    * (`seen`: key -> fingerprint of the latest text). The first time (`seen`
-   * is null) only unread conversations from the last day count as new, by
-   * the time the list shows, so old texts aren't answered as if they just
-   * came. Each text carries that time, or now when the list's time can't be
-   * read (it changed while the page was watching). Returns { items, seen }.
+   * is null) every conversation the list shows from the last 30 days is
+   * told, so the person can ask about texts from before they turned texts
+   * on. Only unread ones from the last day count as new; the rest go as
+   * `earlier` (kept to read, never answered as if they just came). Each text
+   * carries the time the list shows, or now when it can't be read (it
+   * changed while the page was watching). Returns { items, seen }.
    */
   T.changes = function (rows, seen, now) {
     const first = seen === null || typeof seen !== "object";
@@ -140,7 +145,9 @@
       const count = (parseInt(beforeCount, 10) || 0) + 1;
       next[row.key] = `${print}.${count}`;
       const shown = T.timeOf(row.time, now);
-      if (first && (!row.unread || row.outgoing || shown === null || now - shown > DAY)) continue;
+      // A first look can't date a row it can't read the time of: left out.
+      if (first && (shown === null || now - shown > KEEP)) continue;
+      const earlier = first && (!row.unread || row.outgoing || now - shown > DAY);
       items.push({
         // The same change, reported again (an answer that never came back),
         // is the same ref, so it is kept once.
@@ -152,12 +159,17 @@
         at: new Date(shown === null ? now : Math.min(shown, now)).toISOString(),
         number: T.looksLikeNumber(row.title) ? row.title.slice(0, 40) : "",
         is_group: row.group,
-        outgoing: row.outgoing,
+        // An older Open Executive doesn't know `earlier`: it reads this hint
+        // as "don't answer it", which is what earlier means too.
+        outgoing: row.outgoing || earlier,
+        earlier,
       });
     }
     // Forget conversations far down the list, so the map stays small.
     const keys = Object.keys(next);
     if (keys.length > 500) for (const k of keys.slice(0, keys.length - 500)) delete next[k];
+    // New texts first, so a long first look never crowds one out.
+    items.sort((a, b) => Number(a.earlier) - Number(b.earlier));
     return { items: items.slice(0, 100), seen: next };
   };
 
@@ -215,7 +227,10 @@
 
   // ---- Telling the background ----
 
-  const SEEN_KEY = "textsSeen";
+  // Renamed when a first look began reading earlier texts, so an update
+  // reads them once too. The old key is dropped.
+  const SEEN_KEY = "textsSeen2";
+  void chrome.storage.local.remove("textsSeen").catch(() => {});
   let reporting = false;
   let lastReport = 0;
   // What the last report said about pairing: a change goes at once, so the

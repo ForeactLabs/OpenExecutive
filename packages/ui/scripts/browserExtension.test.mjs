@@ -411,18 +411,28 @@ test("texts: the first look only counts unread texts from others, later looks co
   assert.equal(mine.sender, "Ana");
 });
 
-test("texts: a first look answers no old unread texts, and each text carries the time the list shows", () => {
+test("texts: a first look tells earlier texts as earlier, new ones first, and each text carries the time the list shows", () => {
   const T = textsHelpers();
   const now = Date.parse("2026-11-25T15:00:00");
   const rows = [
     { key: "old", title: "Sam Lee", snippet: "Can you cover Friday?", unread: true, time: "Nov 10" },
     { key: "wk", title: "Ana", snippet: "Lunch?", unread: true, time: "Mon" },
     { key: "odd", title: "Bo", snippet: "?", unread: true, time: "il y a longtemps" },
+    { key: "read", title: "Casey", snippet: "See you then", unread: false, time: "11:00 AM" },
+    { key: "gone", title: "Lee", snippet: "Way back", unread: false, time: "Sep 1" },
     { key: "kai", title: "Kai", snippet: "Here", unread: true, time: "5 min" },
   ];
   const first = T.changes(rows, null, now);
-  assert.deepEqual([...first.items.map((i) => i.conversation)], ["kai"]);
+  // Unread from the last day is new, and goes first; the rest of the last
+  // 30 days goes as earlier (an older server reads that as don't answer).
+  // A row the list can't date, or older than 30 days, is left out.
+  assert.deepEqual([...first.items.map((i) => i.conversation)], ["kai", "old", "wk", "read"]);
+  assert.deepEqual([...first.items.map((i) => i.earlier)], [false, true, true, true]);
+  assert.deepEqual([...first.items.map((i) => i.outgoing)], [false, true, true, true]);
   assert.equal(first.items[0].at, new Date(now - 5 * 60000).toISOString());
+  assert.equal(first.items[3].at, new Date(Date.parse("2026-11-25T11:00:00")).toISOString());
+  // Told once: the next look has nothing new.
+  assert.equal(T.changes(rows, first.seen, now + 1000).items.length, 0);
   // Later, a change the list can't date is taken as just now.
   const later = T.changes([{ key: "odd", title: "Bo", snippet: "Still there?", unread: true, time: "" }], first.seen, now);
   assert.equal(later.items[0].at, new Date(now).toISOString());
@@ -496,11 +506,12 @@ test("texts: the same words again later are a new text", () => {
   assert.notEqual(c.items[0].ref, a.items[0].ref);
 });
 
-test("texts: off forgets what was seen, so on again only counts unread texts", () => {
+test("texts: off forgets what was seen, so on again is a first look", () => {
   const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
   assert.ok(texts.includes("await chrome.storage.local.remove(SEEN_KEY);"));
   const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
-  assert.ok(bg.includes('await chrome.storage.local.remove("textsSeen");'));
+  assert.ok(bg.includes('await chrome.storage.local.remove(["textsSeen", "textsSeen2"]);'));
+  assert.ok(texts.includes('const SEEN_KEY = "textsSeen2";'));
 });
 
 test("texts: once Send is pressed a missing answer is unsure, and a new number picks only its Send-to choice", () => {
