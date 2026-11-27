@@ -57,10 +57,13 @@
   // to the code ("The code for the gate is 4821", "Enter 4821 at the gate").
   const PLACE = "(?:gates?|doors?|garage|alarm|lock ?box|keypad|building|lobby)";
   // The home code's own number, a few words on in the same clause (never
-  // past another code word or a comma), goes
+  // past another code word or a comma, and never a number that is "your
+  // code" further on), goes
   // with it ("Gate code for Saturday is 4821"), so
   // nothing left behind pairs with a later "code".
-  const HOME_TAIL = "(?:(?:(?!\\b(?:codes?|passcodes?|passwords?|passwd|otp|pins?)\\b)[^\\d\\n.!?,;]){0,25}?" + NUMBER + ")?";
+  const HOME_TAIL = "(?:(?:(?!\\b(?:codes?|passcodes?|passwords?|passwd|otp|pins?)\\b)[^\\d\\n.!?,;]){0,25}?" + NUMBER +
+    "(?![^\\n.!?]{0,40}\\byour\\b[^\\n.!?]{0,25}\\b(?:codes?|passcodes?|otp|pins?)\\b" +
+    "|[^\\n.!?]{0,40}\\b(?:codes?|passcodes?|otp|pins?)\\b[^\\n.!?]{0,25}\\byour\\b))?";
   const HOME_CODE = new RegExp(
     "(?:\\b(?:gates?|doors?|garage|alarm|lock ?box|keypad|building|lobby)(?:\\s+(?:entry|access|opener|door|alarm))*\\s+(?:codes?|passcodes?|passwords?|pins?)\\b" +
       // A Wi-Fi "code" is usually a portal's one-time code: only a Wi-Fi password counts.

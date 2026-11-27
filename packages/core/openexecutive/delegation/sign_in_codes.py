@@ -52,12 +52,15 @@ _SIGN_IN_LINK = re.compile(
 # only a Wi-Fi password counts.
 _PLACE = r"(?:gates?|doors?|garage|alarm|lock ?box|keypad|building|lobby)"
 # The home code's own number, a few words on in the same clause (never
-# past another code word or a comma), goes
+# past another code word or a comma, and never a number that is "your
+# code" further on: "482913 is your Microsoft code"), goes
 # with it ("Gate code for Saturday is 4821"), so
 # nothing left behind pairs with a later "code" ("Text me if the code
 # doesn't work").
 _HOME_TAIL = (
-    r"(?:(?:(?!\b(?:codes?|passcodes?|passwords?|passwd|otp|pins?)\b)[^\d\n.!?,;]){0,25}?" + _NUMBER + r")?"
+    r"(?:(?:(?!\b(?:codes?|passcodes?|passwords?|passwd|otp|pins?)\b)[^\d\n.!?,;]){0,25}?" + _NUMBER
+    + r"(?![^\n.!?]{0,40}\byour\b[^\n.!?]{0,25}\b(?:codes?|passcodes?|otp|pins?)\b"
+    r"|[^\n.!?]{0,40}\b(?:codes?|passcodes?|otp|pins?)\b[^\n.!?]{0,25}\byour\b))?"
 )
 _HOME_CODE = re.compile(
     r"(?:\b(?:gates?|doors?|garage|alarm|lock ?box|keypad|building|lobby)(?:\s+(?:entry|access|opener|door|alarm))*"

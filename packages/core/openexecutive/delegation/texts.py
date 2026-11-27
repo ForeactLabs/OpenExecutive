@@ -542,17 +542,17 @@ def send_who(send: Send, *, db_path: Path | None = None) -> str:
         conv = conversation(send.conversation_id, db_path=db_path)
         if conv is not None:
             return conv.who
-    return number_who(send.to_number) or "them"
+    return number_who(send.to_number, db_path=db_path) or "them"
 
 
-def number_who(number: str) -> str:
+def number_who(number: str, *, db_path: Path | None = None) -> str:
     """A number in words: the name on People (contacts included) when the
     number is theirs, else the number itself. Never raises."""
     number = (number or "").strip()
     if not number:
         return ""
     conv = Conversation(id="", person_id=0, key="", title="", number=number, is_group=False, updated_at="")
-    person = known_person(conv)
+    person = known_person(conv, db_path=db_path)
     name = str(getattr(person, "full_name", "") or "").strip() if person is not None else ""
     return name or number
 
@@ -856,7 +856,7 @@ def looks_like_number(text: str) -> bool:
     return bool(stripped) and stripped.isdigit() and len(stripped) >= 3
 
 
-def known_person(conv: Conversation) -> Any | None:
+def known_person(conv: Conversation, *, db_path: Path | None = None) -> Any | None:
     """The person on People (contacts included) this conversation is with,
     or None (a group, someone not on People). By phone number only: the name
     Google Messages shows can be one the sender chose (an SMS sender ID, an
@@ -867,7 +867,7 @@ def known_person(conv: Conversation) -> Any | None:
     try:
         from openexecutive.people.store import list_people
 
-        people = [p for p in list_people(include_contacts=True) if not getattr(p, "archived", False)]
+        people = [p for p in list_people(db_path=db_path, include_contacts=True) if not getattr(p, "archived", False)]
     except Exception:
         return None
     want = digits(conv.number or (conv.title if looks_like_number(conv.title) else ""))
