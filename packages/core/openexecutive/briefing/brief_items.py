@@ -318,7 +318,7 @@ def _says_nothing(text: str) -> bool:
 _PART_NAMES = frozenset({
     "do today", "new since yesterday", "still open", "getting started",
     "today", "done for you", "needs you", "next", "sleep on this",
-    "what changed", "handled overnight",
+    "what changed", "handled overnight", "from your notes", "what i found",
 })
 
 

@@ -284,3 +284,19 @@ def test_a_short_headline_still_counts_as_told() -> None:
     assert "card:251" not in brief_items.item_states(
         _data(lone), "- VAT due", {}, "Reviewed the private equity deck."
     )
+
+
+def test_every_part_the_prompts_name_is_a_part_heading() -> None:
+    import re
+    from pathlib import Path
+
+    import openexecutive
+
+    root = Path(openexecutive.__file__).parent
+    named = set()
+    for rel in ("briefing/narrative.py", "workflows/end_of_day_digest.py"):
+        text = (root / rel).read_text()
+        named |= {m.casefold() for m in re.findall(r"\*\*([A-Z][A-Za-z ]{1,40})\*\*", text)}
+    # An item's tag in an example line, not a part.
+    named -= {"office lease"}
+    assert named <= brief_items._PART_NAMES, named - brief_items._PART_NAMES
