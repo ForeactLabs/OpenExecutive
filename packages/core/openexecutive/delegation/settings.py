@@ -239,6 +239,32 @@ def is_enabled(person_id: int | None, *, db_path: Path | None = None) -> bool:
     return bool(row is not None and row[0])
 
 
+def enabled_since(person_id: int, *, db_path: Path | None = None) -> datetime | None:
+    """When ``person_id`` last turned it on, or None (off, or unreadable).
+    Never raises."""
+    path = _resolve_db_path(db_path)
+    if not path.exists():
+        return None
+    try:
+        conn = sqlite3.connect(str(path))
+        try:
+            row = conn.execute(
+                f"SELECT enabled, updated_at FROM {SETTINGS_TABLE} WHERE person_id = ?",  # noqa: S608
+                (person_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+    except Exception:
+        return None
+    if row is None or not row[0] or not row[1]:
+        return None
+    try:
+        since = datetime.fromisoformat(str(row[1]))
+    except ValueError:
+        return None
+    return since if since.tzinfo is not None else since.replace(tzinfo=UTC)
+
+
 def set_enabled(
     person_id: int, enabled: bool, *, updated_by: str, db_path: Path | None = None
 ) -> None:

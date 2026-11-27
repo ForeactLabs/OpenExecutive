@@ -42,6 +42,14 @@ def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
 
 
 @pytest.fixture(autouse=True)
+def _on_since_yesterday(monkeypatch: pytest.MonkeyPatch) -> None:
+    # set_enabled stamps the wall clock; these tests run at NOW.
+    import openexecutive.delegation.settings as delegation_settings
+
+    monkeypatch.setattr(delegation_settings, "enabled_since", lambda pid, **_: NOW - timedelta(days=1))
+
+
+@pytest.fixture(autouse=True)
 def _fresh_misses() -> Iterator[None]:
     mail_context._MISSES.clear()
     yield
@@ -332,6 +340,17 @@ def test_an_email_never_gisted_is_kept_bare_after_a_few_tries(owner: Any, monkey
     later = NOW + timedelta(hours=3 * (mail_context.GIST_TRIES - 1))
     (item,) = noticed.recent(owner.id, now=later)
     assert (item.subject, item.gist) == ("Flight DL123 update", "")
+
+
+def test_mail_from_before_it_was_turned_on_is_context_only(owner: Any, monkeypatch: pytest.MonkeyPatch,
+                                                           model: dict[str, Any]) -> None:
+    import openexecutive.delegation.settings as delegation_settings
+
+    monkeypatch.setattr(delegation_settings, "enabled_since", lambda pid, **_: NOW - timedelta(minutes=5))
+    _look(owner, Mailbox(_msg("m1", minutes_ago=60)))
+    (item,) = noticed.recent(owner.id, now=NOW)
+    assert item.tie == "3:00 PM Board prep" and not item.wants_act
+    assert model["acts"] == []
 
 
 def test_nothing_is_read_with_act_as_me_off(owner: Any, model: dict[str, Any]) -> None:

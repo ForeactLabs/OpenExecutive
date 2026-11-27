@@ -520,13 +520,20 @@ async def _look(person: Any, client: Any, cursor: _Cursor, now: datetime) -> Loo
         # Turned off while it read: nothing is kept and the read point stays
         # forgotten, so turning it on again starts from then.
         return LookResult("act_as_me_off")
+    # Mail from before they turned it on is context only: turning it on
+    # never catches up on steps for what came earlier.
+    from openexecutive.delegation.settings import enabled_since
+
+    switched_on = enabled_since(person.id)
     for note in notes:
         m = note.message
+        arrived = _parse(m.received_at) or now
+        after_on = switched_on is None or arrived >= switched_on
         if noticed.note(
             person.id, source=noticed.EMAIL, item_key=m.id, sender_name=m.from_name or "",
             sender=m.from_addr or "", subject=m.subject or "", gist=note.gist, tie=note.tie,
             thread_id=m.thread_id or "", received_at=_parse(m.received_at) or now, now=now,
-            wants_act=note.act and _left_to_us(person, m, exec_address),
+            wants_act=note.act and after_on and _left_to_us(person, m, exec_address),
         ):
             result.kept += 1
     # What this look found to act on, and any earlier one whose turn failed.
