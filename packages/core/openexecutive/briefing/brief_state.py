@@ -118,14 +118,16 @@ def since_for(kind: str, now: datetime | None = None) -> datetime:
     return min(now, max(delivered_at, now - timedelta(days=7)))
 
 
-def record_delivered(kind: str, fingerprint: str, text: str) -> None:
-    """Persist the delivered brief so the next run can diff against it."""
+def record_delivered(kind: str, fingerprint: str, text: str, *, at: str | None = None) -> None:
+    """Persist the delivered brief so the next run can diff against it.
+    ``at`` is when it reached its reader, when that was not now (a brief kept
+    for quiet hours and sent later)."""
     try:
         narrative_cache.put(narrative_cache.BriefingNarrative(
             scope=scope_for(kind),
             input_hash=fingerprint,
             narrative_text=text,
-            generated_at=narrative_cache.utc_now_iso(),
+            generated_at=at or narrative_cache.utc_now_iso(),
         ))
     except Exception:
         logger.exception("brief_state: write failed for %s", kind)

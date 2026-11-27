@@ -227,6 +227,31 @@ def waiting_for(person_id: int, ref: str, *, db_path: Path | None = None) -> boo
     return row is not None
 
 
+def status(held_id: int, *, db_path: Path | None = None) -> tuple[str, str | None]:
+    """Where one held message stands: ``("waiting", None)``, ``("sent",
+    sent_at)`` or ``("dropped", None)``; ``("waiting", None)`` too on a read
+    error or an unknown id, so a caller never takes it as sent."""
+    try:
+        conn = _connect(db_path)
+        try:
+            row = conn.execute(
+                f"SELECT sent_at, dropped_at FROM {TABLE} WHERE id = ?",  # noqa: S608
+                (held_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+    except Exception:
+        logger.warning("held_messages: couldn't read message %s", held_id, exc_info=True)
+        return "waiting", None
+    if row is None:
+        return "waiting", None
+    if row[0]:
+        return "sent", str(row[0])
+    if row[1]:
+        return "dropped", None
+    return "waiting", None
+
+
 def claim(ids: list[int], *, now: datetime | None = None, db_path: Path | None = None) -> list[int]:
     """Take ``ids`` for sending; returns the ones this caller got (not sent,
     dropped or claimed by someone else within ``CLAIM_TTL``)."""

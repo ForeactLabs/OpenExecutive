@@ -227,3 +227,26 @@ def test_a_line_naming_someone_is_kept() -> None:
         "- Nothing new from Dana Reyes on the Acme lease she promised by Friday.\n"
         "- No update from Dana since Monday on the lease renewal."
     )
+
+
+def test_a_bold_lead_in_item_keeps_its_part_heading() -> None:
+    text = (
+        "**Do today**\n"
+        "**Sign the Pine View lease** — Dana needs it by noon.\n\n"
+        "**New since yesterday**\n"
+        "- Nothing new in your inbox.\n"
+        "- Dana sent the lease."
+    )
+    assert brief_items.drop_empty_lines(text) == (
+        "**Do today**\n"
+        "**Sign the Pine View lease** — Dana needs it by noon.\n\n"
+        "**New since yesterday**\n"
+        "- Dana sent the lease."
+    )
+
+
+def test_a_short_headline_still_counts_as_told() -> None:
+    vat = _card(250, "Q3 VAT due")
+    rendered = "- Q3 VAT due\nClose 4 buyouts\nJosef R"
+    assert "card:250" in brief_items.item_states(_data(vat), rendered, {}, "1. File the Q3 VAT return today.")
+    assert "card:250" not in brief_items.item_states(_data(vat), rendered, {}, "1. Call Dana.")

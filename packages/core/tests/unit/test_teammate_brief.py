@@ -158,13 +158,13 @@ def test_a_teammate_in_quiet_hours_gets_it_when_they_end(monkeypatch: pytest.Mon
         "openexecutive.people.held_messages.hold",
         lambda pid, text, **kw: held.append((pid, kw["release_at"])) or 1,
     )
-    recorded: list[int] = []
+    kept: list[int] = []
     monkeypatch.setattr(teammate_brief, "write", _write)
     monkeypatch.setattr(runner, "deliver_to_person", _deliver)
-    monkeypatch.setattr(teammate_brief, "record_delivered", lambda pid, brief: recorded.append(pid))
+    monkeypatch.setattr(teammate_brief, "record_kept", lambda pid, brief, held_id: kept.append(pid))
     asyncio.run(runner._send_teammate_briefs(NOW))
     assert written == [5]  # the one on leave is not written to
-    assert held == [(5, later)] and recorded == [5]
+    assert held == [(5, later)] and kept == [5]  # told only once it is sent
 
 
 def test_nobody_is_written_a_brief_nothing_can_reach(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -201,3 +201,22 @@ def test_what_was_done_for_them_with_no_department_reaches_them(monkeypatch: pyt
     monkeypatch.setattr(today_route, "_build_activity", lambda *a, **kw: SimpleNamespace(items=items))
     got = teammate_brief._activity(5, NOW, ["ops"])
     assert [a["title"] for a in got] == ["Nudged Dana's vendor", "Ops check-in"]
+
+
+def test_a_kept_brief_is_told_only_once_it_was_sent(
+    board: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.people import held_messages
+
+    original = held_messages._connect
+    monkeypatch.setattr(held_messages, "_connect", lambda db_path=None: original(tmp_path / "held.db"))
+    brief = asyncio.run(teammate_brief.write(_person(5), NOW))
+    assert brief is not None
+    held_id = held_messages.hold(5, brief.text, source=teammate_brief.KIND, release_at=NOW)
+    teammate_brief.record_kept(5, brief, held_id)
+    # Still waiting: nothing told, so the next brief tells it again.
+    teammate_brief.settle_kept(5)
+    assert brief_items.told(teammate_brief.KIND, 5) == {}
+    held_messages.mark_sent([held_id])
+    teammate_brief.settle_kept(5)
+    assert brief_items.told(teammate_brief.KIND, 5) == brief.items

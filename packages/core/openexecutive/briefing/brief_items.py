@@ -116,6 +116,7 @@ def _named(text: object, rendered: str | None, limit: int = 60) -> bool:
     return line[:limit] in rendered or quoted(line, limit) in rendered
 
 
+_SHORT_STOP = frozenset({"the", "for", "and", "due", "to", "of", "on", "in", "an", "by", "at", "is"})
 _MENTION_STOP = frozenset({"with", "from", "that", "this", "your", "their", "about", "into", "over"})
 
 
@@ -125,12 +126,13 @@ def _mentioned(text: object, said: str | None) -> bool:
     words an item in its own way. Without ``said``, everything counts."""
     if said is None:
         return True
-    words = [
-        w for w in re.findall(r"[a-z][a-z'-]{3,}", str(text or "").lower())
-        if w not in _MENTION_STOP
-    ][:6]
+    label = " ".join(str(text or "").lower().split())
+    words = [w for w in re.findall(r"[a-z][a-z'-]{3,}", label) if w not in _MENTION_STOP][:6]
     if not words:
-        return False
+        # A short headline ("Q3 VAT due", "W-9 for Bo"): its short tokens.
+        words = [w for w in re.findall(r"[a-z0-9][a-z0-9'-]+", label) if w not in _SHORT_STOP][:6]
+    if not words:
+        return bool(label) and label in said.lower()
     lowered = said.lower()
     hits = sum(1 for w in words if w in lowered)
     return hits >= min(2, len(words))
@@ -302,6 +304,17 @@ def _says_nothing(text: str) -> bool:
     return bool(_EMPTY_LINE.match(body))
 
 
+def _is_part_heading(line: str) -> bool:
+    """A heading with its text on the same line ("**Needs you** - Approve
+    the draft"), not an item with a bold lead-in ("**Sign the Pine View
+    lease** — Dana needs it by noon"): a part's name is a few words."""
+    match = _INLINE_HEADING.match(line)
+    if match is None:
+        return False
+    name = re.sub(r"[*:—-]", " ", match.group(1)).split()
+    return len(name) <= 3
+
+
 def drop_empty_lines(text: str) -> str:
     """``text`` without lines that only say a section is empty or talk about
     the brief itself, and without a heading left with nothing under it.
@@ -329,7 +342,7 @@ def drop_empty_lines(text: str) -> str:
             rest = kept[i + 1:]
             body = []
             for nxt in rest:
-                if _HEADING.match(nxt) or _INLINE_HEADING.match(nxt):
+                if _HEADING.match(nxt) or _is_part_heading(nxt):
                     break
                 body.append(nxt)
             if not any(b.strip() for b in body):

@@ -114,6 +114,8 @@ async def write(person: Person, now: datetime | None = None) -> TeammateBrief | 
     pid = person.id
     now = now or datetime.now(UTC)
     kind = kind_for(pid)
+    # Yesterday's brief kept for their quiet hours counts once it was sent.
+    await asyncio.to_thread(settle_kept, pid)
     since = brief_state.since_for(kind, now)
     data = await asyncio.to_thread(_scoped_today, pid)
     if data is None:
@@ -171,12 +173,64 @@ async def write(person: Person, now: datetime | None = None) -> TeammateBrief | 
     )
 
 
-def record_delivered(person_id: int, brief: TeammateBrief) -> None:
+def record_delivered(person_id: int, brief: TeammateBrief, *, at: str | None = None) -> None:
     """After it reached them: the window, the fingerprint, what it told."""
     from openexecutive.briefing import brief_items, brief_state
 
-    brief_state.record_delivered(kind_for(person_id), brief.fingerprint, brief.text)
+    brief_state.record_delivered(kind_for(person_id), brief.fingerprint, brief.text, at=at)
     brief_items.record(KIND, brief.items, person_id)
+
+
+def _pending_scope(person_id: int) -> str:
+    return f"brief_pending:{KIND}:{person_id}"
+
+
+def record_kept(person_id: int, brief: TeammateBrief, held_id: int) -> None:
+    """A brief kept for their quiet hours (``people.held_messages``): told
+    only once it is sent, which ``settle_kept`` checks on their next one."""
+    import json
+
+    from openexecutive.briefing import narrative_cache
+
+    try:
+        narrative_cache.put(narrative_cache.BriefingNarrative(
+            scope=_pending_scope(person_id), input_hash=str(held_id),
+            narrative_text=json.dumps({
+                "text": brief.text, "fingerprint": brief.fingerprint, "items": brief.items,
+            }),
+            generated_at=narrative_cache.utc_now_iso(),
+        ))
+    except Exception:
+        logger.exception("teammate_brief: couldn't keep person %s's brief", person_id)
+
+
+def settle_kept(person_id: int) -> None:
+    """A kept brief that was sent since counts as delivered then; one that
+    was dropped told nothing. Still waiting: left as it is. Never raises."""
+    import json
+
+    from openexecutive.briefing import narrative_cache
+    from openexecutive.people.held_messages import status
+
+    try:
+        row = narrative_cache.get(_pending_scope(person_id))
+        if row is None or not row.input_hash:
+            return
+        state, sent_at = status(int(row.input_hash))
+        if state == "waiting":
+            return
+        if state == "sent":
+            data = json.loads(row.narrative_text)
+            record_delivered(person_id, TeammateBrief(
+                text=str(data.get("text", "")), fingerprint=str(data.get("fingerprint", "")),
+                items={str(k): str(v) for k, v in (data.get("items") or {}).items()},
+            ), at=sent_at)
+        narrative_cache.put(narrative_cache.BriefingNarrative(
+            scope=_pending_scope(person_id), input_hash="", narrative_text="{}",
+            generated_at=narrative_cache.utc_now_iso(),
+        ))
+    except Exception:
+        logger.exception("teammate_brief: couldn't settle person %s's kept brief", person_id)
 
 
 __all__ = [
@@ -186,5 +240,7 @@ __all__ = [
     "gets_a_brief",
     "kind_for",
     "record_delivered",
+    "record_kept",
+    "settle_kept",
     "write",
 ]
