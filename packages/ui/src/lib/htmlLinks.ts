@@ -32,3 +32,10 @@ export function htmlLinks(text: string): string {
     )
     .join("");
 }
+
+/** Whether a link in a reply opens in a new tab: only an address on
+ * another site (http or https). An in-app link (`/people`, `/?card=1`, `#…`)
+ * or a `mailto:` opens in place. */
+export function opensInNewTab(href: string | undefined): boolean {
+  return typeof href === "string" && /^https?:\/\//i.test(href);
+}

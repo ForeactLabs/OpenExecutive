@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { emailBlocks } from "../src/lib/emailBlocks.ts";
-import { htmlLinks } from "../src/lib/htmlLinks.ts";
+import { htmlLinks, opensInNewTab } from "../src/lib/htmlLinks.ts";
 
 const EMAIL = [
   "Hi,",
@@ -56,6 +56,15 @@ test("an attribute list after a link is dropped, other braces stay", () => {
   assert.equal(htmlLinks("[a](https://x.example/) {target=\"_blank\"}"), "[a](https://x.example/) {target=\"_blank\"}");
   assert.equal(htmlLinks("[a](https://x.example/){see below}"), "[a](https://x.example/){see below}");
   assert.equal(htmlLinks("Use `[a](u){target=\"_blank\"}` in kramdown"), "Use `[a](u){target=\"_blank\"}` in kramdown");
+});
+
+test("only a link to another site opens in a new tab", () => {
+  for (const href of ["https://x.example/a", "HTTP://x.example/b", "http://x.example/c?u=1"]) {
+    assert.equal(opensInNewTab(href), true, href);
+  }
+  for (const href of ["/people", "/?card=220&u=https://x.example/", "#user-content-fn-1", "mailto:a@b.co", "javascript:x", "", undefined]) {
+    assert.equal(opensInNewTab(href), false, String(href));
+  }
 });
 
 test("a forwarded message reads as written, as the email sends it", () => {
