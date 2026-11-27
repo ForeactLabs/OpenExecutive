@@ -828,7 +828,7 @@ def _kept_mail(person_id: int, since: datetime, now: datetime | None) -> dict[st
     from openexecutive.delegation import noticed
 
     try:
-        items = noticed.recent(person_id, since=since, source=noticed.EMAIL, now=now)
+        items = noticed.recent(person_id, since=since, source=noticed.EMAIL, limit=200, now=now)
     except Exception:
         logger.exception("live_signals: kept mail read failed")
         return {}

@@ -852,6 +852,22 @@ def test_a_new_kept_line_is_not_crowded_out_by_older_watcher_lines(principal: Si
     assert mail.total == live_signals._INBOX_MAX + 1
 
 
+def test_an_older_tied_email_is_told_past_a_busy_nights_newest(principal: SimpleNamespace) -> None:
+    from openexecutive.delegation import noticed
+
+    now = datetime(2026, 10, 26, 18, 0, tzinfo=UTC)
+    noticed.note(7, source=noticed.EMAIL, item_key="k0", sender_name="Delta", subject="Flight update",
+                 gist="DL123 delayed 90 minutes", tie="3:00 PM Board prep",
+                 received_at=now - timedelta(hours=10), now=now)
+    for n in range(noticed.MAX_LISTED + 10):
+        noticed.note(7, source=noticed.EMAIL, item_key=f"k{n + 1}", sender_name=f"P{n}", subject=f"Note {n}",
+                     gist=f"Note {n}", received_at=now - timedelta(hours=1, minutes=n), now=now)
+
+    mail = live_signals.own_inbox(now - timedelta(hours=12), UTC, now)
+
+    assert any("DL123 delayed 90 minutes" in line for line in mail.lines)
+
+
 def test_kept_mail_they_wrote_to_the_sender_about_is_left_out(
     principal: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
