@@ -216,11 +216,16 @@ def record_kept(person_id: int, brief: TeammateBrief, held_id: int) -> None:
     only once it is sent, which ``settle_kept`` checks on their next one.
     Each kept brief has its own entry, so a second one kept while the first
     still waits does not lose it."""
+    from openexecutive.briefing import narrative_cache
+
     try:
         entries = [e for e in _read_kept(person_id) if e.get("held_id") != held_id]
         entries.append({
             "held_id": held_id, "text": brief.text,
             "fingerprint": brief.fingerprint, "items": brief.items,
+            # Its window ends when it was written, not when it went out:
+            # what happened while it waited is news for the next one.
+            "written_at": narrative_cache.utc_now_iso(),
         })
         _write_kept(person_id, entries)
     except Exception:
@@ -228,8 +233,9 @@ def record_kept(person_id: int, brief: TeammateBrief, held_id: int) -> None:
 
 
 def settle_kept(person_id: int) -> None:
-    """A kept brief that was sent since counts as delivered then; one that
-    was dropped told nothing. Still waiting: left as it is.
+    """A kept brief that was sent since counts as delivered, as of when it
+    was written (its window ends there); one that was dropped told nothing.
+    Still waiting: left as it is.
 
     One sent after a newer brief already reached them (theirs waited while
     the next day's went straight out) does not take that newer brief's
@@ -254,20 +260,20 @@ def settle_kept(person_id: int) -> None:
             if state == "waiting":
                 waiting.append(entry)
             elif state == "sent":
-                sent.append((sent_at or "", entry))
+                sent.append((str(entry.get("written_at") or sent_at or ""), entry))
         kind = kind_for(person_id)
-        for sent_at, entry in sorted(sent, key=lambda t: t[0]):
+        for as_of, entry in sorted(sent, key=lambda t: t[0]):
             items = {str(k): str(v) for k, v in (entry.get("items") or {}).items()}
             last = brief_state.last_delivered(kind)
             last_at = parse_aware(last.generated_at) if last else None
-            this_at = parse_aware(sent_at)
+            this_at = parse_aware(as_of)
             if last_at is not None and (this_at is None or last_at > this_at):
                 brief_items.record(KIND, {**items, **brief_items.told(KIND, person_id)}, person_id)
                 continue
             record_delivered(person_id, TeammateBrief(
                 text=str(entry.get("text", "")), fingerprint=str(entry.get("fingerprint", "")),
                 items=items,
-            ), at=sent_at or None)
+            ), at=as_of or None)
         if len(waiting) != len(entries):
             _write_kept(person_id, waiting)
     except Exception:

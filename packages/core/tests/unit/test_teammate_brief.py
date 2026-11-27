@@ -217,9 +217,16 @@ def test_a_kept_brief_is_told_only_once_it_was_sent(
     # Still waiting: nothing told, so the next brief tells it again.
     teammate_brief.settle_kept(5)
     assert brief_items.told(teammate_brief.KIND, 5) == {}
+    written_at = teammate_brief._read_kept(5)[0]["written_at"]
     held_messages.mark_sent([held_id])
     teammate_brief.settle_kept(5)
     assert brief_items.told(teammate_brief.KIND, 5) == brief.items
+    # The next window starts when it was written, not when it went out, so
+    # what happened while it waited is still news.
+    from openexecutive.briefing import brief_state
+
+    last = brief_state.last_delivered(teammate_brief.kind_for(5))
+    assert last is not None and last.generated_at == written_at
 
 
 def test_a_kept_brief_sent_after_a_newer_one_does_not_replace_it(
