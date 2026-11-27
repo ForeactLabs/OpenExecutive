@@ -1989,6 +1989,8 @@ async def _run_chat_turn(
                             else:
                                 full_response += item
                                 chunk_count += 1
+                                if item.strip():
+                                    timeline.wrote()
                                 live_evt = {
                                     "type": "chunk",
                                     "content": item,

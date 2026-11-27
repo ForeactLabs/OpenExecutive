@@ -141,6 +141,12 @@ def chip_follows(tool: str) -> bool:
     return extensions.has_chip(tool)
 
 
+def _is_cut_off(label: str) -> bool:
+    from openexecutive.orchestrator.executive import CUT_OFF_LABEL
+
+    return label == _clean(CUT_OFF_LABEL)
+
+
 def _may_be_held(step: Step) -> bool:
     """A round that could be one held for an outside read: a write, or a
     connected app's round, with no chip yet (never the approved card's)."""
@@ -271,10 +277,17 @@ class TurnTimeline:
         self.reads: dict[str, int] = {}
         self.finished = False
         self.seconds = 0
+        # The reply has been streaming since the last step: no step is
+        # running any more.
+        self.writing = False
         self._found_seen: set[str] = set()
 
     def _now(self) -> int:
         return max(0, int(self._clock() - self._t0))
+
+    def wrote(self) -> None:
+        """Reply text streamed: the last step's round is over."""
+        self.writing = True
 
     def _add_step(self, step: Step) -> None:
         self.steps.append(step)
@@ -304,6 +317,9 @@ class TurnTimeline:
             for kind, n in reads.items():
                 last.reads[kind] = last.reads.get(kind, 0) + n
             return True
+        if not unnamed and not item.get("tool") and _is_cut_off(label):
+            # The executive's own line for a round cut short: no step's.
+            return False
         if not unnamed and not item.get("tool") and last is not None:
             # A line a running tool says about itself (a workflow's steps
             # while run_workflow runs): the step it belongs to, not a new one.
@@ -400,8 +416,10 @@ class TurnTimeline:
         try:
             kind = item.get("type")
             if kind == "activity":
+                self.writing = False
                 changed = self._activity(item)
             elif kind == "progress":
+                self.writing = False
                 changed = self._progress(item)
             elif kind == "action_taken":
                 changed = self._action(item)
@@ -418,7 +436,7 @@ class TurnTimeline:
         waiting, and nothing is current any more. On a stopped or timed-out
         turn the step that was running is saved as stopped, not done. The
         payload to save with the reply, or None when the turn took no steps."""
-        if interrupted and not self.finished and self.steps:
+        if interrupted and not self.writing and not self.finished and self.steps:
             last = self.steps[-1]
             if not (last.acted or last.waits):
                 last.stopped = True

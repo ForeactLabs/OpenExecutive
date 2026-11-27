@@ -198,6 +198,24 @@ def test_two_holds_in_one_round_never_take_over_an_earlier_failure() -> None:
     ]
 
 
+def test_a_step_finished_before_the_reply_started_is_not_stopped() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Searching your email…", "tool": "search_my_email"})
+    tl.wrote()
+    done = tl.finish((), interrupted=True)
+    assert done is not None
+    assert done["steps"][-1]["state"] == "done"
+
+
+def test_the_cut_off_line_is_no_steps_detail() -> None:
+    from openexecutive.orchestrator.executive import CUT_OFF_LABEL
+
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Checking your calendar…", "tool": "check_calendar"})
+    assert tl.observe({"type": "activity", "label": CUT_OFF_LABEL, "tool": ""}) is None
+    assert "detail" not in tl.payload()["steps"][0]
+
+
 def test_a_held_step_waits_once_not_twice() -> None:
     # outside_content held the send: its activity came, no chip followed.
     tl = TurnTimeline(Clock())
