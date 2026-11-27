@@ -116,6 +116,11 @@ def _named(text: object, rendered: str | None, limit: int = 60) -> bool:
     return line[:limit] in rendered or quoted(line, limit) in rendered
 
 
+_SHORT_STOP = frozenset({
+    "the", "for", "and", "due", "to", "of", "on", "in", "an", "by", "at", "is",
+    "it", "a", "i", "we", "us", "me", "my", "or", "no", "do", "be", "go", "up",
+    "so", "if", "as", "are", "was", "has", "can", "get", "you", "out", "now", "new",
+})
 _MENTION_STOP = frozenset({"with", "from", "that", "this", "your", "their", "about", "into", "over"})
 
 
@@ -125,14 +130,27 @@ def _mentioned(text: object, said: str | None) -> bool:
     words an item in its own way. Without ``said``, everything counts."""
     if said is None:
         return True
-    words = [
-        w for w in re.findall(r"[a-z][a-z'-]{3,}", str(text or "").lower())
-        if w not in _MENTION_STOP
-    ][:6]
+    label = " ".join(str(text or "").lower().split())
+    words = [w for w in re.findall(r"[a-z][a-z'-]{3,}", label) if w not in _MENTION_STOP][:6]
+    # A long word may take an ending ("buyout" in "buyouts"); a short token
+    # ("vat", "bo") must be a whole word, or "private" would mention "VAT".
+    whole = False
     if not words:
-        return False
+        # A short headline ("Q3 VAT due", "W-9 for Bo"): its short tokens.
+        words = [w for w in re.findall(r"[a-z0-9][a-z0-9'-]+", label) if w not in _SHORT_STOP][:6]
+        whole = True
     lowered = said.lower()
-    hits = sum(1 for w in words if w in lowered)
+    if not words:
+        # Nothing but one-character tokens ("Q", "5"): the whole label, as
+        # words. A label of everyday words only ("Due") is in any prose, so
+        # it is not taken as mentioned: retelling it is the safe side.
+        if not label or all(w in _SHORT_STOP for w in re.findall(r"[a-z0-9]+", label)):
+            return False
+        return re.search(
+            rf"(?<![a-z0-9]){re.escape(label)}(?![a-z0-9])", lowered,
+        ) is not None
+    end = r"(?![a-z0-9])" if whole else ""
+    hits = sum(1 for w in words if re.search(rf"(?<![a-z0-9]){re.escape(w)}{end}", lowered))
     return hits >= min(2, len(words))
 
 
@@ -302,6 +320,27 @@ def _says_nothing(text: str) -> bool:
     return bool(_EMPTY_LINE.match(body))
 
 
+# The parts the briefs and the digest are written in (``narrative``'s
+# prompts and ``workflows.end_of_day_digest``). An item's bold lead-in is
+# any other name, however short.
+_PART_NAMES = frozenset({
+    "do today", "new since yesterday", "still open", "getting started",
+    "today", "done for you", "needs you", "next", "sleep on this",
+    "what changed", "handled overnight", "from your notes", "what i found",
+})
+
+
+def _is_part_heading(line: str) -> bool:
+    """A heading with its text on the same line ("**Needs you** - Approve
+    the draft"), not an item with a bold lead-in ("**Sign Acme lease** —
+    Dana needs it by noon"): a part's name is one the briefs use."""
+    match = _INLINE_HEADING.match(line)
+    if match is None:
+        return False
+    name = " ".join(re.sub(r"[*:—-]", " ", match.group(1)).split()).casefold()
+    return name in _PART_NAMES
+
+
 def drop_empty_lines(text: str) -> str:
     """``text`` without lines that only say a section is empty or talk about
     the brief itself, and without a heading left with nothing under it.
@@ -329,7 +368,7 @@ def drop_empty_lines(text: str) -> str:
             rest = kept[i + 1:]
             body = []
             for nxt in rest:
-                if _HEADING.match(nxt) or _INLINE_HEADING.match(nxt):
+                if _HEADING.match(nxt) or _is_part_heading(nxt):
                     break
                 body.append(nxt)
             if not any(b.strip() for b in body):
