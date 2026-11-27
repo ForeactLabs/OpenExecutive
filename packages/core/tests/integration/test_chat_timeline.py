@@ -129,3 +129,43 @@ def test_a_turn_with_no_steps_saves_none(
     assert not [e for e in events if e["type"] == "timeline"]
     session_id = next(e["session_id"] for e in events if e["type"] == "done")
     assert "steps" not in session_store.load_messages(session_id, db_path=temp_db)[-1]
+
+
+def test_a_step_cut_off_by_a_disconnect_is_saved_as_stopped(
+    temp_db: Path, patched_deps: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from openexecutive.orchestrator import executive as exec_mod
+    from openexecutive.orchestrator import outside_content
+
+    gone = {"now": False}
+
+    class _Exec:
+        _THINKING = exec_mod.Executive._THINKING
+
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        async def stream_chat(self, **_kwargs: Any) -> AsyncIterator[Any]:
+            yield "Sending it now. "
+            gone["now"] = True
+            yield {"type": "activity", "label": "Sending the update…", "tool": "send_text"}
+            yield "Sent."
+
+    async def _is_disconnected(_self: Any) -> bool:
+        return gone["now"]
+
+    monkeypatch.setattr(exec_mod, "Executive", _Exec)
+    monkeypatch.setattr(outside_content, "pending_held", lambda _s: ())
+    monkeypatch.setattr("starlette.requests.Request.is_disconnected", _is_disconnected)
+    _client().post("/chat", json={"message": "tell the team"})
+
+    import sqlite3
+
+    with sqlite3.connect(temp_db) as conn:
+        row = conn.execute(
+            "SELECT steps FROM chat_messages WHERE role = 'assistant' ORDER BY rowid DESC LIMIT 1"
+        ).fetchone()
+    assert row is not None
+    steps = json.loads(row[0])["steps"]
+    assert steps[-1]["label"] == "Sending the update"
+    assert steps[-1]["state"] == "stopped"

@@ -2111,7 +2111,7 @@ async def _run_chat_turn(
             # buttons under the reply (Approve sends the person's go), and
             # as waiting steps on its timeline.
             held_steps = outside_content.pending_held(session) if not (stopped or timed_out) else ()
-            saved_steps = timeline.finish(held_steps, interrupted=stopped or timed_out)
+            saved_steps = timeline.finish(held_steps, interrupted=stopped or timed_out or client_disconnected)
 
             if client_disconnected:
                 # Connection is gone, so we can't yield anything more — but we
