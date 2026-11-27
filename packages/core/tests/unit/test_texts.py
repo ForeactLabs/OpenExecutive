@@ -1013,3 +1013,93 @@ def test_a_contacts_text_is_outside_words(ids: dict[str, int], monkeypatch: pyte
     monkeypatch.setattr(texts_watch, "_turn", turn)
     assert asyncio.run(texts_watch.look(owner)) is True
     assert off == [True]
+
+
+# --- how a text shows in Done for you --------------------------------------
+
+
+def _row(log_id: int | None) -> Any:
+    assert log_id is not None
+    with ttl._connect() as conn:
+        return conn.execute(f"SELECT * FROM {ttl.LOG_TABLE} WHERE id=?", (log_id,)).fetchone()
+
+
+def test_a_text_on_its_way_is_done_only_once_it_went(ids: dict[str, int], as_turn_for: Any) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    as_turn_for(owner)
+    sends = [tx.queue_send(owner, words, to_number="5550004444") for words in ("one", "two", "three")]
+    rows = []
+    for send in sends:
+        status, send_id = ttl.device_status("send_text", json.dumps({"status": "on_its_way", "send_id": send.id}))
+        assert (status, send_id) == (ttl.SENDING, send.id)
+        log_id = ttl.record(scope=ttl.SCOPE_EXECUTIVE, source="chat", tool="send_text", summary="Text 5550004444",
+                            status=status)
+        ttl._link_device(send_id, log_id)
+        rows.append(log_id)
+    # On its way: not in Done for you (done or approved only).
+    assert [_row(i)["status"] for i in rows] == [ttl.SENDING] * 3
+    tx.settle_send(owner, sends[0].id, status=tx.SENT, conversation_key="k9")
+    tx.settle_send(owner, sends[1].id, status=tx.FAILED, error="Nothing went.")
+    tx.take_send(owner)  # hands out the third
+    _age(sends[2].id, 3)
+    tx.take_send(owner)  # the browser never said: unsure
+    assert [_row(i)["status"] for i in rows] == ["done", "failed", ttl.UNSURE]
+    # A text still on its way, or unsure, is never sent again on its own.
+    lately = {s.id: s.status for s in ttl.done_lately(owner)}
+    assert lately.get(rows[0]) == "done" and lately.get(rows[2]) == ttl.UNSURE and rows[1] not in lately
+
+
+def test_a_text_that_settled_before_its_row_was_tied_still_says_so(ids: dict[str, int], as_turn_for: Any) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    as_turn_for(owner)
+    send = tx.queue_send(owner, "quick", to_number="5550005555")
+    tx.settle_send(owner, send.id, status=tx.SENT, conversation_key="k8")
+    log_id = ttl.record(scope=ttl.SCOPE_EXECUTIVE, source="chat", tool="send_text", summary="Text", status=ttl.SENDING)
+    ttl._link_device(send.id, log_id)
+    assert _row(log_id)["status"] == "done"
+
+
+def test_an_approved_text_is_approved_once_it_went(ids: dict[str, int], as_turn_for: Any) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    as_turn_for(owner)
+    send = tx.queue_send(owner, "ok", to_number="5550006666")
+    log_id = ttl.record(scope=ttl.SCOPE_EXECUTIVE, source="chat", tool="send_text", summary="Text",
+                        status="waiting", decision_id=4242)
+    payload = {"tool": "send_text", "input": {"to": "5550006666", "text": "ok"}, "mcp": False}
+    ttl.resolved(4242, "approved", payload=payload,
+                 result=json.dumps({"status": "on_its_way", "send_id": send.id, "message": "x"}))
+    assert _row(log_id)["status"] == ttl.SENDING
+    tx.settle_send(owner, send.id, status=tx.SENT, conversation_key="k7")
+    assert _row(log_id)["status"] == "approved"
+
+
+def test_only_a_device_step_is_told_apart() -> None:
+    assert ttl.device_status("send_text", json.dumps({"status": "sent", "send_id": 3})) == (None, 3)
+    assert ttl.device_status("send_text", json.dumps({"status": "unsure", "send_id": 3})) == (ttl.UNSURE, 3)
+    assert ttl.device_status("message_person", json.dumps({"status": "on_its_way"})) == (None, None)
+    assert ttl.device_status("send_text", "not json") == (None, None)
+
+
+def test_the_send_text_result_names_its_send(ids: dict[str, int], as_turn_for: Any) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    as_turn_for(owner)
+    out = json.loads(asyncio.run(text_tools.handle_send_text({"to": "555 201 3344", "text": "Ok"})))
+    taken = tx.take_send(owner)
+    assert out["status"] == "on_its_way" and taken is not None and out["send_id"] == taken[0].id
+
+
+def test_a_text_shows_as_sent_as_you() -> None:
+    from openexecutive.api.routes import today
+
+    def item(**kw: Any) -> Any:
+        return today.ActivityItem(kind="took_the_lead", summary="Text Curt", actor="Executive", target=None,
+                                  department=None, at=NOW.isoformat(), **kw)
+
+    assert today._as_tag(item(sent=True, own_device=True)) == "Sent as you"
+    assert today._as_tag(item(sent=True)).startswith("Sent as ")
+    assert today._as_tag(item(sent=True)) != "Sent as you"
+    assert ttl.on_own_device("send_text") and not ttl.on_own_device("message_person")
