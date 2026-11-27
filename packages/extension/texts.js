@@ -152,9 +152,10 @@
   const KEEP = 30 * DAY;
   // Seen-map mark for a row a full first look had no room for.
   const WAITING = "~";
-  // The same, for a row that went as earlier: still earlier when it is told
-  // (a text the old version had told is never answered on the next look).
-  const WAITING_EARLIER = "~e";
+  // The same, for a row the old version had told: "~e.<fingerprint>". It
+  // still goes as earlier while its text is the same one, never once a new
+  // text came in.
+  const WAITING_TOLD = "~e.";
 
   /**
    * What to tell Open Executive about the list, given what it said before
@@ -181,7 +182,8 @@
       // A row a full first look had no room for ("~") is still judged as a
       // first look, so its old text never reads as new.
       const kept = first ? "" : String(next[row.key] || "");
-      const waited = kept === WAITING || kept === WAITING_EARLIER;
+      const toldPrint = kept.startsWith(WAITING_TOLD) ? kept.slice(WAITING_TOLD.length) : null;
+      const waited = kept === WAITING || toldPrint !== null;
       const look = first || waited;
       // What was seen is "<fingerprint>.<count of changes>": the count tells
       // the same words again later ("ok") from the same report sent again.
@@ -194,12 +196,13 @@
       // A first look can't date a row it can't read the time of: left out.
       if (look && (shown === null || now - shown > KEEP)) continue;
       if (T.isSignInCode(row.snippet)) continue;
-      const toldBefore = Boolean(told && typeof told === "object" && String(told[row.key] || "").split(".")[0] === print);
-      const earlier = look && (kept === WAITING_EARLIER || toldBefore || !row.unread || row.outgoing || now - shown > DAY);
+      const toldBefore = toldPrint === print || Boolean(told && typeof told === "object" && String(told[row.key] || "").split(".")[0] === print);
+      const earlier = look && (toldBefore || !row.unread || row.outgoing || now - shown > DAY);
       items.push({
         // What was seen before (taken off before it goes): a row cut from a
         // full report is put back to it, so the next report tells it.
         before,
+        print: look && toldBefore ? print : null,
         // The same change, reported again (an answer that never came back),
         // is the same ref, so it is kept once.
         ref: `${row.key}:${print}:${count}`,
@@ -225,9 +228,9 @@
     items.sort((a, b) => Number(a.earlier) - Number(b.earlier));
     for (const cut of items.slice(100)) {
       if (cut.before === undefined) delete next[cut.conversation];
-      else next[cut.conversation] = cut.before === WAITING && cut.earlier ? WAITING_EARLIER : cut.before;
+      else next[cut.conversation] = cut.before === WAITING && cut.print ? WAITING_TOLD + cut.print : cut.before;
     }
-    return { items: items.slice(0, 100).map(({ before, ...item }) => item), seen: next };
+    return { items: items.slice(0, 100).map(({ before, print, ...item }) => item), seen: next };
   };
 
   /** The conversation key in a Google Messages address, or "". */

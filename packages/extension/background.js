@@ -443,6 +443,11 @@ async function sendOneText(send) {
 let pressing = null;
 // The tab a press moved from, while Messages shows in its place.
 let pressShowing = null;
+// Any other tab made active in that window (the person, or a workflow step)
+// ends it, so a step never goes back to a page left long ago.
+chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
+  if (pressShowing && pressShowing.windowId === windowId && tabId !== pressShowing.messagesId) pressShowing = null;
+});
 
 // Its own window, kept minimized, is shown for a press or an away
 // screenshot. Each holds it while it works; only the last to let go puts it
@@ -554,7 +559,7 @@ async function showForPress(tab, target) {
   try {
     if (back.minimized) await chrome.windows.update(win.id, { state: "normal", focused: false });
     if (back.tabId !== null) {
-      pressShowing = { windowId: win.id, tabId: back.tabId };
+      pressShowing = { windowId: win.id, tabId: back.tabId, messagesId: tab.id };
       await chrome.tabs.update(tab.id, { active: true });
       // In a window the person is typing in, their keys would now go to the
       // box holding the text: take the focus off it straight away.
