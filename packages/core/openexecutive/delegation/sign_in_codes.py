@@ -14,9 +14,12 @@ import re
 # a hyphen (Google's G-482913). Never part of a phone number (555-123-4567,
 # 4155551234) and never a year (2026).
 _NUMBER = r"(?<!\d)(?<!\d-)(?!(?:19|20)\d\d(?![\d-]))(?:\d{4,8}|\d{3}[- ]\d{3}|(?:\d ){3,7}\d)(?![\d-])"
-# A code word, not a zip, area, postal, dress, promo or discount code.
+# A code word, not a zip, area, postal, dress, promo or discount code, and
+# not a gate, door, garage, alarm, lockbox or wifi one, which people text
+# each other and ask about later ("what's the gate code Sam sent?").
 _CODE_WORD = (
     r"(?<!zip )(?<!area )(?<!postal )(?<!dress )(?<!promo )(?<!discount )"
+    r"(?<!gate )(?<!door )(?<!garage )(?<!alarm )(?<!lockbox )(?<!wifi )(?<!wi-fi )(?<!network )"
     r"\b(?:codes?|passcodes?|passwords?|passwd|otp|pins?)\b"
 )
 # The code close to its word, either way round: "code is 482913", "PIN: 4821",

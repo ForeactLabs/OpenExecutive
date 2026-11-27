@@ -522,6 +522,20 @@ test("texts: a first look after an update tells what the old version told as ear
   assert.ok(texts.includes("await chrome.storage.local.remove(OLD_SEEN_KEY);"));
 });
 
+test("texts: rows past the 100 a report carries are told in the next one", () => {
+  const T = textsHelpers();
+  const now = Date.parse("2026-11-25T15:00:00");
+  const rows = Array.from({ length: 150 }, (_, i) => ({ key: `c${i}`, title: `P${i}`, snippet: `Hi ${i}`, unread: false, time: "Mon" }));
+  const first = T.changes(rows, null, now);
+  assert.equal(first.items.length, 100);
+  assert.ok(first.items.every((i) => !("before" in i)));
+  const second = T.changes(rows, first.seen, now + 1000);
+  assert.equal(second.items.length, 50);
+  // Still a first look for them: old texts, never new.
+  assert.ok(second.items.every((i) => i.earlier === true));
+  assert.equal(T.changes(rows, second.seen, now + 2000).items.length, 0);
+});
+
 test("texts: a sign-in code is never told, now or on a first look", () => {
   const T = textsHelpers();
   const now = Date.parse("2026-11-25T15:00:00");
@@ -542,6 +556,7 @@ test("texts: a sign-in code is never told, now or on a first look", () => {
     "Can't log in to the portal, call me at 555-123-4567", "Please verify the invoice total, it is 12500",
     "zip code 94103", "Can you verify the address? 1600 Amphitheatre Pkwy, 94043",
     "Login meeting moved, dial 4155551234",
+    "Gate code is 4821", "Door code 1234#", "The wifi password is 84219375",
   ]) {
     assert.equal(T.isSignInCode(plain), false, plain);
   }

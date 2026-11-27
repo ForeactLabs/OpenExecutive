@@ -188,6 +188,20 @@ def test_tidy_drops_sign_in_codes_kept_before(ids: dict[str, int]) -> None:
         )
     tx.tidy()
     assert [t.text for t in tx.texts(conv.id)] == ["Lunch Friday?"]
+    # A conversation that held only a code goes too.
+    with tx._connect() as conn:
+        conn.execute(
+            f"INSERT INTO {tx.TEXT_CONVERSATIONS_TABLE} (id, person_id, key, title, number, is_group, updated_at) "
+            "VALUES ('tc_att', ?, 'att', 'AT&T', '', 0, ?)",
+            (owner, tx._iso(NOW)),
+        )
+        conn.execute(
+            f"INSERT INTO {tx.TEXTS_TABLE} (person_id, conversation_id, ref, sender, text, outgoing, at, handled) "
+            "VALUES (?, 'tc_att', 'att:1', 'AT&T', 'Your verification code is 482913', 0, ?, 1)",
+            (owner, tx._iso(NOW)),
+        )
+    tx.tidy()
+    assert [c.title for c in tx.conversations(owner)] == ["Kai"]
 
 
 def test_old_and_future_texts(ids: dict[str, int]) -> None:

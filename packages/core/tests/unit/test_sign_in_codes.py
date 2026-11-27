@@ -25,5 +25,6 @@ def test_ordinary_texts_are_not() -> None:
         "Can't log in to the portal, call me at 555-123-4567", "Please verify the invoice total, it is 12500",
         "zip code 94103", "Can you verify the address? 1600 Amphitheatre Pkwy, 94043",
         "Login meeting moved, dial 4155551234",
+        "Gate code is 4821", "Door code 1234#", "The wifi password is 84219375",
     ):
         assert not is_sign_in_code(text), text

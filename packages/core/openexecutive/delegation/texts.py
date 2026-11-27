@@ -205,6 +205,12 @@ def _drop_codes(conn: sqlite3.Connection) -> None:
     codes = [(int(r["id"]),) for r in rows if is_sign_in_code(str(r["text"] or ""))]
     if codes:
         conn.executemany(f"DELETE FROM {TEXTS_TABLE} WHERE id=?", codes)
+        # A conversation that held only a code goes too, as record never
+        # makes one for a code.
+        conn.execute(
+            f"DELETE FROM {TEXT_CONVERSATIONS_TABLE} WHERE id NOT IN (SELECT conversation_id FROM {TEXTS_TABLE}) "
+            f"AND id NOT IN (SELECT conversation_id FROM {TEXT_SENDS_TABLE} WHERE conversation_id IS NOT NULL)"
+        )
 
 
 def _prune(conn: sqlite3.Connection, person_id: int | None) -> None:
