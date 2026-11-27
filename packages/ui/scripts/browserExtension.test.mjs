@@ -535,6 +535,9 @@ test("texts: a sign-in code is never told, now or on a first look", () => {
     "Running late, there by 2:30", "Lunch Friday?", "Call me at 4", "Gate code changed",
     "Can we use 2000 from the budget?", "Dress code for the 2026 gala is black tie",
     "Login meeting moved to 1030", "Sign in sheet for the 2026 offsite", "Enter 2026 in the year box",
+    "Can't log in to the portal, call me at 555-123-4567", "Please verify the invoice total, it is 12500",
+    "zip code 94103", "Can you verify the address? 1600 Amphitheatre Pkwy, 94043",
+    "Login meeting moved, dial 4155551234",
   ]) {
     assert.equal(T.isSignInCode(plain), false, plain);
   }
@@ -544,7 +547,7 @@ test("texts: a sign-in code is never told, now or on a first look", () => {
   ];
   const first = T.changes(rows, null, now);
   assert.deepEqual([...first.items.map((i) => i.conversation)], ["kai"]);
-  const later = T.changes([{ ...rows[0], snippet: "Use 991234 to log in" }], first.seen, now);
+  const later = T.changes([{ ...rows[0], snippet: "Your login code is 991234" }], first.seen, now);
   assert.equal(later.items.length, 0);
 });
 

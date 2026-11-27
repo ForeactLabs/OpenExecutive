@@ -47,16 +47,16 @@
 
   // Sign-in codes are never sent to Open Executive (the same patterns as
   // openexecutive/delegation/sign_in_codes.py, which drops any that come).
-  const CODE_RIGHT_AFTER = /\b(?:codes?|passcodes?|passwords?|passwd|otp|pins?|tokens?)\b[\s:#-]*(?:(?:is|was)\b[\s:#-]*)?(\d{4,10}|\d{3}[- ]\d{3}|(?:\d ){3,7}\d)(?!\d)/i;
-  const SIGN_IN_WORDS = /\b(one[- ]time|verification|verify|sign(?:ing)?[- ]?in|log(?:ging)?[- ]?in|2fa|mfa|authenticat\w*)\b/i;
-  const CODE_DIGITS = /(?<!\d)(\d{5,10}|\d{3}[- ]\d{3}|(?:\d ){3,7}\d)(?!\d)/;
+  const NUMBER = "(?<![\\d-])(?!(?:19|20)\\d\\d(?![\\d-]))(?:\\d{4,8}|\\d{3}[- ]\\d{3}|(?:\\d ){3,7}\\d)(?![\\d-])";
+  const CODE_WORD = "(?<!zip )(?<!area )(?<!postal )(?<!dress )(?<!promo )(?<!discount )\\b(?:codes?|passcodes?|passwords?|passwd|otp|pins?)\\b";
+  const CODE_NEAR = new RegExp(CODE_WORD + "[^\\d\\n]{0,25}" + NUMBER, "i");
   const SIGN_IN_LINK = /\b(magic link|sign[- ]?in link|log[- ]?in link|is this you signing in|approve (?:this |the )?sign[- ]?in|tap to (?:sign|log) in|trying to sign in)\b/i;
-  const ENTER_CODE = /\b(?:enter|type)\s+((?!(?:19|20)\d\d(?!\d))\d{4,10}(?!\d)|(?:\d ){3,7}\d)/i;
+  const ENTER_CODE = new RegExp("\\b(?:enter|type)\\s+" + NUMBER, "i");
 
   /** Whether the words read like a sign-in code or a sign-in link. */
   T.isSignInCode = function (text) {
     const s = String(text || "");
-    return SIGN_IN_LINK.test(s) || ENTER_CODE.test(s) || CODE_RIGHT_AFTER.test(s) || (SIGN_IN_WORDS.test(s) && CODE_DIGITS.test(s));
+    return SIGN_IN_LINK.test(s) || ENTER_CODE.test(s) || CODE_NEAR.test(s);
   };
 
   /** One line of text, at most `max` characters. */
