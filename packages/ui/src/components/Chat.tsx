@@ -430,6 +430,9 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
         return;
       }
       setMessages(fresh);
+      // The saved list can line up differently from the shown one: a panel
+      // open on a reply by its place could now show another reply's steps.
+      setStepsOpen((open) => (typeof open === "number" ? null : open));
     } catch {
       // Kept as shown; the next turn or reconnect reads it again.
     }
