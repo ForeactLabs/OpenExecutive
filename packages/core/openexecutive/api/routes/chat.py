@@ -1687,6 +1687,10 @@ async def _run_chat_turn(
         persisted: dict[str, int] = {}
         chunk_count = 0
         exec_t0 = time.monotonic()
+        # What the turn did, step by step: sent as it changes and saved with
+        # the reply for its "What I did" timeline. Timed from the turn's start,
+        # an approved card's step included.
+        timeline = TurnTimeline()
         timed_out = False
         client_disconnected = False
         stopped = False
@@ -1715,6 +1719,11 @@ async def _run_chat_turn(
                 # deadline hold while it runs (the step itself finishes on its
                 # own and its card says how it went).
                 approved: str | None = None
+                approving_evt = timeline.observe(
+                    {"type": "activity", "label": APPROVING_LABEL, "tool": "answer_card"}
+                )
+                if approving_evt is not None:
+                    yield f"data: {json.dumps({**approving_evt, 'session_id': session.session_id})}\n\n"
                 async for evt in _approve_card_in_turn(
                     approve_card, approve_input, request, session,
                     stop_event=stop_event,
@@ -1779,9 +1788,6 @@ async def _run_chat_turn(
             action_chips: list[dict[str, Any]] = []
             # `turn_sources` as sent and saved once the reply is over.
             answer_sources: dict[str, Any] | None = None
-            # What the turn did, step by step: sent as it changes and saved
-            # with the reply for its "What I did" timeline.
-            timeline = TurnTimeline()
             saved_steps: dict[str, Any] | None = None
 
             async def _persist_turn() -> None:

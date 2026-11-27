@@ -900,6 +900,7 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
               actions: turnActions.length > 0 ? turnActions : undefined,
               stopped: true,
               sources: turnSources,
+              steps: turnDone?.done ? turnDone : undefined,
             },
           ]);
         } else if (queuedRef.current.length > 0) {

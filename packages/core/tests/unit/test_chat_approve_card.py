@@ -109,6 +109,13 @@ def test_approve_on_a_chat_card_approves_it_and_the_turn_carries_on(
     assert resp.status_code == 200
     # The turn shows it's doing the step while it runs.
     assert json.dumps(chat_route.APPROVING_LABEL) in resp.text
+    # ...and its "What I did" timeline opens with that step.
+    timelines = [
+        json.loads(line[6:]) for line in resp.text.splitlines()
+        if line.startswith("data: ") and '"type": "timeline"' in line
+    ]
+    assert timelines and timelines[0]["steps"][0]["kind"] == "do"
+    assert timelines[0]["steps"][0]["label"] == chat_route.APPROVING_LABEL.rstrip("…")
     assert approved == [(43, {"input": {"url": "https://example.com"}})]
     block = captured["stream_chat"]["page_context_block"]
     assert "THE CARD THEY JUST APPROVED" in block
