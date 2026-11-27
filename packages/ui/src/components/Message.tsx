@@ -366,13 +366,15 @@ export default function Message({
             components={{
               // A link to another site opens in a new tab, so the chat stays
               // open; an in-app link (/people, #…) opens in place.
-              a: ({ href, children }) =>
+              a: ({ node: _node, href, children, ...rest }) =>
                 typeof href === "string" && /^https?:\/\//i.test(href) ? (
-                  <a href={href} target="_blank" rel="noopener noreferrer nofollow">
+                  <a {...rest} href={href} target="_blank" rel="noopener noreferrer nofollow">
                     {children}
                   </a>
                 ) : (
-                  <a href={href}>{children}</a>
+                  <a {...rest} href={href}>
+                    {children}
+                  </a>
                 ),
               // An image from another site never loads by itself: its URL
               // could carry what the reply quotes (see loadsInline).
