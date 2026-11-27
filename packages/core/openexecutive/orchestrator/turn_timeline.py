@@ -442,24 +442,34 @@ class TurnTimeline:
                 last.stopped = True
         texts = [t for t in (_clean(w) for w in held) if t]
         # A held step's round already showed (its activity came, no chip
-        # followed): that step is the one waiting, not one that failed. The
-        # held tools are the turn's latest tries, so match from the end.
-        # Any write with no chip yet, whether or not its tool makes chips,
-        # and any connected app's round with none (a write whose label
-        # doesn't say so, "Using … · Notion").
-        # Only the run of such steps at the end: a hold comes after an
-        # outside read, so a try before the last other step (an approved
-        # card that failed, an earlier failed send) is not one of them.
-        tries: list[Step] = []
-        for step in reversed(self.steps):
-            if not _may_be_held(step):
-                break
-            tries.insert(0, step)
-        for text, step in zip(reversed(texts), reversed(tries), strict=False):
-            step.label = text
+        # followed): that step is the one waiting, not one that failed. A
+        # held text is its tool in plain words (outside_content.step_words),
+        # so each goes on the latest round of that tool still without a
+        # chip, wherever it is in the turn; one with no such round is added.
+        from openexecutive.orchestrator.outside_content import step_words
+
+        taken: set[int] = set()
+        extra: list[str] = []
+        for text in texts:
+            match = next(
+                (
+                    i for i in range(len(self.steps) - 1, -1, -1)
+                    if i not in taken
+                    and _may_be_held(self.steps[i])
+                    and _clean(step_words(self.steps[i].tool)) == text
+                ),
+                None,
+            )
+            if match is None:
+                extra.append(text)
+                continue
+            taken.add(match)
+            # Its round's own words ("Messaging Dana") say more than the
+            # held text, which is the tool's generic name.
+            step = self.steps[match]
             step.named = True
             step.waits = True
-        for text in texts[: max(0, len(texts) - len(tries))]:
+        for text in extra:
             self._add_step(Step(label=text, kind=DO, at=self._now(), waits=True, named=True))
         self.finished = True
         self.seconds = self._now()
