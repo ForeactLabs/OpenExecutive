@@ -2086,7 +2086,12 @@ def _build_activity(
     for row in led:
         if row.status not in ("done", "approved"):
             continue
-        if not _theirs(None if row.asked_by == owners.principal_id else row.asked_by):
+        # A text went from its asker's own phone: theirs alone, the owner's
+        # too (Privacy hides one person's own messages from everyone else).
+        own_device = take_the_lead.on_own_device(row.tool)
+        if own_device and row.asked_by is None and not everyone:
+            continue
+        if not _theirs(row.asked_by if own_device else None if row.asked_by == owners.principal_id else row.asked_by):
             continue
         if "__" in row.tool and not take_the_lead.mcp_tool_acts(row.tool):
             # A connected-app read logged before reads stopped being gated
@@ -2111,7 +2116,8 @@ def _build_activity(
             mail_to=row.mail_to,
             lead_line=_lead_line(row, jobs, answers),
             sent=mailed or take_the_lead.is_message_send(row.tool),
-            own_device=take_the_lead.on_own_device(row.tool),
+            # "Sent as you" only for the person whose phone it went from.
+            own_device=own_device and viewer is not None and row.asked_by == viewer,
             session_id=row.session_id,
             decision_id=row.decision_id,
         ))
