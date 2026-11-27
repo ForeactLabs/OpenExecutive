@@ -543,13 +543,16 @@ async function showForPress(tab, target) {
 const UNFOCUS = `(() => { const a = document.activeElement; if (a && a !== document.body && a.blur) a.blur(); })()`;
 
 // Only when the press didn't go from behind their windows: the window comes
-// in front for that one press, and the focus goes straight back after it.
-async function focusForPress(back) {
+// in front for that one press, with its focused field blurred so nothing
+// typed elsewhere reaches the box, and the focus goes straight back after it.
+async function focusForPress(back, target) {
   const [before] = (await chrome.windows.getAll({ windowTypes: ["normal"] })).filter((w) => w.focused);
   back.focusedId = before && before.id !== back.windowId ? before.id : null;
   back.tookFocus = true;
   await chrome.windows.update(back.windowId, { focused: true });
-  await pause(300);
+  // Keys they were typing elsewhere must not reach the box holding the text.
+  await chrome.debugger.sendCommand(target, "Runtime.evaluate", { expression: UNFOCUS }).catch(() => null);
+  await pause(200);
 }
 
 async function putBack(tab, back) {
@@ -611,11 +614,16 @@ async function pressInTab(tab, x, y) {
     // Still in the box: a window behind the person's own may not take a
     // press. Once, it comes in front for the press alone, and the focus goes
     // straight back, so nothing they type lands in the box.
+    // The spot is found before the focus is taken, and the focus is held
+    // only for the press, with the box unfocused.
     if (back && !back.focused && after && after.at === at && after.full) {
-      await focusForPress(back);
       const last = await sendSpot(target, at, false);
-      if (last && last.full) await pressAt(target, last);
-      await putBack(now, back);
+      if (last && last.full) {
+        await focusForPress(back, target);
+        const check = await readSpot(target);
+        if (check && check.at === at && check.full && check.x === last.x && check.y === last.y) await pressAt(target, check);
+        await putBack(now, back);
+      }
     }
     return { ok: true };
   } catch {

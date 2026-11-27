@@ -619,8 +619,12 @@ test("texts: the press shows Google Messages without taking the focus, and focus
   assert.ok(show.indexOf("const back =") < show.indexOf("try {") && show.includes("return back;"));
   // Focus only when the words are still in the box after the press, and it goes straight back.
   const last = press.slice(press.indexOf("if (back && !back.focused && after"));
-  assert.ok(last.indexOf("await focusForPress(back)") < last.indexOf("if (last && last.full) await pressAt(target, last);"));
-  assert.ok(last.indexOf("await putBack(now, back);") > last.indexOf("await pressAt(target, last)"));
+  // The spot is found before the focus is taken; with the focus held, one reading, the press, and back.
+  assert.ok(last.indexOf("const last = await sendSpot(target, at, false);") < last.indexOf("await focusForPress(back, target)"));
+  assert.ok(last.indexOf("check.x === last.x && check.y === last.y) await pressAt(target, check);") > last.indexOf("await focusForPress(back, target)"));
+  assert.ok(last.indexOf("await putBack(now, back);") > last.indexOf("await pressAt(target, check)"));
+  const focus = bg.slice(bg.indexOf("async function focusForPress"), bg.indexOf("async function putBack"));
+  assert.ok(focus.indexOf("{ expression: UNFOCUS }") > focus.indexOf("{ focused: true }"));
   assert.ok(press.includes("after.full"));
   const back = bg.slice(bg.indexOf("async function putBack"), bg.indexOf("async function pressInTab"));
   // Left alone when it was in front already, put back once, and left where they are if they went to it.
