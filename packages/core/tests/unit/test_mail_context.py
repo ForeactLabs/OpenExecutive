@@ -527,6 +527,21 @@ def test_a_turn_that_failed_to_start_is_tried_again(owner: Any, monkeypatch: pyt
     assert len(model["acts"]) == 1
 
 
+def test_a_turn_that_failed_to_start_is_not_tried_once_stale(owner: Any, monkeypatch: pytest.MonkeyPatch,
+                                                              model: dict[str, Any]) -> None:
+    async def failing(person: Any, client: Any, *, off_team: bool) -> tuple[Any, Any]:
+        raise RuntimeError("gateway down")
+
+    monkeypatch.setattr(mail_context, "_prepare", failing)
+    client = Mailbox(_msg("m1", minutes_ago=1))
+    _look(owner, client)
+    monkeypatch.setattr(mail_context, "_prepare", model["prepare"])
+    later = NOW + mail_context.ACT_MAX_AGE + timedelta(minutes=5)
+    _look(owner, client, later)
+    assert model["acts"] == []
+    assert noticed.waiting_to_act(owner.id, source=noticed.EMAIL, now=later) == []
+
+
 def test_a_turn_that_failed_after_starting_is_not_run_again(owner: Any, monkeypatch: pytest.MonkeyPatch,
                                                             model: dict[str, Any]) -> None:
     calls: list[str] = []

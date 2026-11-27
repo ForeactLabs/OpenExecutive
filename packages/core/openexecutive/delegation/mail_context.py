@@ -552,12 +552,19 @@ async def _look(person: Any, client: Any, cursor: _Cursor, now: datetime) -> Loo
     ready: list[Any] = []
     handled: list[str] = []
     for item in waiting:
+        # Past ACT_MAX_AGE (a turn that failed to start, or reply cards
+        # unreadable for a while) it is stale: context only, never a late turn.
+        got = _parse(item.received_at)
+        if got is None or now - got > ACT_MAX_AGE:
+            handled.append(item.item_key)
+            continue
         state = _reply_state(item, now, replies)
         if state == "act":
             ready.append(item)
         elif state == "handled":
             handled.append(item.item_key)
-    # A reply card of its own handles it: marked acted, with no turn.
+    # A reply card of its own handles it, or it went stale: marked acted,
+    # with no turn.
     noticed.claim_to_act(person.id, handled, now=now)
     claimed = set(noticed.claim_to_act(person.id, [item.item_key for item in ready], now=now))
     picked = [_from_kept(item) for item in ready if item.item_key in claimed]
