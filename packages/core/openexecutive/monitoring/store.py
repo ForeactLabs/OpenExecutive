@@ -38,6 +38,8 @@ from openexecutive.monitoring.models import (
     ORIGIN_RESEARCH,
     ORIGIN_RESEARCH_PROPOSED,
     OUTCOME_ALERTED,
+    OUTCOME_BRIEF_LINE,
+    OUTCOME_HELD_BRIEF,
     OUTCOME_HELD_DIGEST,
     OUTCOME_SUPPRESSED_BASELINE,
     OUTCOME_SUPPRESSED_TRIAGE,
@@ -1278,31 +1280,32 @@ def recent_query_finds(
     db_path: Path | None = None,
 ) -> list[tuple[str, str]]:
     """``(link, title)`` of web search finds since ``since``, newest first:
-    this watch's own, and every company-wide web search watch's (never
-    another person's own watch), so a story one search already reported
-    isn't reported again as new by it or by another."""
+    this watch's own (whatever became of them), and what another live
+    company-wide web search watch actually showed (a card, a brief line, a
+    held digest), never another person's own watch, a suggestion or a
+    switched-off watch, so a story one search already reported isn't
+    reported again as new, and one nobody was shown is never held back."""
     resolved = _resolve_db_path(db_path)
     if not resolved.exists():
         return []
     from openexecutive.monitoring import mailbox
 
-    ids = {
+    others = {
         i.id
         for i in list_watchlist(every_watch=True, db_path=db_path)
-        if i.id is not None and i.signal_type == item.signal_type
-        and (i.id == item.id or mailbox.set_by(i) is None)
+        if i.id is not None and i.id != item.id and i.signal_type == item.signal_type
+        and i.enabled and i.origin != ORIGIN_RESEARCH_PROPOSED and mailbox.set_by(i) is None
     }
-    if item.id is not None:
-        ids.add(item.id)
-    if not ids:
-        return []
-    marks = ", ".join("?" * len(ids))
+    own = item.id if item.id is not None else -1
+    shown = (OUTCOME_ALERTED, OUTCOME_BRIEF_LINE, OUTCOME_HELD_DIGEST, OUTCOME_HELD_BRIEF)
+    marks = ", ".join("?" * len(others)) or "NULL"
     with _get_conn(db_path) as conn:
         rows = conn.execute(
-            "SELECT raw_payload_json FROM external_signals "
-            f"WHERE watchlist_id IN ({marks}) AND captured_at >= ? "
+            "SELECT raw_payload_json FROM external_signals WHERE captured_at >= ? AND "
+            f"(watchlist_id = ? OR (watchlist_id IN ({marks}) "
+            f"AND processed_outcome IN ({', '.join('?' * len(shown))}))) "
             "ORDER BY captured_at DESC LIMIT ?",
-            (*sorted(ids), since.isoformat(), limit),
+            (since.isoformat(), own, *sorted(others), *shown, limit),
         ).fetchall()
     out: list[tuple[str, str]] = []
     for row in rows:

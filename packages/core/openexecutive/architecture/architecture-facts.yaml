@@ -6937,7 +6937,8 @@ external_monitoring:
     enrichment_json.triage_reason, audits it, and rewrites last_check_note.
     A failed evaluation reports no card (triage_error).
     Web search: each poll shows up to 30 headlines found in the last 30 days
-    by this watch and every company-wide query watch
+    by this watch, plus those other live company query watches showed (card,
+    brief line, digest; never a suggestion's or a page-only find)
     (store.recent_query_finds) in a fenced <already_reported> block, drops
     results with a reported link or a headline that is the same story
     (query.story_words / same_story: the watched subject's words left out,
@@ -6947,7 +6948,8 @@ external_monitoring:
     publish date into published_at so the age gate applies.
     Pages: only_counts_or_marks observes a change with no new links whose
     only differences are bare counts and punctuation (no decimal, date or
-    time; no currency or rate mark or word on or beside a changed number)
+    time; no currency or rate mark on a changed number, and no money, rate,
+    size, month, quarter or version word within 3 words of it)
     and sends nothing, unless every_change.
     Steer: steer_watch has stop_watch; /alerts/{id}/say turns the watch off
     (stopped in the reply). Before, "stop" only rewrote notes.

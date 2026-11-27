@@ -498,20 +498,28 @@ _MONEY_OR_RATE = frozenset("$€£¥₹%")
 # A bare count: digits, with thousands commas.
 _COUNT_RE = re.compile(r"\d{1,3}(?:,\d{3})+|\d+")
 _EDGE_MARKS = ".,;:!?()[]{}\"'“”‘’"
-# Words that make a number beside them money or a rate.
+# Words that make a number near them news: money, a rate, a size, a date,
+# a version. Only a number with none of these nearby is a plain count.
 _UNIT_WORDS = frozenset((
     "usd", "eur", "gbp", "jpy", "cad", "aud", "inr", "chf", "dollars", "euros", "pounds",
-    "percent", "pct", "per", "apr", "apy", "mo", "month", "monthly", "yr", "year", "yearly",
-    "annually", "seat", "user", "bps",
+    "percent", "pct", "per", "apr", "apy", "bps", "mo", "month", "months", "monthly",
+    "yr", "year", "years", "yearly", "annually", "k", "m", "bn", "thousand", "million", "billion", "trillion",
+    "jan", "january", "feb", "february", "mar", "march", "april", "may", "jun",
+    "june", "jul", "july", "aug", "august", "sep", "sept", "september", "oct", "october",
+    "nov", "november", "dec", "december", "q1", "q2", "q3", "q4",
+    "version", "v", "release", "build", "series", "round",
 ))
+# How many words either side of a changed number are read for those words.
+_UNIT_WINDOW = 3
 
 
 def only_counts_or_marks(old: str, new: str) -> bool:
     """True when the two texts differ only in plain counts and punctuation:
     the same words in the same order once digits and marks are set aside,
     every changed number a bare count ("25", "1,204"; not a date, a time or
-    a decimal), and nothing beside a changed number saying it is money or a
-    rate ("$", "USD", "%", "per", "/mo")."""
+    a decimal), and nothing within a few words of it saying it is money, a
+    rate, a size, a date or a version ("$", "USD", "%", "a month",
+    "million", "June", "Version")."""
     old_words = old.split()[:_MAX_DIFF_WORDS]
     new_words = new.split()[:_MAX_DIFF_WORDS]
     if old_words == new_words:
@@ -538,7 +546,10 @@ def only_counts_or_marks(old: str, new: str) -> bool:
         changed = (*old_words[i1:i2], *new_words[j1:j2])
         if not all(counted(w) for w in changed):
             return False
-        around = (*old_words[max(0, i1 - 1):i2 + 1], *new_words[max(0, j1 - 1):j2 + 1])
+        around = (
+            *old_words[max(0, i1 - _UNIT_WINDOW):i2 + _UNIT_WINDOW],
+            *new_words[max(0, j1 - _UNIT_WINDOW):j2 + _UNIT_WINDOW],
+        )
         if any(money_or_rate(w) for w in around):
             return False
     return True

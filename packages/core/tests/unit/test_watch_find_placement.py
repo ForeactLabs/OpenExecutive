@@ -101,6 +101,11 @@ def test_only_a_count_changing_is_not_news() -> None:
     assert not only_counts_or_marks("Interest rate 4 % APR", "Interest rate 5 % APR")
     assert not only_counts_or_marks("Deadline 2026-12-01", "Deadline 2027-01-15")
     assert not only_counts_or_marks("Rated 4.5 stars", "Rated 4.7 stars")
+    assert not only_counts_or_marks("Applications close June 3, 2026", "Applications close June 17, 2026")
+    assert not only_counts_or_marks("Webinar on 3 June", "Webinar on 17 June")
+    assert not only_counts_or_marks("Raised 20 million in Series B", "Raised 45 million in Series B")
+    assert not only_counts_or_marks("Plans from 49 a month", "Plans from 59 a month")
+    assert not only_counts_or_marks("Version 17 is out", "Version 18 is out")
     assert only_counts_or_marks("1,204 customers", "1,317 customers")
     assert not only_counts_or_marks("same", "same")
 
@@ -200,3 +205,42 @@ async def test_a_search_drops_stories_already_reported_and_dates_the_rest(monkey
     assert signals[0].published_at is not None and signals[0].published_at.startswith("2026-11-20")
     assert "<already_reported>" in seen_content[0]
     assert "Open Executive launches nine AI specialists" in seen_content[0]
+
+
+def test_only_what_was_shown_counts_as_already_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A suggestion's find, or one kept only on another watch's page, was
+    never shown to anyone, so it can't hold back another watch's result."""
+    from openexecutive.memory import episodic
+    from openexecutive.monitoring import store as ms
+
+    db_path = tmp_path / "reported.db"
+    monkeypatch.setattr(episodic, "DB_PATH", db_path)
+    episodic.initialize_db(db_path)
+    ms.initialize_db(db_path)
+    me = ms.insert_watchlist_item(slug="news-me", signal_type="query", target="rival news", db_path=db_path)
+    other = ms.insert_watchlist_item(slug="news-other", signal_type="query", target="rival", db_path=db_path)
+    suggested = ms.insert_watchlist_item(
+        slug="news-suggested", signal_type="query", target="rival funding",
+        origin="research_proposed", mode="dry_run", db_path=db_path,
+    )
+    assert me and other and suggested
+
+    def find(watch: int, n: int, outcome: str) -> None:
+        sid = ms.insert_signal(Signal(
+            watchlist_id=watch, source_kind="query", source_external_id=f"r{n}",
+            captured_at=datetime.now(UTC).isoformat(), normalized_summary="s",
+            raw_payload={"link": f"https://x.example/{n}", "title": f"story {n}"},
+            provenance_url=f"https://x.example/{n}", dedup_key=f"q{n}", severity_hint=AlertSeverity.LOW,
+        ), db_path=db_path)
+        assert sid is not None
+        ms.mark_signal_processed(sid, outcome, db_path=db_path)
+
+    find(me, 1, "suppressed_low_relevance")   # its own: counts, whatever became of it
+    find(other, 2, "alerted")                 # shown elsewhere: counts
+    find(other, 3, "suppressed_low_relevance")  # never shown: doesn't
+    find(suggested, 4, "brief_line")          # a suggestion's: doesn't
+
+    item = ms.get_watchlist_item(me, db_path=db_path)
+    assert item is not None
+    got = ms.recent_query_finds(item, since=datetime.now(UTC) - timedelta(days=1), db_path=db_path)
+    assert sorted(title for _, title in got) == ["story 1", "story 2"]
