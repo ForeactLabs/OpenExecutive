@@ -591,6 +591,17 @@ async function putBack(tab, back) {
   back.done = true;
 }
 
+// The words still in the box for ~3 s, reading after reading: the press
+// never landed (a send clears the box), not a send that is slow to clear it.
+async function staysFull(target, at) {
+  for (let i = 0; i < 10; i++) {
+    await pause(300);
+    const now = await readSpot(target);
+    if (!now || now.at !== at || !now.full) return false;
+  }
+  return true;
+}
+
 async function pressInTab(tab, x, y) {
   if (!tab || !pressing || tab.id !== pressing.tabId) return { ok: false };
   const conversation = pressing.conversation;
@@ -633,7 +644,9 @@ async function pressInTab(tab, x, y) {
     // straight back, so nothing they type lands in the box.
     // The spot is found before the focus is taken, and the focus is held
     // only for the press, with the box unfocused.
-    if (back && !back.focused && after && after.at === at && after.full) {
+    // A send that is only slow to clear the box must never get a second
+    // press: the words must stay put for ~3 s first.
+    if (back && !back.focused && after && after.at === at && after.full && (await staysFull(target, at))) {
       const last = await sendSpot(target, at, false);
       if (last && last.full) {
         if (await focusForPress(back, target)) {
