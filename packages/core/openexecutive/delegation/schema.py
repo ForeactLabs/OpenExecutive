@@ -151,7 +151,10 @@ _DDL: tuple[str, ...] = (
     "  tell_session TEXT,"
     # Its words came back once in the list (``texts._echo_of``): the same
     # words again are someone's reply.
-    "  echoed INTEGER NOT NULL DEFAULT 0"
+    "  echoed INTEGER NOT NULL DEFAULT 0,"
+    # The Take the lead log row that says it is on its way, told how it
+    # went (``take_the_lead.device_settled``).
+    "  log_id INTEGER"
     ")",
     # The owner's "Let team members use Act as me": one row, absent means off.
     f"CREATE TABLE IF NOT EXISTS {TEAM_TABLE} ("
@@ -442,6 +445,14 @@ def _add_draft_from_executive(conn: sqlite3.Connection) -> None:
         conn.commit()
 
 
+def _add_text_send_log_id(conn: sqlite3.Connection) -> None:
+    """Give a text sends table made before ``log_id`` existed the column."""
+    columns = {row[1] for row in conn.execute(f"PRAGMA table_info({TEXT_SENDS_TABLE})")}
+    if "log_id" not in columns:
+        conn.execute(f"ALTER TABLE {TEXT_SENDS_TABLE} ADD COLUMN log_id INTEGER")
+        conn.commit()
+
+
 def ensure_schema(conn: sqlite3.Connection) -> None:
     """Create the tables if missing. Idempotent."""
     for statement in _DDL:
@@ -452,3 +463,4 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     _add_draft_session_id(conn)
     _add_draft_replaced_by(conn)
     _add_draft_from_executive(conn)
+    _add_text_send_log_id(conn)

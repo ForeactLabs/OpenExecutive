@@ -247,3 +247,21 @@ def test_a_chat_whose_owner_cant_be_read_stays_the_principals(
     monkeypatch.setattr(session_store, "get_session_owner", broken)
     assert "Check the prescription shipped" not in _feed(mate)
     assert "Check the prescription shipped" in _feed(owner)
+
+
+def test_a_text_is_its_askers_alone_and_sent_as_them(team: tuple[Path, int, int]) -> None:
+    from openexecutive.orchestrator import take_the_lead
+
+    db, owner, mate = team
+    with take_the_lead._connect(db) as conn:
+        for who, summary in ((owner, "Text Curt Floener"), (mate, "Text Dana Ruiz")):
+            conn.execute(
+                f"INSERT INTO {take_the_lead.LOG_TABLE} (at, scope, source, tool, summary, status, why, asked_by) "
+                "VALUES (?, ?, 'chat', 'send_text', ?, 'done', '', ?)",
+                (_now(), take_the_lead.SCOPE_EXECUTIVE, summary, who),
+            )
+    for viewer, mine, theirs in ((owner, "Text Curt Floener", "Text Dana Ruiz"), (mate, "Text Dana Ruiz", "Text Curt Floener")):
+        items = [i for i in today_route._build_activity(50, viewer=viewer).items if i.kind == "took_the_lead"]
+        assert [i.summary for i in items] == [mine]
+        assert today_route._as_tag(items[0]) == "Sent as you"
+        assert theirs not in {i.summary for i in items}

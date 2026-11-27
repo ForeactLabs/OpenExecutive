@@ -231,3 +231,13 @@ def test_a_step_the_tidy_up_let_lapse_stops_waiting_and_undo_brings_it_back(
     assert lifecycle.unlapse_step(card)
     block = ttl.done_lately_block(_web(roster.principal))
     assert f"waiting on their OK (card {card})" in block and "Pallet wrap order" in block
+
+
+def test_a_text_on_its_way_or_unsure_is_shown_as_such(monkeypatch: pytest.MonkeyPatch, roster: SimpleNamespace) -> None:
+    # Never read as done, and never left out: it may have gone, so it is never sent twice.
+    _step(monkeypatch, roster.principal, tool="send_text", status=ttl.SENDING, to="", summary="Text Curt Floener")
+    _step(monkeypatch, roster.principal, tool="send_text", status=ttl.UNSURE, to="", summary="Text Dana Ruiz")
+    block = ttl.done_lately_block(_web(roster.principal))
+    assert "on its way from their phone: Text Curt Floener" in block
+    assert "may have gone (their browser couldn't tell): Text Dana Ruiz" in block
+    assert "done: Text" not in block

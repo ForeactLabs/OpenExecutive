@@ -1092,6 +1092,9 @@ class ActivityItem(BaseModel):
     # It sent something to someone (an email, a message), for Done for
     # you's "Sent as …" (``_as_tag``). Never served.
     sent: bool = Field(default=False, exclude=True)
+    # It went from the person's own device (a text from their phone), so
+    # in their name: "Sent as you". Never served.
+    own_device: bool = Field(default=False, exclude=True)
     # The chat a step ran in and the card it went through, so Done for you
     # leaves out a step a take-on row already shows. Never served.
     session_id: str = Field(default="", exclude=True)
@@ -2083,7 +2086,12 @@ def _build_activity(
     for row in led:
         if row.status not in ("done", "approved"):
             continue
-        if not _theirs(None if row.asked_by == owners.principal_id else row.asked_by):
+        # A text went from its asker's own phone: theirs alone, the owner's
+        # too (Privacy hides one person's own messages from everyone else).
+        own_device = take_the_lead.on_own_device(row.tool)
+        if own_device and row.asked_by is None and not everyone:
+            continue
+        if not _theirs(row.asked_by if own_device else None if row.asked_by == owners.principal_id else row.asked_by):
             continue
         if "__" in row.tool and not take_the_lead.mcp_tool_acts(row.tool):
             # A connected-app read logged before reads stopped being gated
@@ -2108,6 +2116,8 @@ def _build_activity(
             mail_to=row.mail_to,
             lead_line=_lead_line(row, jobs, answers),
             sent=mailed or take_the_lead.is_message_send(row.tool),
+            # "Sent as you" only for the person whose phone it went from.
+            own_device=own_device and viewer is not None and row.asked_by == viewer,
             session_id=row.session_id,
             decision_id=row.decision_id,
         ))
@@ -3289,8 +3299,8 @@ def _as_tag(item: ActivityItem) -> str:
     """Whose name a Done for you row went out in: "Sent as you" for what
     Handle it for me sent from the reader's own mailbox; "Sent as <the
     Executive>" for an email or message it sent; else "Done as <the
-    Executive>"."""
-    if item.kind == "sent_as_you":
+    Executive>". A text went from the person's own phone: "Sent as you"."""
+    if item.kind == "sent_as_you" or item.own_device:
         return "Sent as you"
     verb = "Sent" if item.sent or item.mail_to else "Done"
     return f"{verb} as {_executive_name()}"

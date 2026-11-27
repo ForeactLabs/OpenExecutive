@@ -12919,6 +12919,12 @@ delegation:
     a personal source). A turn that read mail never reads texts
     (read_texts is mail-touched withheld). Why: Rufus (2026-11-25) wanted texts only, through the
     extension, not a phone app reading notifications.
+    Its Take the lead row is "sending" while the text is on its way
+    (take_the_lead.device_status, tied by delegation_text_sends.log_id) and
+    becomes done/approved, failed or unsure when the browser settles it
+    (device_settled), so Done for you shows only texts that went, tagged
+    "Sent as you" (on_own_device). Why: Rufus (2026-11-27) saw handed-over
+    tries that never sent listed as "Done as OE".
   later_phases: |
     Each is its own change behind its own switch, off by default: more
     kinds under Handle it for me (meetings, handing to a teammate,

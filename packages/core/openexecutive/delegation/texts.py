@@ -485,6 +485,29 @@ def tell_later(send_id: int, session_id: str, *, db_path: Path | None = None) ->
         _tell(_send(row), db_path=db_path)
 
 
+def link_log(send_id: int, log_id: int, *, db_path: Path | None = None) -> None:
+    """Tie a send to the log row that says it is on its way. Already
+    settled (the browser was quick): the row hears how it went now."""
+    with _connect(db_path) as conn:
+        conn.execute(f"UPDATE {TEXT_SENDS_TABLE} SET log_id=? WHERE id=?", (log_id, send_id))
+        row = conn.execute(f"SELECT * FROM {TEXT_SENDS_TABLE} WHERE id=?", (send_id,)).fetchone()
+    if row is not None and row["status"] in SETTLED:
+        _settle_log(row, db_path)
+
+
+def _settle_log(row: sqlite3.Row, db_path: Path | None = None) -> None:
+    """Tell a settled send's log row how it went. Never raises."""
+    try:
+        log_id = row["log_id"]
+        if log_id is None:
+            return
+        from openexecutive.orchestrator import take_the_lead
+
+        take_the_lead.device_settled(int(log_id), str(row["status"]), db_path=db_path)
+    except Exception:
+        logging.getLogger(__name__).exception("texts: couldn't say on its row how send %s went", row["id"])
+
+
 def send_who(send: Send, *, db_path: Path | None = None) -> str:
     """Who a send is to, in words."""
     if send.conversation_id:
@@ -596,9 +619,10 @@ def _expire(person_id: int, db_path: Path | None) -> None:
                 )
                 if cur.rowcount == 1:
                     row = conn.execute(f"SELECT * FROM {TEXT_SENDS_TABLE} WHERE id=?", (r["id"],)).fetchone()
-                    expired.append(_send(row))
+                    expired.append(row)
     for gone in expired:
-        _tell(gone, db_path=db_path)
+        _settle_log(gone, db_path)
+        _tell(_send(gone), db_path=db_path)
 
 
 def expire_all(*, db_path: Path | None = None) -> None:
@@ -698,6 +722,7 @@ def settle_send(
             )
         row = conn.execute(f"SELECT * FROM {TEXT_SENDS_TABLE} WHERE id=?", (send_id,)).fetchone()
     settled = _send(row)
+    _settle_log(row, db_path)
     _tell(settled, db_path=db_path)
     return settled
 

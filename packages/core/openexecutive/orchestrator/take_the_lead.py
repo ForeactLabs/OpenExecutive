@@ -190,6 +190,14 @@ ACTING_TOOLS: frozenset[str] = frozenset({
 # from their own phone. Approved on their own card, the tap is their OK for
 # that call (``carry_out``), as for an extension's ``card`` tool.
 _OWN_DEVICE_TOOLS = frozenset({"send_text"})
+
+
+def on_own_device(tool: str) -> bool:
+    """Whether ``tool`` runs on the person's own device, as them (a text
+    from their phone), so what it did went out in their name."""
+    return tool in _OWN_DEVICE_TOOLS
+
+
 _DELETE_TOOLS = frozenset({"archive_person", "cancel_calendar_event"})
 # The name ``in_app`` gives a change to the app asked for in chat.
 APP_STEP = "do_in_app:"
@@ -2282,8 +2290,9 @@ def record(
     *, scope: str, source: str, tool: str, summary: str, status: str, why: str = "",
     decision_id: int | None = None, db_path: Path | None = None,
     mail: tuple[str, str] | None = None, outcome: str = "", to_person_id: int | None = None,
-) -> None:
-    """Add a log row (Recent activity reads the done ones). Best effort.
+) -> int | None:
+    """Add a log row (Recent activity reads the done ones), and return its
+    id (None when it couldn't be written). Best effort.
     ``mail`` is an email send's ``(to, subject)`` (``mail_sent``);
     ``outcome`` what came of it (``outcome_of``). What made it look and the
     standing job it worked for come from the pass it ran in (``looking``)."""
@@ -2295,7 +2304,7 @@ def record(
     try:
         conn = _connect(db_path)
         try:
-            conn.execute(
+            cur = conn.execute(
                 f"INSERT INTO {LOG_TABLE} (at, scope, source, tool, summary, status, why, decision_id, "  # noqa: S608
                 "mail_to, mail_subject, prompted_by, job_id, outcome, to_person_id, goal_id, asked_by, session_id) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -2304,10 +2313,87 @@ def record(
                  asked_by_now(), _session_now()),
             )
             conn.commit()
+            return int(cur.lastrowid) if cur.lastrowid is not None else None
         finally:
             conn.close()
     except Exception:
         logger.warning("take_the_lead: couldn't record what it did", exc_info=True)
+        return None
+
+
+# A text is handed to the person's browser and goes from their phone later:
+# until the browser says it went, its row is on its way (or, when the
+# browser couldn't tell, unsure), never done (``device_status``,
+# ``device_settled``).
+SENDING = "sending"
+UNSURE = "unsure"
+
+
+def device_status(tool: str, text: str) -> tuple[str | None, int | None]:
+    """For a step on the person's own device that ran (``_OWN_DEVICE_TOOLS``):
+    the log status its result calls for in place of done ("sending" while it
+    is on its way, "unsure" when the browser couldn't tell; None once it
+    went) and the device send it is (``send_id``). (None, None) for any
+    other step or a result that isn't JSON."""
+    if tool not in _OWN_DEVICE_TOOLS:
+        return None, None
+    try:
+        parsed = json.loads(text)
+    except (TypeError, ValueError):
+        return None, None
+    if not isinstance(parsed, dict):
+        return None, None
+    raw = parsed.get("send_id")
+    send_id = raw if isinstance(raw, int) and not isinstance(raw, bool) else None
+    state = parsed.get("status")
+    if state == "on_its_way":
+        return SENDING, send_id
+    if state == "unsure":
+        return UNSURE, send_id
+    return None, send_id
+
+
+def _link_device(send_id: int | None, log_id: int | None) -> None:
+    """Tie a device send to its log row, so the row says how it went once
+    the browser does (``device_settled``). Best effort."""
+    if send_id is None or log_id is None:
+        return
+    try:
+        from openexecutive.delegation import texts
+
+        texts.link_log(send_id, log_id)
+    except Exception:
+        logger.warning("take_the_lead: couldn't tie a text to its row", exc_info=True)
+
+
+def device_settled(log_id: int, went: str, *, db_path: Path | None = None) -> None:
+    """The browser said how a device send went (``texts.SENT``, ``FAILED`` or
+    ``UNSURE``): its log row, while still on its way or unsure, becomes done
+    (approved, for one that waited on a card), failed or unsure. Best
+    effort."""
+    from openexecutive.delegation import texts
+
+    try:
+        conn = _connect(db_path)
+        try:
+            row = conn.execute(
+                f"SELECT decision_id FROM {LOG_TABLE} WHERE id = ? AND status IN (?, ?)",  # noqa: S608
+                (log_id, SENDING, UNSURE),
+            ).fetchone()
+            if row is None:
+                return
+            if went == texts.SENT:
+                status = "approved" if row["decision_id"] is not None else "done"
+            elif went == texts.UNSURE:
+                status = UNSURE
+            else:
+                status = "failed"
+            conn.execute(f"UPDATE {LOG_TABLE} SET status = ? WHERE id = ?", (status, log_id))  # noqa: S608
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        logger.warning("take_the_lead: couldn't say how a text went", exc_info=True)
 
 
 def _set_log_status(decision_id: int, status: str, *, db_path: Path | None = None) -> None:
@@ -2383,7 +2469,7 @@ DONE_LATELY_TEXT = 400
 # A step that went (on its own, or once its card was approved), and one
 # whose card is still open. A failed or skipped one didn't happen: asking
 # again is a new ask.
-_LATELY_WENT = ("done", "approved")
+_LATELY_WENT = ("done", "approved", SENDING, UNSURE)
 _LATELY_WAITING = "waiting"
 
 
@@ -2406,7 +2492,7 @@ def done_lately(
         rows = conn.execute(
             f"SELECT l.* FROM {LOG_TABLE} l LEFT JOIN decision_instances d ON d.id = l.decision_id "  # noqa: S608
             f"WHERE l.asked_by = ? AND ((l.status = ? AND (l.decision_id IS NULL OR d.status IN ({open_marks}))) "
-            "OR (l.status IN (?, ?) AND l.at >= ?)) ORDER BY l.at DESC, l.id DESC LIMIT ?",
+            f"OR (l.status IN ({','.join('?' * len(_LATELY_WENT))}) AND l.at >= ?)) ORDER BY l.at DESC, l.id DESC LIMIT ?",
             (int(person_id), _LATELY_WAITING, *OPEN_STATUSES, *_LATELY_WENT, since, DONE_LATELY_MAX * 4),
         ).fetchall()
     finally:
@@ -2468,6 +2554,10 @@ def done_lately_block(session: Any, *, now: datetime | None = None, db_path: Pat
                 )
                 card = f" (card {step.decision_id})" if step.decision_id else ""
                 state = f"waiting on {whose} OK{card}"
+            elif step.status == SENDING:
+                state = "on its way from their phone"
+            elif step.status == UNSURE:
+                state = "may have gone (their browser couldn't tell)"
             else:
                 state = "done"
             lines.append(no_tags(f"- {at}, {state}: {what}"))
@@ -3163,10 +3253,15 @@ async def _gated(name: str, inner: _Handler, tool_input: dict[str, Any], *, sour
         why = f"{why} You allowed this: {allowed.label}.".strip()
         if not failed:
             _used(allowed.id)
-    record(scope=SCOPE_EXECUTIVE, source=source, tool=name, summary=summarize(name, tool_input, mcp=mcp, quote=False),
-           status="failed" if failed else "done", why=why, mail=mail_sent(name, tool_input) if mcp else None,
-           outcome="" if failed else outcome_of(name, tool_input, text, mcp=mcp),
-           to_person_id=_message_target(name, tool_input))
+    on_device, send_id = device_status(name, text) if not failed else (None, None)
+    log_id = record(
+        scope=SCOPE_EXECUTIVE, source=source, tool=name, summary=summarize(name, tool_input, mcp=mcp, quote=False),
+        status="failed" if failed else on_device or "done", why=why, mail=mail_sent(name, tool_input) if mcp else None,
+        outcome="" if failed else outcome_of(name, tool_input, text, mcp=mcp),
+        to_person_id=_message_target(name, tool_input),
+    )
+    if on_device is not None:
+        _link_device(send_id, log_id)
     return text
 
 
@@ -3430,9 +3525,15 @@ def _went_on_its_own(name: str, tool_input: dict[str, Any], result: Any, *, mcp:
         session = current_session.get()
         why = went_on_its_own_why(levels.turn_level(session))
         asked = who_asked(session)
-        record(scope=SCOPE_EXECUTIVE, source="chat", tool=name, summary=summarize(name, tool_input, mcp=mcp, quote=False),
-               status="done", why=f"{asked} Went on its own: {why}.".strip(), mail=mail_sent(name, tool_input) if mcp else None,
-               outcome=outcome_of(name, tool_input, text, mcp=mcp), to_person_id=_message_target(name, tool_input))
+        on_device, send_id = device_status(name, text)
+        log_id = record(
+            scope=SCOPE_EXECUTIVE, source="chat", tool=name, summary=summarize(name, tool_input, mcp=mcp, quote=False),
+            status=on_device or "done", why=f"{asked} Went on its own: {why}.".strip(),
+            mail=mail_sent(name, tool_input) if mcp else None,
+            outcome=outcome_of(name, tool_input, text, mcp=mcp), to_person_id=_message_target(name, tool_input),
+        )
+        if on_device is not None:
+            _link_device(send_id, log_id)
     except Exception:
         logger.warning("take_the_lead: couldn't log a step that went on its own", exc_info=True)
 
@@ -3689,19 +3790,27 @@ def resolved(
     tool_input: dict[str, Any] = raw_input if isinstance(raw_input, dict) else {}
     mcp = bool(payload.get("mcp"))
     mail_to, mail_subject = (mail_sent(tool, tool_input) if mcp else None) or ("", "")
+    # A text approved on its card went to the browser: approved once it went.
+    on_device, send_id = device_status(tool, result)
     try:
         conn = _connect(db_path)
         try:
             conn.execute(
                 f"UPDATE {LOG_TABLE} SET status = ?, at = ?, summary = ?, mail_to = ?, mail_subject = ?, "  # noqa: S608
                 "outcome = ?, to_person_id = ? WHERE decision_id = ?",
-                (status, datetime.now(UTC).isoformat(), summarize(tool, tool_input, mcp=mcp, quote=False),
+                (on_device or status, datetime.now(UTC).isoformat(), summarize(tool, tool_input, mcp=mcp, quote=False),
                  mail_to, mail_subject, _one_line(outcome_of(tool, tool_input, result, mcp=mcp), 160),
                  _message_target(tool, tool_input), decision_id),
             )
             conn.commit()
+            row = conn.execute(
+                f"SELECT id FROM {LOG_TABLE} WHERE decision_id = ? ORDER BY id DESC LIMIT 1",  # noqa: S608
+                (decision_id,),
+            ).fetchone() if on_device is not None else None
         finally:
             conn.close()
+        if row is not None:
+            _link_device(send_id, int(row["id"]))
     except Exception:
         # Whatever else failed, the step went: it never stays "waiting".
         logger.warning("take_the_lead: couldn't update what it did", exc_info=True)
