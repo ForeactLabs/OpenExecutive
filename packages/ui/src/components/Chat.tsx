@@ -373,6 +373,7 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
     setLiveState(EMPTY_LIVE);
     setSettling(null);
     setClosed(null);
+    setStepsOpen(null);
     setSharing(false);
     if (initialSessionId && endsOnReply(initialMessages)) loadFollowup(initialSessionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1095,11 +1096,10 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
   // While the turn streams, its own timeline, even once the finished one has
   // come and the reply is not in the list yet.
   const runningTimeline = isLoading ? turnTimeline : null;
-  const openIndex = liveOpen
-    ? runningTimeline || messages[stepsOpen.live]?.role !== "assistant"
-      ? null
-      : stepsOpen.live
-    : stepsOpen;
+  // The turn's reply is the first one from where it was opened: messages the
+  // person queued while it ran land just before it.
+  const liveReply = liveOpen ? messages.findIndex((m, i) => i >= stepsOpen.live && m.role === "assistant") : -1;
+  const openIndex = liveOpen ? (runningTimeline || liveReply < 0 ? null : liveReply) : stepsOpen;
   const openTimeline =
     liveOpen && runningTimeline
       ? runningTimeline
