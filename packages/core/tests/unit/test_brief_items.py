@@ -245,6 +245,27 @@ def test_a_bold_lead_in_item_keeps_its_part_heading() -> None:
     )
 
 
+@pytest.mark.parametrize("lead_in", ["Sign Acme lease", "Sign it"])
+def test_a_short_bold_lead_in_item_keeps_its_part_heading(lead_in: str) -> None:
+    text = (
+        "**Do today**\n"
+        f"**{lead_in}** — Dana needs it by noon.\n\n"
+        "**New since yesterday**\n"
+        "- Nothing new in your inbox.\n"
+        "- Dana sent it."
+    )
+    assert brief_items.drop_empty_lines(text).startswith(f"**Do today**\n**{lead_in}**")
+
+
+def test_an_empty_part_above_an_inline_part_is_dropped() -> None:
+    text = (
+        "**Do today**\n"
+        "- Nothing new in your inbox.\n\n"
+        "**New since yesterday** — Dana sent the lease."
+    )
+    assert brief_items.drop_empty_lines(text) == "**New since yesterday** — Dana sent the lease."
+
+
 def test_a_short_headline_still_counts_as_told() -> None:
     vat = _card(250, "Q3 VAT due")
     rendered = "- Q3 VAT due\nClose 4 buyouts\nJosef R"

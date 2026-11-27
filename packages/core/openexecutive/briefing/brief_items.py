@@ -309,15 +309,25 @@ def _says_nothing(text: str) -> bool:
     return bool(_EMPTY_LINE.match(body))
 
 
+# The parts the briefs and the digest are written in (``narrative``'s
+# prompts and ``workflows.end_of_day_digest``). An item's bold lead-in is
+# any other name, however short.
+_PART_NAMES = frozenset({
+    "do today", "new since yesterday", "still open", "getting started",
+    "today", "done for you", "needs you", "next", "sleep on this",
+    "what changed", "handled overnight",
+})
+
+
 def _is_part_heading(line: str) -> bool:
     """A heading with its text on the same line ("**Needs you** - Approve
-    the draft"), not an item with a bold lead-in ("**Sign the Pine View
-    lease** — Dana needs it by noon"): a part's name is a few words."""
+    the draft"), not an item with a bold lead-in ("**Sign Acme lease** —
+    Dana needs it by noon"): a part's name is one the briefs use."""
     match = _INLINE_HEADING.match(line)
     if match is None:
         return False
-    name = re.sub(r"[*:—-]", " ", match.group(1)).split()
-    return len(name) <= 3
+    name = " ".join(re.sub(r"[*:—-]", " ", match.group(1)).split()).casefold()
+    return name in _PART_NAMES
 
 
 def drop_empty_lines(text: str) -> str:
