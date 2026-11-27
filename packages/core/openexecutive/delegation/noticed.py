@@ -94,10 +94,25 @@ def _iso(value: datetime) -> str:
 
 
 def _prune(conn: sqlite3.Connection, now: datetime) -> None:
+    cutoff = _iso(now - KEEP)
     conn.execute(
-        f"DELETE FROM {NOTICED_TABLE} WHERE noted_at < ?",  # noqa: S608 — constant table name
-        (_iso(now - KEEP),),
+        f"DELETE FROM {NOTICED_TABLE} WHERE noted_at < ? OR received_at < ?",  # noqa: S608 — constant table name
+        (cutoff, cutoff),
     )
+
+
+def prune(*, now: datetime | None = None, db_path: Path | None = None) -> None:
+    """Delete what is older than ``KEEP``, for everyone, even when nothing
+    new is written. Never raises."""
+    try:
+        conn = _connect(db_path)
+        try:
+            _prune(conn, now or datetime.now(UTC))
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        logger.warning("noticed: pruning failed", exc_info=True)
 
 
 def note(
@@ -352,5 +367,5 @@ def forget(person_id: int, *, source: str | None = None, db_path: Path | None = 
 
 __all__ = [
     "EMAIL", "KEEP", "MATCH_WINDOW", "Noticed", "claim_to_act", "forget", "kept_keys", "match_key",
-    "note", "recent", "release", "set_gist", "waiting_to_act",
+    "note", "prune", "recent", "release", "set_gist", "waiting_to_act",
 ]

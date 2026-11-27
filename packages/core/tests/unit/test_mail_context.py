@@ -259,6 +259,29 @@ def test_a_failed_gist_is_read_again_after_a_backoff(owner: Any, monkeypatch: py
     assert mail_context.get_cursor(owner.id).failures == 0
 
 
+def test_someone_who_may_no_longer_have_it_is_forgotten(owner: Any, monkeypatch: pytest.MonkeyPatch,
+                                                         model: dict[str, Any]) -> None:
+    import openexecutive.delegation.settings as delegation_settings
+
+    _look(owner, Mailbox(_msg("m1")))
+    assert noticed.recent(owner.id, now=NOW)
+    monkeypatch.setattr(delegation_settings, "can_delegate", lambda person: False)
+    client = Mailbox(_msg("m2"))
+    later = NOW + timedelta(minutes=10)
+    assert _look(owner, client, later).status == "act_as_me_off"
+    assert noticed.recent(owner.id, now=later) == [] and client.asked_since == []
+    assert owner.id not in mail_context._due(later + timedelta(minutes=1))
+
+
+def test_what_came_in_is_pruned_even_when_nothing_new_comes(owner: Any) -> None:
+    noticed.note(owner.id, source=noticed.EMAIL, item_key="old", sender_name="Delta", subject="DL123",
+                 received_at=NOW - timedelta(days=3), now=NOW - timedelta(days=3))
+    noticed.note(owner.id, source=noticed.EMAIL, item_key="new", sender_name="UPS", subject="Delivered",
+                 received_at=NOW, now=NOW)
+    noticed.prune(now=NOW)
+    assert noticed.kept_keys(owner.id, ["old", "new"]) == {"new"}
+
+
 def test_nothing_is_read_with_act_as_me_off(owner: Any, model: dict[str, Any]) -> None:
     set_enabled(owner.id, False, updated_by="test")
     client = Mailbox(_msg("m1"))

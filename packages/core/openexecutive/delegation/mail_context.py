@@ -380,7 +380,14 @@ async def look_person(person: Any, *, gmail: Any = None, now: datetime | None = 
         return LookResult("off")
     try:
         cursor = get_cursor(person.id)
-        if not can_delegate(person) or not is_enabled(person.id):
+        if not is_enabled(person.id):
+            return LookResult("act_as_me_off")
+        if not can_delegate(person):
+            # Switch still on, but they may no longer have it (a role
+            # change): forget what came in, and look again only later.
+            forget(person.id)
+            _save_cursor(_Cursor(person_id=person.id, last_poll_at=moment.isoformat(),
+                                 backoff_until=(moment + AUTH_RECHECK).isoformat()))
             return LookResult("act_as_me_off")
     except Exception:
         logger.exception("mail_context: couldn't start a look")
@@ -724,6 +731,7 @@ async def _look_due(person_ids: list[int], now: datetime) -> None:
             logger.warning("mail_context: couldn't read person %s", person_id, exc_info=True)
             continue
         if person is None or person.archived:
+            forget(person_id)
             continue
         await look_person(person, now=now)
 
@@ -739,6 +747,9 @@ def maybe_look(now: datetime) -> bool:
 
         if _client_slot_active():
             return False
+        from openexecutive.delegation import noticed
+
+        noticed.prune(now=now)  # the two days hold even when nothing new comes
         due = _due(now)
         if not due:
             return False
