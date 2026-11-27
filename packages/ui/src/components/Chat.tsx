@@ -8,7 +8,7 @@ import { APPROVED_MESSAGE } from "./ChatHeldActionCard";
 import BrowserExtensionCard, { BROWSER_GO_AHEAD } from "./browser/BrowserExtensionCard";
 import BrowserWelcomeCard from "./browser/BrowserWelcomeCard";
 import { browserWelcomeClosed, closeBrowserWelcome, showBrowserWelcome } from "@/lib/browserWelcome";
-import BrandMark from "./BrandMark";
+import BrandMark, { CouncilMark } from "./BrandMark";
 import TurnStatusRow, { useTurnClock } from "./TurnStatusRow";
 import TurnSteps from "./TurnSteps";
 import HandOverAsk from "./HandOverAsk";
@@ -1461,8 +1461,10 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
               ) : (
                 liveSlot && (
                   <div className="flex gap-4 mb-8">
+                    {/* While it works, the bare mark in the accent colour; a
+                        written reply's avatar (Message) keeps its circle. */}
                     <div className="flex-shrink-0 mt-1">
-                      <BrandMark size="md" consulting />
+                      <CouncilMark consulting className="w-7 h-7 text-accent" />
                     </div>
                     <div className="flex-1 pt-1.5">
                       <div className="text-xs text-fg-muted mb-3 font-medium tracking-wide uppercase">{executiveName}</div>
@@ -1490,7 +1492,7 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
                   ) : (
                     <div className="flex gap-4 mb-8">
                       <div className="flex-shrink-0 mt-1">
-                        <BrandMark size="md" consulting />
+                        <CouncilMark consulting className="w-7 h-7 text-accent" />
                       </div>
                       <div className="flex-1 pt-1.5">
                         <div className="text-xs text-fg-muted mb-3 font-medium tracking-wide uppercase">{executiveName}</div>
