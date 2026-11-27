@@ -43,6 +43,19 @@ _SIGN_IN_LINK = re.compile(
     r"tap to (?:sign|log) in|trying to sign in)\b",
     re.IGNORECASE,
 )
+# A gate, door, garage, alarm, lockbox or wifi code, however it is worded
+# ("The code for the gate is 4821", "Wifi: HomeNet, password 84219375"), is
+# something people text each other and ask about later: never dropped.
+_HOME = re.compile(
+    r"\b(?:gates?|doors?|garage|alarm|lock ?box|keypad|wi-?fi|ssid|router|network|building|lobby)\b",
+    re.IGNORECASE,
+)
+# Words only a sign-in code has: with one of them, a place word ("Your
+# PlayStation Network verification code is 482913") doesn't keep it.
+_SIGN_IN_WORD = re.compile(
+    r"\b(?:verif\w*|sign[- ]?in|log[- ]?in|otp|one[- ]time|2fa|two[- ]factor|authenticat\w*|security code)\b",
+    re.IGNORECASE,
+)
 # "Enter 482913 to confirm", "Use 482913 to verify your account": a number
 # to type back somewhere.
 _ENTER_CODE = re.compile(
@@ -56,8 +69,8 @@ def is_sign_in_code(text: str) -> bool:
     """Whether the words read like a sign-in code ("Your code is 482913",
     "Enter 4 8 2 9 1 3 to confirm") or a sign-in link or prompt."""
     words = text or ""
-    return bool(
-        _SIGN_IN_LINK.search(words)
-        or _ENTER_CODE.search(words)
-        or _CODE_NEAR.search(words)
-    )
+    if _SIGN_IN_LINK.search(words):
+        return True
+    if _HOME.search(words) and not _SIGN_IN_WORD.search(words):
+        return False
+    return bool(_ENTER_CODE.search(words) or _CODE_NEAR.search(words))

@@ -53,12 +53,18 @@
   const NOT_A_PLACE = "(?<!apt )(?<!apt\\. )(?<!apartment )(?<!suite )(?<!ste )(?<!room )(?<!rm )(?<!unit )(?<!floor )(?<!building )(?<!bldg )(?<!lot )(?<!box )(?<!#)(?<!no\\. )";
   const CODE_NEAR = new RegExp(CODE_WORD + "[^\\d\\n]{0,25}" + NUMBER + "|" + NOT_A_PLACE + NUMBER + "[^\\d\\n]{0,40}" + CODE_WORD, "i");
   const SIGN_IN_LINK = /\b(magic link|sign[- ]?in link|log[- ]?in link|is this you signing in|approve (?:this |the )?sign[- ]?in|tap to (?:sign|log) in|trying to sign in)\b/i;
+  const HOME = /\b(?:gates?|doors?|garage|alarm|lock ?box|keypad|wi-?fi|ssid|router|network|building|lobby)\b/i;
+  // Words only a sign-in code has: with one, a place word doesn't keep it.
+  const SIGN_IN_WORD = /\b(?:verif\w*|sign[- ]?in|log[- ]?in|otp|one[- ]time|2fa|two[- ]factor|authenticat\w*|security code)\b/i;
   const ENTER_CODE = new RegExp("\\b(?:enter|type)\\s+" + NUMBER + "|\\buse\\s+" + NUMBER + "\\s+(?:to|for)\\s+(?:verify|confirm|sign|log|authenticat)", "i");
 
   /** Whether the words read like a sign-in code or a sign-in link. */
   T.isSignInCode = function (text) {
     const s = String(text || "");
-    return SIGN_IN_LINK.test(s) || ENTER_CODE.test(s) || CODE_NEAR.test(s);
+    if (SIGN_IN_LINK.test(s)) return true;
+    // A gate, door or wifi code, however it is worded, is kept.
+    if (HOME.test(s) && !SIGN_IN_WORD.test(s)) return false;
+    return ENTER_CODE.test(s) || CODE_NEAR.test(s);
   };
 
   /** One line of text, at most `max` characters. */
@@ -137,6 +143,9 @@
   const KEEP = 30 * DAY;
   // Seen-map mark for a row a full first look had no room for.
   const WAITING = "~";
+  // The same, for a row that went as earlier: still earlier when it is told
+  // (a text the old version had told is never answered on the next look).
+  const WAITING_EARLIER = "~e";
 
   /**
    * What to tell Open Executive about the list, given what it said before
@@ -163,10 +172,11 @@
       // A row a full first look had no room for ("~") is still judged as a
       // first look, so its old text never reads as new.
       const kept = first ? "" : String(next[row.key] || "");
-      const look = first || kept === WAITING;
+      const waited = kept === WAITING || kept === WAITING_EARLIER;
+      const look = first || waited;
       // What was seen is "<fingerprint>.<count of changes>": the count tells
       // the same words again later ("ok") from the same report sent again.
-      const [beforePrint, beforeCount] = (kept === WAITING ? "" : kept).split(".");
+      const [beforePrint, beforeCount] = (waited ? "" : kept).split(".");
       if (beforePrint === print) continue;
       const count = (parseInt(beforeCount, 10) || 0) + 1;
       const before = look ? WAITING : next[row.key];
@@ -176,7 +186,7 @@
       if (look && (shown === null || now - shown > KEEP)) continue;
       if (T.isSignInCode(row.snippet)) continue;
       const toldBefore = Boolean(told && typeof told === "object" && String(told[row.key] || "").split(".")[0] === print);
-      const earlier = look && (toldBefore || !row.unread || row.outgoing || now - shown > DAY);
+      const earlier = look && (kept === WAITING_EARLIER || toldBefore || !row.unread || row.outgoing || now - shown > DAY);
       items.push({
         // What was seen before (taken off before it goes): a row cut from a
         // full report is put back to it, so the next report tells it.
@@ -206,7 +216,7 @@
     items.sort((a, b) => Number(a.earlier) - Number(b.earlier));
     for (const cut of items.slice(100)) {
       if (cut.before === undefined) delete next[cut.conversation];
-      else next[cut.conversation] = cut.before;
+      else next[cut.conversation] = cut.before === WAITING && cut.earlier ? WAITING_EARLIER : cut.before;
     }
     return { items: items.slice(0, 100).map(({ before, ...item }) => item), seen: next };
   };
