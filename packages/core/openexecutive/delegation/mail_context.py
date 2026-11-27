@@ -550,9 +550,9 @@ def _reply_state(person: Any, item: Any, now: datetime) -> str:
     except Exception:
         logger.warning("mail_context: couldn't read the reply cards", exc_info=True)
         return "wait"
-    if outcome in (inbox.DRAFTED, inbox.SENT, inbox.PROCESSING):
+    if outcome in (inbox.DRAFTED, inbox.SENT):
         return "handled"
-    if outcome not in (None, inbox.RETRY):
+    if outcome not in (None, inbox.RETRY, inbox.PROCESSING):  # PROCESSING: still deciding
         return "act"
     poll = timedelta(minutes=get_settings().delegation_inbox_poll_minutes)
     received = _parse(item.received_at) or now
@@ -579,7 +579,7 @@ def _left_to_us(person: Any, message: Any, exec_address: str) -> bool:
     if exec_address and exec_address in addressed:
         return False
     try:
-        if inbox.outcomes(person.id, [message.id]).get(message.id) in (inbox.DRAFTED, inbox.SENT, inbox.PROCESSING):
+        if inbox.outcomes(person.id, [message.id]).get(message.id) in (inbox.DRAFTED, inbox.SENT):
             return False
         if message.thread_id in inbox.card_threads(inbox.open_cards(person.id)):
             return False
@@ -657,6 +657,10 @@ async def _act(person: Any, client: Any, notes: list[_Note], *, off_team: bool) 
         logger.exception("mail_context: couldn't start the turn for person %s", person.id)
         noticed.release(person.id, [n.message.id for n in notes])
         return
+    from openexecutive.delegation.settings import can_delegate, is_enabled
+
+    if not is_enabled(person.id) or not can_delegate(person):
+        return  # turned off since the look claimed it
     try:
         await _turn(person, executive, session, prompt_for(person, notes))
     except Exception:

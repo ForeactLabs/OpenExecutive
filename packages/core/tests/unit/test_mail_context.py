@@ -459,6 +459,29 @@ def test_waits_for_the_reply_watcher_and_leaves_its_cards_alone(owner: Any, mode
     assert noticed.waiting_to_act(owner.id, source=noticed.EMAIL, now=NOW + timedelta(minutes=10)) == []
 
 
+def test_a_reply_watcher_still_deciding_is_waited_for(owner: Any, model: dict[str, Any]) -> None:
+    inbox.set_watch(owner.id, True, updated_by="test", now=NOW - timedelta(days=1))
+    fresh = _msg("m1", minutes_ago=1)
+    inbox._claim(owner.id, fresh, relation="", outcome=inbox.PROCESSING, now=NOW)
+    _look(owner, Mailbox(fresh))
+    assert model["acts"] == []
+    inbox._retry_later(owner.id, fresh.id, "test")  # then the watcher decides: no reply needed
+    inbox._claim(owner.id, fresh, relation="", outcome=inbox.NOT_NEEDED, now=NOW)
+    _look(owner, Mailbox(fresh), NOW + timedelta(minutes=10))
+    assert len(model["acts"]) == 1
+
+
+def test_no_turn_once_act_as_me_went_off_after_the_claim(owner: Any, monkeypatch: pytest.MonkeyPatch,
+                                                         model: dict[str, Any]) -> None:
+    async def prepare_then_off(person: Any, client: Any, *, off_team: bool) -> tuple[Any, Any]:
+        set_enabled(owner.id, False, updated_by="test")
+        return None, {"off_team": off_team}
+
+    monkeypatch.setattr(mail_context, "_prepare", prepare_then_off)
+    _look(owner, Mailbox(_msg("m1")))
+    assert model["acts"] == []
+
+
 def test_acts_once_the_reply_watcher_needs_no_reply(owner: Any, model: dict[str, Any]) -> None:
     inbox.set_watch(owner.id, True, updated_by="test", now=NOW - timedelta(days=1))
     fresh = _msg("m1", minutes_ago=1)
