@@ -59,6 +59,7 @@ _DRAFTS_SHOWN = 2
 MY_EMAIL_READ_BEFORE = "my_email_read_before"
 MY_CALENDAR = "my_calendar"
 SAVE_MY_EMAIL_ATTACHMENT = "save_my_email_attachment"
+WHAT_CAME_IN = "what_came_in"
 
 SEARCHES_PER_TURN = 10
 THREADS_PER_TURN = 20
@@ -270,6 +271,32 @@ SAVE_MY_EMAIL_ATTACHMENT_TOOL: dict[str, Any] = {
     },
 }
 
+WHAT_CAME_IN_TOOL: dict[str, Any] = {
+    "name": WHAT_CAME_IN,
+    "description": (
+        "What reached the person you are speaking with in the last two days, "
+        "newest first: each email in their own inbox (in Gmail every tab but "
+        "promotions, social and forums, in Outlook Focused and Other; so "
+        "deliveries, bank and card alerts, travel changes, receipts and notes "
+        "from people; search their mailbox for anything else), with who it is from, its subject, a "
+        "one-line gist of what it says and what it ties to that you know (a "
+        "meeting, a task, someone on the team). Use it first when they ask what "
+        "came in, whether something arrived or was answered, or about a "
+        "delivery, payment, flight or booking, before searching their mailbox. "
+        "`words` narrows it to items holding all of them. Open one in full with "
+        "read_my_email (its thread_id). Read-only."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "words": {
+                "type": "string",
+                "description": "Optional words from the sender, subject or gist, e.g. 'UPS' or 'refund'.",
+            },
+        },
+    },
+}
+
 MAIL_READ_TOOLS: list[dict[str, Any]] = [
     MY_CALENDAR_TOOL,
     MY_EMAIL_AWAITING_REPLY_TOOL,
@@ -278,6 +305,7 @@ MAIL_READ_TOOLS: list[dict[str, Any]] = [
     READ_MY_EMAIL_ATTACHMENT_TOOL,
     SAVE_MY_EMAIL_ATTACHMENT_TOOL,
     SEARCH_MY_EMAIL_TOOL,
+    WHAT_CAME_IN_TOOL,
 ]
 
 
@@ -635,6 +663,54 @@ async def handle_my_email_read_before(tool_input: dict[str, Any]) -> str:
     return await _run(MY_EMAIL_READ_BEFORE, ("searches", SEARCHES_PER_TURN, "searches"), read)
 
 
+async def handle_what_came_in(tool_input: dict[str, Any]) -> str:
+    from openexecutive.delegation import noticed
+    from openexecutive.memory.workspace_settings import get_user_timezone
+
+    words = str(tool_input.get("words") or "").strip()[:200]
+
+    async def read(writer: Any) -> str:
+        found = noticed.recent(writer.person.id, words=words, limit=noticed.MAX_LISTED + 1)
+        more = len(found) > noticed.MAX_LISTED
+        found = found[: noticed.MAX_LISTED]
+        if not found:
+            return json.dumps({
+                "status": "not_found",
+                "detail": (
+                    "Nothing like that reached them in the last two days. Search their mailbox "
+                    "with search_my_email."
+                    if words else "Nothing new reached them in the last two days."
+                ),
+            })
+        zone = get_user_timezone()
+        items: list[dict[str, str]] = []
+        for item in found:
+            when = _parse_time(item.received_at)
+            entry = {
+                "from": f"{item.sender_name} <{item.sender}>" if item.sender_name else item.sender,
+                "subject": item.subject,
+                "at": when.astimezone(zone).strftime("%a %d %b %H:%M") if when else item.received_at[:16],
+                "via": item.source,
+            }
+            if item.gist:
+                entry["gist"] = item.gist
+            if item.tie:
+                entry["ties_to"] = item.tie
+            if item.thread_id:
+                entry["thread_id"] = item.thread_id
+            items.append(entry)
+        _note_senders(writer, [i["from"] for i in items])
+        out: dict[str, Any] = {"status": "ok", "items": items, "note": _DATA_NOTE}
+        if more:
+            out["more"] = (
+                f"Only the newest {noticed.MAX_LISTED} are listed. More reached them: narrow with "
+                "words, or search their mailbox with search_my_email."
+            )
+        return json.dumps(out)
+
+    return await _run(WHAT_CAME_IN, ("searches", SEARCHES_PER_TURN, "searches"), read)
+
+
 async def handle_my_email_awaiting_reply(tool_input: dict[str, Any]) -> str:
     from openexecutive.config import get_settings
     from openexecutive.delegation.follow_ups import recipients
@@ -915,4 +991,5 @@ MAIL_READ_TOOL_HANDLERS: dict[str, Any] = {
     READ_MY_EMAIL_ATTACHMENT: handle_read_my_email_attachment,
     SAVE_MY_EMAIL_ATTACHMENT: handle_save_my_email_attachment,
     SEARCH_MY_EMAIL: handle_search_my_email,
+    WHAT_CAME_IN: handle_what_came_in,
 }

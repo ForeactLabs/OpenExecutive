@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from openexecutive.api.routes import texts as route
 from openexecutive.delegation import texts as tx
 from openexecutive.delegation import texts_watch
+from openexecutive.delegation.settings import DelegationOverride
 from openexecutive.memory import episodic
 from openexecutive.orchestrator import take_the_lead as ttl
 from openexecutive.orchestrator import text_tools
@@ -927,6 +928,9 @@ def test_a_turn_on_a_teammates_text_never_reads_the_others_either(ids: dict[str,
         Session(unattended=True, caller_person_id=owner, answers_a_text=True),
         # The inbox's reply-card work answers an email, maybe a stranger's.
         Session(unattended=True, caller_person_id=owner, reply_card_work=7),
+        # A turn on mail that just came in, even when it is all the team's.
+        Session(unattended=True, caller_person_id=owner, sender_off_team=False,
+                delegation_override=DelegationOverride(enabled=True, inbox_work=True)),
     ):
         token = current_session.set(session)
         try:

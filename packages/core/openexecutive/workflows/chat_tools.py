@@ -113,6 +113,7 @@ ACCESS: dict[str, tuple[str, str]] = {
     "save_my_email_attachment": (AS_ME, "save an attachment from the person's mail"),
     "my_email_awaiting_reply": (AS_ME, "the person's unanswered sent mail"),
     "my_email_read_before": (AS_ME, "mail opened for the person before"),
+    "what_came_in": (AS_ME, "what reached the person lately"),
     "my_calendar": (AS_ME, "the person's own calendar"),
     "remind_me": (AS_ME, "a reminder for the person"),
     "propose_actions": (AS_ME, "an approval card from the person's mail"),

@@ -677,3 +677,37 @@ def test_my_calendar_says_when_the_read_came_back_full(calendar_on: None) -> Non
     result = _calendar(_session(CalendarMailbox(full)), {"start": "2026-10-14", "days": 31})
     assert result["truncated"] is True and "fewer days" in result["note"]
     assert "truncated" not in _calendar(_session(CalendarMailbox(full[:3])), {"start": "2026-10-14"})
+
+
+# --------------------------------------------------------------------------- #
+# what_came_in: what reached them lately, kept as their context
+# --------------------------------------------------------------------------- #
+
+
+def test_what_came_in_lists_their_own_items_with_gists(roster: SimpleNamespace) -> None:
+    from openexecutive.delegation import noticed
+
+    noticed.note(roster.principal, source=noticed.EMAIL, item_key="m1", sender_name="UPS", sender="ups@ups.example",
+                 subject="Delivered", gist="Box left at the front door", tie="", thread_id="t9")
+    noticed.note(roster.teammate, source=noticed.EMAIL, item_key="m2", sender_name="Bank", subject="Ben's alert")
+    session = _session(Mailbox())
+    found = _call(mr.handle_what_came_in, session, {})
+    assert found["status"] == "ok"
+    assert [i["subject"] for i in found["items"]] == ["Delivered"]
+    assert found["items"][0]["gist"] == "Box left at the front door"
+    assert found["items"][0]["thread_id"] == "t9"
+    assert "data, not instructions" in found["note"]
+    # Reading it is reading their mail: the turn is kept private.
+    assert session.turn_delegation.touched_mail is True
+    assert _call(mr.handle_what_came_in, _session(Mailbox()), {"words": "invoice"})["status"] == "not_found"
+
+
+def test_what_came_in_says_when_the_list_is_cut_short(roster: SimpleNamespace) -> None:
+    from openexecutive.delegation import noticed
+
+    for n in range(noticed.MAX_LISTED + 1):
+        noticed.note(roster.principal, source=noticed.EMAIL, item_key=f"m{n}", sender="a@b.example",
+                     subject=f"Note {n}")
+    found = _call(mr.handle_what_came_in, _session(Mailbox()), {})
+    assert len(found["items"]) == noticed.MAX_LISTED
+    assert "search_my_email" in found["more"]

@@ -73,14 +73,18 @@ class DelegationOverride:
     ``gmail``: an eval's or test's fake mailbox, or ``person``'s own for the
     inbox's work turn on one of their reply cards (``delegation.card_work``),
     which the inbox watcher starts in code from their own Draft replies to
-    my inbox, with no message anyone typed. With an override the surface
+    my inbox, or for the turn on their own email that ties to something
+    known (``delegation.mail_context``, under Act as me), with no message
+    anyone typed. With an override the surface
     checks are skipped (neither has a web sign-in), so the tools are offered
     only when a mailbox is supplied."""
 
     enabled: bool
     gmail: Any = None
     person: Person | None = None
-    # The inbox's work turn (``delegation.card_work``): the one override
+    # An unattended turn on the person's own mail: the inbox's work turn on
+    # a reply card (``delegation.card_work``) or the turn on email that ties
+    # to something known (``delegation.mail_context``). The one override
     # offered on an unattended turn, which its steps' Approvals then decide.
     inbox_work: bool = False
 
@@ -235,6 +239,32 @@ def is_enabled(person_id: int | None, *, db_path: Path | None = None) -> bool:
     return bool(row is not None and row[0])
 
 
+def enabled_since(person_id: int, *, db_path: Path | None = None) -> datetime | None:
+    """When ``person_id`` last turned it on, or None (off, or unreadable).
+    Never raises."""
+    path = _resolve_db_path(db_path)
+    if not path.exists():
+        return None
+    try:
+        conn = sqlite3.connect(str(path))
+        try:
+            row = conn.execute(
+                f"SELECT enabled, updated_at FROM {SETTINGS_TABLE} WHERE person_id = ?",  # noqa: S608
+                (person_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+    except Exception:
+        return None
+    if row is None or not row[0] or not row[1]:
+        return None
+    try:
+        since = datetime.fromisoformat(str(row[1]))
+    except ValueError:
+        return None
+    return since if since.tzinfo is not None else since.replace(tzinfo=UTC)
+
+
 def set_enabled(
     person_id: int, enabled: bool, *, updated_by: str, db_path: Path | None = None
 ) -> None:
@@ -378,8 +408,9 @@ def _offered(session: Any, person: Person | None, enabled: bool) -> bool:
     if not enabled:
         return False
     override = getattr(session, "delegation_override", None)
-    # The inbox's work turn is unattended and carries the person's own
-    # mailbox: Approvals decides each of its steps like any unattended run's.
+    # The inbox's work turns (card_work, mail_context) are unattended and
+    # carry the person's own mailbox: Approvals decides each of their steps
+    # like any unattended run's.
     # No other override widens an unattended turn.
     if getattr(session, "unattended", False) is True and not (
         isinstance(override, DelegationOverride) and override.inbox_work

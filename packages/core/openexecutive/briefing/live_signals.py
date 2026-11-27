@@ -743,8 +743,10 @@ def own_inbox(since: datetime, tz: tzinfo, now: datetime | None = None) -> OwnIn
         picked.append(d | {"_at": arrived})
     picked.sort(key=lambda d: d["_at"], reverse=True)
     done = watcher.outcomes(principal.id, [str(d["message_id"]) for d in picked])
-    lines: list[str] = []
-    refs: list[dict[str, Any]] = []
+    said_of = _kept_mail(principal.id, since, now)
+    # Mail the watcher noted is told (or passed over) from its own row.
+    kept = {key: item for key, item in said_of.items() if key not in seen}
+    shown: list[tuple[datetime, str, dict[str, Any]]] = []
     others: list[str] = []
     others_total = 0
     total = 0
@@ -766,8 +768,6 @@ def own_inbox(since: datetime, tz: tzinfo, now: datetime | None = None) -> OwnIn
                 others.append(_one_line(f"{who}: {subject}", 90))
             continue
         total += 1
-        if len(lines) >= _INBOX_MAX:
-            continue
         who = f"{name} ({address})" if name and address else _named(address, True)
         at = _local_hhmm(d["_at"].isoformat(), tz, now)
         if on_card:
@@ -784,9 +784,55 @@ def own_inbox(since: datetime, tz: tzinfo, now: datetime | None = None) -> OwnIn
         else:
             what = ""
         line = f"[{at}] from {who}: \"{subject}\""
-        lines.append(f"{line} — {what}" if what else line)
-        refs.append(_mail_ref(d))
+        said = said_of.get(str(d["message_id"]))
+        if said is not None and said.gist:
+            line += f" (says: {said.gist})"
+        shown.append((d["_at"], f"{line} — {what}" if what else line, _mail_ref(d)))
+    # What else reached their inbox, kept as context (delegation.noticed):
+    # bank, delivery and travel mail the reply watcher passes over. Only what
+    # ties to something known is a line; the rest is "Also in".
+    for item in kept.values():
+        arrived_at = parse_aware(item.received_at)
+        replied_at = answered.get(item.thread_id) if item.thread_id else None
+        if replied_at is not None and arrived_at is not None and replied_at > arrived_at:
+            continue  # they answered it since
+        if arrived_at is not None and _wrote_back(
+            {"subject": item.subject, "_at": arrived_at}, not item.tie,
+            wrote.get(item.sender.strip().lower(), []),
+        ):
+            continue  # they wrote to the sender since
+        who_short = _one_line(item.sender_name, 60) or _one_line(item.sender, 60)
+        what_said = item.gist or _one_line(item.subject, 100) or "(no subject)"
+        if not item.tie:
+            others_total += 1
+            if len(others) < _INBOX_OTHERS_MAX:
+                others.append(_one_line(f"{who_short}: {what_said}", 120))
+            continue
+        total += 1
+        at = _local_hhmm(item.received_at, tz, now)
+        shown.append((
+            arrived_at or now or datetime.now(UTC),
+            _one_line(f"[{at}] from {who_short}: {what_said} — ties to {item.tie}", 400),
+            _mail_ref({"message_id": item.item_key, "thread_id": item.thread_id}),
+        ))
+    # Newest first across both kinds, then the cap.
+    shown.sort(key=lambda row: row[0], reverse=True)
+    lines = [line for _, line, _ in shown[:_INBOX_MAX]]
+    refs = [ref for _, _, ref in shown[:_INBOX_MAX]]
     return OwnInbox(tuple(lines), tuple(others), others_total, tuple(refs), total)
+
+
+def _kept_mail(person_id: int, since: datetime, now: datetime | None) -> dict[str, Any]:
+    """The emails kept as ``person_id``'s context since ``since``
+    (``delegation.noticed``), by message id, newest first. Never raises."""
+    from openexecutive.delegation import noticed
+
+    try:
+        items = noticed.recent(person_id, since=since, source=noticed.EMAIL, limit=200, now=now)
+    except Exception:
+        logger.exception("live_signals: kept mail read failed")
+        return {}
+    return {item.item_key: item for item in items}
 
 
 def _wrote_back(d: dict[str, Any], fyi: bool, sends: list[tuple[datetime, str]]) -> bool:

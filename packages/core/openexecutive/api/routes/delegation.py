@@ -901,6 +901,13 @@ async def update_delegation(request: Request, body: DelegationUpdate) -> Delegat
             mail_reads.forget(person_id)
         except Exception:
             logger.warning("delegation: couldn't forget the emails it opened for person %s", person_id, exc_info=True)
+        # What came in for them (delegation.noticed): only kept while it's on.
+        from openexecutive.delegation import mail_context
+
+        try:
+            mail_context.forget(person_id)
+        except Exception:
+            logger.warning("delegation: couldn't forget what came in for person %s", person_id, exc_info=True)
     if before != body.enabled:
         set_enabled(person_id, body.enabled, updated_by=f"person:{person_id}")
         if body.enabled:
