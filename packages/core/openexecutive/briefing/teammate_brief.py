@@ -285,9 +285,11 @@ def settle_kept(person_id: int, now: datetime | None = None) -> bool:
             if last_at is not None and (this_at is None or last_at > this_at):
                 brief_items.record(KIND, {**items, **brief_items.told(KIND, person_id)}, person_id)
                 continue
+            # On top of what is already told: another kept one settled in this
+            # pass (written while this one waited) may hold items this lacks.
             record_delivered(person_id, TeammateBrief(
                 text=str(entry.get("text", "")), fingerprint=str(entry.get("fingerprint", "")),
-                items=items,
+                items={**brief_items.told(KIND, person_id), **items},
             ), at=as_of or None)
         if len(waiting) + len(unread) != len(entries):
             _write_kept(person_id, waiting + unread)

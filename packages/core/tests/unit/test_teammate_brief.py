@@ -314,3 +314,26 @@ def test_a_read_error_on_a_kept_brief_does_not_cost_the_day(
     monkeypatch.undo()
     monkeypatch.setattr(held_messages, "_connect", lambda db_path=None: original(tmp_path / "held.db"))
     assert held_messages.status(held_id + 999) == ("dropped", None)
+
+
+def test_two_kept_briefs_sent_together_keep_both_told(
+    board: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dataclasses import replace
+
+    from openexecutive.people import held_messages
+
+    original = held_messages._connect
+    monkeypatch.setattr(held_messages, "_connect", lambda db_path=None: original(tmp_path / "held.db"))
+    brief = asyncio.run(teammate_brief.write(_person(5), NOW))
+    assert brief is not None
+    first = replace(brief, items={"card:1": "a"})
+    second = replace(brief, items={"card:2": "b"})
+    ids = []
+    for kept in (first, second):
+        held_id = held_messages.hold(5, kept.text, source=teammate_brief.KIND, release_at=NOW)
+        teammate_brief.record_kept(5, kept, held_id)
+        ids.append(held_id)
+    held_messages.mark_sent(ids)
+    teammate_brief.settle_kept(5)
+    assert brief_items.told(teammate_brief.KIND, 5) == {"card:1": "a", "card:2": "b"}
