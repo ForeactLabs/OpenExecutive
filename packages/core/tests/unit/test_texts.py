@@ -1302,3 +1302,31 @@ def test_a_refused_turn_leaves_no_note() -> None:
 
     assert texts_watch.last_line(REFUSED_REPLY) == ""
     assert texts_watch.last_line("Read it.\nNothing needed.") == "Nothing needed."
+
+
+@pytest.mark.parametrize("had", [(), ("note",)])
+def test_an_older_conversations_table_gains_the_note_columns(tmp_path: Path, had: tuple[str, ...]) -> None:
+    import sqlite3
+
+    from openexecutive.delegation.schema import TEXT_CONVERSATIONS_TABLE, ensure_schema
+
+    path = tmp_path / "old.db"
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            f"CREATE TABLE {TEXT_CONVERSATIONS_TABLE} (id TEXT PRIMARY KEY, person_id INTEGER NOT NULL, "
+            "key TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', number TEXT NOT NULL DEFAULT '', "
+            "is_group INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL, "
+            + "".join(f"{c} TEXT NOT NULL DEFAULT ''," for c in had)
+            + " UNIQUE (person_id, key))"
+        )
+        conn.execute(
+            f"INSERT INTO {TEXT_CONVERSATIONS_TABLE} (id, person_id, key, title, updated_at) VALUES (?,?,?,?,?)",
+            ("tc_old", 1, "dana", "Dana Ruiz", tx._iso(NOW)),
+        )
+        ensure_schema(conn)
+        ensure_schema(conn)
+        columns = {row[1] for row in conn.execute(f"PRAGMA table_info({TEXT_CONVERSATIONS_TABLE})")}
+    assert {"note", "note_at"} <= columns
+    tx.save_note(1, "tc_old", "Nothing needed.", db_path=path)
+    (thread,) = tx.threads(1, db_path=path)
+    assert (thread.who, thread.note, thread.status) == ("Dana Ruiz", "Nothing needed.", "read")
