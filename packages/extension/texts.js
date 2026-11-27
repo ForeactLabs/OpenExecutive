@@ -47,11 +47,11 @@
 
   // Sign-in codes are never sent to Open Executive (the same patterns as
   // openexecutive/delegation/sign_in_codes.py, which drops any that come).
-  const NUMBER = "(?<![\\d-])(?!(?:19|20)\\d\\d(?![\\d-]))(?:\\d{4,8}|\\d{3}[- ]\\d{3}|(?:\\d ){3,7}\\d)(?![\\d-])";
+  const NUMBER = "(?<!\\d)(?<!\\d-)(?!(?:19|20)\\d\\d(?![\\d-]))(?:\\d{4,8}|\\d{3}[- ]\\d{3}|(?:\\d ){3,7}\\d)(?![\\d-])";
   const CODE_WORD = "(?<!zip )(?<!area )(?<!postal )(?<!dress )(?<!promo )(?<!discount )\\b(?:codes?|passcodes?|passwords?|passwd|otp|pins?)\\b";
-  const CODE_NEAR = new RegExp(CODE_WORD + "[^\\d\\n]{0,25}" + NUMBER, "i");
+  const CODE_NEAR = new RegExp(CODE_WORD + "[^\\d\\n]{0,25}" + NUMBER + "|" + NUMBER + "[^\\d\\n]{0,40}" + CODE_WORD, "i");
   const SIGN_IN_LINK = /\b(magic link|sign[- ]?in link|log[- ]?in link|is this you signing in|approve (?:this |the )?sign[- ]?in|tap to (?:sign|log) in|trying to sign in)\b/i;
-  const ENTER_CODE = new RegExp("\\b(?:enter|type)\\s+" + NUMBER, "i");
+  const ENTER_CODE = new RegExp("\\b(?:enter|type)\\s+" + NUMBER + "|\\buse\\s+" + NUMBER + "\\s+(?:to|for)\\s+(?:verify|confirm|sign|log|authenticat)", "i");
 
   /** Whether the words read like a sign-in code or a sign-in link. */
   T.isSignInCode = function (text) {
@@ -142,11 +142,13 @@
    * on. Only unread ones from the last day count as new; the rest go as
    * `earlier` (kept to read, never answered as if they just came). Each text
    * carries the time the list shows, or now when it can't be read (it
-   * changed while the page was watching). `allEarlier`: a first look after
-   * an update forgot what was seen, so nothing in it is new (each was told
-   * before). A sign-in code is never told. Returns { items, seen }.
+   * changed while the page was watching). `told`: on a first look after an
+   * update, what the old version had seen (same form as `seen`): a row it
+   * had already told goes as earlier, so it isn't answered twice, while one
+   * that changed since is judged as usual. A sign-in code is never told.
+   * Returns { items, seen }.
    */
-  T.changes = function (rows, seen, now, allEarlier) {
+  T.changes = function (rows, seen, now, told) {
     const first = seen === null || typeof seen !== "object";
     const next = first ? {} : { ...seen };
     const items = [];
@@ -164,7 +166,8 @@
       // A first look can't date a row it can't read the time of: left out.
       if (first && (shown === null || now - shown > KEEP)) continue;
       if (T.isSignInCode(row.snippet)) continue;
-      const earlier = first && (allEarlier === true || !row.unread || row.outgoing || now - shown > DAY);
+      const toldBefore = Boolean(told && typeof told === "object" && String(told[row.key] || "").split(".")[0] === print);
+      const earlier = first && (toldBefore || !row.unread || row.outgoing || now - shown > DAY);
       items.push({
         // The same change, reported again (an answer that never came back),
         // is the same ref, so it is kept once.
@@ -245,8 +248,8 @@
   // ---- Telling the background ----
 
   // Renamed when a first look began reading earlier texts, so an update
-  // reads them once too: as earlier, since what the old key saw was told
-  // already (answering it again would be a second turn on the same text).
+  // reads them once too. What the old key saw was told already: those go as
+  // earlier (answering one again would be a second turn on the same text).
   // The old key is dropped once the new one is kept.
   const SEEN_KEY = "textsSeen2";
   const OLD_SEEN_KEY = "textsSeen";
@@ -290,8 +293,9 @@
       if (isPaired) {
         const kept = await chrome.storage.local.get([SEEN_KEY, OLD_SEEN_KEY]);
         const stored = kept[SEEN_KEY];
-        const updated = !(stored && typeof stored === "object") && Boolean(kept[OLD_SEEN_KEY]);
-        const out = T.changes(listRows(), stored && typeof stored === "object" ? stored : null, now, updated);
+        const old = kept[OLD_SEEN_KEY];
+        const told = !(stored && typeof stored === "object") && old && typeof old === "object" ? old : null;
+        const out = T.changes(listRows(), stored && typeof stored === "object" ? stored : null, now, told);
         items = out.items;
         seen = out.seen;
       }

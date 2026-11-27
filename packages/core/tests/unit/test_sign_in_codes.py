@@ -11,6 +11,8 @@ def test_codes_and_sign_in_links_are_found() -> None:
         "Is this you signing in?",
         "Your PIN: 4821",
         "Your code is 1234",
+        "482913 is your verification code", "G-482913 is your Google verification code",
+        "Your Google code is G-482913", "Use 482913 to verify your account",
     ):
         assert is_sign_in_code(text), text
 

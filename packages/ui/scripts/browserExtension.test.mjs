@@ -506,17 +506,19 @@ test("texts: the same words again later are a new text", () => {
   assert.notEqual(c.items[0].ref, a.items[0].ref);
 });
 
-test("texts: a first look after an update tells everything as earlier", () => {
+test("texts: a first look after an update tells what the old version told as earlier, and anything newer as new", () => {
   const T = textsHelpers();
   const now = Date.parse("2026-11-25T15:00:00");
-  const rows = [{ key: "kai", title: "Kai", snippet: "Here", unread: true, time: "5 min" }];
-  // What the old key saw was told already: answering it again would be a second turn.
-  const out = T.changes(rows, null, now, true);
-  assert.equal(out.items.length, 1);
-  assert.equal(out.items[0].earlier, true);
-  assert.equal(out.items[0].outgoing, true);
+  const rows = [
+    { key: "kai", title: "Kai", snippet: "Here", unread: true, time: "5 min" },
+    { key: "casey", title: "Casey", snippet: "On my way", unread: true, time: "Now" },
+  ];
+  // The old version told Kai's text already; Casey's came while it updated.
+  const old = T.changes([rows[0]], {}, now - 60000).seen;
+  const out = T.changes(rows, null, now, old);
+  assert.deepEqual([...out.items.map((i) => [i.conversation, i.earlier])], [["casey", false], ["kai", true]]);
   const texts = readFileSync(new URL("../../extension/texts.js", import.meta.url), "utf8");
-  assert.ok(texts.includes("const updated = !(stored && typeof stored === \"object\") && Boolean(kept[OLD_SEEN_KEY]);"));
+  assert.ok(texts.includes("const told = !(stored && typeof stored === \"object\") && old && typeof old === \"object\" ? old : null;"));
   assert.ok(texts.includes("await chrome.storage.local.remove(OLD_SEEN_KEY);"));
 });
 
@@ -530,6 +532,8 @@ test("texts: a sign-in code is never told, now or on a first look", () => {
     "Tap to sign in to your account",
     "Your PIN: 4821",
     "Your code is 1234",
+    "482913 is your verification code", "G-482913 is your Google verification code",
+    "Your Google code is G-482913", "Use 482913 to verify your account",
   ]) assert.equal(T.isSignInCode(code), true, code);
   for (const plain of [
     "Running late, there by 2:30", "Lunch Friday?", "Call me at 4", "Gate code changed",
