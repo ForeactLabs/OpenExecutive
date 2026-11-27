@@ -1724,7 +1724,10 @@ async def _run_chat_turn(
                 approved: str | None = None
                 approved_done = False
                 # A page in another app never approves (no step to show).
-                approving_evt = None if session.from_host else timeline.observe(
+                # Nor does a turn stopped before it began.
+                approving_evt = None if session.from_host or (
+                    stop_event is not None and stop_event.is_set()
+                ) else timeline.observe(
                     {"type": "activity", "label": APPROVING_LABEL, "tool": "answer_card"}
                 )
                 if approving_evt is not None:
@@ -1740,6 +1743,12 @@ async def _run_chat_turn(
                         approved_done = evt.done
                     else:
                         yield evt
+                if approving_evt is not None and approved is None:
+                    # Still running as the turn moves on (stopped, or out of
+                    # time): it may yet work, and its card will say.
+                    dropped_evt = timeline.drop_last()
+                    if dropped_evt is not None:
+                        yield f"data: {json.dumps({**dropped_evt, 'session_id': session.session_id})}\n\n"
                 if approved_done:
                     # Only a step that went through reads as done; a refused
                     # or failed one stays as tried ("didn't go through").

@@ -136,6 +136,14 @@ def test_a_held_step_waits_once_not_twice() -> None:
     ]
 
 
+def test_a_step_whose_outcome_is_unknown_can_be_taken_back() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Doing what you approved", "tool": "answer_card"})
+    evt = tl.drop_last()
+    assert evt is not None and evt["steps"] == []
+    assert tl.finish(()) is None
+
+
 def test_a_meeting_sent_for_approval_waits() -> None:
     tl = TurnTimeline(Clock())
     tl.observe({"type": "action_taken", "tool": "create_calendar_event", "summary": "Sent for approval: Board sync", "target": "x1"})

@@ -359,6 +359,15 @@ class TurnTimeline:
             return None
         return self.payload()
 
+    def drop_last(self) -> dict[str, Any] | None:
+        """Take back the last step, when what became of it is not known (an
+        approved card's step still running as the turn moves on: its card
+        says how it went). The timeline event to send, or None."""
+        if self.finished or not self.steps:
+            return None
+        self.steps.pop()
+        return {"type": "timeline", **self.payload()}
+
     def payload(self) -> dict[str, Any]:
         last = len(self.steps) - 1
         out: dict[str, Any] = {
