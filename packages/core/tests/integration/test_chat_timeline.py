@@ -80,8 +80,10 @@ def test_each_step_sends_the_timeline_and_the_reply_keeps_it(
     _stub(
         monkeypatch,
         [
+            # The executive's order: show_progress, then that round's activity.
+            {"type": "progress", "task": "Checking the budget", "now": "Reading Dana's emails"},
             {"type": "activity", "label": "Searching your email…", "tool": "search_my_email", "reads": {"email": 2}},
-            {"type": "progress", "task": "Checking the budget", "now": "Reading Dana's emails", "found": ["Budget has room"]},
+            {"type": "progress", "now": "Writing to Dana", "found": ["Budget has room"]},
             {"type": "activity", "label": "Messaging Dana", "tool": "message_person"},
             {"type": "action_taken", "tool": "message_person", "summary": "Waiting for your approval", "target": "Dana", "decision_id": 9},
             "Yes, there is room.",
@@ -95,8 +97,8 @@ def test_each_step_sends_the_timeline_and_the_reply_keeps_it(
 
     # A timeline follows each event that changes it, while the turn runs.
     live = [e for e in events if e["type"] == "timeline" and not e["done"]]
-    assert len(live) == 4
-    assert kinds.index("timeline") == kinds.index("activity") + 1
+    assert len(live) == 5
+    assert kinds.index("timeline") == kinds.index("progress") + 1
     assert live[-1]["steps"][-1]["state"] == "current"
 
     # The finished one comes before `done`, with the held step waiting.

@@ -51,21 +51,53 @@ def test_an_unnamed_round_adds_no_step() -> None:
     assert tl.steps == []
 
 
-def test_progress_names_the_step_and_adds_what_it_found() -> None:
+def test_progress_names_the_round_it_comes_before() -> None:
+    # The executive sends show_progress before the activity of the round it
+    # describes, so ``now`` names the next round and ``found`` goes on the
+    # work done so far.
     tl = TurnTimeline(Clock())
-    tl.observe({"type": "activity", "label": "Reading a file", "tool": "read_document"})
+    tl.observe({"type": "activity", "label": "Searching your email", "tool": "search_my_email"})
     evt = tl.observe({
         "type": "progress",
         "task": "Checking hiring budget",
-        "now": "Reading the Q4 budget",
+        "now": "Comparing the LOI with Dana's email",
         "found": ["$96k of sales headcount unspent"],
     })
     assert evt is not None
     assert evt["task"] == "Checking hiring budget"
-    assert evt["steps"][0]["label"] == "Reading the Q4 budget"
+    assert [s["label"] for s in evt["steps"]] == ["Searched your email", "Comparing the LOI with Dana's email"]
     assert evt["steps"][0]["found"] == ["$96k of sales headcount unspent"]
+    assert evt["steps"][1]["state"] == "current"
+    # That round's activity fills in the named step, it does not add one.
+    evt = tl.observe({"type": "activity", "label": "Reading a file", "tool": "read_document", "reads": {"file": 1}})
+    assert evt is not None
+    assert [s["label"] for s in evt["steps"]] == ["Searched your email", "Comparing the LOI with Dana's email"]
+    assert evt["steps"][1]["kind"] == "look"
+    assert evt["steps"][1]["detail"] == "1 file"
+    # The next round is a new step again.
+    evt = tl.observe({"type": "activity", "label": "Running the numbers", "tool": "calculate"})
+    assert evt is not None
+    assert evt["steps"][-1]["label"] == "Running the numbers"
     # The same finding sent again is not added twice.
     assert tl.observe({"type": "progress", "found": ["$96k of sales headcount unspent"]}) is None
+
+
+def test_progress_on_the_first_round_names_it() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "progress", "now": "Reading the Q4 budget"})
+    evt = tl.observe({"type": "activity", "label": "Reading a file", "tool": "read_document"})
+    assert evt is not None
+    assert [s["label"] for s in evt["steps"]] == ["Reading the Q4 budget"]
+
+
+def test_a_meeting_sent_for_approval_waits() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "action_taken", "tool": "create_calendar_event", "summary": "Sent for approval: Board sync", "target": "x1"})
+    done = tl.finish(())
+    assert done is not None
+    steps = done["steps"]
+    assert steps[0]["state"] == "waits"
+    assert steps[0]["label"] == "Sent for approval: Board sync"
 
 
 def test_an_action_names_its_round_and_says_when_it_waits() -> None:
@@ -84,7 +116,8 @@ def test_an_action_names_its_round_and_says_when_it_waits() -> None:
     assert step["kind"] == DO
     assert step["state"] == "waits"
     assert step["card_id"] == 42
-    assert step["label"] == "Waiting for your approval: Dana Park"
+    # The summary alone: a target is often an id.
+    assert step["label"] == "Waiting for your approval"
 
 
 def test_finish_adds_held_steps_and_ends_the_current_one() -> None:

@@ -136,6 +136,11 @@ def _counts(raw: Any) -> dict[str, int]:
     return out
 
 
+# Chip summaries for a step that waits on the person's OK without a card of
+# its own (a meeting sent for approval, say).
+_WAITING = ("Waiting", "Sent for approval")
+
+
 @dataclass
 class Step:
     label: str
@@ -148,6 +153,11 @@ class Step:
     card_id: int | None = None
     # Named by the turn itself (``show_progress``), not by its tool.
     named: bool = False
+    # Opened by ``show_progress`` for the round about to run: the executive
+    # sends it before that round's activity, which then fills this step in.
+    awaits_round: bool = False
+    # An ``action_taken`` already named this step.
+    acted: bool = False
 
     def as_dict(self, *, current: bool) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -192,14 +202,22 @@ class TurnTimeline:
         reads = _counts(item.get("reads"))
         for kind, n in reads.items():
             self.reads[kind] = self.reads.get(kind, 0) + n
+        last = self.steps[-1] if self.steps else None
+        if last is not None and last.awaits_round:
+            # The round show_progress named: keep its words, take the tool's
+            # kind and what it read.
+            last.awaits_round = False
+            if label and label != _clean(FALLBACK_LABEL):
+                last.kind = kind_of(str(item.get("tool") or ""))
+            for kind, n in reads.items():
+                last.reads[kind] = last.reads.get(kind, 0) + n
+            return True
         if not label or label == _clean(FALLBACK_LABEL):
             # An unnamed round says nothing new, but what it read still counts.
-            if reads and self.steps:
-                prev = self.steps[-1]
+            if reads and last is not None:
                 for kind, n in reads.items():
-                    prev.reads[kind] = prev.reads.get(kind, 0) + n
+                    last.reads[kind] = last.reads.get(kind, 0) + n
             return bool(reads)
-        last = self.steps[-1] if self.steps else None
         if last is not None and not last.named and last.label == label:
             for kind, n in reads.items():
                 last.reads[kind] = last.reads.get(kind, 0) + n
@@ -208,18 +226,15 @@ class TurnTimeline:
         return True
 
     def _progress(self, item: dict[str, Any]) -> bool:
+        # The executive sends show_progress before the activity of the round
+        # it describes: ``found`` is what the rounds so far turned up, and
+        # ``now`` names the round about to run.
         changed = False
         task = _clean(item.get("task"))
         if task and task != self.task:
             self.task = task
             changed = True
-        now = _clean(item.get("now"))
         last = self.steps[-1] if self.steps else None
-        if now and last is not None and last.label != now and last.kind != DO:
-            # The turn's own words for what this round is doing.
-            last.label = now
-            last.named = True
-            changed = True
         found = item.get("found")
         if isinstance(found, list):
             for line in found:
@@ -228,31 +243,39 @@ class TurnTimeline:
                     continue
                 self._found_seen.add(text.casefold())
                 if last is None:
-                    last = Step(label=task or "Started", kind=LOOK, at=self._now())
+                    last = Step(label=task or "Started", kind=LOOK, at=self._now(), named=True)
                     self._add_step(last)
                 if len(last.found) < MAX_FOUND_PER_STEP:
                     last.found.append(text)
                     changed = True
+        now = _clean(item.get("now"))
+        if now and (last is None or last.label != now):
+            if last is not None and last.awaits_round:
+                last.label = now
+            else:
+                self._add_step(Step(label=now, kind=WORK, at=self._now(), named=True, awaits_round=True))
+            changed = True
         return changed
 
     def _action(self, item: dict[str, Any]) -> bool:
         summary = _clean(item.get("summary"))
         if not summary:
             return False
-        target = _clean(item.get("target"))
-        label = f"{summary}: {target}" if target and target not in summary else summary
+        # The summary alone: a chip's target is often an id, not words.
         card = item.get("decision_id")
         card_id = card if isinstance(card, int) and not isinstance(card, bool) else None
-        waits = card_id is not None or summary.startswith("Waiting")
+        waits = card_id is not None or summary.startswith(_WAITING)
         last = self.steps[-1] if self.steps else None
-        if last is not None and last.kind == DO and not last.named and last.card_id is None and not last.found:
+        if last is not None and last.kind == DO and not last.acted and last.card_id is None and not last.found:
             # The round that did it: name it by what it did.
             step = last
         else:
-            step = Step(label=label, kind=DO, at=self._now())
+            step = Step(label=summary, kind=DO, at=self._now())
             self._add_step(step)
-        step.label = label
+        step.label = summary
         step.named = True
+        step.acted = True
+        step.awaits_round = False
         step.waits = waits
         step.card_id = card_id
         return True
