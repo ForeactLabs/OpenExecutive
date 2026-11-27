@@ -73,11 +73,14 @@ def test_progress_names_the_round_it_comes_before() -> None:
     assert evt is not None
     assert [s["label"] for s in evt["steps"]] == ["Searched your email", "Comparing the LOI with Dana's email"]
     assert evt["steps"][1]["kind"] == "look"
+    assert evt["steps"][1]["state"] == "current"
     assert evt["steps"][1]["detail"] == "1 file"
     # The next round is a new step again.
     evt = tl.observe({"type": "activity", "label": "Running the numbers", "tool": "calculate"})
     assert evt is not None
     assert evt["steps"][-1]["label"] == "Running the numbers"
+    # Once done, the turn's own words read in the past tense too.
+    assert evt["steps"][1]["label"] == "Compared the LOI with Dana's email"
     # The same finding sent again is not added twice.
     assert tl.observe({"type": "progress", "found": ["$96k of sales headcount unspent"]}) is None
 

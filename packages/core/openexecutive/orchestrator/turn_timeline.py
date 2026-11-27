@@ -161,7 +161,10 @@ class Step:
 
     def as_dict(self, *, current: bool) -> dict[str, Any]:
         out: dict[str, Any] = {
-            "label": self.label if current or self.named else past(self.label),
+            # Finished steps read in the past tense, the turn's own words
+            # too; an action's summary and a waiting step already say what
+            # happened.
+            "label": self.label if current or self.acted or self.waits else past(self.label),
             "kind": self.kind,
             "at": self.at,
             "state": "current" if current else ("waits" if self.waits else "done"),

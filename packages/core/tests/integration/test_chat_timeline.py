@@ -107,7 +107,7 @@ def test_each_step_sends_the_timeline_and_the_reply_keeps_it(
     assert kinds.index("timeline", kinds.index("chunk")) < kinds.index("done")
     steps = final[0]["steps"]
     assert final[0]["task"] == "Checking the budget"
-    assert steps[0]["label"] == "Reading Dana's emails"
+    assert steps[0]["label"] == "Read Dana's emails"
     assert steps[0]["found"] == ["Budget has room"]
     assert steps[1]["state"] == "waits" and steps[1]["card_id"] == 9
     assert steps[2] == {**steps[2], "label": "Forward the contract", "state": "waits", "kind": "do"}
