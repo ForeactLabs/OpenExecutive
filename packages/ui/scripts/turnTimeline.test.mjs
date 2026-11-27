@@ -62,7 +62,7 @@ test("steps group by kind in time order", () => {
 test("the summary says what it read, worked out and what waits", () => {
   assert.equal(
     summaryLine(timelineFrom(done)),
-    "Read 4 emails, 1 file and your calendar. Worked it through in 1 step. 1 step waits for your OK.",
+    "Read 4 emails, 1 file and your calendar. Worked it through in 1 step. 1 step asked for your OK.",
   );
 });
 

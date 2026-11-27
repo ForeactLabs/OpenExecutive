@@ -84,7 +84,7 @@ export function StepsTimelineBody({ timeline, onClose }: { timeline: TurnTimelin
             <p className="mb-1.5 mt-3 ml-9 text-[11px] font-bold uppercase tracking-wider text-fg-subtle">{group.name}</p>
             <ol className="list-none p-0 m-0">
               {group.steps.map(({ step, index }) => {
-                const said = step.state === "current" ? "in progress" : step.state === "waits" ? "waiting for your OK" : "done";
+                const said = step.state === "current" ? "in progress" : step.state === "waits" ? (timeline.done ? "asked for your OK" : "waiting for your OK") : "done";
                 return (
                   <li key={index} className="relative flex gap-3 pb-3.5" aria-label={`${step.label} (${said})`}>
                     {index < total - 1 && (
@@ -105,7 +105,7 @@ export function StepsTimelineBody({ timeline, onClose }: { timeline: TurnTimelin
                       {step.state === "current" ? (
                         <p className="mt-0.5 text-sm text-fg-muted">Working on it…</p>
                       ) : step.state === "waits" ? (
-                        <p className="mt-0.5 text-sm text-fg-muted">Waiting for your OK</p>
+                        <p className="mt-0.5 text-sm text-fg-muted">{timeline.done ? "Asked for your OK" : "Waiting for your OK"}</p>
                       ) : step.detail ? (
                         <p className="mt-0.5 text-sm text-fg-muted">{step.detail}</p>
                       ) : null}

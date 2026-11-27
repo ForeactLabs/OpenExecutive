@@ -152,7 +152,10 @@ export function summaryLine(t: TurnTimeline): string {
   const did = t.steps.filter((s) => s.kind === "do" && s.state === "done").length;
   if (did > 0) parts.push(did === 1 ? "Did 1 thing." : `Did ${did} things.`);
   const waits = t.steps.filter((s) => s.state === "waits").length;
-  if (waits > 0) parts.push(waits === 1 ? "1 step waits for your OK." : `${waits} steps wait for your OK.`);
+  // A saved reply's waits may have been answered since: say it asked.
+  if (waits > 0) {
+    parts.push(t.done ? `${stepCount(waits)} asked for your OK.` : waits === 1 ? "1 step waits for your OK." : `${waits} steps wait for your OK.`);
+  }
   if (parts.length === 0) parts.push(t.done ? `Took ${stepCount(t.steps.length)}.` : "Working on it.");
   return parts.join(" ");
 }
