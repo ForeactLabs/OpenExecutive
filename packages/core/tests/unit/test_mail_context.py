@@ -354,6 +354,14 @@ def test_mail_from_before_it_was_turned_on_is_context_only(owner: Any, monkeypat
     assert model["acts"] == []
 
 
+def test_mail_with_no_readable_time_is_context_only(owner: Any, model: dict[str, Any]) -> None:
+    undated = _msg("m1")
+    undated.received_at = ""
+    _look(owner, Mailbox(undated))
+    assert model["acts"] == []
+    assert len(noticed.recent(owner.id, now=NOW)) == 1
+
+
 def test_a_backlog_is_context_only(owner: Any, model: dict[str, Any]) -> None:
     # On long before (shipped to someone who had it on), or back after a gap.
     _look(owner, Mailbox(_msg("m1", minutes_ago=180)))

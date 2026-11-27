@@ -546,12 +546,14 @@ async def _look(person: Any, client: Any, cursor: _Cursor, now: datetime) -> Loo
     replies = _Replies.read(person, [n.message.id for n in notes])
     for note in notes:
         m = note.message
-        arrived = _parse(m.received_at) or now
+        parsed = _parse(m.received_at)
         # Only mail that came since they turned it on, and lately (a backlog
         # after a gap, or on the first look after this shipped, is context
         # only, as the reply watcher never catches up either). Unreadable
         # is context only.
-        recent_enough = switched_on is not None and arrived >= switched_on and now - arrived <= max_age
+        recent_enough = (
+            parsed is not None and switched_on is not None and parsed >= switched_on and now - parsed <= max_age
+        )
         if noticed.note(
             person.id, source=noticed.EMAIL, item_key=m.id, sender_name=m.from_name or "",
             sender=m.from_addr or "", subject=m.subject or "", gist=note.gist, tie=note.tie,
