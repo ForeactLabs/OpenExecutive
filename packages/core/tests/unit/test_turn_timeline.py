@@ -185,6 +185,19 @@ def test_a_held_app_write_waits_on_its_own_round() -> None:
     assert done["steps"][2]["label"] == "Add to the Notion page"
 
 
+def test_two_holds_in_one_round_never_take_over_an_earlier_failure() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Doing what you approved", "tool": "answer_card"})
+    tl.observe({"type": "activity", "label": "Messaging Sara…", "tool": "message_person"})
+    done = tl.finish(("DM Sara", "DM Bob"))
+    assert done is not None
+    assert [(s["label"], s["state"]) for s in done["steps"]] == [
+        ("Doing what you approved", "tried"),
+        ("DM Bob", "waits"),
+        ("DM Sara", "waits"),
+    ]
+
+
 def test_a_held_step_waits_once_not_twice() -> None:
     # outside_content held the send: its activity came, no chip followed.
     tl = TurnTimeline(Clock())

@@ -141,6 +141,18 @@ def chip_follows(tool: str) -> bool:
     return extensions.has_chip(tool)
 
 
+def _may_be_held(step: Step) -> bool:
+    """A round that could be one held for an outside read: a write, or a
+    connected app's round, with no chip yet (never the approved card's)."""
+    return (
+        (step.kind == DO or "__" in step.tool)
+        and step.tool != "answer_card"
+        and not step.acted
+        and not step.waits
+        and not step.stopped
+    )
+
+
 def _same_app_tool(step_tool: str, chip_tool: str) -> bool:
     """A connected app's chip and the round it came from: the activity names
     the tool cut short and cleaned, the chip by its raw name."""
@@ -417,10 +429,14 @@ class TurnTimeline:
         # Any write with no chip yet, whether or not its tool makes chips,
         # and any connected app's round with none (a write whose label
         # doesn't say so, "Using … · Notion").
-        tries = [
-            s for s in self.steps
-            if (s.kind == DO or "__" in s.tool) and not s.acted and not s.waits and not s.stopped
-        ]
+        # Only the run of such steps at the end: a hold comes after an
+        # outside read, so a try before the last other step (an approved
+        # card that failed, an earlier failed send) is not one of them.
+        tries: list[Step] = []
+        for step in reversed(self.steps):
+            if not _may_be_held(step):
+                break
+            tries.insert(0, step)
         for text, step in zip(reversed(texts), reversed(tries), strict=False):
             step.label = text
             step.named = True
