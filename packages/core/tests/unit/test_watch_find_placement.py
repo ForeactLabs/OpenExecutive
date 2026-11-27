@@ -49,6 +49,11 @@ def test_the_same_story_reworded_is_caught() -> None:
     c = story_words("Initech raises prices for its enterprise plan")
     assert same_story(a, b)
     assert not same_story(a, c)
+    # A padded headline listing every topic is not every story.
+    padded = story_words(
+        "Acme breach lawsuit layoffs acquisition outage recall CEO resigns funding SEC probe pricing launch"
+    )
+    assert not same_story(padded, story_words("Acme confirms data breach lawsuit"))
     # Too few words to tell.
     assert not same_story(story_words("Acme news"), story_words("Acme news"))
 

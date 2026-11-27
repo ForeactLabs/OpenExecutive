@@ -155,6 +155,7 @@ def test_saying_stop_turns_the_watch_off(
     res = client.post(f"/alerts/{aid}/say", json={"text": "Stop telling me about this."})
     assert res.status_code == 200, res.text
     assert res.json()["stopped"] is True
+    assert res.json()["reply"].endswith(alerts_route.STOPPED_WORDS)
     item = ms.get_watchlist_item(wid, db_path=db)
     assert item is not None and item.enabled is False
 

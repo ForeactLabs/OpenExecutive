@@ -866,6 +866,9 @@ def reopen_alert(alert_id: int, request: Request) -> Alert:
     return updated
 
 
+STOPPED_WORDS = "I've turned this watch off. You can turn it back on from the watch list."
+
+
 class SteerResponse(BaseModel):
     """What changed when the person corrected a watch on its card."""
 
@@ -982,8 +985,11 @@ async def _steer(alert_id: int, text: str, request: Request) -> SteerResponse:
         # about it.
         **mailbox.audit_privacy(item),
     )
+    # Said in our own words, whatever the model wrote, so turning a watch
+    # off is never silent.
+    reply = f"{plan.reply} {STOPPED_WORDS}".strip() if stopped else plan.reply
     return SteerResponse(
-        reply=plan.reply,
+        reply=reply,
         watch_slug=slug,
         watch_title=watch_title(item),
         notes=plan.notes,

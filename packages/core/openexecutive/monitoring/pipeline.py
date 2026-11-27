@@ -444,6 +444,11 @@ async def promote_signal_to_alert(
     """
     event = _signal_to_alert_event(signal, item, enrichment)
     sent = [signal_id, *(covers or [])]
+    # Marked before triage is scheduled: triage can finish first (on a
+    # thread, with no running loop), and what it records must not be
+    # written over by this.
+    for row_id in sent:
+        store.mark_signal_processed(row_id, OUTCOME_ALERTED, promoted_alert_id=None, db_path=db_path)
     try:
         schedule_evaluation(
             event,
@@ -463,11 +468,11 @@ async def promote_signal_to_alert(
         store.mark_signal_processed(
             signal_id, OUTCOME_FAILED, promoted_alert_id=None, db_path=db_path
         )
+        # The rest of a digest stays held and goes out with the next one.
+        for row_id in covers or []:
+            store.mark_signal_processed(row_id, OUTCOME_HELD_DIGEST, db_path=db_path)
         return False
 
-    store.mark_signal_processed(
-        signal_id, OUTCOME_ALERTED, promoted_alert_id=None, db_path=db_path
-    )
     if item.id is not None:
         store.mark_fired(item.id, datetime.now(UTC), db_path=db_path)
     audit_log(
@@ -640,8 +645,6 @@ async def _flush_page_watch_digests(
             # The newest row is marked failed; the rest stay held and go
             # out with the next digest.
             continue
-        for row_id in rest:
-            store.mark_signal_processed(row_id, OUTCOME_ALERTED, db_path=db_path)
         sent += 1
     return sent
 
