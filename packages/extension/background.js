@@ -515,29 +515,45 @@ async function pressAt(target, spot) {
 // Chrome only delivers a press to a page that is on screen. Google Messages
 // sits in a background tab of the extension's own window, which is kept
 // minimized: there the press goes nowhere, though the button is found. So
-// for the press the tab is brought up in front, then everything is put back
-// the way it was (unless the person moved to it meanwhile).
+// for the press the window is shown (never focused, so what the person types
+// stays in their own window) with the tab showing, then put back the way it
+// was. If the person went to it meanwhile (its window took the focus), it is
+// left where they are.
 async function showForPress(tab) {
   const win = await chrome.windows.get(tab.windowId, { populate: true }).catch(() => null);
   if (!win) return null;
   const shown = (win.tabs || []).find((t) => t.active) || null;
-  const [before] = await chrome.windows.getAll({ windowTypes: ["normal"] }).then((all) => all.filter((w) => w.focused));
-  const back = { windowId: win.id, minimized: win.state === "minimized", tabId: shown && shown.id !== tab.id ? shown.id : null, focusedId: before && before.id !== win.id ? before.id : null };
-  if (back.minimized) await chrome.windows.update(win.id, { state: "normal" });
-  if (back.tabId !== null) await chrome.tabs.update(tab.id, { active: true });
-  await chrome.windows.update(win.id, { focused: true });
-  await pause(400);
+  const back = { windowId: win.id, minimized: win.state === "minimized", tabId: shown && shown.id !== tab.id ? shown.id : null, focused: win.focused, focusedId: null };
+  // Whatever step fails, what was changed is still put back.
+  try {
+    if (back.minimized) await chrome.windows.update(win.id, { state: "normal", focused: false });
+    if (back.tabId !== null) await chrome.tabs.update(tab.id, { active: true });
+    await pause(400);
+  } catch {
+    // Put back by the caller.
+  }
   return back;
 }
 
+// Only when the press didn't go from behind their windows: the window comes
+// in front for that one press, and the focus goes straight back after it.
+async function focusForPress(back) {
+  const [before] = (await chrome.windows.getAll({ windowTypes: ["normal"] })).filter((w) => w.focused);
+  back.focusedId = before && before.id !== back.windowId ? before.id : null;
+  back.tookFocus = true;
+  await chrome.windows.update(back.windowId, { focused: true });
+  await pause(300);
+}
+
 async function putBack(tab, back) {
-  if (!back) return;
-  const now = await chrome.tabs.get(tab.id).catch(() => null);
+  if (!back || back.focused || back.done) return;
+  const win = await chrome.windows.get(back.windowId).catch(() => null);
   // The person went to it meanwhile: leave it where they are.
-  if (!now || !now.active) return;
+  if (!win || (win.focused && !back.tookFocus)) return;
   if (back.tabId !== null) await chrome.tabs.update(back.tabId, { active: true }).catch(() => undefined);
   if (back.minimized) await chrome.windows.update(back.windowId, { state: "minimized" }).catch(() => undefined);
   if (back.focusedId !== null) await chrome.windows.update(back.focusedId, { focused: true }).catch(() => undefined);
+  back.done = true;
 }
 
 async function pressInTab(tab, x, y) {
@@ -571,10 +587,21 @@ async function pressInTab(tab, x, y) {
     // there. Never when the box emptied, which is what a send does, so a
     // text that went is never sent twice.
     await pause(1500);
-    const after = await readSpot(target);
+    let after = await readSpot(target);
     if (after && after.at === at && after.full && (after.x !== spot.x || after.y !== spot.y)) {
       const again = await sendSpot(target, at, false);
       if (again && again.full) await pressAt(target, again);
+      await pause(1500);
+      after = await readSpot(target);
+    }
+    // Still in the box: a window behind the person's own may not take a
+    // press. Once, it comes in front for the press alone, and the focus goes
+    // straight back, so nothing they type lands in the box.
+    if (back && !back.focused && after && after.at === at && after.full) {
+      await focusForPress(back);
+      const last = await sendSpot(target, at, false);
+      if (last && last.full) await pressAt(target, last);
+      await putBack(now, back);
     }
     return { ok: true };
   } catch {

@@ -604,19 +604,28 @@ test("texts: the press waits for the debugging bar, presses only where the butto
   assert.ok(press.includes("if (again && again.full) await pressAt(target, again);"));
 });
 
-test("texts: the press brings Google Messages on screen first, then puts things back", () => {
+test("texts: the press shows Google Messages without taking the focus, and focuses it only for one last press", () => {
   const bg = readFileSync(new URL("../../extension/background.js", import.meta.url), "utf8");
   const press = bg.slice(bg.indexOf("async function pressInTab"), bg.indexOf("function waitLoaded"));
   // Shown before attaching, put back after detaching, and after a failed attach too.
   assert.ok(press.indexOf("await showForPress(now)") < press.indexOf("chrome.debugger.attach"));
   assert.ok(press.lastIndexOf("await putBack(now, back)") > press.indexOf("chrome.debugger.detach"));
-  assert.equal(press.split("await putBack(now, back)").length - 1, 2);
-  const show = bg.slice(bg.indexOf("async function showForPress"), bg.indexOf("async function putBack"));
-  assert.ok(show.includes('state: "normal"') && show.includes("{ active: true }") && show.includes("{ focused: true }"));
+  const show = bg.slice(bg.indexOf("async function showForPress"), bg.indexOf("async function focusForPress"));
+  // Never focused: what the person types stays in their own window.
+  assert.ok(show.includes('{ state: "normal", focused: false }') && show.includes("{ active: true }"));
+  assert.ok(!show.includes("focused: true"));
+  // What was changed is put back even when a step fails part way.
+  assert.ok(show.indexOf("const back =") < show.indexOf("try {") && show.includes("return back;"));
+  // Focus only when the words are still in the box after the press, and it goes straight back.
+  const last = press.slice(press.indexOf("if (back && !back.focused && after"));
+  assert.ok(last.indexOf("await focusForPress(back)") < last.indexOf("if (last && last.full) await pressAt(target, last);"));
+  assert.ok(last.indexOf("await putBack(now, back);") > last.indexOf("await pressAt(target, last)"));
+  assert.ok(press.includes("after.full"));
   const back = bg.slice(bg.indexOf("async function putBack"), bg.indexOf("async function pressInTab"));
-  // Never pulled away from under the person, who went to it meanwhile.
-  assert.ok(back.includes("if (!now || !now.active) return;"));
-  assert.ok(back.includes('{ state: "minimized" }') && back.includes("back.focusedId"));
+  // Left alone when it was in front already, put back once, and left where they are if they went to it.
+  assert.ok(back.includes("if (!back || back.focused || back.done) return;"));
+  assert.ok(back.includes("if (!win || (win.focused && !back.tookFocus)) return;"));
+  assert.ok(back.includes('{ state: "minimized" }') && back.includes("back.focusedId") && back.includes("back.done = true;"));
   // A press as a real mouse makes it: the left button held while pressed.
   const at = bg.slice(bg.indexOf("async function pressAt"), bg.indexOf("async function showForPress"));
   assert.ok(at.includes('buttons: type === "mousePressed" ? 1 : 0') && at.includes('pointerType: "mouse"'));
