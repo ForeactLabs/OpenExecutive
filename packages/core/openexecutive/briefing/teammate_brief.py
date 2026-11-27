@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from openexecutive.people.models import Person
@@ -117,7 +117,7 @@ async def write(person: Person, now: datetime | None = None) -> TeammateBrief | 
     # Yesterday's brief kept for their quiet hours counts once it was sent.
     # One still waiting to go out is the one they get: a second written now
     # would repeat it and arrive right behind it.
-    if await asyncio.to_thread(settle_kept, pid):
+    if await asyncio.to_thread(settle_kept, pid, now):
         return None
     since = brief_state.since_for(kind, now)
     data = await asyncio.to_thread(_scoped_today, pid)
@@ -235,7 +235,13 @@ def record_kept(person_id: int, brief: TeammateBrief, held_id: int) -> None:
         logger.exception("teammate_brief: couldn't keep person %s's brief", person_id)
 
 
-def settle_kept(person_id: int) -> bool:
+# How long a kept brief still waiting holds back the next one. Past this
+# its delivery is stuck (a failed chat app, a long leave) and a fresh brief
+# is worth more than waiting behind a stale "Do today".
+KEPT_FRESH_FOR = timedelta(hours=20)
+
+
+def settle_kept(person_id: int, now: datetime | None = None) -> bool:
     """A kept brief that was sent since counts as delivered, as of when it
     was written (its window ends there); one that was dropped told nothing.
     Still waiting: left as it is.
@@ -244,7 +250,8 @@ def settle_kept(person_id: int) -> bool:
     the next day's went straight out) does not take that newer brief's
     place: it only adds what it told that the newer one did not track, and
     leaves the window and fingerprint where the newer one set them.
-    True while one is still waiting to go out. Never raises."""
+    True while one written in the last ``KEPT_FRESH_FOR`` is still waiting to
+    go out. Never raises."""
     from openexecutive.alerts.lifecycle import parse_aware
     from openexecutive.briefing import brief_items, brief_state
     from openexecutive.people.held_messages import status
@@ -284,7 +291,11 @@ def settle_kept(person_id: int) -> bool:
             ), at=as_of or None)
         if len(waiting) + len(unread) != len(entries):
             _write_kept(person_id, waiting + unread)
-        return bool(waiting)
+        cutoff = (now or datetime.now(UTC)) - KEPT_FRESH_FOR
+        return any(
+            (at := parse_aware(str(e.get("written_at") or ""))) is not None and at > cutoff
+            for e in waiting
+        )
     except Exception:
         logger.exception("teammate_brief: couldn't settle person %s's kept brief", person_id)
         return False

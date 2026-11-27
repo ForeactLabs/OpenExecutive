@@ -61,6 +61,10 @@ def board(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 def test_a_teammate_with_nothing_on_their_plate_gets_nothing(board: dict[str, Any]) -> None:
     board["data"]["proposals"] = []
     assert asyncio.run(teammate_brief.write(_person(5), NOW)) is None
+    # One stuck for longer (a failed chat app, a long leave) no longer holds
+    # back a fresh brief.
+    later = datetime.now(UTC) + teammate_brief.KEPT_FRESH_FOR + timedelta(minutes=1)
+    assert teammate_brief.settle_kept(5, later) is False
     assert board["contexts"] == []
 
 
@@ -88,6 +92,10 @@ def test_a_quiet_answer_sends_nothing(board: dict[str, Any]) -> None:
 
     board["texts"] = [QUIET_PRINCIPAL]
     assert asyncio.run(teammate_brief.write(_person(5), NOW)) is None
+    # One stuck for longer (a failed chat app, a long leave) no longer holds
+    # back a fresh brief.
+    later = datetime.now(UTC) + teammate_brief.KEPT_FRESH_FOR + timedelta(minutes=1)
+    assert teammate_brief.settle_kept(5, later) is False
 
 
 def test_who_gets_a_brief(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -219,6 +227,10 @@ def test_a_kept_brief_is_told_only_once_it_was_sent(
     assert teammate_brief.settle_kept(5) is True
     assert brief_items.told(teammate_brief.KIND, 5) == {}
     assert asyncio.run(teammate_brief.write(_person(5), NOW)) is None
+    # One stuck for longer (a failed chat app, a long leave) no longer holds
+    # back a fresh brief.
+    later = datetime.now(UTC) + teammate_brief.KEPT_FRESH_FOR + timedelta(minutes=1)
+    assert teammate_brief.settle_kept(5, later) is False
     written_at = teammate_brief._read_kept(5)[0]["written_at"]
     held_messages.mark_sent([held_id])
     teammate_brief.settle_kept(5)
