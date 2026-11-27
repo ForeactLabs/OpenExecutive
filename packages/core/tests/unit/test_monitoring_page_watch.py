@@ -526,3 +526,43 @@ def test_headline_text_loses_planted_links_and_addresses() -> None:
     [link] = extract_headline_links(body, "https://news.example/")
     assert "evil.example" not in link["text"]
     assert link["url"] == "https://news.example/a"
+
+
+@pytest.mark.asyncio
+async def test_a_count_that_grows_a_little_each_check_is_told_once_it_grew_a_lot(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each small step is a tick, but the steps add up: the page is compared
+    with the text last reported, not the one seen a check ago."""
+    page = _Page(b"<body>We have 40 open roles</body>")
+    _install(monkeypatch, page)
+    src = PageWatchSource()
+    item = _make_item(target="https://acme.example/careers")
+    await src.poll(item, db_path=db)  # baseline
+
+    page.body = b"<body>We have 48 open roles</body>"
+    assert await src.poll(item, db_path=db) == []  # 40 -> 48: a tick
+    assert await src.poll(item, db_path=db) == []  # same page: no change
+    page.body = b"<body>We have 58 open roles</body>"
+    signals = await src.poll(item, db_path=db)  # 40 -> 58: news
+    assert len(signals) == 1
+    assert "40" in signals[0].raw_payload["summary"] and "58" in signals[0].raw_payload["summary"]
+    # Now the baseline is the reported page.
+    page.body = b"<body>We have 60 open roles</body>"
+    assert await src.poll(item, db_path=db) == []
+
+
+@pytest.mark.asyncio
+async def test_a_count_back_where_it_was_is_no_change(
+    db: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = _Page(b"<body>3 people viewing</body>")
+    _install(monkeypatch, page)
+    src = PageWatchSource()
+    item = _make_item(target="https://acme.example/listing")
+    await src.poll(item, db_path=db)  # baseline
+    page.body = b"<body>4 people viewing</body>"
+    assert await src.poll(item, db_path=db) == []
+    page.body = b"<body>3 people viewing</body>"
+    assert await src.poll(item, db_path=db) == []
+    assert await src.poll(item, db_path=db) == []

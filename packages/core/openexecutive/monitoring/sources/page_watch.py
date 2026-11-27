@@ -177,6 +177,15 @@ class PageWatchSource:
 
         # Changed — summarise (one diff pass), advance the baseline, emit one Signal.
         old_snapshot = prior.get("text_snapshot") or ""
+        if old_snapshot == snapshot and len(text) <= _MAX_TEXT_CHARS:
+            # Back to the text last reported (a count went 40, 48, 40): the
+            # hash moved since, the words did not. (A page longer than the
+            # snapshot can differ past it, so only the hash speaks there.)
+            store.upsert_page_watch_state(
+                item.slug, content_hash, snapshot, links=links, db_path=db_path,
+            )
+            observe(item, "No change on the page.")
+            return []
         pct, added, changes = _diff(old_snapshot, snapshot)
         # NOTE: at-most-once. We advance the stored baseline here, before the
         # pipeline inserts the Signal. If the process dies between this write
@@ -184,9 +193,7 @@ class PageWatchSource:
         # the new hash as current). Acceptable for a monitoring poller; the
         # alternative (advance-after-insert) needs insertion feedback the
         # adapter doesn't have. The dedup_key still prevents double-emit.
-        store.upsert_page_watch_state(
-            item.slug, content_hash, snapshot, links=links, db_path=db_path,
-        )
+        # (A change of only counts keeps the old text, below.)
 
         # What the change added, in words a person can act on: the headline
         # links that were not on the page last time (a news or listing page),
@@ -200,10 +207,19 @@ class PageWatchSource:
             and only_counts_or_marks(old_snapshot, snapshot)
         ):
             # A counter ticking ("was 14, now 15"), a star count or a curly
-            # quote turned straight says nothing new; the baseline has moved
-            # on, so the next real change is compared with the page as it is.
+            # quote turned straight says nothing new. The text compared next
+            # time stays the one last reported, so a count that grows a little
+            # at every check is still told once it has grown a lot in all
+            # (40, 48, 58: the third check reads 40 to 58). The hash moves on,
+            # so the same page is not read as a change again.
+            store.upsert_page_watch_state(
+                item.slug, content_hash, old_snapshot, links=links, db_path=db_path,
+            )
             observe(item, "Only a count or punctuation changed on the page.")
             return []
+        store.upsert_page_watch_state(
+            item.slug, content_hash, snapshot, links=links, db_path=db_path,
+        )
         snippet = _without_links(added[:_SUMMARY_SNIPPET_CHARS].strip())
         label = item.config_json.get("label") or _host_label(item.target)
         # Words replaced or removed say what the page used to say too.
