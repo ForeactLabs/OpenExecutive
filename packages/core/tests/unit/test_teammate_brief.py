@@ -279,3 +279,26 @@ def test_a_kept_brief_that_was_dropped_tells_nothing(
     assert brief_items.told(teammate_brief.KIND, 5) == {}
     assert teammate_brief._read_kept(5) == []
     assert brief_state.last_delivered(teammate_brief.kind_for(5)) == before
+
+
+def test_a_read_error_on_a_kept_brief_does_not_cost_the_day(
+    board: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.people import held_messages
+
+    original = held_messages._connect
+    monkeypatch.setattr(held_messages, "_connect", lambda db_path=None: original(tmp_path / "held.db"))
+    brief = asyncio.run(teammate_brief.write(_person(5), NOW))
+    assert brief is not None
+    held_id = held_messages.hold(5, brief.text, source=teammate_brief.KIND, release_at=NOW)
+    teammate_brief.record_kept(5, brief, held_id)
+    monkeypatch.setattr(held_messages, "status", lambda _id, **_kw: ("unknown", None))
+    # Not known to be waiting: today's brief is still written, nothing is
+    # counted as told, and the kept one is looked at again next time.
+    assert teammate_brief.settle_kept(5) is False
+    assert brief_items.told(teammate_brief.KIND, 5) == {}
+    assert [e["held_id"] for e in teammate_brief._read_kept(5)] == [held_id]
+    # An id no longer there was never sent.
+    monkeypatch.undo()
+    monkeypatch.setattr(held_messages, "_connect", lambda db_path=None: original(tmp_path / "held.db"))
+    assert held_messages.status(held_id + 999) == ("dropped", None)

@@ -254,6 +254,7 @@ def settle_kept(person_id: int) -> bool:
         if not entries:
             return False
         waiting: list[dict[str, Any]] = []
+        unread: list[dict[str, Any]] = []
         sent: list[tuple[str, dict[str, Any]]] = []
         for entry in entries:
             try:
@@ -262,6 +263,10 @@ def settle_kept(person_id: int) -> bool:
                 continue
             if state == "waiting":
                 waiting.append(entry)
+            elif state == "unknown":
+                # Couldn't read it: look again next time, and don't let a
+                # read error cost them today's brief.
+                unread.append(entry)
             elif state == "sent":
                 sent.append((str(entry.get("written_at") or sent_at or ""), entry))
         kind = kind_for(person_id)
@@ -277,8 +282,8 @@ def settle_kept(person_id: int) -> bool:
                 text=str(entry.get("text", "")), fingerprint=str(entry.get("fingerprint", "")),
                 items=items,
             ), at=as_of or None)
-        if len(waiting) != len(entries):
-            _write_kept(person_id, waiting)
+        if len(waiting) + len(unread) != len(entries):
+            _write_kept(person_id, waiting + unread)
         return bool(waiting)
     except Exception:
         logger.exception("teammate_brief: couldn't settle person %s's kept brief", person_id)

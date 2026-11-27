@@ -229,8 +229,9 @@ def waiting_for(person_id: int, ref: str, *, db_path: Path | None = None) -> boo
 
 def status(held_id: int, *, db_path: Path | None = None) -> tuple[str, str | None]:
     """Where one held message stands: ``("waiting", None)``, ``("sent",
-    sent_at)`` or ``("dropped", None)``; ``("waiting", None)`` too on a read
-    error or an unknown id, so a caller never takes it as sent."""
+    sent_at)`` or ``("dropped", None)`` (also for an id no longer there).
+    ``("unknown", None)`` on a read error: not sent, and not known to be
+    waiting either, so a caller can look again later."""
     try:
         conn = _connect(db_path)
         try:
@@ -242,9 +243,9 @@ def status(held_id: int, *, db_path: Path | None = None) -> tuple[str, str | Non
             conn.close()
     except Exception:
         logger.warning("held_messages: couldn't read message %s", held_id, exc_info=True)
-        return "waiting", None
+        return "unknown", None
     if row is None:
-        return "waiting", None
+        return "dropped", None
     if row[0]:
         return "sent", str(row[0])
     if row[1]:
