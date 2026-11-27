@@ -158,6 +158,9 @@ class Step:
     awaits_round: bool = False
     # An ``action_taken`` already named this step.
     acted: bool = False
+    # The latest line a running tool said about itself (a workflow's steps):
+    # shown as the step's detail when it read nothing.
+    note: str = ""
 
     def as_dict(self, *, current: bool) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -169,9 +172,9 @@ class Step:
             "at": self.at,
             "state": "current" if current else ("waits" if self.waits else "done"),
         }
-        detail = read_chips(self.reads)
+        detail = ", ".join(read_chips(self.reads)) or self.note
         if detail:
-            out["detail"] = ", ".join(detail)
+            out["detail"] = detail
         if self.found:
             out["found"] = list(self.found)
         if self.card_id is not None:
@@ -219,6 +222,13 @@ class TurnTimeline:
                 last.kind = kind_of(str(item.get("tool") or ""))
             for kind, n in reads.items():
                 last.reads[kind] = last.reads.get(kind, 0) + n
+            return True
+        if not unnamed and not item.get("tool") and last is not None:
+            # A line a running tool says about itself (a workflow's steps
+            # while run_workflow runs): the step it belongs to, not a new one.
+            if last.note == label:
+                return False
+            last.note = label
             return True
         if unnamed:
             # An unnamed round says nothing new, but what it read still counts.

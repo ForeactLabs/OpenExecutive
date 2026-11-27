@@ -104,6 +104,16 @@ def test_a_round_that_only_shows_progress_leaves_its_step_to_the_next() -> None:
     assert [(s["label"], s.get("detail")) for s in evt["steps"]] == [("Checking your inbox", "3 emails")]
 
 
+def test_a_running_tools_own_lines_stay_on_its_step() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Running the weekly report", "tool": "run_workflow"})
+    for line in ("Pulling the numbers", "Sending the weekly report"):
+        assert tl.observe({"type": "activity", "label": line, "tool": ""}) is not None
+    steps = tl.payload()["steps"]
+    assert len(steps) == 1
+    assert steps[0]["detail"] == "Sending the weekly report"
+
+
 def test_a_meeting_sent_for_approval_waits() -> None:
     tl = TurnTimeline(Clock())
     tl.observe({"type": "action_taken", "tool": "create_calendar_event", "summary": "Sent for approval: Board sync", "target": "x1"})
