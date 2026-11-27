@@ -5,7 +5,8 @@
 // the same thing.
 
 export type StepKind = "look" | "work" | "do";
-export type StepState = "done" | "current" | "waits";
+// "tried": a step that would change something, with nothing saying it did.
+export type StepState = "done" | "current" | "waits" | "tried";
 
 export interface TimelineStep {
   label: string;
@@ -31,7 +32,7 @@ export interface TurnTimeline {
 }
 
 const KINDS: readonly StepKind[] = ["look", "work", "do"];
-const STATES: readonly StepState[] = ["done", "current", "waits"];
+const STATES: readonly StepState[] = ["done", "current", "waits", "tried"];
 
 function str(raw: unknown): string {
   return typeof raw === "string" ? raw.trim() : "";
@@ -156,6 +157,8 @@ export function summaryLine(t: TurnTimeline): string {
   if (waits > 0) {
     parts.push(t.done ? `${stepCount(waits)} asked for your OK.` : waits === 1 ? "1 step waits for your OK." : `${waits} steps wait for your OK.`);
   }
+  const tried = t.steps.filter((s) => s.state === "tried").length;
+  if (tried > 0) parts.push(tried === 1 ? "1 step didn't go through." : `${tried} steps didn't go through.`);
   if (parts.length === 0) parts.push(t.done ? `Took ${stepCount(t.steps.length)}.` : "Working on it.");
   return parts.join(" ");
 }

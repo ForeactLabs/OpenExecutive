@@ -116,6 +116,8 @@ def test_approve_on_a_chat_card_approves_it_and_the_turn_carries_on(
     ]
     assert timelines and timelines[0]["steps"][0]["kind"] == "do"
     assert timelines[0]["steps"][0]["label"] == chat_route.APPROVING_LABEL.rstrip("…")
+    assert timelines[-1]["steps"][0]["label"] == "Handled the card you approved"
+    assert timelines[-1]["steps"][0]["state"] == "done"
     assert approved == [(43, {"input": {"url": "https://example.com"}})]
     block = captured["stream_chat"]["page_context_block"]
     assert "THE CARD THEY JUST APPROVED" in block

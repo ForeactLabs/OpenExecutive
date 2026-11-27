@@ -1735,6 +1735,13 @@ async def _run_chat_turn(
                     else:
                         yield evt
                 if approved is not None:
+                    # The card says how it went; the timeline only that it
+                    # was handled.
+                    handled_evt = timeline.observe(
+                        {"type": "action_taken", "tool": "answer_card", "summary": "Handled the card you approved"}
+                    )
+                    if handled_evt is not None:
+                        yield f"data: {json.dumps({**handled_evt, 'session_id': session.session_id})}\n\n"
                     turn_page_block = "\n\n".join(
                         part for part in (page_context_block, f"THE CARD THEY JUST APPROVED:\n{approved}") if part
                     )

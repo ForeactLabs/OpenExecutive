@@ -162,15 +162,22 @@ class Step:
     # shown as the step's detail when it read nothing.
     note: str = ""
 
+    @property
+    def tried(self) -> bool:
+        """A step that would change something, whose round is over with no
+        chip saying it did (it failed, was refused or found nothing): it
+        never reads as done."""
+        return self.kind == DO and not self.acted and not self.waits
+
     def as_dict(self, *, current: bool) -> dict[str, Any]:
         out: dict[str, Any] = {
             # Finished steps read in the past tense, the turn's own words
             # too; an action's summary and a waiting step already say what
             # happened.
-            "label": self.label if current or self.acted or self.waits else past(self.label),
+            "label": self.label if current or self.acted or self.waits or self.tried else past(self.label),
             "kind": self.kind,
             "at": self.at,
-            "state": "current" if current else ("waits" if self.waits else "done"),
+            "state": "current" if current else ("waits" if self.waits else ("tried" if self.tried else "done")),
         }
         detail = ", ".join(read_chips(self.reads)) or self.note
         if detail:
@@ -350,7 +357,7 @@ class TurnTimeline:
 
 _STEP_KEYS = {"label", "kind", "at", "state", "detail", "found", "card_id"}
 _KINDS = {LOOK, WORK, DO}
-_STATES = {"done", "current", "waits"}
+_STATES = {"done", "current", "waits", "tried"}
 
 
 def from_saved(raw: Any) -> dict[str, Any] | None:

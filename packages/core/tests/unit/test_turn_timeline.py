@@ -114,6 +114,15 @@ def test_a_running_tools_own_lines_stay_on_its_step() -> None:
     assert steps[0]["detail"] == "Sending the weekly report"
 
 
+def test_a_step_with_no_chip_never_reads_as_done() -> None:
+    # message_person failed (no action_taken): the step says it tried.
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Sending a message", "tool": "message_person"})
+    done = tl.finish(())
+    assert done is not None
+    assert done["steps"] == [{**done["steps"][0], "label": "Sending a message", "state": "tried", "kind": "do"}]
+
+
 def test_a_meeting_sent_for_approval_waits() -> None:
     tl = TurnTimeline(Clock())
     tl.observe({"type": "action_taken", "tool": "create_calendar_event", "summary": "Sent for approval: Board sync", "target": "x1"})

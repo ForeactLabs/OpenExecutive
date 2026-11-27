@@ -73,3 +73,13 @@ test("times read as people say them", () => {
   assert.equal(clock(19), "0:19");
   assert.equal(clock(75), "1:15");
 });
+
+test("a step that didn't go through is kept, never counted as done", () => {
+  const t = timelineFrom({
+    ...done,
+    reads: [],
+    steps: [{ label: "Sending a message", kind: "do", at: 4, state: "tried" }],
+  });
+  assert.equal(t.steps[0].state, "tried");
+  assert.equal(summaryLine(t), "1 step didn't go through.");
+});
