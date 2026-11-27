@@ -147,6 +147,23 @@ def test_earlier_texts_from_a_first_look_are_kept_to_read_never_answered(ids: di
                                        text="Still on?")])) == 1
 
 
+def test_conversations_are_newest_text_first_after_a_first_look(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    # One report with a month of conversations: listed by when each text came.
+    tx.record(owner, [
+        _item("old:1", conv="old", title="Old", sender="Old", text="Hi", at=NOW - timedelta(days=20), earlier=True),
+        _item("casey:1", conv="casey", title="Casey", sender="Casey", text="See you", at=NOW - timedelta(hours=3),
+              earlier=True),
+        _item("mid:1", conv="mid", title="Mid", sender="Mid", text="Ok", at=NOW - timedelta(days=5), earlier=True),
+    ])
+    assert [c.title for c in tx.conversations(owner)] == ["Casey", "Mid", "Old"]
+    # An older text told late never moves a conversation back.
+    tx.record(owner, [_item("casey:0", conv="casey", title="Casey", sender="Casey", text="Earlier one",
+                            at=NOW - timedelta(days=30) + timedelta(hours=1), earlier=True)])
+    assert [c.title for c in tx.conversations(owner)][0] == "Casey"
+
+
 def test_a_sign_in_code_is_never_kept(ids: dict[str, int]) -> None:
     owner = ids["principal"]
     _on(owner)

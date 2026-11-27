@@ -402,18 +402,22 @@ def _upsert_conversation(conn: sqlite3.Connection, person_id: int, item: Incomin
         f"SELECT id FROM {TEXT_CONVERSATIONS_TABLE} WHERE person_id=? AND key=?", (person_id, key),
     ).fetchone()
     number = _clip(item.number, 40)
+    # When its latest text came, not when the browser said so: a first look
+    # tells a month of conversations at once, and the list is newest first.
+    # Never moved back by an older text told late.
+    at = _iso(min(item.at, now))
     if row is not None:
         conn.execute(
             f"UPDATE {TEXT_CONVERSATIONS_TABLE} SET title=?, number=CASE WHEN ?<>'' THEN ? ELSE number END, "
-            "is_group=?, updated_at=? WHERE id=?",
-            (_clip(item.title, 200), number, number, int(item.is_group), _iso(now), row["id"]),
+            "is_group=?, updated_at=MAX(updated_at, ?) WHERE id=?",
+            (_clip(item.title, 200), number, number, int(item.is_group), at, row["id"]),
         )
         return str(row["id"])
     new_id = "tc_" + secrets.token_hex(8)
     conn.execute(
         f"INSERT INTO {TEXT_CONVERSATIONS_TABLE} (id, person_id, key, title, number, is_group, updated_at) "
         "VALUES (?,?,?,?,?,?,?)",
-        (new_id, person_id, key, _clip(item.title, 200), number, int(item.is_group), _iso(now)),
+        (new_id, person_id, key, _clip(item.title, 200), number, int(item.is_group), at),
     )
     return new_id
 
