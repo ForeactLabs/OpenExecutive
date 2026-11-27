@@ -700,3 +700,14 @@ def test_what_came_in_lists_their_own_items_with_gists(roster: SimpleNamespace) 
     # Reading it is reading their mail: the turn is kept private.
     assert session.turn_delegation.touched_mail is True
     assert _call(mr.handle_what_came_in, _session(Mailbox()), {"words": "invoice"})["status"] == "not_found"
+
+
+def test_what_came_in_says_when_the_list_is_cut_short(roster: SimpleNamespace) -> None:
+    from openexecutive.delegation import noticed
+
+    for n in range(noticed.MAX_LISTED + 1):
+        noticed.note(roster.principal, source=noticed.EMAIL, item_key=f"m{n}", sender="a@b.example",
+                     subject=f"Note {n}")
+    found = _call(mr.handle_what_came_in, _session(Mailbox()), {})
+    assert len(found["items"]) == noticed.MAX_LISTED
+    assert "search_my_email" in found["more"]

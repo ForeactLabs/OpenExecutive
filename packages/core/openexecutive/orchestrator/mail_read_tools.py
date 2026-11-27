@@ -670,7 +670,9 @@ async def handle_what_came_in(tool_input: dict[str, Any]) -> str:
     words = str(tool_input.get("words") or "").strip()[:200]
 
     async def read(writer: Any) -> str:
-        found = noticed.recent(writer.person.id, words=words)
+        found = noticed.recent(writer.person.id, words=words, limit=noticed.MAX_LISTED + 1)
+        more = len(found) > noticed.MAX_LISTED
+        found = found[: noticed.MAX_LISTED]
         if not found:
             return json.dumps({
                 "status": "not_found",
@@ -698,7 +700,13 @@ async def handle_what_came_in(tool_input: dict[str, Any]) -> str:
                 entry["thread_id"] = item.thread_id
             items.append(entry)
         _note_senders(writer, [i["from"] for i in items])
-        return json.dumps({"status": "ok", "items": items, "note": _DATA_NOTE})
+        out: dict[str, Any] = {"status": "ok", "items": items, "note": _DATA_NOTE}
+        if more:
+            out["more"] = (
+                f"Only the newest {noticed.MAX_LISTED} are listed. More reached them: narrow with "
+                "words, or search their mailbox with search_my_email."
+            )
+        return json.dumps(out)
 
     return await _run(WHAT_CAME_IN, ("searches", SEARCHES_PER_TURN, "searches"), read)
 
