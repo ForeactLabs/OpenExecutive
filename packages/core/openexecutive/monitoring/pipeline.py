@@ -522,17 +522,58 @@ def _after_triage(
         return
     for signal_id in signal_ids:
         _audit_suppressed(signal_id, item, signal, OUTCOME_SUPPRESSED_TRIAGE, reason=reason)
-    if item.id is None:
+    key = (str(db_path), item.id)
+    if item.id is None or key in _POLLING:
+        # The check is still running: its own note, written as it ends,
+        # reads what triage recorded on the row.
         return
-    words = _TRIAGE_WORDS.get(reason.split(":", 1)[0].strip().lower(), "")
-    if not words:
-        words = "You muted this topic, so no card." if reason.lower().startswith("muted") else _TRIAGE_DEFAULT_WORDS
+    told = _LAST_TOLD.get(key) or []
+    if any(row_id in signal_ids for row_id, _ in told):
+        # Triage finished after the check wrote "Told you": say it again
+        # from every find that check told, as they stand now.
+        note = _told_note(told, db_path=db_path)
+    else:
+        note = f"Noticed: {_note_summary(signal.normalized_summary)}. {_triage_words(reason)}"
     try:
-        store.set_last_check_note(
-            item.id, f"Noticed: {_note_summary(signal.normalized_summary)}. {words}", db_path=db_path,
-        )
+        if note:
+            store.set_last_check_note(item.id, note, db_path=db_path)
     except Exception:
         logger.exception("monitoring.pipeline: last-check note failed for %r", item.slug)
+
+
+def _triage_words(reason: str) -> str:
+    """Why triage raised no card, in the person's words."""
+    words = _TRIAGE_WORDS.get(reason.split(":", 1)[0].strip().lower(), "")
+    if words:
+        return words
+    return "You muted this topic, so no card." if reason.lower().startswith("muted") else _TRIAGE_DEFAULT_WORDS
+
+
+# Watches being checked right now, and what each one's last check told
+# (signal id, summary), so triage finishing early or late leaves one true
+# note: the check's own note reads the rows as triage left them, and a
+# triage that finishes after it rewrites that note from the same finds.
+# Keyed by (database, watch id): ids are only unique within one database.
+_POLLING: set[tuple[str, int | None]] = set()
+_LAST_TOLD: dict[tuple[str, int | None], list[tuple[int, str]]] = {}
+
+
+def _told_note(told: list[tuple[int, str]], *, db_path: Path | None = None) -> str | None:
+    """The note for finds a check sent on: those still told, or, when
+    triage turned them all down, the last one and why."""
+    if not told:
+        return None
+    outcomes = store.triage_outcomes([row_id for row_id, _ in told], db_path=db_path)
+    turned_down = {
+        row_id: reason for row_id, (outcome, reason) in outcomes.items()
+        if outcome == OUTCOME_SUPPRESSED_TRIAGE
+    }
+    still = [summary for row_id, summary in told if row_id not in turned_down]
+    if still:
+        more = len(still) - 1
+        return f"Told you: {_note_summary(still[-1])}." + (f" And {more} more." if more > 0 else "")
+    row_id, summary = told[-1]
+    return f"Noticed: {_note_summary(summary)}. {_triage_words(turned_down[row_id])}"
 
 
 # --------------------------------------------------------------------- #
@@ -976,6 +1017,7 @@ class _PollTally:
     # what it held back, how many entries it noted as already there, and
     # what the adapter said when it emitted nothing.
     told: list[str] = field(default_factory=list)
+    told_ids: list[int] = field(default_factory=list)
     held: list[tuple[str, str]] = field(default_factory=list)
     baselined: int = 0
     observation: str = ""
@@ -1030,11 +1072,18 @@ def _note_summary(text: str) -> str:
     return line[:1].upper() + line[1:]
 
 
-def check_note(item: WatchlistItem, tally: _PollTally, *, failed: bool = False) -> str:
-    """What this check found, and why it stayed quiet when it did."""
+def check_note(
+    item: WatchlistItem, tally: _PollTally, *, failed: bool = False, db_path: Path | None = None,
+) -> str:
+    """What this check found, and why it stayed quiet when it did. A find
+    triage has already turned down is not one it told."""
     if failed:
         return COULD_NOT_REACH
     if tally.told:
+        if len(tally.told_ids) == len(tally.told):
+            note = _told_note(list(zip(tally.told_ids, tally.told, strict=True)), db_path=db_path)
+            if note:
+                return note
         more = len(tally.told) - 1
         return f"Told you: {_note_summary(tally.told[-1])}." + (f" And {more} more." if more > 0 else "")
     for outcome, summary in reversed(tally.held):
@@ -1353,6 +1402,7 @@ async def _poll_one_watchlist_item(
             enrichment=enrichment_payload,
         ):
             tally.told.append(signal.normalized_summary)
+            tally.told_ids.append(signal_id)
 
 
 
@@ -1463,6 +1513,8 @@ async def run_external_monitor_scan(
         per_source_start = datetime.now(UTC)
         tally = _PollTally()
         failed = False
+        if item.id is not None:
+            _POLLING.add((str(db_path), item.id))
         try:
             await _poll_one_watchlist_item(
                 item, now, budget=budget, tally=tally,
@@ -1491,9 +1543,13 @@ async def run_external_monitor_scan(
             failed = failed or tally.failed
             total_written += tally.written
             if item.id is not None:
+                # Recorded before the note is read, so a triage finishing
+                # from here on rewrites it rather than skipping it.
+                _LAST_TOLD[(str(db_path), item.id)] = list(zip(tally.told_ids, tally.told, strict=False))
+                _POLLING.discard((str(db_path), item.id))
                 try:
                     store.set_last_check_note(
-                        item.id, check_note(item, tally, failed=failed), db_path=db_path,
+                        item.id, check_note(item, tally, failed=failed, db_path=db_path), db_path=db_path,
                     )
                 except Exception:
                     logger.exception("monitoring.pipeline: last-check note failed for %r", item.slug)
