@@ -498,6 +498,10 @@ async def promote_signal_to_alert(
 # Why triage raised no card, said to the person on the watch's page.
 _TRIAGE_WORDS: dict[str, str] = {
     "duplicate": "It repeats something you already have, so no new card.",
+    # Not a judgment: triage was busy or failed, so say that.
+    "rate_limited": "It couldn't be checked this time, so it is only noted here.",
+    "triage_error": "It couldn't be checked this time, so it is only noted here.",
+    "parse_error": "It couldn't be checked this time, so it is only noted here.",
 }
 _TRIAGE_DEFAULT_WORDS = "It didn't look worth a card, so it is only noted here."
 

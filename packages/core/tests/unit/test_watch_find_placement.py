@@ -49,6 +49,16 @@ def test_the_same_story_reworded_is_caught() -> None:
     c = story_words("Initech raises prices for its enterprise plan")
     assert same_story(a, b)
     assert not same_story(a, c)
+    # Two different stories about the watched company are two stories.
+    acme = story_words("Acme Corp")
+    assert not same_story(
+        story_words("Acme Corp Q3 earnings beat estimates"),
+        story_words("Acme Corp Q4 earnings miss estimates"), subject=acme,
+    )
+    assert not same_story(
+        story_words("Acme Corp launches AI pricing product"),
+        story_words("Acme Corp recalls AI pricing product"), subject=acme,
+    )
     # A padded headline listing every topic is not every story.
     padded = story_words(
         "Acme breach lawsuit layoffs acquisition outage recall CEO resigns funding SEC probe pricing launch"
@@ -85,6 +95,13 @@ def test_only_a_count_changing_is_not_news() -> None:
     assert not only_counts_or_marks("Pro is $29/mo", "Pro is $40/mo")
     assert not only_counts_or_marks("Save 10% today", "Save 20% today")
     assert not only_counts_or_marks("Pro plan", "Team plan")
+    # A mark or a unit beside the number, a decimal, a date: all news.
+    assert not only_counts_or_marks("Pro plan $ 49 per month", "Pro plan $ 59 per month")
+    assert not only_counts_or_marks("Pro plan 49 USD", "Pro plan 59 USD")
+    assert not only_counts_or_marks("Interest rate 4 % APR", "Interest rate 5 % APR")
+    assert not only_counts_or_marks("Deadline 2026-12-01", "Deadline 2027-01-15")
+    assert not only_counts_or_marks("Rated 4.5 stars", "Rated 4.7 stars")
+    assert only_counts_or_marks("1,204 customers", "1,317 customers")
     assert not only_counts_or_marks("same", "same")
 
 

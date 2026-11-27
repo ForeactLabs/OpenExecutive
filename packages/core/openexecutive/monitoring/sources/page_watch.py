@@ -494,13 +494,24 @@ def _strip_blocks(markup: str) -> str:
 
 _LETTERS_RE = re.compile(r"[^a-z]+")
 # A number that carries one of these is a price or a rate: always a change.
-_MONEY_OR_RATE = frozenset("$€£¥%")
+_MONEY_OR_RATE = frozenset("$€£¥₹%")
+# A bare count: digits, with thousands commas.
+_COUNT_RE = re.compile(r"\d{1,3}(?:,\d{3})+|\d+")
+_EDGE_MARKS = ".,;:!?()[]{}\"'“”‘’"
+# Words that make a number beside them money or a rate.
+_UNIT_WORDS = frozenset((
+    "usd", "eur", "gbp", "jpy", "cad", "aud", "inr", "chf", "dollars", "euros", "pounds",
+    "percent", "pct", "per", "apr", "apy", "mo", "month", "monthly", "yr", "year", "yearly",
+    "annually", "seat", "user", "bps",
+))
 
 
 def only_counts_or_marks(old: str, new: str) -> bool:
-    """True when the two texts differ only in plain numbers and punctuation:
+    """True when the two texts differ only in plain counts and punctuation:
     the same words in the same order once digits and marks are set aside,
-    and no changed number is a price or a rate ("$15", "4%")."""
+    every changed number a bare count ("25", "1,204"; not a date, a time or
+    a decimal), and nothing beside a changed number saying it is money or a
+    rate ("$", "USD", "%", "per", "/mo")."""
     old_words = old.split()[:_MAX_DIFF_WORDS]
     new_words = new.split()[:_MAX_DIFF_WORDS]
     if old_words == new_words:
@@ -511,13 +522,25 @@ def only_counts_or_marks(old: str, new: str) -> bool:
 
     if letters(old_words) != letters(new_words):
         return False
+
+    def counted(word: str) -> bool:
+        core = word.strip(_EDGE_MARKS)
+        return not any(ch.isdigit() for ch in core) or _COUNT_RE.fullmatch(core) is not None
+
+    def money_or_rate(word: str) -> bool:
+        low = word.lower()
+        return any(ch in _MONEY_OR_RATE for ch in word) or low.strip(_EDGE_MARKS) in _UNIT_WORDS or "/" in low
+
     sm = difflib.SequenceMatcher(None, old_words, new_words, autojunk=False)
     for tag, i1, i2, j1, j2 in sm.get_opcodes():
         if tag == "equal":
             continue
-        for word in (*old_words[i1:i2], *new_words[j1:j2]):
-            if any(ch in _MONEY_OR_RATE for ch in word):
-                return False
+        changed = (*old_words[i1:i2], *new_words[j1:j2])
+        if not all(counted(w) for w in changed):
+            return False
+        around = (*old_words[max(0, i1 - 1):i2 + 1], *new_words[max(0, j1 - 1):j2 + 1])
+        if any(money_or_rate(w) for w in around):
+            return False
     return True
 
 

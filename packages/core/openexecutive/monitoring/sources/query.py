@@ -75,7 +75,6 @@ _MAX_RESULTS_CEILING = 10
 _REPORTED_WINDOW_DAYS = 30
 _REPORTED_TITLES_SHOWN = 30
 # Two headlines share this much of their distinctive words: the same story.
-_SAME_STORY_OVERLAP = 0.6
 _SAME_STORY_MAX_RATIO = 2
 _STORY_WORDS_MAX = 24
 _WORD_RE = re.compile(r"[a-z0-9]+")
@@ -245,6 +244,7 @@ class QuerySource:
         # when valid results exist further down.
         links = {link for link, _ in reported if link}
         titles = [story_words(title) for _, title in reported if title]
+        subject = story_words(f"{query} {item.config_json.get('label') or ''}")
         for raw in results:
             if len(signals) >= max_results:
                 break
@@ -252,7 +252,7 @@ class QuerySource:
             if signal is None:
                 continue
             words = story_words(str(signal.raw_payload.get("title") or ""))
-            if signal.provenance_url in links or any(same_story(words, seen) for seen in titles):
+            if signal.provenance_url in links or any(same_story(words, seen, subject=subject) for seen in titles):
                 # Already reported, by this search or another: one story is
                 # told once, however it is worded or wherever it reappears.
                 continue
@@ -309,16 +309,29 @@ def story_words(title: str) -> frozenset[str]:
     return frozenset(w for w in words if w not in _COMMON_WORDS and len(w) > 1)
 
 
-def same_story(a: frozenset[str], b: frozenset[str]) -> bool:
+def same_story(a: frozenset[str], b: frozenset[str], *, subject: frozenset[str] = frozenset()) -> bool:
     """Two headlines name the same story: most of their distinctive words
-    are shared (of the shorter one, so a longer rewording still matches)."""
+    are shared (of the shorter one, so a longer rewording still matches).
+    The words of what is being watched (``subject``) are in nearly every
+    headline, so they don't count; and two headlines whose numbers differ
+    ("Q3" and "Q4") are different stories."""
+    a, b = a - subject, b - subject
     if len(a) < 3 or len(b) < 3:
+        return False
+    numbers_a = {w for w in a if any(ch.isdigit() for ch in w)}
+    numbers_b = {w for w in b if any(ch.isdigit() for ch in w)}
+    if numbers_a and numbers_b and numbers_a != numbers_b:
         return False
     # A headline far longer than the other is a different story however
     # much it shares: it would otherwise match everything it lists.
     if max(len(a), len(b)) > _SAME_STORY_MAX_RATIO * min(len(a), len(b)):
         return False
-    return len(a & b) / min(len(a), len(b)) >= _SAME_STORY_OVERLAP
+    # Every distinctive word of the shorter headline is in the longer one:
+    # a rewording adds words, a different story ("launches" / "recalls")
+    # changes one. Dropping a real story costs more than telling one twice,
+    # which triage's own duplicate check still catches.
+    shorter, longer = (a, b) if len(a) <= len(b) else (b, a)
+    return shorter <= longer
 
 
 def published_at(raw: object) -> str | None:

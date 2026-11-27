@@ -6940,11 +6940,15 @@ external_monitoring:
     by this watch and every company-wide query watch
     (store.recent_query_finds) in a fenced <already_reported> block, drops
     results with a reported link or a headline that is the same story
-    (query.story_words / same_story: 60 percent of the shorter's distinctive
-    words), and reads a publish date into published_at so the age gate applies.
+    (query.story_words / same_story: the watched subject's words left out,
+    the shorter headline's distinctive words all in the longer, within 2x
+    length, numbers equal - a changed verb is another story, since dropping
+    a real story costs more than a repeat triage still catches), and reads a
+    publish date into published_at so the age gate applies.
     Pages: only_counts_or_marks observes a change with no new links whose
-    only differences are plain numbers and punctuation (no $ EUR GBP JPY or
-    percent sign on a changed token) and sends nothing, unless every_change.
+    only differences are bare counts and punctuation (no decimal, date or
+    time; no currency or rate mark or word on or beside a changed number)
+    and sends nothing, unless every_change.
     Steer: steer_watch has stop_watch; /alerts/{id}/say turns the watch off
     (stopped in the reply). Before, "stop" only rewrote notes.
     Noise: an expired card (only unread cards expire) counts as half a
