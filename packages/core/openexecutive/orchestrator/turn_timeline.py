@@ -103,7 +103,8 @@ def past(label: str) -> str:
 
 # A round whose label starts with one of these changes something, whatever
 # its tool is called (a connected app's or an extension's write, which the
-# built-in list can't name): it reads as done only once a chip says so.
+# built-in list can't name): it goes under Did, and when its tool makes
+# chips (chip_follows) it reads as done only once one says so.
 _WRITE_VERBS = frozenset({
     "Accepting", "Adding", "Archiving", "Booking", "Cancelling", "Creating",
     "Declining", "Deleting", "Drafting", "Editing", "Forwarding", "Inviting",
@@ -123,6 +124,20 @@ def kind_of(tool: str, label: str = "") -> str:
     if any(word in name for word in _WORK_WORDS):
         return WORK
     return LOOK
+
+
+def chip_follows(tool: str) -> bool:
+    """Whether a round of ``tool`` that works always sends an action chip
+    (action_chips.summarize_action): a built-in write, a connected app's
+    tool (its activity names it ``server__tool``) or an extension tool with
+    a chip."""
+    if not tool:
+        return False
+    if tool in SIDE_EFFECTING_TOOLS or "__" in tool:
+        return True
+    from openexecutive.orchestrator import extensions
+
+    return extensions.has_chip(tool)
 
 
 def read_chips(reads: dict[str, int]) -> list[str]:
@@ -175,6 +190,11 @@ class Step:
     # The latest line a running tool said about itself (a workflow's steps):
     # shown as the step's detail when it read nothing.
     note: str = ""
+    # Its tool leaves an action chip whenever it works (a built-in write, a
+    # connected app's tool, an extension tool with a chip): with no chip,
+    # it didn't go through. A tool that never makes a chip (send_text,
+    # save_file) can't say either way, so its step reads as done.
+    confirms: bool = False
     # The turn was stopped (or timed out) while this step ran: it never
     # finished, so it neither reads as done nor as failed.
     stopped: bool = False
@@ -184,7 +204,7 @@ class Step:
         """A step that would change something, whose round is over with no
         chip saying it did (it failed, was refused or found nothing): it
         never reads as done."""
-        return self.kind == DO and not self.acted and not self.waits
+        return self.kind == DO and self.confirms and not self.acted and not self.waits
 
     def _state(self, current: bool) -> str:
         if current:
@@ -256,7 +276,9 @@ class TurnTimeline:
             # kind and what it read.
             last.awaits_round = False
             if not unnamed:
-                last.kind = kind_of(str(item.get("tool") or ""), label)
+                tool = str(item.get("tool") or "")
+                last.kind = kind_of(tool, label)
+                last.confirms = chip_follows(tool)
             for kind, n in reads.items():
                 last.reads[kind] = last.reads.get(kind, 0) + n
             return True
@@ -277,7 +299,10 @@ class TurnTimeline:
             for kind, n in reads.items():
                 last.reads[kind] = last.reads.get(kind, 0) + n
             return bool(reads)
-        self._add_step(Step(label=label, kind=kind_of(str(item.get("tool") or ""), label), at=self._now(), reads=reads))
+        tool = str(item.get("tool") or "")
+        self._add_step(
+            Step(label=label, kind=kind_of(tool, label), at=self._now(), reads=reads, confirms=chip_follows(tool))
+        )
         return True
 
     def _progress(self, item: dict[str, Any]) -> bool:
@@ -369,7 +394,8 @@ class TurnTimeline:
         # A held step's round already showed (its activity came, no chip
         # followed): that step is the one waiting, not one that failed. The
         # held tools are the turn's latest tries, so match from the end.
-        tries = [s for s in self.steps if s.tried]
+        # Any write with no chip yet, whether or not its tool makes chips.
+        tries = [s for s in self.steps if s.kind == DO and not s.acted and not s.waits and not s.stopped]
         for text, step in zip(reversed(texts), reversed(tries), strict=False):
             step.label = text
             step.named = True

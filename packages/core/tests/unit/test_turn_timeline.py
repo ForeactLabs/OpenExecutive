@@ -144,6 +144,27 @@ def test_a_stopped_turn_keeps_a_finished_action_as_it_was() -> None:
     assert done["steps"][-1]["state"] == "done"
 
 
+def test_a_write_whose_tool_never_makes_a_chip_is_not_called_failed() -> None:
+    # send_text and save_file send no action_taken even when they work.
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Sending a text…", "tool": "send_text"})
+    tl.observe({"type": "activity", "label": "Saving the file…", "tool": "save_file"})
+    done = tl.finish(())
+    assert done is not None
+    assert [(s["label"], s["state"], s["kind"]) for s in done["steps"]] == [
+        ("Sent a text", "done", "do"),
+        ("Saved the file", "done", "do"),
+    ]
+
+
+def test_a_held_text_waits_even_though_its_tool_makes_no_chip() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Sending a text…", "tool": "send_text"})
+    done = tl.finish(("Text Dana",))
+    assert done is not None
+    assert [(s["label"], s["state"]) for s in done["steps"]] == [("Text Dana", "waits")]
+
+
 def test_a_held_step_waits_once_not_twice() -> None:
     # outside_content held the send: its activity came, no chip followed.
     tl = TurnTimeline(Clock())
