@@ -189,11 +189,13 @@ def _rename_session_in_background(
 # Steps approved from a chat that were still running when the turn was
 # stopped or ran out of time: they finish on their own (strong references,
 # as `_rename_tasks`).
-_approving_tasks: set[asyncio.Future[str]] = set()
+_approving_tasks: set[asyncio.Future[Any]] = set()
 class _ApprovedNote(NamedTuple):
     """What the turn reads about the card it approved."""
 
     text: str
+    # The step went through (``decisions.ChatApprovalNote.done``).
+    done: bool = False
 
 
 # What the turn shows while an approved step runs.
@@ -252,7 +254,8 @@ async def _approve_card_in_turn(
             _approving_tasks.add(approving)
             approving.add_done_callback(_approving_tasks.discard)
     if approving.done():
-        yield _ApprovedNote(approving.result())
+        result = approving.result()
+        yield _ApprovedNote(result, bool(getattr(result, "done", False)))
 
 
 def _stop_owner_key(request: Request, caller_person_id: int | None) -> str:
@@ -1719,7 +1722,9 @@ async def _run_chat_turn(
                 # deadline hold while it runs (the step itself finishes on its
                 # own and its card says how it went).
                 approved: str | None = None
-                approving_evt = timeline.observe(
+                approved_done = False
+                # A page in another app never approves (no step to show).
+                approving_evt = None if session.from_host else timeline.observe(
                     {"type": "activity", "label": APPROVING_LABEL, "tool": "answer_card"}
                 )
                 if approving_evt is not None:
@@ -1732,16 +1737,18 @@ async def _run_chat_turn(
                 ):
                     if isinstance(evt, _ApprovedNote):
                         approved = evt.text
+                        approved_done = evt.done
                     else:
                         yield evt
-                if approved is not None:
-                    # The card says how it went; the timeline only that it
-                    # was handled.
-                    handled_evt = timeline.observe(
-                        {"type": "action_taken", "tool": "answer_card", "summary": "Handled the card you approved"}
+                if approved_done:
+                    # Only a step that went through reads as done; a refused
+                    # or failed one stays as tried ("didn't go through").
+                    did_evt = timeline.observe(
+                        {"type": "action_taken", "tool": "answer_card", "summary": "Did what you approved"}
                     )
-                    if handled_evt is not None:
-                        yield f"data: {json.dumps({**handled_evt, 'session_id': session.session_id})}\n\n"
+                    if did_evt is not None:
+                        yield f"data: {json.dumps({**did_evt, 'session_id': session.session_id})}\n\n"
+                if approved is not None:
                     turn_page_block = "\n\n".join(
                         part for part in (page_context_block, f"THE CARD THEY JUST APPROVED:\n{approved}") if part
                     )
