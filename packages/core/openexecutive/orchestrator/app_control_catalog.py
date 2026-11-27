@@ -1145,6 +1145,7 @@ _SCREENS = (
     ("departments", "/departments", "Departments"),
     ("goals", "/goals", "Goals"),
     ("watchlist", "/watchlist", "Watch list"),
+    ("texts", "/texts", "Texts (your own texts, when on)"),
     ("documents", "/artifacts", "Work, Made for you"),
     ("knowledge", "/knowledge", "Knowledge (uploaded files)"),
     ("memories", "/memories", "Memory"),

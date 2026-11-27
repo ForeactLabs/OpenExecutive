@@ -55,6 +55,7 @@ const ROUTE_GUIDE_MAP: Array<{ prefix: string; guideId: string; title: string }>
   { prefix: "/today", guideId: "today", title: "Today" },
   { prefix: "/chats", guideId: "chat", title: "Chats" },
   { prefix: "/delegate", guideId: "delegate", title: "Delegate" },
+  { prefix: "/texts", guideId: "delegate", title: "Texts" },
   { prefix: "/skills", guideId: "skills", title: "How it's done" },
   { prefix: "/memories", guideId: "pulse", title: "Memory" },
   { prefix: "/review", guideId: "review", title: "Review queue" },

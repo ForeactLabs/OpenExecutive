@@ -4,6 +4,9 @@
 - ``PUT /delegation/texts``: turn texts on or off. Off drops what was kept.
 - ``POST /delegation/texts/seen``: the browser extension sends what Google
   Messages shows: whether it is paired, and the texts it sees.
+- ``GET /delegation/texts/conversations``: the Texts page: their
+  conversations, latest first, each with what the Executive did about it,
+  how its latest text from them went, and what was said.
 - ``GET /delegation/texts/next``: the extension asks for the next text to
   send, waiting up to ``wait`` seconds for one.
 - ``POST /delegation/texts/sends/{id}``: the extension says how a send went.
@@ -100,6 +103,30 @@ class SendResultOut(BaseModel):
     status: str
 
 
+class ThreadTextOut(BaseModel):
+    # "" for their own texts (``outgoing``), else who sent it.
+    sender: str
+    text: str
+    outgoing: bool
+    at: str
+
+
+class ThreadOut(BaseModel):
+    id: str
+    who: str
+    number: str
+    is_group: bool
+    at: str
+    note: str
+    status: Literal["read", "sending", "sent", "failed", "unsure"]
+    texts: list[ThreadTextOut]
+
+
+class ThreadsOut(BaseModel):
+    enabled: bool
+    conversations: list[ThreadOut]
+
+
 async def _state(person_id: int) -> TextsOut:
     settings = await asyncio.to_thread(tx.get_settings, person_id)
     convs = await asyncio.to_thread(tx.conversations, person_id, limit=200)
@@ -141,6 +168,29 @@ def _audit(person_id: int, enabled: bool) -> None:
         )
     except Exception:
         logger.debug("texts: audit row failed", exc_info=True)
+
+
+@router.get("/conversations", response_model=ThreadsOut)
+async def get_conversations(request: Request, limit: int = Query(default=50, ge=1, le=200)) -> ThreadsOut:
+    """The caller's own conversations, for the Texts page. Empty while
+    texts are off for them or for the install."""
+    person_id = _person_id(_caller(request))
+    settings = await asyncio.to_thread(tx.get_settings, person_id)
+    if not settings.active:
+        return ThreadsOut(enabled=False, conversations=[])
+    found = await asyncio.to_thread(tx.threads, person_id, limit=limit)
+    return ThreadsOut(
+        enabled=True,
+        conversations=[
+            ThreadOut(
+                id=t.id, who=t.who, number=t.number, is_group=t.is_group, at=t.at, note=t.note,
+                status=t.status,  # type: ignore[arg-type]
+                texts=[ThreadTextOut(sender="" if x.outgoing else x.sender, text=x.text, outgoing=x.outgoing, at=x.at)
+                       for x in t.texts],
+            )
+            for t in found
+        ],
+    )
 
 
 @router.post("/seen", response_model=SeenOut)
