@@ -669,7 +669,9 @@ export default function Chat({ onDebugEvent, initialMessages, initialSessionId, 
     setTurnSteps([]);
     setTurnProgress(null);
     setTurnTimeline(null);
-    setStepsOpen((open) => (typeof open === "number" ? open : null));
+    // A new turn closes the panel: Try again or Edit drops the last reply, and
+    // the new one would land where the open one was.
+    setStepsOpen(null);
     setTurnReads({});
     setLiveLine(null);
     setWritingReply(false);
