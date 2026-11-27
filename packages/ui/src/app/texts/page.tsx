@@ -18,6 +18,9 @@ import { remember, STORAGE_KEYS } from "@/lib/firstRun";
 // shows Texts only while it is on for this person (AppSidebar).
 
 const RECHECK_MS = 15_000;
+// The home page asks at most 2000 characters; leave room for "Text <who> (<number>): ".
+const MAX_WORDS = 1600;
+const MAX_WHO = 120;
 const SETUP_HREF = "/delegate#as-you";
 
 type Filter = "all" | "texted" | "read";
@@ -63,8 +66,8 @@ function TextSomeone() {
       <form onSubmit={submit} className="space-y-3">
         <p className="text-[17px] font-semibold text-fg">Text someone</p>
         <div className="grid gap-3 sm:grid-cols-2">
-          <input value={who} onChange={(e) => setWho(e.target.value)} placeholder="Who (e.g. Dana Ruiz)" aria-label="Who to text" className={field} />
-          <input value={number} onChange={(e) => setNumber(e.target.value)} placeholder="Number, if you have it" aria-label="Their number" inputMode="tel" className={field} />
+          <input value={who} onChange={(e) => setWho(e.target.value)} placeholder="Who (e.g. Dana Ruiz)" aria-label="Who to text" maxLength={MAX_WHO} className={field} />
+          <input value={number} onChange={(e) => setNumber(e.target.value)} placeholder="Number, if you have it" aria-label="Their number" inputMode="tel" maxLength={40} className={field} />
         </div>
         <textarea
           value={what}
@@ -72,6 +75,7 @@ function TextSomeone() {
           rows={2}
           placeholder="What to say, e.g. tell Dana I'm 10 minutes late and ask if 4:15 still works"
           aria-label="What to say"
+          maxLength={MAX_WORDS}
           className={field}
         />
         <div className="flex flex-wrap items-center justify-between gap-3">
