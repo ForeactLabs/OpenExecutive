@@ -147,10 +147,22 @@ class _Cursor:
 
 
 _SCANNING: set[int] = set()
-# Only mail this new can start a turn: a backlog is context only.
+# Only mail this new can start a turn: a backlog is context only. The
+# window grows with the poll interval (see act_max_age).
 ACT_MAX_AGE = timedelta(hours=1)
 PRUNE_EVERY = timedelta(hours=1)
 _pruned_at: datetime | None = None
+
+
+def act_max_age() -> timedelta:
+    """How new mail must be to start a turn: an hour, or longer when the
+    poll interval is long, so the reply watcher's wait (``inbox.GRACE`` and
+    two polls) and the next look both still fall inside it."""
+    from openexecutive.config import get_settings
+    from openexecutive.delegation import inbox
+
+    poll = timedelta(minutes=get_settings().delegation_inbox_poll_minutes)
+    return max(ACT_MAX_AGE, inbox.GRACE + 4 * poll)
 # Looks in a row an email's gist was missing (failed or left out), by
 # (person, message id). In memory: a restart only gives it fresh tries.
 _MISSES: dict[tuple[int, str], int] = {}
@@ -529,6 +541,7 @@ async def _look(person: Any, client: Any, cursor: _Cursor, now: datetime) -> Loo
     from openexecutive.delegation.settings import enabled_since
 
     switched_on = enabled_since(person.id)
+    max_age = act_max_age()
     # The reply watcher's cards and outcomes, read once for the whole look.
     replies = _Replies.read(person, [n.message.id for n in notes])
     for note in notes:
@@ -538,7 +551,7 @@ async def _look(person: Any, client: Any, cursor: _Cursor, now: datetime) -> Loo
         # after a gap, or on the first look after this shipped, is context
         # only, as the reply watcher never catches up either). Unreadable
         # is context only.
-        recent_enough = switched_on is not None and arrived >= switched_on and now - arrived <= ACT_MAX_AGE
+        recent_enough = switched_on is not None and arrived >= switched_on and now - arrived <= max_age
         if noticed.note(
             person.id, source=noticed.EMAIL, item_key=m.id, sender_name=m.from_name or "",
             sender=m.from_addr or "", subject=m.subject or "", gist=note.gist, tie=note.tie,
@@ -552,10 +565,10 @@ async def _look(person: Any, client: Any, cursor: _Cursor, now: datetime) -> Loo
     ready: list[Any] = []
     handled: list[str] = []
     for item in waiting:
-        # Past ACT_MAX_AGE (a turn that failed to start, or reply cards
+        # Past act_max_age (a turn that failed to start, or reply cards
         # unreadable for a while) it is stale: context only, never a late turn.
         got = _parse(item.received_at)
-        if got is None or now - got > ACT_MAX_AGE:
+        if got is None or now - got > max_age:
             handled.append(item.item_key)
             continue
         state = _reply_state(item, now, replies)

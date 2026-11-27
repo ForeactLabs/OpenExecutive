@@ -536,10 +536,29 @@ def test_a_turn_that_failed_to_start_is_not_tried_once_stale(owner: Any, monkeyp
     client = Mailbox(_msg("m1", minutes_ago=1))
     _look(owner, client)
     monkeypatch.setattr(mail_context, "_prepare", model["prepare"])
-    later = NOW + mail_context.ACT_MAX_AGE + timedelta(minutes=5)
+    later = NOW + mail_context.act_max_age() + timedelta(minutes=5)
     _look(owner, client, later)
     assert model["acts"] == []
     assert noticed.waiting_to_act(owner.id, source=noticed.EMAIL, now=later) == []
+
+
+def test_a_long_poll_interval_still_acts_after_the_reply_watcher(owner: Any, monkeypatch: pytest.MonkeyPatch,
+                                                                   model: dict[str, Any]) -> None:
+    monkeypatch.setenv("DELEGATION_INBOX_POLL_MINUTES", "30")
+    inbox.set_watch(owner.id, True, updated_by="test", now=NOW - timedelta(days=1))
+    fresh = _msg("m1", minutes_ago=1)
+    _look(owner, Mailbox(fresh))
+    assert model["acts"] == []  # the reply watcher hasn't looked yet
+    # Past its wait (GRACE + 2 polls = 70 minutes), on the look after.
+    _look(owner, Mailbox(fresh), NOW + timedelta(minutes=95))
+    assert len(model["acts"]) == 1
+
+
+def test_a_long_poll_interval_still_notes_mail_to_act_on(owner: Any, monkeypatch: pytest.MonkeyPatch,
+                                                         model: dict[str, Any]) -> None:
+    monkeypatch.setenv("DELEGATION_INBOX_POLL_MINUTES", "90")
+    _look(owner, Mailbox(_msg("m1", minutes_ago=89)))
+    assert len(model["acts"]) == 1
 
 
 def test_a_turn_that_failed_after_starting_is_not_run_again(owner: Any, monkeypatch: pytest.MonkeyPatch,
