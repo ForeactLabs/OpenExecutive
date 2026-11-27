@@ -159,10 +159,28 @@ def test_a_write_whose_tool_never_makes_a_chip_is_not_called_failed() -> None:
 
 def test_a_held_text_waits_even_though_its_tool_makes_no_chip() -> None:
     tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Reading a web page…", "tool": "read_web_page"})
     tl.observe({"type": "activity", "label": "Sending a text…", "tool": "send_text"})
-    done = tl.finish(("A step",))
+    done = tl.finish(("A step",), held_tools=("send_text",))
     assert done is not None
-    assert [(s["label"], s["state"]) for s in done["steps"]] == [("Sending a text", "waits")]
+    assert [(s["label"], s["state"]) for s in done["steps"]][-1] == ("Sending a text", "waits")
+    assert len(done["steps"]) == 2
+
+
+def test_only_the_held_tools_rounds_after_the_first_read_wait() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Sending a text…", "tool": "send_text"})
+    tl.observe({"type": "activity", "label": "Reading a web page…", "tool": "read_web_page"})
+    tl.observe({"type": "activity", "label": "Saving the file…", "tool": "save_file"})
+    tl.observe({"type": "activity", "label": "Texting Sam…", "tool": "send_text"})
+    done = tl.finish(("A step",), held_tools=("send_text",))
+    assert done is not None
+    assert [(s["label"], s["state"]) for s in done["steps"]] == [
+        ("Sent a text", "done"),
+        ("Read a web page", "done"),
+        ("Saved the file", "done"),
+        ("Texting Sam", "waits"),
+    ]
 
 
 def test_a_connected_apps_read_stays_under_looked_at() -> None:
@@ -179,7 +197,7 @@ def test_a_held_app_write_waits_on_its_own_round() -> None:
     tl.observe({"type": "activity", "label": "Messaging Dana…", "tool": "message_person"})
     tl.observe({"type": "activity", "label": "Reading a web page…", "tool": "fetch_url"})
     tl.observe({"type": "activity", "label": "Using append block · Notion…", "tool": "notion__append_block"})
-    done = tl.finish(("A connected-app step",))
+    done = tl.finish(("A connected-app step",), held_tools=("notion__append_block",))
     assert done is not None
     assert [s["state"] for s in done["steps"]] == ["tried", "done", "waits"]
     assert done["steps"][2]["label"] == "Using append block · Notion"
@@ -188,11 +206,13 @@ def test_a_held_app_write_waits_on_its_own_round() -> None:
 def test_a_hold_never_takes_over_the_approved_cards_step() -> None:
     tl = TurnTimeline(Clock())
     tl.observe({"type": "activity", "label": "Doing what you approved", "tool": "answer_card"})
+    tl.observe({"type": "activity", "label": "Reading a web page…", "tool": "read_web_page"})
     tl.observe({"type": "activity", "label": "Messaging Sara…", "tool": "message_person"})
-    done = tl.finish(("A step", "Send an email"))
+    done = tl.finish(("A step", "Send an email"), held_tools=("message_person", "answer_card", "send_email"))
     assert done is not None
     assert [(s["label"], s["state"]) for s in done["steps"]] == [
         ("Doing what you approved", "tried"),
+        ("Read a web page", "done"),
         ("Messaging Sara", "waits"),
         ("Send an email", "waits"),
     ]
@@ -203,7 +223,7 @@ def test_two_held_rounds_of_one_tool_both_wait() -> None:
     tl.observe({"type": "activity", "label": "Reading a web page…", "tool": "read_web_page"})
     tl.observe({"type": "activity", "label": "Messaging Dana…", "tool": "send_slack_dm"})
     tl.observe({"type": "activity", "label": "Messaging Sam…", "tool": "send_slack_dm"})
-    done = tl.finish(("A step",))
+    done = tl.finish(("A step",), held_tools=("send_slack_dm",))
     assert done is not None
     assert [(s["label"], s["state"]) for s in done["steps"]] == [
         ("Read a web page", "done"),
@@ -219,7 +239,7 @@ def test_a_held_write_with_a_read_after_it_waits_once() -> None:
         {"type": "activity", "label": "Sending an email…", "tool": "google_workspace__send_gmail_message"}
     )
     tl.observe({"type": "activity", "label": "Checking your calendar…", "tool": "check_calendar"})
-    done = tl.finish(("Send an email",))
+    done = tl.finish(("Send an email",), held_tools=("google_workspace__send_gmail_message",))
     assert done is not None
     assert [s["state"] for s in done["steps"]] == ["done", "waits", "done"]
     assert done["steps"][1]["label"] == "Sending an email"
@@ -260,7 +280,7 @@ def test_a_held_step_waits_once_not_twice() -> None:
     tl = TurnTimeline(Clock())
     tl.observe({"type": "activity", "label": "Reading a web page", "tool": "read_web_page"})
     tl.observe({"type": "activity", "label": "Messaging Dana", "tool": "message_person"})
-    done = tl.finish(("A step",))
+    done = tl.finish(("A step",), held_tools=("message_person",))
     assert done is not None
     assert [(s["label"], s["state"]) for s in done["steps"]] == [
         ("Read a web page", "done"),

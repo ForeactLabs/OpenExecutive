@@ -431,6 +431,21 @@ def pending_held(session: Any) -> tuple[str, ...]:
         return ()
 
 
+def pending_held_tools(session: Any) -> tuple[str, ...]:
+    """The tool names behind ``pending_held``, each once, for the chat's own
+    record of the turn (orchestrator/turn_timeline): never shown as they
+    are. Empty whenever ``pending_held`` is. Never raises."""
+    try:
+        if not pending_held(session):
+            return ()
+        speaker = getattr(session, "caller_person_id", None)
+        key = f"{session.session_id}|{speaker if speaker is not None else ''}"
+        stored = _HELD.get(key)
+        return tuple(str(t) for t in stored[0]) if stored is not None else ()
+    except Exception:
+        return ()
+
+
 # Held steps as a person reads them (``step_words``). Only these names are
 # shown: a gateway tool name is whatever the model asked for, and text read
 # from outside can steer it, so an unknown one gets its app's generic label.

@@ -147,16 +147,12 @@ def _is_cut_off(label: str) -> bool:
     return label == _clean(CUT_OFF_LABEL)
 
 
-def _may_be_held(step: Step) -> bool:
-    """A round that could be one held for an outside read: a write, or a
-    connected app's round, with no chip yet (never the approved card's)."""
-    return (
-        (step.kind == DO or "__" in step.tool)
-        and step.tool != "answer_card"
-        and not step.acted
-        and not step.waits
-        and not step.stopped
-    )
+def _held_round(step_tool: str, held_tool: str) -> bool:
+    """Whether a round's tool is the held one (a connected app's comes cut
+    short and cleaned in its activity)."""
+    if not step_tool:
+        return False
+    return step_tool == held_tool or _same_app_tool(step_tool, held_tool)
 
 
 def _same_app_tool(step_tool: str, chip_tool: str) -> bool:
@@ -430,7 +426,11 @@ class TurnTimeline:
         return self.event() if changed else None
 
     def finish(
-        self, held: tuple[str, ...] | list[str] = (), *, interrupted: bool = False
+        self,
+        held: tuple[str, ...] | list[str] = (),
+        *,
+        held_tools: tuple[str, ...] | list[str] = (),
+        interrupted: bool = False,
     ) -> dict[str, Any] | None:
         """Close the turn: steps held for the person's go are added as
         waiting, and nothing is current any more. On a stopped or timed-out
@@ -442,24 +442,30 @@ class TurnTimeline:
                 last.stopped = True
         texts = [t for t in (_clean(w) for w in held) if t]
         # A held step's round already showed (its activity came, no chip
-        # followed): that step is the one waiting, not one that failed. A
-        # held text is its tool in plain words (outside_content.step_words),
-        # given once however many calls of it were held, so every round of
-        # that tool still without a chip waits; a text with none is added.
+        # followed): that round is the one waiting, not one that failed.
+        # ``held_tools`` names the held tools; each round of one, still
+        # without a chip, waits, but only after the turn's first read: a
+        # step is held only once something from outside was read, so a
+        # round of the same tool before that went through.
         from openexecutive.orchestrator.outside_content import step_words
 
-        extra: list[str] = []
-        for text in texts:
-            matched = False
-            for step in self.steps:
-                if _may_be_held(step) and _clean(step_words(step.tool)) == text:
+        first_read = next((i for i, s in enumerate(self.steps) if s.kind == LOOK), len(self.steps))
+        covered: set[str] = set()
+        for tool in dict.fromkeys(str(t) for t in held_tools if t):
+            for step in self.steps[first_read + 1 :]:
+                if (
+                    _held_round(step.tool, tool)
+                    and step.tool != "answer_card"
+                    and not (step.acted or step.waits or step.stopped)
+                ):
                     # Its round's own words ("Messaging Dana") say more
-                    # than the held text, the tool's generic name.
+                    # than the held text, the tool's generic name. A held
+                    # tool is a write, whatever its label says.
+                    step.kind = DO
                     step.named = True
                     step.waits = True
-                    matched = True
-            if not matched:
-                extra.append(text)
+                    covered.add(_clean(step_words(tool)))
+        extra = [t for t in texts if t not in covered]
         for text in extra:
             self._add_step(Step(label=text, kind=DO, at=self._now(), waits=True, named=True))
         self.finished = True

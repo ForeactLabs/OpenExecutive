@@ -290,3 +290,13 @@ def test_a_timed_out_turn_sends_no_flags(flagging: TestClient, monkeypatch: pyte
     events = _events(flagging.post("/chat", json={"message": "what does this say?"}).text)
     assert "error" in [e.get("type") for e in events]
     assert not [e for e in events if e.get("type") == "flags"]
+
+
+def test_pending_held_tools_names_the_held_tools_for_the_same_reader() -> None:
+    session = Session(caller_person_id=4)
+    _hold(session, "upsert_person", "send_text")
+    assert oc.pending_held_tools(session) == ("upsert_person", "send_text")
+    assert oc.pending_held_tools(Session(session_id=session.session_id, caller_person_id=5)) == ()
+    expired = Session()
+    _hold(expired, "send_text", age=oc.HELD_TTL_SECONDS + 1)
+    assert oc.pending_held_tools(expired) == ()
