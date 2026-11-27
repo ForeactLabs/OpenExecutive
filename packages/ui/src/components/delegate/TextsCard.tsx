@@ -13,7 +13,14 @@ import Switch from "@/components/Switch";
 import { BROWSER_SETTINGS_HREF } from "@/components/browser/BrowserExtensionCard";
 import SettingsCard from "@/components/settings/SettingsCard";
 import { buttonClass } from "@/components/ui/Button";
-import { getBrowserStatus, getTexts, updateTexts, type BrowserStatus, type Texts } from "@/lib/api";
+import {
+  getBrowserStatus,
+  getTexts,
+  TEXTS_CHANGED_EVENT,
+  updateTexts,
+  type BrowserStatus,
+  type Texts,
+} from "@/lib/api";
 
 const GOOGLE_MESSAGES = "https://messages.google.com/web";
 const RECHECK_MS = 5000;
@@ -125,6 +132,7 @@ export default function TextsCard() {
     saving.current = true;
     try {
       const saved = await updateTexts(next);
+      window.dispatchEvent(new Event(TEXTS_CHANGED_EVENT));
       if (save >= textsSeen.current) {
         textsSeen.current = save;
         setState(saved);

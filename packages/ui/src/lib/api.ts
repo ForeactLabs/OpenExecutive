@@ -2432,6 +2432,33 @@ export async function getTexts(signal?: AbortSignal): Promise<Texts | null> {
   return res.json();
 }
 
+/** Sent on window when someone turns their Texts on or off, so the menu follows. */
+export const TEXTS_CHANGED_EVENT = "oe:texts-changed";
+
+export type TextThread = {
+  id: string;
+  who: string;
+  number: string;
+  is_group: boolean;
+  at: string;
+  /** The Executive's own line on what it did about it, or "". */
+  note: string;
+  /** How its latest text here went; "read" when it sent none. */
+  status: "read" | "sending" | "sent" | "failed" | "unsure";
+  /** The latest texts, oldest first. `sender` is "" for the person's own. */
+  texts: { sender: string; text: string; outgoing: boolean; at: string }[];
+};
+
+export type TextThreads = { enabled: boolean; conversations: TextThread[] };
+
+// null when this viewer can't have it (403) or the backend predates it (404).
+export async function getTextThreads(signal?: AbortSignal): Promise<TextThreads | null> {
+  const res = await fetch(`${API_BASE}/delegation/texts/conversations`, { signal, cache: "no-store" });
+  if (res.status === 403 || res.status === 404) return null;
+  if (!res.ok) throw await delegationError(res, "Couldn't load your texts.");
+  return res.json();
+}
+
 export async function updateTexts(enabled: boolean): Promise<Texts> {
   const res = await fetch(`${API_BASE}/delegation/texts`, {
     method: "PUT",

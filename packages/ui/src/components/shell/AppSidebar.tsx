@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
 import BrandMark from "@/components/BrandMark";
 import ApprovalsChip from "@/components/shell/ApprovalsChip";
@@ -10,13 +10,15 @@ import UserBadge from "@/components/UserBadge";
 import { useWorkspace } from "@/components/workspace/WorkspaceContext";
 import {
   buildDestinations,
+  groupBySection,
   isDestinationActive,
   isAdvancedPath,
   isNavActive,
   NEW_CHAT_DESCRIPTION,
   SETTINGS_NAV_ITEM,
+  type NavSectionKey,
 } from "@/components/shell/navConfig";
-import { getReviewStats, listMemoryChanges, listUnansweredQuestions } from "@/lib/api";
+import { getReviewStats, getTexts, listMemoryChanges, listUnansweredQuestions, TEXTS_CHANGED_EVENT } from "@/lib/api";
 import { MEMORY_VISITED_EVENT, readLastVisit, writeLastVisit } from "@/lib/memoryChanges";
 
 /**
@@ -85,7 +87,10 @@ export default function AppSidebar({
     mode,
     roleKind: role.role_kind,
     hasDepartments,
+    textsEnabled: useTextsNav(pathname),
   });
+  const sections = groupBySection(destinations);
+  const [folded, toggleFolded] = useFoldedSections();
   const newChatActive = home ? home.mode === "chat" && home.activeSessionId === undefined : false;
 
   return (
@@ -141,23 +146,52 @@ export default function AppSidebar({
       {/* The six places. Everything else is a tab inside one of them, or a
           tool on Settings. */}
       <nav aria-label="Main" className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-3 py-2">
-        <div className="space-y-1">
-          {destinations.map((d) => {
-            const isHome = d.key === "home";
-            const active =
-              isHome && home ? home.mode === "briefing" : isDestinationActive(d, pathname);
+        <div className="space-y-2">
+          {sections.map((section) => {
+            const isActive = (d: (typeof destinations)[number]) =>
+              d.key === "home" && home ? home.mode === "briefing" : isDestinationActive(d, pathname);
+            // The heading holding the page you're on never folds it away.
+            const holdsPage = section.items.some(isActive);
+            const open = holdsPage || !folded.includes(section.key);
+            const listId = `nav-section-${section.key}`;
             return (
-              <NavRow
-                key={d.key}
-                href={isHome && home ? undefined : d.href}
-                onClick={isHome && home ? home.onBriefing : onClose}
-                label={d.label}
-                icon={d.icon}
-                description={d.description}
-                active={active}
-                badge={d.badge}
-                dot={d.key === "pulse" && memoryNews}
-              />
+              <div key={section.key}>
+                <button
+                  type="button"
+                  onClick={() => toggleFolded(section.key)}
+                  disabled={holdsPage}
+                  aria-expanded={open}
+                  aria-controls={listId}
+                  className="w-full flex items-center gap-1.5 px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-fg-muted hover:text-fg disabled:hover:text-fg-muted cursor-pointer disabled:cursor-default"
+                >
+                  <span className="flex-1 text-left">{section.label}</span>
+                  <Icon
+                    name="chevron-right"
+                    size="w-3.5 h-3.5"
+                    className={`transition-transform ${open ? "rotate-90" : ""} ${holdsPage ? "opacity-0" : ""}`}
+                  />
+                </button>
+                {open && (
+                  <div id={listId} className="space-y-1">
+                    {section.items.map((d) => {
+                      const isHome = d.key === "home";
+                      return (
+                        <NavRow
+                          key={d.key}
+                          href={isHome && home ? undefined : d.href}
+                          onClick={isHome && home ? home.onBriefing : onClose}
+                          label={d.label}
+                          icon={d.icon}
+                          description={d.description}
+                          active={isActive(d)}
+                          badge={d.badge}
+                          dot={d.key === "pulse" && memoryNews}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>
@@ -268,6 +302,70 @@ function NavRow({
       )}
     </SidebarEntry>
   );
+}
+
+// Which sidebar headings this browser folded away.
+const FOLDED_KEY = "oe.nav.folded";
+
+// Every sidebar on the page reads the same saved value and hears a change.
+const foldListeners = new Set<() => void>();
+
+function savedFolded(): string {
+  try {
+    return window.localStorage.getItem(FOLDED_KEY) ?? "[]";
+  } catch {
+    return "[]";
+  }
+}
+
+function useFoldedSections(): [NavSectionKey[], (key: NavSectionKey) => void] {
+  const raw = useSyncExternalStore(
+    (onChange) => {
+      foldListeners.add(onChange);
+      return () => foldListeners.delete(onChange);
+    },
+    savedFolded,
+    // Before the page loads in the browser: every heading open.
+    () => "[]",
+  );
+  const folded = useMemo<NavSectionKey[]>(() => {
+    try {
+      const saved: unknown = JSON.parse(raw);
+      return Array.isArray(saved) ? saved.filter((k): k is NavSectionKey => typeof k === "string") : [];
+    } catch {
+      return [];
+    }
+  }, [raw]);
+  const toggle = (key: NavSectionKey) => {
+    const next = folded.includes(key) ? folded.filter((k) => k !== key) : [...folded, key];
+    try {
+      window.localStorage.setItem(FOLDED_KEY, JSON.stringify(next));
+    } catch {
+      // Storage is off: nothing to remember it in.
+    }
+    foldListeners.forEach((hear) => hear());
+  };
+  return [folded, toggle];
+}
+
+/** Whether Texts belongs in this person's menu: on for the install and
+ * turned on by them. Looked at on each move and when they flip it. */
+function useTextsNav(pathname: string): boolean {
+  const [on, setOn] = useState(false);
+  const [flips, setFlips] = useState(0);
+  useEffect(() => {
+    const onFlip = () => setFlips((n) => n + 1);
+    window.addEventListener(TEXTS_CHANGED_EVENT, onFlip);
+    return () => window.removeEventListener(TEXTS_CHANGED_EVENT, onFlip);
+  }, []);
+  useEffect(() => {
+    const ctl = new AbortController();
+    getTexts(ctl.signal)
+      .then((t) => setOn(Boolean(t?.available && t.enabled)))
+      .catch(() => {});
+    return () => ctl.abort();
+  }, [pathname, flips]);
+  return on;
 }
 
 /** Whether Memory has something new since it was last opened in this

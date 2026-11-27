@@ -161,7 +161,9 @@ async def look(person_id: int) -> bool:
         off_team = True
         before = await asyncio.to_thread(texts.last_send_id, person_id)
         try:
-            await _turn(person, prompt, off_team=off_team)
+            said = await _turn(person, prompt, off_team=off_team)
+            # Its last line says what it did: the Texts page shows it.
+            await asyncio.to_thread(texts.save_note, person_id, conv.id, last_line(said))
         except Exception as exc:
             # A failed turn (the model busy, the gateway down) leaves them
             # new, unless it already texted back: then a second look would
@@ -174,8 +176,15 @@ async def look(person_id: int) -> bool:
     return True
 
 
-async def _turn(person: Any, prompt: str, *, off_team: bool = False) -> None:
-    """The person's Executive, unattended, for them alone."""
+def last_line(said: str) -> str:
+    """The turn's last line, which says what it did ("Nothing needed." too)."""
+    lines = [line.strip().strip("*_ ") for line in str(said or "").splitlines()]
+    lines = [line for line in lines if line]
+    return lines[-1] if lines else ""
+
+
+async def _turn(person: Any, prompt: str, *, off_team: bool = False) -> str:
+    """The person's Executive, unattended, for them alone. Returns what it said."""
     from openexecutive.audit.context import rows_for_person
     from openexecutive.onboarding.profile_builder import load_or_create_profile
     from openexecutive.orchestrator.executive import Executive
@@ -194,4 +203,4 @@ async def _turn(person: Any, prompt: str, *, off_team: bool = False) -> None:
     executive = Executive(mcp_gateway=await ensure_active_gateway())
     # Their texts and what came of them are in their activity alone.
     with contextlib.nullcontext() if person.is_principal else rows_for_person(person.id):
-        await executive.chat(user_message=prompt, session=session, person_id=person.id, memory_text="")
+        return await executive.chat(user_message=prompt, session=session, person_id=person.id, memory_text="")

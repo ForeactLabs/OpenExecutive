@@ -1224,3 +1224,61 @@ def test_a_text_that_went_on_its_own_is_sending_until_it_went(ids: dict[str, int
     assert row["status"] == ttl.SENDING and _log_id_of(send_id) == row["id"]
     tx.settle_send(owner, send_id, status=tx.FAILED, error="Nothing went.")
     assert _row(row["id"])["status"] == "failed"
+
+
+# --- the Texts page --------------------------------------------------------
+
+
+def test_the_turn_keeps_its_last_line_on_the_conversation(ids: dict[str, int], monkeypatch: pytest.MonkeyPatch) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("a", text="Cleaning Monday 9 AM, reply C to confirm")])
+
+    async def turn(person: Any, prompt: str, *, off_team: bool = False) -> str:
+        return "Looked at it.\n\n**Put the cleaning on your calendar; nothing sent.**\n"
+
+    monkeypatch.setattr(texts_watch, "_turn", turn)
+    assert asyncio.run(texts_watch.look(owner)) is True
+    (thread,) = tx.threads(owner)
+    assert thread.note == "Put the cleaning on your calendar; nothing sent."
+    assert thread.status == "read" and thread.who == "Dana Ruiz"
+    assert [t.text for t in thread.texts] == ["Cleaning Monday 9 AM, reply C to confirm"]
+
+
+def test_threads_show_how_the_latest_send_went_and_loose_sends(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("a", text="Friday works?")])
+    (conv,) = tx.conversations(owner)
+    first = tx.queue_send(owner, "Yes, Friday", conversation_id=conv.id)
+    tx.settle_send(owner, first.id, status=tx.SENT)
+    tx.queue_send(owner, "See you then", conversation_id=conv.id)
+    tx.queue_send(owner, "Hi, it's Olivia", to_number="+1 512 555 0100")
+    found = {t.id: t for t in tx.threads(owner)}
+    assert found[conv.id].status == "sending"
+    assert [(t.text, t.outgoing) for t in found[conv.id].texts] == [("Friday works?", False), ("Yes, Friday", True)]
+    (loose,) = [t for t in found.values() if t.id.startswith("send-")]
+    assert loose.who == "+1 512 555 0100" and loose.status == "sending"
+    assert loose.texts[0].text == "Hi, it's Olivia"
+    # Someone else's are never there.
+    assert tx.threads(ids["teammate"]) == []
+
+
+def test_conversations_route_is_the_callers_own(client: TestClient, ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    assert client.get("/delegation/texts/conversations", headers=OWNER).json() == {
+        "enabled": False, "conversations": [],
+    }
+    _on(owner)
+    tx.record(owner, [_item("a", text="Running late?")])
+    (conv,) = tx.conversations(owner)
+    tx.save_note(owner, conv.id, "  Told Dana  you'd be there at 4:15. ")
+    tx.save_note(ids["teammate"], conv.id, "not theirs")
+    body = client.get("/delegation/texts/conversations", headers=OWNER).json()
+    assert body["enabled"] is True
+    (row,) = body["conversations"]
+    assert row["who"] == "Dana Ruiz" and row["note"] == "Told Dana you'd be there at 4:15."
+    assert row["status"] == "read"
+    assert row["texts"] == [{"sender": "Dana Ruiz", "text": "Running late?", "outgoing": False, "at": row["texts"][0]["at"]}]
+    _on(ids["teammate"])
+    assert client.get("/delegation/texts/conversations", headers=TEAMMATE).json()["conversations"] == []

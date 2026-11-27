@@ -780,6 +780,95 @@ def get_send(send_id: int, *, db_path: Path | None = None) -> Send | None:
 
 
 # --------------------------------------------------------------------------- #
+# The Texts page: each conversation, what the Executive did, what was said
+# --------------------------------------------------------------------------- #
+
+# The most characters of the Executive's line on a conversation kept.
+MAX_NOTE = 600
+
+
+def save_note(person_id: int, conversation_id: str, note: str, *, db_path: Path | None = None) -> None:
+    """Keep the Executive's line on what it did about a conversation (its
+    turn's last line, ``texts_watch``). Only the person's own conversation."""
+    line = " ".join(str(note or "").split())
+    if not line:
+        return
+    with _connect(db_path) as conn:
+        conn.execute(
+            f"UPDATE {TEXT_CONVERSATIONS_TABLE} SET note=?, note_at=? WHERE id=? AND person_id=?",
+            (_clip(line, MAX_NOTE), _iso(_now()), conversation_id, person_id),
+        )
+
+
+@dataclass(frozen=True)
+class Thread:
+    """One row on the Texts page: a conversation, or a text on its way to a
+    number with no conversation yet."""
+
+    id: str
+    who: str
+    number: str
+    is_group: bool
+    at: str
+    # The Executive's own line on what it did, or "".
+    note: str
+    # How the latest text it sent here went (``SENT``, ``FAILED``, ``UNSURE``,
+    # or ``"sending"`` while on its way), or ``"read"`` when it sent none.
+    status: str
+    # The latest texts, oldest first.
+    texts: list[Text]
+
+
+def _status(send_status: str | None) -> str:
+    if send_status is None:
+        return "read"
+    return "sending" if send_status in (PENDING, HANDED) else send_status
+
+
+def threads(person_id: int, *, limit: int = 50, per: int = 20, db_path: Path | None = None) -> list[Thread]:
+    """The person's own conversations for the Texts page, latest first. Each
+    one's status comes from its latest send; a send to a new number shows as
+    its own row until the browser says which conversation it went to."""
+    out: list[Thread] = []
+    with _connect(db_path) as conn:
+        convs = conn.execute(
+            f"SELECT * FROM {TEXT_CONVERSATIONS_TABLE} WHERE person_id=? ORDER BY updated_at DESC LIMIT ?",
+            (person_id, limit),
+        ).fetchall()
+        for c in convs:
+            last = conn.execute(
+                f"SELECT status, created_at FROM {TEXT_SENDS_TABLE} WHERE person_id=? AND conversation_id=? "
+                "ORDER BY id DESC LIMIT 1",
+                (person_id, c["id"]),
+            ).fetchone()
+            rows = conn.execute(
+                f"SELECT * FROM {TEXTS_TABLE} WHERE person_id=? AND conversation_id=? ORDER BY at DESC, id DESC LIMIT ?",
+                (person_id, c["id"], per),
+            ).fetchall()
+            at = max(str(c["updated_at"] or ""), str(last["created_at"]) if last else "", str(c["note_at"] or ""))
+            out.append(Thread(
+                id=str(c["id"]), who=_conversation(c).who, number=str(c["number"] or ""),
+                is_group=bool(c["is_group"]), at=at, note=str(c["note"] or ""),
+                status=_status(last["status"] if last else None),
+                texts=[_text(r) for r in reversed(rows)],
+            ))
+        loose = conn.execute(
+            f"SELECT * FROM {TEXT_SENDS_TABLE} WHERE person_id=? AND conversation_id IS NULL "
+            "ORDER BY id DESC LIMIT ?",
+            (person_id, limit),
+        ).fetchall()
+    for r in loose:
+        out.append(Thread(
+            id=f"send-{r['id']}", who=str(r["to_number"] or "someone"), number=str(r["to_number"] or ""),
+            is_group=False, at=str(r["created_at"]), note="", status=_status(str(r["status"])),
+            texts=[Text(id=0, conversation_id="", sender="", text=str(r["text"]), outgoing=True,
+                        at=str(r["created_at"]))],
+        ))
+    out.sort(key=lambda t: t.at, reverse=True)
+    return out[:limit]
+
+
+# --------------------------------------------------------------------------- #
 # Their browser asking for the next send
 # --------------------------------------------------------------------------- #
 

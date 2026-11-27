@@ -55,6 +55,12 @@ interface BuildOpts {
    * that doesn't know keeps the tab.
    */
   hasDepartments?: boolean;
+  /**
+   * Show Texts (the texts the Executive read and sent for this person) under
+   * Chats. Only while texts are on for the install and the person turned
+   * theirs on (`useTextsNav`); nobody else sees it.
+   */
+  textsEnabled?: boolean;
 }
 
 // What the profile at /company-profile is called. A team's is its company.
@@ -267,17 +273,67 @@ export interface Destination extends NavItem {
   key: string;
   /** Pages that light this entry up, besides `href` itself. */
   alsoActiveOn?: string[];
+  /** Which heading it sits under in the sidebar (`NAV_SECTIONS`). */
+  section?: NavSectionKey;
 }
 
-// The main menu, the same in the sidebar on every page: seven places, then
-// Settings at the bottom. Everything else is a tab inside one of them or a
-// tool under Settings.
+// The sidebar's headings, in order. Each folds its entries away; the one
+// holding the page you're on stays open (AppSidebar).
+export type NavSectionKey = "talk" | "do" | "company";
+
+export const NAV_SECTIONS: { key: NavSectionKey; label: string }[] = [
+  { key: "talk", label: "Talk" },
+  { key: "do", label: "Get things done" },
+  { key: "company", label: "Your company" },
+];
+
+// Where each main-menu entry sits. An entry with no `section` of its own and
+// none here goes under "Get things done".
+const SECTION_OF: Record<string, NavSectionKey> = {
+  chats: "talk",
+  texts: "talk",
+  home: "do",
+  work: "do",
+  delegate: "do",
+  company: "company",
+  you: "company",
+  knowledge: "company",
+  pulse: "company",
+};
+
+export function sectionOf(dest: Destination): NavSectionKey {
+  return dest.section ?? SECTION_OF[dest.key] ?? "do";
+}
+
+/** The main menu under its headings, each in menu order; empty ones left out. */
+export function groupBySection(
+  destinations: Destination[],
+): { key: NavSectionKey; label: string; items: Destination[] }[] {
+  return NAV_SECTIONS.map((s) => ({ ...s, items: destinations.filter((d) => sectionOf(d) === s.key) })).filter(
+    (s) => s.items.length > 0,
+  );
+}
+
+// The main menu, the same in the sidebar on every page: seven places (eight
+// with Texts) under three headings, then Settings at the bottom. Everything
+// else is a tab inside one of them or a tool under Settings.
+// Texts' main-menu entry (see BuildOpts.textsEnabled).
+export const TEXTS_DESTINATION: Destination = {
+  key: "texts",
+  href: "/texts",
+  label: "Texts",
+  icon: "text",
+  section: "talk",
+  description: "Texts your Executive read and sent for you from your own number, and what it did about each.",
+};
+
 export function buildDestinations({
   isOnboarded = true,
   reviewBadge = 0,
   mode = "team",
   roleKind = null,
   hasDepartments = true,
+  textsEnabled = false,
 }: BuildOpts = {}): Destination[] {
   const hubs = buildHubs({ isOnboarded, mode, roleKind, hasDepartments });
   const hubEntry = (hub: Hub): Destination => ({
@@ -297,6 +353,7 @@ export function buildDestinations({
       icon: "chat",
       description: "Every conversation, searchable — including Slack, Telegram and Discord.",
     },
+    ...(textsEnabled ? [TEXTS_DESTINATION] : []),
     ...hubs.map(hubEntry),
     { key: "delegate", ...DELEGATE_NAV_ITEM },
     {

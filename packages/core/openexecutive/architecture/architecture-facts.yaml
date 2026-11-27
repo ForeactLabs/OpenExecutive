@@ -12893,6 +12893,11 @@ delegation:
     the Delegate page; OE_TEXTS_OFF=1 or OE_BROWSER_OFF=1 turns it off for the
     install. Tables delegation_text_settings, delegation_text_conversations,
     delegation_texts, delegation_text_sends; 30 days, 5000 a person; off
+    forgets them. The Texts page (/texts, GET /delegation/texts/conversations,
+    texts.threads) lists the person's own conversations with the turn's last
+    line (note/note_at on the conversation), how the latest send went and
+    what was said; it and its menu entry under Talk show only while texts are
+    on for the install and that person.
     forgets them. New incoming texts wake one unattended turn for that person
     with the texts as untrusted_content source text_message, as a sender off
     the team (Session.sender_off_team, every text: its number can be one the
