@@ -547,7 +547,10 @@ const UNFOCUS = `(() => { const a = document.activeElement; if (a && a !== docum
 // typed elsewhere reaches the box, and the focus goes straight back after it.
 async function focusForPress(back, target) {
   const [before] = (await chrome.windows.getAll({ windowTypes: ["normal"] })).filter((w) => w.focused);
-  back.focusedId = before && before.id !== back.windowId ? before.id : null;
+  // Only from another Chrome window, which the focus can go back to: never
+  // from another app, which it could not.
+  if (!before || before.id === back.windowId) return false;
+  back.focusedId = before.id;
   back.tookFocus = true;
   // Keys they were typing elsewhere must not reach the box holding the text:
   // blurred before the window takes the focus, and again after in case the
@@ -556,6 +559,7 @@ async function focusForPress(back, target) {
   await chrome.windows.update(back.windowId, { focused: true });
   await chrome.debugger.sendCommand(target, "Runtime.evaluate", { expression: UNFOCUS }).catch(() => null);
   await pause(200);
+  return true;
 }
 
 async function putBack(tab, back) {
@@ -622,10 +626,11 @@ async function pressInTab(tab, x, y) {
     if (back && !back.focused && after && after.at === at && after.full) {
       const last = await sendSpot(target, at, false);
       if (last && last.full) {
-        await focusForPress(back, target);
-        const check = await readSpot(target);
-        if (check && check.at === at && check.full && check.x === last.x && check.y === last.y) await pressAt(target, check);
-        await putBack(now, back);
+        if (await focusForPress(back, target)) {
+          const check = await readSpot(target);
+          if (check && check.at === at && check.full && check.x === last.x && check.y === last.y) await pressAt(target, check);
+          await putBack(now, back);
+        }
       }
     }
     return { ok: true };

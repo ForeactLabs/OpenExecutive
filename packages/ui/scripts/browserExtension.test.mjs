@@ -620,10 +620,14 @@ test("texts: the press shows Google Messages without taking the focus, and focus
   // Focus only when the words are still in the box after the press, and it goes straight back.
   const last = press.slice(press.indexOf("if (back && !back.focused && after"));
   // The spot is found before the focus is taken; with the focus held, one reading, the press, and back.
-  assert.ok(last.indexOf("const last = await sendSpot(target, at, false);") < last.indexOf("await focusForPress(back, target)"));
-  assert.ok(last.indexOf("check.x === last.x && check.y === last.y) await pressAt(target, check);") > last.indexOf("await focusForPress(back, target)"));
+  assert.ok(last.indexOf("const last = await sendSpot(target, at, false);") < last.indexOf("focusForPress(back, target)"));
+  assert.ok(last.indexOf("check.x === last.x && check.y === last.y) await pressAt(target, check);") > last.indexOf("focusForPress(back, target)"));
   assert.ok(last.indexOf("await putBack(now, back);") > last.indexOf("await pressAt(target, check)"));
   const focus = bg.slice(bg.indexOf("async function focusForPress"), bg.indexOf("async function putBack"));
+  // Never from another app (no Chrome window in front), which the focus couldn't go back to.
+  assert.ok(focus.includes("if (!before || before.id === back.windowId) return false;"));
+  assert.ok(focus.indexOf("return false;") < focus.indexOf("{ focused: true }"));
+  assert.ok(last.includes("if (await focusForPress(back, target)) {"));
   assert.ok(focus.indexOf("{ expression: UNFOCUS }") < focus.indexOf("{ focused: true }"));
   assert.ok(focus.lastIndexOf("{ expression: UNFOCUS }") > focus.indexOf("{ focused: true }"));
   assert.ok(press.includes("after.full"));
