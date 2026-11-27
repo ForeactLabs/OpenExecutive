@@ -549,8 +549,11 @@ async function focusForPress(back, target) {
   const [before] = (await chrome.windows.getAll({ windowTypes: ["normal"] })).filter((w) => w.focused);
   back.focusedId = before && before.id !== back.windowId ? before.id : null;
   back.tookFocus = true;
+  // Keys they were typing elsewhere must not reach the box holding the text:
+  // blurred before the window takes the focus, and again after in case the
+  // page put it back.
+  await chrome.debugger.sendCommand(target, "Runtime.evaluate", { expression: UNFOCUS }).catch(() => null);
   await chrome.windows.update(back.windowId, { focused: true });
-  // Keys they were typing elsewhere must not reach the box holding the text.
   await chrome.debugger.sendCommand(target, "Runtime.evaluate", { expression: UNFOCUS }).catch(() => null);
   await pause(200);
 }

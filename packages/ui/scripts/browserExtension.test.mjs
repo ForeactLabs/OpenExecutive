@@ -624,7 +624,8 @@ test("texts: the press shows Google Messages without taking the focus, and focus
   assert.ok(last.indexOf("check.x === last.x && check.y === last.y) await pressAt(target, check);") > last.indexOf("await focusForPress(back, target)"));
   assert.ok(last.indexOf("await putBack(now, back);") > last.indexOf("await pressAt(target, check)"));
   const focus = bg.slice(bg.indexOf("async function focusForPress"), bg.indexOf("async function putBack"));
-  assert.ok(focus.indexOf("{ expression: UNFOCUS }") > focus.indexOf("{ focused: true }"));
+  assert.ok(focus.indexOf("{ expression: UNFOCUS }") < focus.indexOf("{ focused: true }"));
+  assert.ok(focus.lastIndexOf("{ expression: UNFOCUS }") > focus.indexOf("{ focused: true }"));
   assert.ok(press.includes("after.full"));
   const back = bg.slice(bg.indexOf("async function putBack"), bg.indexOf("async function pressInTab"));
   // Left alone when it was in front already, put back once, and left where they are if they went to it.
