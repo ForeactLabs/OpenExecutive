@@ -443,6 +443,30 @@ async function sendOneText(send) {
 let pressing = null;
 // The tab a press moved from, while Messages shows in its place.
 let pressShowing = null;
+// Any other tab made active in that window (the person, or a workflow step)
+// ends it, so a step never goes back to a page left long ago.
+chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
+  if (pressShowing && pressShowing.windowId === windowId && tabId !== pressShowing.messagesId) pressShowing = null;
+});
+
+// Its own window, kept minimized, is shown for a press or an away
+// screenshot. Each holds it while it works; only the last to let go puts it
+// back down, and only if one of them brought it up.
+const shownFor = new Map();
+function holdShown(windowId, wasMinimized) {
+  const held = shownFor.get(windowId) || { count: 0, minimize: false };
+  held.count += 1;
+  if (wasMinimized) held.minimize = true;
+  shownFor.set(windowId, held);
+}
+function releaseShown(windowId) {
+  const held = shownFor.get(windowId);
+  if (!held) return false;
+  held.count -= 1;
+  if (held.count > 0) return false;
+  shownFor.delete(windowId);
+  return held.minimize;
+}
 
 // Attaching shows Chrome's "is debugging this browser" bar, which makes the
 // page shorter and moves the compose bar up. So the Send button is found
@@ -530,11 +554,12 @@ async function showForPress(tab, target) {
   if (!win) return null;
   const shown = (win.tabs || []).find((t) => t.active) || null;
   const back = { windowId: win.id, minimized: win.state === "minimized", tabId: shown && shown.id !== tab.id ? shown.id : null, focused: win.focused, focusedId: null };
+  if (!back.focused) holdShown(win.id, back.minimized);
   // Whatever step fails, what was changed is still put back.
   try {
     if (back.minimized) await chrome.windows.update(win.id, { state: "normal", focused: false });
     if (back.tabId !== null) {
-      pressShowing = { windowId: win.id, tabId: back.tabId };
+      pressShowing = { windowId: win.id, tabId: back.tabId, messagesId: tab.id };
       await chrome.tabs.update(tab.id, { active: true });
       // In a window the person is typing in, their keys would now go to the
       // box holding the text: take the focus off it straight away.
@@ -571,24 +596,28 @@ async function focusForPress(back, target) {
 
 async function putBack(tab, back) {
   if (!back || back.done) return;
-  pressShowing = null;
+  back.done = true;
   if (back.focused) {
+    pressShowing = null;
     // Their own window, in front: only their tab comes back, and only if
     // Messages is still the one showing (they didn't move on themselves).
     const now = await chrome.tabs.get(tab.id).catch(() => null);
     if (back.tabId !== null && now && now.active) await chrome.tabs.update(back.tabId, { active: true }).catch(() => undefined);
-    back.done = true;
     return;
   }
+  const minimize = releaseShown(back.windowId);
   const win = await chrome.windows.get(back.windowId).catch(() => null);
-  // The person went to it meanwhile: leave it where they are.
+  // The person went to it meanwhile: leave it where they are. While
+  // Messages still shows there, a workflow step keeps to the page that was
+  // showing (pressShowing stays until another tab is made active).
   if (!win || (win.focused && !back.tookFocus)) return;
+  pressShowing = null;
   // A tab made active since (a workflow's step) stays: only Messages, still showing, gives way.
   const shown = await chrome.tabs.get(tab.id).catch(() => null);
   if (back.tabId !== null && shown && shown.active) await chrome.tabs.update(back.tabId, { active: true }).catch(() => undefined);
-  if (back.minimized) await chrome.windows.update(back.windowId, { state: "minimized" }).catch(() => undefined);
+  // Down again only if no away screenshot still needs it up.
+  if (minimize) await chrome.windows.update(back.windowId, { state: "minimized" }).catch(() => undefined);
   if (back.focusedId !== null) await chrome.windows.update(back.focusedId, { focused: true }).catch(() => undefined);
-  back.done = true;
 }
 
 // The words still in the box for ~3 s, reading after reading: the press
@@ -633,7 +662,7 @@ async function pressInTab(tab, x, y) {
     // text that went is never sent twice.
     await pause(1500);
     let after = await readSpot(target);
-    if (after && after.at === at && after.full && (after.x !== spot.x || after.y !== spot.y)) {
+    if (after && after.at === at && after.full && (after.x !== spot.x || after.y !== spot.y) && (await staysFull(target, at))) {
       const again = await sendSpot(target, at, false);
       if (again && again.full) await pressAt(target, again);
       await pause(1500);
@@ -760,16 +789,22 @@ async function stillShown(tab) {
 // just for the capture, then minimized again.
 async function ownScreenshot(tab, view) {
   const win = await chrome.windows.get(tab.windowId).catch(() => null);
-  if (!win || win.state !== "minimized") return await screenshot(tab, view);
-  await chrome.windows.update(win.id, { state: "normal", focused: false });
+  // Up already for a press: held too, so the press can't put it down mid-capture.
+  if (!win || (win.state !== "minimized" && !shownFor.has(win.id))) return await screenshot(tab, view);
+  const lifted = win.state === "minimized";
+  holdShown(win.id, lifted);
+  if (lifted) await chrome.windows.update(win.id, { state: "normal", focused: false });
   try {
-    await new Promise((done) => setTimeout(done, 400));
+    if (lifted) await new Promise((done) => setTimeout(done, 400));
     return await screenshot(tab, view);
   } finally {
-    // Put it back only if the person didn't open it meanwhile.
-    const now = await chrome.windows.get(win.id).catch(() => null);
-    if (now && now.state === "normal" && !now.focused) {
-      await chrome.windows.update(win.id, { state: "minimized" }).catch(() => undefined);
+    // Put it back only if nothing else still needs it up and the person
+    // didn't open it meanwhile.
+    if (releaseShown(win.id)) {
+      const now = await chrome.windows.get(win.id).catch(() => null);
+      if (now && now.state === "normal" && !now.focused) {
+        await chrome.windows.update(win.id, { state: "minimized" }).catch(() => undefined);
+      }
     }
   }
 }

@@ -417,7 +417,7 @@ async def test_enrichment_persisted_and_in_alert_body(
     db: Path, install_fake_source, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     promoted: list[Any] = []
-    monkeypatch.setattr(mp, "schedule_evaluation", lambda e: promoted.append(e))
+    monkeypatch.setattr(mp, "schedule_evaluation", lambda e, **_: promoted.append(e))
     monkeypatch.setattr(mp, "build_company_context", lambda db_path=None: "CTX")
 
     async def fake_enrich(signal, item, *, company_ctx):
@@ -451,7 +451,7 @@ async def test_relevance_gate_suppresses(
     db: Path, install_fake_source, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     promoted: list[Any] = []
-    monkeypatch.setattr(mp, "schedule_evaluation", lambda e: promoted.append(e))
+    monkeypatch.setattr(mp, "schedule_evaluation", lambda e, **_: promoted.append(e))
     monkeypatch.setattr(mp, "build_company_context", lambda db_path=None: "CTX")
 
     async def fake_enrich(signal, item, *, company_ctx):
@@ -480,7 +480,7 @@ async def test_enrichment_fail_open_still_promotes(
     db: Path, install_fake_source, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     promoted: list[Any] = []
-    monkeypatch.setattr(mp, "schedule_evaluation", lambda e: promoted.append(e))
+    monkeypatch.setattr(mp, "schedule_evaluation", lambda e, **_: promoted.append(e))
     monkeypatch.setattr(mp, "build_company_context", lambda db_path=None: "CTX")
 
     async def fake_enrich(signal, item, *, company_ctx):
@@ -505,7 +505,7 @@ async def test_per_row_enrich_opt_out_falsy(
     db: Path, install_fake_source, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """config_json.enrich = 0 (falsy JSON) disables enrichment for that row."""
-    monkeypatch.setattr(mp, "schedule_evaluation", lambda e: None)
+    monkeypatch.setattr(mp, "schedule_evaluation", lambda e, **_: None)
     monkeypatch.setattr(mp, "build_company_context", lambda db_path=None: "CTX")
 
     called = {"n": 0}
@@ -629,7 +629,7 @@ async def test_query_material_hit_graded_clears_medium_floor(
     floor (the adapter's flat-LOW would otherwise be suppressed_below_floor),
     and reach triage with the graded hint."""
     promoted: list[Any] = []
-    monkeypatch.setattr(mp, "schedule_evaluation", lambda e: promoted.append(e))
+    monkeypatch.setattr(mp, "schedule_evaluation", lambda e, **_: promoted.append(e))
     monkeypatch.setattr(mp, "build_company_context", lambda db_path=None: "CTX")
 
     async def fake_enrich(signal, item, *, company_ctx):
@@ -640,9 +640,10 @@ async def test_query_material_hit_graded_clears_medium_floor(
     monkeypatch.setattr(mp, "enrich_signal", fake_enrich)
 
     install_fake_query_source([_query_signal()])
+    # Every change as a card, so the 0.6 read is a card, not a brief line.
     wl_id = ms.insert_watchlist_item(
         slug="q-funding", signal_type="query", target="humanoid VC funding",
-        severity_floor=AlertSeverity.MEDIUM, db_path=db,
+        severity_floor=AlertSeverity.MEDIUM, trigger={"every_change": True}, db_path=db,
     )
 
     written = await mp.run_external_monitor_scan(db_path=db)
@@ -657,13 +658,14 @@ async def test_query_material_hit_graded_clears_medium_floor(
 
 
 @pytest.mark.asyncio
-async def test_query_low_relevance_hit_still_reaches_the_person(
+async def test_query_low_relevance_hit_is_noted_unless_every_change_is_asked(
     db: Path, install_fake_query_source, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """There is no floor: a hit that matches the watch is passed on with a
-    low hint. A watch that asks for big changes only holds it back."""
+    """A hit far from the company is only noted on the watch. A watch that
+    asks for every change passes it on with a low hint; one that asks for big
+    changes only holds it back."""
     promoted: list[Any] = []
-    monkeypatch.setattr(mp, "schedule_evaluation", lambda e: promoted.append(e))
+    monkeypatch.setattr(mp, "schedule_evaluation", lambda e, **_: promoted.append(e))
     monkeypatch.setattr(mp, "build_company_context", lambda db_path=None: "CTX")
 
     async def fake_enrich(signal, item, *, company_ctx):
@@ -672,9 +674,21 @@ async def test_query_low_relevance_hit_still_reaches_the_person(
     monkeypatch.setattr(mp, "enrich_signal", fake_enrich)
 
     install_fake_query_source([_query_signal()])
+    far_id = ms.insert_watchlist_item(
+        slug="q-far", signal_type="query", target="humanoid VC funding",
+        db_path=db,
+    )
+    await mp.run_external_monitor_scan(db_path=db)
+
+    assert promoted == []
+    sigs = ms.list_signals_for_watchlist(far_id, db_path=db)
+    assert sigs[0]["processed_outcome"] == OUTCOME_SUPPRESSED_LOW_RELEVANCE
+    ms.set_enabled(far_id, False, db_path=db)
+
+    install_fake_query_source([_query_signal(dedup_key="query:every")])
     wl_id = ms.insert_watchlist_item(
         slug="q-funding", signal_type="query", target="humanoid VC funding",
-        db_path=db,
+        trigger={"every_change": True}, db_path=db,
     )
     await mp.run_external_monitor_scan(db_path=db)
 
@@ -704,7 +718,7 @@ async def test_query_relevance_gate_fires_before_floor(
     pre-floor enrichment — so the outcome is suppressed_low_relevance, not
     suppressed_below_floor (for query, enrichment + its gate run first)."""
     promoted: list[Any] = []
-    monkeypatch.setattr(mp, "schedule_evaluation", lambda e: promoted.append(e))
+    monkeypatch.setattr(mp, "schedule_evaluation", lambda e, **_: promoted.append(e))
     monkeypatch.setattr(mp, "build_company_context", lambda db_path=None: "CTX")
 
     async def fake_enrich(signal, item, *, company_ctx):

@@ -327,7 +327,7 @@ async def test_model_call_is_one_forced_tool_call(monkeypatch: pytest.MonkeyPatc
     assert call["tool_choice"] == {"type": "tool", "name": describe.TOOL_NAME}
     tool = call["tools"][0]
     assert set(tool["input_schema"]["properties"]["trigger"]["properties"]) == {
-        "abs_change_pct_gte", "keywords", "forms", "only_big", "from",
+        "abs_change_pct_gte", "keywords", "forms", "only_big", "every_change", "from",
     }
     assert call["messages"] == [{"role": "user", "content": "<request>\nwatch GLBX\n</request>"}]
 
@@ -443,13 +443,32 @@ def test_few_alerts_are_not_noisy(db: Path) -> None:
     assert noise.watch_noise(item, db_path=db).noisy is False
 
 
+def test_unopened_cards_count_as_half_a_dismissal(db: Path) -> None:
+    """A card that expired unread was likely noise too: 4 dismissed and 4
+    unopened make 6, as many as 6 dismissed; 4 dismissed and 3 unopened do not."""
+    watch_id = ms.insert_watchlist_item(slug="stock-glbx", signal_type="stock", target="GLBX", db_path=db)
+    _alerts(db, watch_id, ["dismissed"] * 4 + ["expired"] * 4)
+    item = ms.get_watchlist_item(watch_id, db_path=db)
+    assert item is not None
+    got = noise.watch_noise(item, db_path=db)
+    assert (got.recent_dismissed, got.recent_expired_unread, got.noisy) == (4, 4, True)
+
+    other = ms.insert_watchlist_item(slug="stock-acme", signal_type="stock", target="ACME", db_path=db)
+    _alerts(db, other, ["dismissed"] * 4 + ["expired"] * 3 + ["ack"])
+    item = ms.get_watchlist_item(other, db_path=db)
+    assert item is not None
+    assert noise.watch_noise(item, db_path=db).noisy is False
+
+
 def test_detail_route_carries_noise_and_patch_quiets_it(client: TestClient, db: Path) -> None:
     watch_id = ms.insert_watchlist_item(
         slug="stock-glbx", signal_type="stock", target="GLBX", trigger={"abs_change_pct_gte": 5}, db_path=db,
     )
     _alerts(db, watch_id, ["dismissed"] * 7 + ["ack"])
     body = client.get("/watchlist/stock-glbx").json()
-    assert body["noise"] == {"recent_alerts": 8, "recent_dismissed": 7, "noisy": True}
+    assert body["noise"] == {
+        "recent_alerts": 8, "recent_dismissed": 7, "recent_expired_unread": 0, "noisy": True,
+    }
 
     res = client.patch("/watchlist/stock-glbx", json={"trigger": {"abs_change_pct_gte": 10}, "quiet_noise_nudge": True})
     assert res.status_code == 200, res.text

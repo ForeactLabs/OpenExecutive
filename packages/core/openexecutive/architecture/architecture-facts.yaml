@@ -6917,6 +6917,52 @@ external_monitoring:
     the person who said it); the card has no Undo any more. 60 calls an
     hour. No approval and no gate: it changes only the watch's
     notes, the same field the watch page and tune_watchlist_entry edit.
+  finds_placement: |
+    Where a find that met its trigger shows (monitoring.pipeline.placement),
+    decided after enrichment and before the page digest: for query,
+    page_watch and rss finds with a relevance read, >= RELEVANCE_CARD (0.7)
+    is a card, >= RELEVANCE_BRIEF (0.4) is a brief line (outcome brief_line
+    plus a watch_found_quietly audit row "Noticed on ..."), lower is kept on
+    the watch page only (suppressed_low_relevance). Email watches, other
+    sources, no read, and trigger every_change always get a card. Why - the
+    audit of real watch lists found most cards were dismissed or expired
+    unopened, while the relevance score that could tell them apart was used
+    only for severity. This is where a find is shown, never whether a step
+    runs, so it does not touch levels or the gate.
+    Triage's answer is kept: schedule_evaluation(event, then=...) and
+    evaluate_and_dispatch(..., on_card=...) report the card an event landed
+    on (a coalesced repeat reports the card it joined); _after_triage writes
+    it to external_signals.promoted_alert_id (never filled before, so the
+    noise question counted nothing) or marks suppressed_triage with
+    enrichment_json.triage_reason, audits it, and rewrites last_check_note.
+    A failed evaluation reports no card (triage_error).
+    Web search: each poll shows up to 30 headlines found in the last 30 days
+    by this watch, plus those other live company query watches showed (card,
+    brief line, digest; never a suggestion's or a page-only find)
+    (store.recent_query_finds) in a fenced <already_reported> block, drops
+    results with a reported link or a headline that is the same story
+    (query.story_words / same_story: the watched subject's words left out,
+    the shorter headline's distinctive words all in the longer, within 2x
+    length, numbers equal - a changed verb is another story, since dropping
+    a real story costs more than a repeat triage still catches), and reads a
+    publish date into published_at so the age gate applies.
+    Pages: only_counts_or_marks observes a change with no new links whose
+    only differences are bare counts moved by 25 percent or less, and punctuation (no decimal, date or
+    time; no currency or rate mark on a changed number, and no money, rate,
+    size, month, quarter or version word within 3 words of it)
+    and sends nothing, unless every_change.
+    Steer: steer_watch has stop_watch; /alerts/{id}/say turns the watch off
+    (stopped in the reply). Before, "stop" only rewrote notes.
+    Noise: an expired card (only unread cards expire) counts as half a
+    dismissal (WatchNoise.recent_expired_unread).
+    Review: a watch's card already reviewed is a candidate again after a
+    find joins it (last_seen_at after last_reviewed_at), else only every 4th
+    interval (its other evidence can still move).
+    Chat tools: add_watchlist_entry defaults cadence to daily (15min for
+    stock and vendor_status, real_time for mailbox) and lists overlapping
+    company watches under overlaps (informational, never stops the add).
+    Reflection reads 7 days of card and brief_line finds, fenced untrusted,
+    with the initiative each touched.
   alerts_integration: |
     `promote_signal_to_alert` builds an `AlertEvent(source=signal_kind,
     external_id=dedup_key, subject, body)` whose body interleaves the

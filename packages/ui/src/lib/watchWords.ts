@@ -37,6 +37,9 @@ const FORM_NAMES: Record<string, string> = {
   "S-1": "S-1 (IPO filing)",
 };
 
+// Mirrors monitoring/describe.py _EVERY_CHANGE_TYPES.
+export const EVERY_CHANGE_KINDS = new Set(["rss", "page_watch", "query"]);
+
 function joinOr(items: string[]): string {
   if (items.length <= 1) return items.join("");
   return `${items.slice(0, -1).join(", ")} or ${items[items.length - 1]}`;
@@ -57,7 +60,8 @@ function pctOf(trigger: Record<string, unknown>): number {
 export function triggerInWords(signalType: string, trigger: Record<string, unknown> | null | undefined): string {
   const t = trigger ?? {};
   const line = triggerBase(signalType, t);
-  return t.only_big === true && signalType !== "stock" ? `${line}, and only when it is a big change` : line;
+  const big = t.only_big === true && signalType !== "stock" ? `${line}, and only when it is a big change` : line;
+  return t.every_change === true && EVERY_CHANGE_KINDS.has(signalType) ? `${big}, every one as a card` : big;
 }
 
 function triggerBase(signalType: string, t: Record<string, unknown>): string {
@@ -142,4 +146,21 @@ export function raiseTheBar(watch: {
     label: "Only big changes",
     done: "You'll only hear about big changes from this.",
   };
+}
+
+/**
+ * "You dismissed 6 of the last 8 things this told you." Names the cards that
+ * expired unopened too, since they count toward the question (half each).
+ */
+export function noiseWords(noise: {
+  recent_alerts: number;
+  recent_dismissed: number;
+  recent_expired_unread?: number;
+}): string {
+  const unopened = noise.recent_expired_unread ?? 0;
+  const of = `of the last ${noise.recent_alerts} things this told you`;
+  if (!unopened) return `You dismissed ${noise.recent_dismissed} ${of}.`;
+  const left = unopened === 1 ? "1 went unopened" : `${unopened} went unopened`;
+  if (!noise.recent_dismissed) return `${left[0].toUpperCase()}${left.slice(1)} ${of}.`;
+  return `You dismissed ${noise.recent_dismissed} and ${left} ${of}.`;
 }

@@ -230,6 +230,7 @@ function fakeBrowser() {
     tabs: {
       query: async ({ windowId }) => (wins.get(windowId)?.tabs || []).map((t) => ({ ...t })),
       onRemoved: any,
+      onActivated: any,
       onUpdated: any,
     },
     alarms: any,
@@ -536,6 +537,42 @@ test("texts: rows past the 100 a report carries are told in the next one", () =>
   assert.equal(T.changes(rows, second.seen, now + 2000).items.length, 0);
 });
 
+test("texts: a row the old version told, cut from a full first look, is still earlier when it is told", () => {
+  const T = textsHelpers();
+  const now = Date.parse("2026-11-25T15:00:00");
+  const rows = Array.from({ length: 150 }, (_, i) => ({ key: `c${i}`, title: `P${i}`, snippet: `Hi ${i}`, unread: true, time: "Now" }));
+  // The old version told all 150, over two reports.
+  const old = T.changes(rows, T.changes(rows, {}, now - 60000).seen, now - 59000).seen;
+  const first = T.changes(rows, null, now, old);
+  assert.equal(first.items.length, 100);
+  assert.ok(first.items.every((i) => i.earlier === true));
+  // Told on the next look without the old version's list: still earlier, never answered as new.
+  const second = T.changes(rows, first.seen, now + 1000);
+  assert.equal(second.items.length, 50);
+  assert.ok(second.items.every((i) => i.earlier === true));
+  assert.equal(T.changes(rows, second.seen, now + 2000).items.length, 0);
+});
+
+test("texts: a cut row that gets a new text goes as new, never as earlier", () => {
+  const T = textsHelpers();
+  const now = Date.parse("2026-11-25T15:00:00");
+  const rows = Array.from({ length: 150 }, (_, i) => ({ key: `c${i}`, title: `P${i}`, snippet: `Hi ${i}`, unread: false, time: "Mon" }));
+  const first = T.changes(rows, null, now);
+  const cut = rows.findIndex((r) => !first.items.some((i) => i.conversation === r.key));
+  assert.ok(cut >= 0);
+  rows[cut] = { ...rows[cut], snippet: "Are you coming?", unread: true, time: "Now" };
+  const item = T.changes(rows, first.seen, now + 1000).items.find((i) => i.conversation === rows[cut].key);
+  assert.equal(item.earlier, false);
+  // And a told row that gets a new text after it was cut goes as new too.
+  const told = Array.from({ length: 150 }, (_, i) => ({ key: `t${i}`, title: `Q${i}`, snippet: `Yo ${i}`, unread: true, time: "Now" }));
+  const old = T.changes(told, T.changes(told, {}, now - 60000).seen, now - 59000).seen;
+  const look = T.changes(told, null, now, old);
+  const gone = told.findIndex((r) => !look.items.some((i) => i.conversation === r.key));
+  told[gone] = { ...told[gone], snippet: "Are you coming?" };
+  const fresh = T.changes(told, look.seen, now + 1000).items.find((i) => i.conversation === told[gone].key);
+  assert.equal(fresh.earlier, false);
+});
+
 test("texts: a sign-in code is never told, now or on a first look", () => {
   const T = textsHelpers();
   const now = Date.parse("2026-11-25T15:00:00");
@@ -552,6 +589,7 @@ test("texts: a sign-in code is never told, now or on a first look", () => {
     "482913 is the code for your account", "482913 - WhatsApp code",
     "482913 is your verification code", "G-482913 is your Google verification code",
     "Your Google code is G-482913", "Use 482913 to verify your account",
+    "Your DoorDash verification code is 482913", "Your PlayStation Network verification code is 482913", "Wi-Fi login code: 482913", "Xfinity WiFi: Your password reset code is 482913", "Your wifi password reset code is 482913", "PlayStation Network: your code is 482913", "Network Solutions code: 482913. Do not share it.", "Your Alarm.com code is 482913", "Enter 482913 to confirm your Wi-Fi account", "Your code is 482913. Never share it, not even with someone at your door",
   ]) assert.equal(T.isSignInCode(code), true, code);
   for (const plain of [
     "Running late, there by 2:30", "Lunch Friday?", "Call me at 4", "Gate code changed",
@@ -563,6 +601,7 @@ test("texts: a sign-in code is never told, now or on a first look", () => {
     "Gate code is 4821", "Door code 1234#", "The wifi password is 84219375",
     "Apt 1402, the code is on the fridge", "Room 1402, the password is on the fridge",
     "Suite 1200, the door code is on the sign", "Door code is 4821, see you at 7", "Room 1402, wifi password is on the fridge",
+    "The code for the gate is 4821", "The gate entry code is 4821", "Garage door opener code is 4821", "Wifi: HomeNet, password 84219375", "Wifi is HomeNet, password 84219375", "Network: HomeNet Password: 84219375", "Gate access code is 4821", "Building access code is 4821", "Enter 4821 at the gate", "The code for the gate is 4821, can you confirm you got it?",
   ]) {
     assert.equal(T.isSignInCode(plain), false, plain);
   }
@@ -600,7 +639,7 @@ test("texts: the press waits for the debugging bar, presses only where the butto
   assert.ok(settle.includes("if (same >= 2) return spot;"));
   const press = bg.slice(bg.indexOf("async function pressInTab"), bg.indexOf("function waitLoaded"));
   // Again only when the words are still in the box and the button moved.
-  assert.ok(press.includes("after.full && (after.x !== spot.x || after.y !== spot.y)"));
+  assert.ok(press.includes("after.full && (after.x !== spot.x || after.y !== spot.y) && (await staysFull(target, at))"));
   assert.ok(press.includes("if (again && again.full) await pressAt(target, again);"));
 });
 
@@ -646,11 +685,21 @@ test("texts: the press shows Google Messages without taking the focus, and focus
   assert.ok(back.includes("if (!win || (win.focused && !back.tookFocus)) return;"));
   assert.ok(back.includes('{ state: "minimized" }') && back.includes("back.focusedId") && back.includes("back.done = true;"));
   // A workflow step keeps working on the page that was showing while the press shows Messages.
-  assert.ok(show.indexOf("pressShowing = { windowId: win.id, tabId: back.tabId };") < show.indexOf("chrome.tabs.update(tab.id, { active: true })"));
+  assert.ok(show.indexOf("pressShowing = { windowId: win.id, tabId: back.tabId, messagesId: tab.id };") < show.indexOf("chrome.tabs.update(tab.id, { active: true })"));
   assert.ok(back.indexOf("pressShowing = null;") < back.indexOf("chrome.tabs.update(back.tabId"));
   // A tab made active during the press is never put back behind the earlier one.
   assert.ok(back.includes("if (back.tabId !== null && shown && shown.active) await chrome.tabs.update(back.tabId, { active: true })"));
   assert.ok(!/\n  if \(back\.tabId !== null\) await chrome\.tabs\.update/.test(back));
+  // The person went to the window: a workflow step keeps to the page that was showing.
+  assert.ok(back.indexOf("if (!win || (win.focused && !back.tookFocus)) return;") < back.lastIndexOf("pressShowing = null;"));
+  // Another tab made active in that window ends it.
+  assert.ok(bg.includes("if (pressShowing && pressShowing.windowId === windowId && tabId !== pressShowing.messagesId) pressShowing = null;"));
+  // One count for the press and an away screenshot: only the last to let go puts the window down.
+  assert.ok(show.includes("if (!back.focused) holdShown(win.id, back.minimized);"));
+  assert.ok(back.includes("const minimize = releaseShown(back.windowId);") && back.includes("if (minimize) await chrome.windows.update(back.windowId, { state: \"minimized\" })"));
+  const shot = bg.slice(bg.indexOf("async function ownScreenshot"), bg.indexOf("async function ownScreenshot") + 1400);
+  assert.ok(shot.includes("win.state !== \"minimized\" && !shownFor.has(win.id)"));
+  assert.ok(shot.includes("holdShown(win.id, lifted);") && shot.includes("if (releaseShown(win.id)) {"));
   const own = bg.slice(bg.indexOf("async function ownTab"), bg.indexOf("async function ownTab") + 900);
   assert.ok(own.includes("return work.find((t) => t.active) || before || work[work.length - 1] || null;"));
   // A press as a real mouse makes it: the left button held while pressed.

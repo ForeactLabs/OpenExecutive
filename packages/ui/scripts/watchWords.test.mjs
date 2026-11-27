@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { raiseTheBar, triggerInWords } from "../src/lib/watchWords.ts";
+import { noiseWords, raiseTheBar, triggerInWords } from "../src/lib/watchWords.ts";
 
 test("triggerInWords says when a watch tells you", () => {
   // Same lines as test_plain_lines in packages/core/tests/unit/test_watchlist_describe.py.
@@ -59,4 +59,22 @@ test("an email watch says who it is from and what its subject mentions, and has 
     "An email that mentions “sign up” reaches the Executive or you",
   );
   assert.equal(raiseTheBar({ signal_type: "mailbox", trigger_json: { keywords: ["sign up"] } }), null);
+});
+
+test("triggerInWords says when every change goes as a card", () => {
+  assert.equal(triggerInWords("page_watch", { every_change: true }), "The page changes, every one as a card");
+  // Only rss, page_watch and query place finds by closeness.
+  assert.equal(triggerInWords("stock", { every_change: true }), "It moves 5% or more in a day, up or down");
+});
+
+test("noiseWords names dismissed and unopened cards", () => {
+  assert.equal(noiseWords({ recent_alerts: 8, recent_dismissed: 6 }), "You dismissed 6 of the last 8 things this told you.");
+  assert.equal(
+    noiseWords({ recent_alerts: 8, recent_dismissed: 4, recent_expired_unread: 4 }),
+    "You dismissed 4 and 4 went unopened of the last 8 things this told you.",
+  );
+  assert.equal(
+    noiseWords({ recent_alerts: 8, recent_dismissed: 0, recent_expired_unread: 8 }),
+    "8 went unopened of the last 8 things this told you.",
+  );
 });

@@ -22,9 +22,11 @@ import {
 } from "@/lib/api";
 import {
   EDGAR_DEFAULT_FORMS,
+  EVERY_CHANGE_KINDS,
   FILING_CHOICES,
   KIND_LABELS,
   STOCK_DEFAULT_PCT,
+  noiseWords,
   raiseTheBar,
   triggerInWords,
 } from "@/lib/watchWords";
@@ -118,7 +120,7 @@ function NoisyNudge({
   return (
     <div className="rounded-2xl border border-amber-500/40 bg-amber-500/5 p-4 mb-4">
       <p className="text-[15px] text-fg">
-        You dismissed {noise.recent_dismissed} of the last {noise.recent_alerts} things this told you.
+        {noiseWords(noise)}
         {raise ? " Only tell you about bigger changes?" : " Keep watching it?"}
       </p>
       <div className="mt-3 flex flex-wrap gap-2">
@@ -189,6 +191,7 @@ function TriggerEditor({
     Array.isArray(start.from) ? start.from.filter((a) => typeof a === "string").join(", ") : "",
   );
   const [onlyBig, setOnlyBig] = useState(start.only_big === true);
+  const [everyChange, setEveryChange] = useState(start.every_change === true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -213,6 +216,7 @@ function TriggerEditor({
       return next.from || next.keywords ? next : null;
     }
     if (onlyBig) next.only_big = true;
+    if (everyChange && EVERY_CHANGE_KINDS.has(kind)) next.every_change = true;
     return next;
   }
 
@@ -295,6 +299,12 @@ function TriggerEditor({
         <label className="flex min-h-10 items-center gap-2.5 text-[15px] text-fg">
           <input type="checkbox" checked={onlyBig} onChange={(e) => setOnlyBig(e.target.checked)} />
           Only big changes
+        </label>
+      )}
+      {EVERY_CHANGE_KINDS.has(kind) && (
+        <label className="flex min-h-10 items-center gap-2.5 text-[15px] text-fg">
+          <input type="checkbox" checked={everyChange} onChange={(e) => setEveryChange(e.target.checked)} />
+          Every change as a card, not just the ones close to the company
         </label>
       )}
       <p className="text-sm text-fg-subtle">
