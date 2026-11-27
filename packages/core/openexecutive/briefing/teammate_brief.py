@@ -185,50 +185,91 @@ def _pending_scope(person_id: int) -> str:
     return f"brief_pending:{KIND}:{person_id}"
 
 
-def record_kept(person_id: int, brief: TeammateBrief, held_id: int) -> None:
-    """A brief kept for their quiet hours (``people.held_messages``): told
-    only once it is sent, which ``settle_kept`` checks on their next one."""
+def _read_kept(person_id: int) -> list[dict[str, Any]]:
     import json
 
     from openexecutive.briefing import narrative_cache
 
+    row = narrative_cache.get(_pending_scope(person_id))
+    if row is None:
+        return []
     try:
-        narrative_cache.put(narrative_cache.BriefingNarrative(
-            scope=_pending_scope(person_id), input_hash=str(held_id),
-            narrative_text=json.dumps({
-                "text": brief.text, "fingerprint": brief.fingerprint, "items": brief.items,
-            }),
-            generated_at=narrative_cache.utc_now_iso(),
-        ))
+        data = json.loads(row.narrative_text)
+    except (TypeError, ValueError):
+        return []
+    return [e for e in data if isinstance(e, dict)] if isinstance(data, list) else []
+
+
+def _write_kept(person_id: int, entries: list[dict[str, Any]]) -> None:
+    import json
+
+    from openexecutive.briefing import narrative_cache
+
+    narrative_cache.put(narrative_cache.BriefingNarrative(
+        scope=_pending_scope(person_id), input_hash="",
+        narrative_text=json.dumps(entries), generated_at=narrative_cache.utc_now_iso(),
+    ))
+
+
+def record_kept(person_id: int, brief: TeammateBrief, held_id: int) -> None:
+    """A brief kept for their quiet hours (``people.held_messages``): told
+    only once it is sent, which ``settle_kept`` checks on their next one.
+    Each kept brief has its own entry, so a second one kept while the first
+    still waits does not lose it."""
+    try:
+        entries = [e for e in _read_kept(person_id) if e.get("held_id") != held_id]
+        entries.append({
+            "held_id": held_id, "text": brief.text,
+            "fingerprint": brief.fingerprint, "items": brief.items,
+        })
+        _write_kept(person_id, entries)
     except Exception:
         logger.exception("teammate_brief: couldn't keep person %s's brief", person_id)
 
 
 def settle_kept(person_id: int) -> None:
     """A kept brief that was sent since counts as delivered then; one that
-    was dropped told nothing. Still waiting: left as it is. Never raises."""
-    import json
+    was dropped told nothing. Still waiting: left as it is.
 
-    from openexecutive.briefing import narrative_cache
+    One sent after a newer brief already reached them (theirs waited while
+    the next day's went straight out) does not take that newer brief's
+    place: it only adds what it told that the newer one did not track, and
+    leaves the window and fingerprint where the newer one set them.
+    Never raises."""
+    from openexecutive.alerts.lifecycle import parse_aware
+    from openexecutive.briefing import brief_items, brief_state
     from openexecutive.people.held_messages import status
 
     try:
-        row = narrative_cache.get(_pending_scope(person_id))
-        if row is None or not row.input_hash:
+        entries = _read_kept(person_id)
+        if not entries:
             return
-        state, sent_at = status(int(row.input_hash))
-        if state == "waiting":
-            return
-        if state == "sent":
-            data = json.loads(row.narrative_text)
+        waiting: list[dict[str, Any]] = []
+        sent: list[tuple[str, dict[str, Any]]] = []
+        for entry in entries:
+            try:
+                state, sent_at = status(int(entry.get("held_id", 0)))
+            except (TypeError, ValueError):
+                continue
+            if state == "waiting":
+                waiting.append(entry)
+            elif state == "sent":
+                sent.append((sent_at or "", entry))
+        kind = kind_for(person_id)
+        for sent_at, entry in sorted(sent, key=lambda t: t[0]):
+            items = {str(k): str(v) for k, v in (entry.get("items") or {}).items()}
+            last = brief_state.last_delivered(kind)
+            last_at = parse_aware(last.generated_at) if last else None
+            this_at = parse_aware(sent_at)
+            if last_at is not None and (this_at is None or last_at > this_at):
+                brief_items.record(KIND, {**items, **brief_items.told(KIND, person_id)}, person_id)
+                continue
             record_delivered(person_id, TeammateBrief(
-                text=str(data.get("text", "")), fingerprint=str(data.get("fingerprint", "")),
-                items={str(k): str(v) for k, v in (data.get("items") or {}).items()},
-            ), at=sent_at)
-        narrative_cache.put(narrative_cache.BriefingNarrative(
-            scope=_pending_scope(person_id), input_hash="", narrative_text="{}",
-            generated_at=narrative_cache.utc_now_iso(),
-        ))
+                text=str(entry.get("text", "")), fingerprint=str(entry.get("fingerprint", "")),
+                items=items,
+            ), at=sent_at or None)
+        if len(waiting) != len(entries):
+            _write_kept(person_id, waiting)
     except Exception:
         logger.exception("teammate_brief: couldn't settle person %s's kept brief", person_id)
 

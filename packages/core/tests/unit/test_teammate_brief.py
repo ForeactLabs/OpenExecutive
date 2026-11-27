@@ -220,3 +220,33 @@ def test_a_kept_brief_is_told_only_once_it_was_sent(
     held_messages.mark_sent([held_id])
     teammate_brief.settle_kept(5)
     assert brief_items.told(teammate_brief.KIND, 5) == brief.items
+
+
+def test_a_kept_brief_sent_after_a_newer_one_does_not_replace_it(
+    board: dict[str, Any], tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dataclasses import replace
+
+    from openexecutive.briefing import brief_state
+    from openexecutive.people import held_messages
+
+    original = held_messages._connect
+    monkeypatch.setattr(held_messages, "_connect", lambda db_path=None: original(tmp_path / "held.db"))
+    old = asyncio.run(teammate_brief.write(_person(5), NOW))
+    assert old is not None
+    first = held_messages.hold(5, old.text, source=teammate_brief.KIND, release_at=NOW)
+    teammate_brief.record_kept(5, old, first)
+    # A second one kept while the first still waits keeps both.
+    second = held_messages.hold(5, old.text, source=teammate_brief.KIND, release_at=NOW)
+    teammate_brief.record_kept(5, old, second)
+    assert [e["held_id"] for e in teammate_brief._read_kept(5)] == [first, second]
+    # The next day's brief went straight out, then the first kept one was sent.
+    newer = replace(old, text="Newer brief", fingerprint="newer", items={"newer:item": "s"})
+    teammate_brief.record_delivered(5, newer, at="2099-01-01T00:00:00+00:00")
+    held_messages.mark_sent([first])
+    teammate_brief.settle_kept(5)
+    last = brief_state.last_delivered(teammate_brief.kind_for(5))
+    assert last is not None and last.narrative_text == "Newer brief"
+    assert brief_items.told(teammate_brief.KIND, 5) == {**old.items, "newer:item": "s"}
+    # The one still waiting stays kept.
+    assert [e["held_id"] for e in teammate_brief._read_kept(5)] == [second]
