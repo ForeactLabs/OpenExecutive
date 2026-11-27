@@ -198,6 +198,20 @@ def test_a_hold_never_takes_over_the_approved_cards_step() -> None:
     ]
 
 
+def test_two_held_rounds_of_one_tool_both_wait() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Reading a web page…", "tool": "read_web_page"})
+    tl.observe({"type": "activity", "label": "Messaging Dana…", "tool": "send_slack_dm"})
+    tl.observe({"type": "activity", "label": "Messaging Sam…", "tool": "send_slack_dm"})
+    done = tl.finish(("A step",))
+    assert done is not None
+    assert [(s["label"], s["state"]) for s in done["steps"]] == [
+        ("Read a web page", "done"),
+        ("Messaging Dana", "waits"),
+        ("Messaging Sam", "waits"),
+    ]
+
+
 def test_a_held_write_with_a_read_after_it_waits_once() -> None:
     tl = TurnTimeline(Clock())
     tl.observe({"type": "activity", "label": "Reading the email…", "tool": "google_workspace__get_gmail_message"})

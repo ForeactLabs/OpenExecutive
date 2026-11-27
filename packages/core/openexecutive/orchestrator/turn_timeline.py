@@ -444,31 +444,22 @@ class TurnTimeline:
         # A held step's round already showed (its activity came, no chip
         # followed): that step is the one waiting, not one that failed. A
         # held text is its tool in plain words (outside_content.step_words),
-        # so each goes on the latest round of that tool still without a
-        # chip, wherever it is in the turn; one with no such round is added.
+        # given once however many calls of it were held, so every round of
+        # that tool still without a chip waits; a text with none is added.
         from openexecutive.orchestrator.outside_content import step_words
 
-        taken: set[int] = set()
         extra: list[str] = []
         for text in texts:
-            match = next(
-                (
-                    i for i in range(len(self.steps) - 1, -1, -1)
-                    if i not in taken
-                    and _may_be_held(self.steps[i])
-                    and _clean(step_words(self.steps[i].tool)) == text
-                ),
-                None,
-            )
-            if match is None:
+            matched = False
+            for step in self.steps:
+                if _may_be_held(step) and _clean(step_words(step.tool)) == text:
+                    # Its round's own words ("Messaging Dana") say more
+                    # than the held text, the tool's generic name.
+                    step.named = True
+                    step.waits = True
+                    matched = True
+            if not matched:
                 extra.append(text)
-                continue
-            taken.add(match)
-            # Its round's own words ("Messaging Dana") say more than the
-            # held text, which is the tool's generic name.
-            step = self.steps[match]
-            step.named = True
-            step.waits = True
         for text in extra:
             self._add_step(Step(label=text, kind=DO, at=self._now(), waits=True, named=True))
         self.finished = True
