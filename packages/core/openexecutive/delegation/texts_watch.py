@@ -183,9 +183,14 @@ async def look(person_id: int) -> bool:
 
 def last_line(said: str) -> str:
     """The turn's last line, which says what it did ("Nothing needed." too)."""
+    from openexecutive.orchestrator.executive import REFUSED_REPLY
+
     lines = [line.strip().strip("*_ ") for line in str(said or "").splitlines()]
     lines = [line for line in lines if line]
-    return lines[-1] if lines else ""
+    # A refused turn did nothing: no line for the page.
+    if not lines or lines[-1] == REFUSED_REPLY:
+        return ""
+    return lines[-1]
 
 
 async def _turn(person: Any, prompt: str, *, off_team: bool = False) -> str:

@@ -1295,3 +1295,10 @@ def test_a_new_send_brings_an_old_conversation_into_the_list(ids: dict[str, int]
                      (tx._iso(NOW - timedelta(days=20)), dana.id))
     tx.queue_send(owner, "Running late", conversation_id=dana.id)
     assert [t.who for t in tx.threads(owner, limit=1)] == ["Dana Ruiz"]
+
+
+def test_a_refused_turn_leaves_no_note() -> None:
+    from openexecutive.orchestrator.executive import REFUSED_REPLY
+
+    assert texts_watch.last_line(REFUSED_REPLY) == ""
+    assert texts_watch.last_line("Read it.\nNothing needed.") == "Nothing needed."
