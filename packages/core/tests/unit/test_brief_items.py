@@ -269,6 +269,9 @@ def test_an_empty_part_above_an_inline_part_is_dropped() -> None:
 def test_a_one_character_label_is_mentioned_only_as_a_word() -> None:
     assert brief_items._mentioned("5", "Item 5 is due.")
     assert not brief_items._mentioned("5", "Call Dana at 3:15.")
+    # Everyday words alone are in any prose: not taken as a mention.
+    assert not brief_items._mentioned("Due", "Rent is due Friday.")
+    assert not brief_items._mentioned("IT due", "Do it today, then call Dana.")
 
 
 def test_a_short_headline_still_counts_as_told() -> None:

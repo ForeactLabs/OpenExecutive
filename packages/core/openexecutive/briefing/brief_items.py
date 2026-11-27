@@ -116,7 +116,11 @@ def _named(text: object, rendered: str | None, limit: int = 60) -> bool:
     return line[:limit] in rendered or quoted(line, limit) in rendered
 
 
-_SHORT_STOP = frozenset({"the", "for", "and", "due", "to", "of", "on", "in", "an", "by", "at", "is"})
+_SHORT_STOP = frozenset({
+    "the", "for", "and", "due", "to", "of", "on", "in", "an", "by", "at", "is",
+    "it", "a", "i", "we", "us", "me", "my", "or", "no", "do", "be", "go", "up",
+    "so", "if", "as", "are", "was", "has", "can", "get", "you", "out", "now", "new",
+})
 _MENTION_STOP = frozenset({"with", "from", "that", "this", "your", "their", "about", "into", "over"})
 
 
@@ -137,8 +141,12 @@ def _mentioned(text: object, said: str | None) -> bool:
         whole = True
     lowered = said.lower()
     if not words:
-        # Nothing but one-character tokens ("Q", "5"): the whole label, as words.
-        return bool(label) and re.search(
+        # Nothing but one-character tokens ("Q", "5"): the whole label, as
+        # words. A label of everyday words only ("Due") is in any prose, so
+        # it is not taken as mentioned: retelling it is the safe side.
+        if not label or all(w in _SHORT_STOP for w in re.findall(r"[a-z0-9]+", label)):
+            return False
+        return re.search(
             rf"(?<![a-z0-9]){re.escape(label)}(?![a-z0-9])", lowered,
         ) is not None
     end = r"(?![a-z0-9])" if whole else ""
