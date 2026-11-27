@@ -834,6 +834,30 @@ def test_own_inbox_counts_a_send_to_the_sender_from_another_thread(
     assert sorted(r["message_id"] for r in mail.refs) == ["m2", "m4"]
 
 
+def test_kept_mail_they_wrote_to_the_sender_about_is_left_out(
+    principal: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from openexecutive.briefing import waiting_on
+    from openexecutive.delegation import noticed
+
+    now = datetime(2026, 10, 26, 18, 0, tzinfo=UTC)
+    at = now - timedelta(hours=2)
+    noticed.note(7, source=noticed.EMAIL, item_key="k1", sender_name="Dana Fox", sender="dana@co.test",
+                 subject="Running late to the 3pm", gist="Dana is 15 minutes late", tie="3:00 PM Acme sync",
+                 received_at=at, now=now)
+    noticed.note(7, source=noticed.EMAIL, item_key="k2", sender_name="Lee Park", sender="lee@co.test",
+                 subject="Budget", gist="Lee sent the budget", tie="Budget review task", received_at=at, now=now)
+    monkeypatch.setattr(waiting_on, "replied", lambda: {})
+    monkeypatch.setattr(waiting_on, "wrote_to", lambda: {
+        "dana@co.test": [(now - timedelta(hours=1), "Re: Running late to the 3pm")],
+        "lee@co.test": [(now - timedelta(hours=1), "Lunch?")],
+    })
+
+    mail = live_signals.own_inbox(now - timedelta(hours=12), UTC, now)
+
+    assert [r["message_id"] for r in mail.refs] == ["k2"]
+
+
 def test_newer_mail_on_an_open_card_is_news_and_noted_once(
     principal: SimpleNamespace, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

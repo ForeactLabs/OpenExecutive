@@ -800,6 +800,11 @@ def own_inbox(since: datetime, tz: tzinfo, now: datetime | None = None) -> OwnIn
         replied_at = answered.get(item.thread_id) if item.thread_id else None
         if replied_at is not None and arrived_at is not None and replied_at > arrived_at:
             continue  # they answered it since
+        if arrived_at is not None and _wrote_back(
+            {"subject": item.subject, "_at": arrived_at}, not item.tie,
+            wrote.get(item.sender.strip().lower(), []),
+        ):
+            continue  # they wrote to the sender since
         who_short = _one_line(item.sender_name, 60) or _one_line(item.sender, 60)
         what_said = item.gist or _one_line(item.subject, 100) or "(no subject)"
         if not item.tie:

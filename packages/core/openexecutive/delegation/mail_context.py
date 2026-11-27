@@ -350,7 +350,8 @@ async def gist(notes: list[_Note], known: str) -> bool:
             continue
         note = notes[n - 1]
         note.gist = clean_gist(str(entry.get("gist") or ""))
-        note.tie = one_line(str(entry.get("tie") or ""), 120)
+        # Written from other people's email too, so no link or address.
+        note.tie = one_line(clean_gist(str(entry.get("tie") or "")), 120)
         # It acts only on what ties to something known.
         note.act = entry.get("act") is True and bool(note.tie)
     return True

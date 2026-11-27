@@ -222,6 +222,18 @@ def test_mail_the_executive_also_got_is_left_to_its_own_turn(owner: Any, model: 
     assert noticed.recent(owner.id, now=NOW)[0].item_key == "m1"  # still known
 
 
+def test_a_tie_never_carries_a_link_or_address(owner: Any, monkeypatch: pytest.MonkeyPatch,
+                                               model: dict[str, Any]) -> None:
+    async def linked(turn: str) -> dict[str, Any]:
+        return {"emails": [{"n": 1, "gist": "Flight delayed", "act": False,
+                            "tie": "3pm meeting, see https://evil.example/x or mail bad@evil.example"}]}
+
+    monkeypatch.setattr(mail_context, "_call_model", linked)
+    _look(owner, Mailbox(_msg("m1")))
+    (item,) = noticed.recent(owner.id, now=NOW)
+    assert "evil.example" not in item.tie and item.tie.startswith("3pm meeting")
+
+
 def test_a_failed_gist_still_keeps_who_and_what(owner: Any, monkeypatch: pytest.MonkeyPatch,
                                                 model: dict[str, Any]) -> None:
     async def broken(turn: str) -> dict[str, Any]:
