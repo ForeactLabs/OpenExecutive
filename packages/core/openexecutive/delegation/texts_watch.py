@@ -157,7 +157,7 @@ async def look(person_id: int) -> bool:
     failed: Exception | None = None
     for conv, t in items:
         mine = [x.id for x in new if x.conversation_id == conv.id]
-        await _note_answer(person_id, conv, [x for x in new if x.conversation_id == conv.id])
+        _note_later(person_id, conv, [x for x in new if x.conversation_id == conv.id])
         prompt = await asyncio.to_thread(prompt_for, person, [(conv, t)], counts)
         # Every text is outside words, even one showing a teammate's number:
         # a text's number can be one its sender picked, and nothing checks it
@@ -183,6 +183,21 @@ async def look(person_id: int) -> bool:
     if failed is not None:
         raise failed
     return True
+
+
+# Answer notes running in the background, held so they aren't collected.
+_NOTING: set[asyncio.Task[None]] = set()
+
+
+def _note_later(person_id: int, conv: Any, new: list[Any]) -> None:
+    """``_note_answer`` in the background, so the texts turn never waits on
+    it. Never raises."""
+    try:
+        task = asyncio.get_running_loop().create_task(_note_answer(person_id, conv, new))
+        _NOTING.add(task)
+        task.add_done_callback(_NOTING.discard)
+    except Exception:
+        logger.warning("texts_watch: couldn't start noting the answer in conversation %s", conv.id, exc_info=True)
 
 
 async def _note_answer(person_id: int, conv: Any, new: list[Any]) -> None:

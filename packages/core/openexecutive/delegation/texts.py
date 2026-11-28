@@ -779,21 +779,29 @@ ERRAND_REPLY_WITHIN = timedelta(days=1)
 
 
 def errand_sent(conversation_id: str, before: str, *, db_path: Path | None = None) -> bool:
-    """Whether the Executive sent a text in this conversation because the
-    person asked for it in a chat (a send told back to a chat, not a reply a
-    texts turn made on its own), within ``ERRAND_REPLY_WITHIN`` before
-    ``before`` (an ISO time). What comes back then is the errand's answer
-    (``memory.history_heard``). Never raises."""
+    """Whether texts arriving at ``before`` (an ISO time) are the first answer
+    to a text the Executive sent in this conversation because the person
+    asked for it in a chat (a send told back to a chat, not a reply a texts
+    turn made on its own), within ``ERRAND_REPLY_WITHIN``. Only the first
+    texts back count: one that came in between already answered it, and a
+    later text in the conversation is just a text. Never raises."""
     try:
         until = datetime.fromisoformat(before)
         since = _iso(until - ERRAND_REPLY_WITHIN)
         with _connect(db_path) as conn:
             row = conn.execute(
-                f"SELECT 1 FROM {TEXT_SENDS_TABLE} WHERE conversation_id=? AND status=? "  # noqa: S608
-                "AND tell_session IS NOT NULL AND tell_session != ? AND created_at >= ? AND created_at <= ? LIMIT 1",
+                f"SELECT created_at FROM {TEXT_SENDS_TABLE} WHERE conversation_id=? AND status=? "  # noqa: S608
+                "AND tell_session IS NOT NULL AND tell_session != ? AND created_at >= ? AND created_at <= ? "
+                "ORDER BY created_at DESC LIMIT 1",
                 (conversation_id, SENT, TELL_ON_CARD, since, before),
             ).fetchone()
-        return row is not None
+            if row is None:
+                return False
+            answered = conn.execute(
+                f"SELECT 1 FROM {TEXTS_TABLE} WHERE conversation_id=? AND outgoing=0 AND at > ? AND at < ? LIMIT 1",  # noqa: S608
+                (conversation_id, row["created_at"], before),
+            ).fetchone()
+        return answered is None
     except Exception:
         logging.getLogger(__name__).warning("texts: couldn't tell whether a text was an errand", exc_info=True)
         return False

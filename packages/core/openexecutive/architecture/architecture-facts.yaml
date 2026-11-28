@@ -3165,15 +3165,17 @@ memory:
       which reads two ways). Rufus saw such a note, garbled, on 2026-11-28.
     - What came back is kept instead: memory.history_heard.note_heard writes
       one note, kind heard, from what the other side said (the words of a
-      text that answers one a chat asked for, texts.errand_sent and
+      text that is the first answer to one a chat asked for, texts.errand_sent and
       texts_watch._note_answer; a fork's phone calls can call it too). It is
       someone else's words, so trust medium and the counterpart names them;
       check_note runs on their words, their name and a few retelling words
       (history_heard._RETOLD). Same switch and exclusions; no daily
       pass count (it runs only for an answer to an errand they asked for).
     - Chat and heard notes pass skip_repeats to history.add_notes: one with
-      the same quote, or the same kind and 60% of the same summary words,
+      the same quote, or the same kind, the same figures, date words, names
+      and negations (history._specifics) and 60% of the same summary words,
       as a note from the last day (and the same due date) is not stored.
+      A changed answer (8 not 6, Thursday not Tuesday, "won't") is new.
     - Who someone is to the person ("JR is my son") or a standing preference
       is not a note but a fact of their own: remember_fact with about_me
       true (kept for them alone), from the chat or from the review after it

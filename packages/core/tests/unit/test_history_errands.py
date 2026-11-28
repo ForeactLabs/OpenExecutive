@@ -176,6 +176,30 @@ def test_a_different_note_or_an_old_one_is_kept(roster: SimpleNamespace) -> None
     assert add(later, WHEN + timedelta(days=2))
 
 
+@pytest.mark.parametrize(
+    ("kind", "first", "then"),
+    [
+        ("heard", "Heard from JR he will be home for dinner at 6.", "Heard from JR he will be home for dinner at 8."),
+        ("heard", "Heard from JR he will be home for dinner.", "Heard from JR he will not be home for dinner."),
+        ("heard", "Heard from JR he will be home for dinner.", "Heard from JR he won't be home for dinner."),
+        ("agreed", "Agreed the launch moves to Tuesday.", "Agreed the launch moves to Thursday."),
+        ("agreed", "Decided the promotion is 20% off.", "Decided the promotion is 30% off."),
+        ("promised", "Said they will send the deck to Dana Lee.", "Said they will send the deck to Marcus Lee."),
+    ],
+)
+def test_a_changed_answer_is_not_a_repeat(roster: SimpleNamespace, kind: str, first: str, then: str) -> None:
+    def add(summary: str, quote: str) -> list[int]:
+        return h.add_notes(
+            roster.principal, [NewNote(kind=kind, summary=summary, quote=quote)], source=h.SOURCE_CHAT_MESSAGE,
+            channel="web", conversation_ref="web-1", counterpart="", subject="", trust="high",
+            occurred_at=WHEN, now=WHEN, skip_repeats=True,
+        )
+
+    assert add(first, "the first words they said")
+    assert add(then, "the next words they said")
+    assert len(h.list_notes(roster.principal)) == 2
+
+
 # --------------------------------------------------------------------------- #
 # What came back from an errand
 # --------------------------------------------------------------------------- #
@@ -264,6 +288,15 @@ def test_errand_sent_is_a_chat_asked_text_from_the_last_day(roster: SimpleNamesp
     _send(roster.principal, "conv-1", tell="web-1", status=tx.SENT, at=WHEN - timedelta(hours=1))
     assert tx.errand_sent("conv-1", reply_at) is True
     assert tx.errand_sent("conv-2", reply_at) is False
+    # Once they answered, a later text in the conversation is just a text.
+    with tx._connect() as conn:
+        conn.execute(
+            f"INSERT INTO {tx.TEXTS_TABLE} (person_id, conversation_id, ref, sender, text, outgoing, at, handled) "  # noqa: S608
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (roster.principal, "conv-1", "r1", "JR", "Home by 6", 0, reply_at, 1),
+        )
+    assert tx.errand_sent("conv-1", reply_at) is True
+    assert tx.errand_sent("conv-1", tx._iso(WHEN + timedelta(hours=15))) is False
 
 
 def test_a_reply_to_an_errand_text_is_noted(roster: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -708,20 +708,50 @@ def _stems(text: str) -> set[str]:
     return {w[:5] for w in words if len(w) >= 3 and w not in _GLUE}
 
 
+_NEGATIONS = frozenset({
+    "not", "no", "never", "none", "nothing", "nobody", "neither", "nor", "cannot", "can't", "won't",
+    "don't", "doesn't", "didn't", "isn't", "aren't", "wasn't", "weren't", "shouldn't", "wouldn't",
+    "couldn't", "haven't", "hasn't", "hadn't", "without",
+})
+
+
+def _specifics(text: str) -> tuple[frozenset[float], frozenset[str]]:
+    """What must be the same for two notes to be one: every figure, and every
+    date word, negation and name (a capitalised word after the first), in
+    full. "home at 6" and "home at 8", "Tuesday" and "Thursday", "will be
+    home" and "will not be home" are different notes."""
+    from openexecutive.memory.episodic import _normalize_for_quote_match
+    from openexecutive.orchestrator.fact_tools import _DATE_WORDS, _WORD, _bare, _numbers_in
+
+    folded = _normalize_for_quote_match(text)
+    words: set[str] = set()
+    for i, m in enumerate(_WORD.finditer(text)):
+        bare = _bare(m.group(0))
+        if i > 0 and bare[:1].isupper():
+            words.add(bare.lower())
+    for w in folded.split():
+        w = w.strip(".,;:!?\"()")
+        if w in _DATE_WORDS or w in _NEGATIONS or w.endswith("n't"):
+            words.add(w)
+    return frozenset(_numbers_in(text)), frozenset(words)
+
+
 def _repeats(note: NewNote, recent: list[_Recent]) -> bool:
     """Whether ``note`` says again what one of ``recent`` already says: the
-    same quote, or the same kind with most of the same words. A different
+    same quote, or the same kind with the same figures, dates, names and
+    negations (``_specifics``) and most of the same other words. A different
     due date is a different note."""
     from openexecutive.memory.episodic import _normalize_for_quote_match
 
     quote = _normalize_for_quote_match(note.quote)
     mine = _stems(note.summary)
+    specifics = _specifics(note.summary)
     for kind, summary, their_quote, due in recent:
         if (due or None) != (note.due_date or None):
             continue
         if quote and quote == _normalize_for_quote_match(their_quote):
             return True
-        if kind != note.kind:
+        if kind != note.kind or _specifics(summary) != specifics:
             continue
         theirs = _stems(summary)
         union = mine | theirs
