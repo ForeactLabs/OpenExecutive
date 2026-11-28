@@ -337,6 +337,16 @@ def test_a_text_from_before_the_errand_went_is_no_answer(roster: SimpleNamespace
     assert tx.errand_sent("conv-9", tx._iso(went + timedelta(minutes=5))) is True
 
 
+def test_a_reply_in_the_minute_it_went_is_its_answer(roster: SimpleNamespace) -> None:
+    # The phone shows "6:03 PM", so a reply seconds after an 18:03:41 send
+    # is dated 18:03:00, before the send settled.
+    went = WHEN.replace(second=41)
+    _send(roster.principal, "conv-8", asked_in="web-1", status=tx.SENT, at=went)
+    assert tx.errand_sent("conv-8", tx._iso(went.replace(second=0))) is True
+    # Two minutes earlier is still no answer.
+    assert tx.errand_sent("conv-8", tx._iso(went - timedelta(minutes=2))) is False
+
+
 def test_a_reply_to_an_errand_text_is_noted(roster: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[dict[str, Any]] = []
 

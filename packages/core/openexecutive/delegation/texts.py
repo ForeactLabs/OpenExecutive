@@ -777,6 +777,7 @@ def settle_send(
 
 # A reply within this long of a text a chat asked for answers that errand.
 ERRAND_REPLY_WITHIN = timedelta(days=1)
+TEXT_TIME_SLACK = timedelta(minutes=1)
 
 
 def errand_sent(conversation_id: str, before: str, *, db_path: Path | None = None) -> bool:
@@ -789,6 +790,10 @@ def errand_sent(conversation_id: str, before: str, *, db_path: Path | None = Non
     try:
         until = datetime.fromisoformat(before)
         since = _iso(until - ERRAND_REPLY_WITHIN)
+        # A text read from the phone is dated by its shown time, to the
+        # minute ("6:03 PM", "1 min"), so a reply in the minute the send went
+        # can carry a time just before it.
+        latest = _iso(until + TEXT_TIME_SLACK)
         with _connect(db_path) as conn:
             row = conn.execute(
                 # When it went, not when it was queued: a send can wait for
@@ -797,7 +802,7 @@ def errand_sent(conversation_id: str, before: str, *, db_path: Path | None = Non
                 "WHERE conversation_id=? AND status=? AND asked_in IS NOT NULL "
                 "AND COALESCE(done_at, created_at) >= ? AND COALESCE(done_at, created_at) <= ? "
                 "ORDER BY went DESC LIMIT 1",
-                (conversation_id, SENT, since, before),
+                (conversation_id, SENT, since, latest),
             ).fetchone()
             if row is None:
                 return False
