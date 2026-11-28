@@ -12,6 +12,9 @@ instructions.
 ordinary unattended Executive turn, so each step it takes goes through
 Approvals, Your rules and In training (``orchestrator.take_the_lead``), and a
 step that waits is a card on this person's own list.
+
+Texts that answer one the person had it send from a chat are also kept as a
+note of theirs, what they heard back (``memory.history_heard``).
 """
 from __future__ import annotations
 
@@ -154,6 +157,7 @@ async def look(person_id: int) -> bool:
     failed: Exception | None = None
     for conv, t in items:
         mine = [x.id for x in new if x.conversation_id == conv.id]
+        _note_later(person_id, conv, [x for x in new if x.conversation_id == conv.id])
         prompt = await asyncio.to_thread(prompt_for, person, [(conv, t)], counts)
         # Every text is outside words, even one showing a teammate's number:
         # a text's number can be one its sender picked, and nothing checks it
@@ -179,6 +183,70 @@ async def look(person_id: int) -> bool:
     if failed is not None:
         raise failed
     return True
+
+
+# Answer notes running in the background, held so they aren't collected.
+_NOTING: set[asyncio.Task[None]] = set()
+# Texts already read for an answer: a turn that failed puts its texts back,
+# and the next look must not read them again (a newer text with them is read).
+_NOTED: dict[int, None] = {}
+_NOTED_KEEP = 500
+# One answer pass at a time per conversation: "Yes" and "home at 6" seconds
+# apart are two looks, and the second must see the note the first kept.
+_NOTING_IN: dict[str, tuple[asyncio.Lock, list[int]]] = {}
+
+
+def _note_later(person_id: int, conv: Any, new: list[Any]) -> None:
+    """``_note_answer`` in the background, so the texts turn never waits on
+    it. Never raises."""
+    try:
+        task = asyncio.get_running_loop().create_task(_note_answer(person_id, conv, new))
+        _NOTING.add(task)
+        task.add_done_callback(_NOTING.discard)
+    except Exception:
+        logger.warning("texts_watch: couldn't start noting the answer in conversation %s", conv.id, exc_info=True)
+
+
+async def _note_answer(person_id: int, conv: Any, new: list[Any]) -> None:
+    """When these texts answer one the person had the Executive send from a
+    chat ("text JR and ask if he's home for dinner"), keep what they said as
+    a note of theirs (``memory.history_heard``). Never raises."""
+    try:
+        theirs = [t for t in new if not t.outgoing]
+        if not theirs or conv.is_group:
+            return
+        if all(t.id in _NOTED for t in theirs):
+            return
+        lock, users = _NOTING_IN.setdefault(conv.id, (asyncio.Lock(), [0]))
+        users[0] += 1
+        try:
+            async with lock:
+                await _note_answer_now(person_id, conv, theirs)
+        finally:
+            users[0] -= 1
+            if not users[0]:
+                _NOTING_IN.pop(conv.id, None)
+    except Exception:
+        logger.warning("texts_watch: couldn't note the answer in conversation %s", conv.id, exc_info=True)
+
+
+async def _note_answer_now(person_id: int, conv: Any, theirs: list[Any]) -> None:
+    from datetime import datetime
+
+    from openexecutive.delegation import texts
+    from openexecutive.memory.history_heard import note_heard
+
+    first_id = min(t.id for t in theirs)
+    if await asyncio.to_thread(texts.errand_sent, conv.id, min(t.at for t in theirs), first_id=first_id):
+        await note_heard(
+            person_id, words="\n".join(t.text for t in theirs), who=conv.who, channel="texts",
+            conversation_ref=conv.id, said_at=datetime.fromisoformat(max(t.at for t in theirs)),
+        )
+    # Read once, whatever came of it: after the note is stored, never before.
+    for t in theirs:
+        _NOTED[t.id] = None
+    while len(_NOTED) > _NOTED_KEEP:
+        del _NOTED[next(iter(_NOTED))]
 
 
 def last_line(said: str) -> str:

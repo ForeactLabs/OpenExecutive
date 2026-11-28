@@ -158,7 +158,11 @@ _DDL: tuple[str, ...] = (
     "  echoed INTEGER NOT NULL DEFAULT 0,"
     # The Take the lead log row that says it is on its way, told how it
     # went (``take_the_lead.device_settled``).
-    "  log_id INTEGER"
+    "  log_id INTEGER,"
+    # The chat whose person asked for it (an errand), however fast it went;
+    # NULL for a reply a texts turn or an approved card sent. Its first answer
+    # is kept as a heard note (``memory.history_heard``).
+    "  asked_in TEXT"
     ")",
     # The owner's "Let team members use Act as me": one row, absent means off.
     f"CREATE TABLE IF NOT EXISTS {TEAM_TABLE} ("
@@ -457,6 +461,14 @@ def _add_text_send_log_id(conn: sqlite3.Connection) -> None:
         conn.commit()
 
 
+def _add_text_send_asked_in(conn: sqlite3.Connection) -> None:
+    """Give a text sends table made before ``asked_in`` existed the column."""
+    columns = {row[1] for row in conn.execute(f"PRAGMA table_info({TEXT_SENDS_TABLE})")}
+    if "asked_in" not in columns:
+        conn.execute(f"ALTER TABLE {TEXT_SENDS_TABLE} ADD COLUMN asked_in TEXT")
+        conn.commit()
+
+
 def _add_text_conversation_note(conn: sqlite3.Connection) -> None:
     """Give a text conversations table made before ``note`` existed the columns."""
     columns = {row[1] for row in conn.execute(f"PRAGMA table_info({TEXT_CONVERSATIONS_TABLE})")}
@@ -480,4 +492,5 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     _add_draft_replaced_by(conn)
     _add_draft_from_executive(conn)
     _add_text_send_log_id(conn)
+    _add_text_send_asked_in(conn)
     _add_text_conversation_note(conn)

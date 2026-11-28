@@ -683,19 +683,20 @@ def _tell_on_card(send: Send, *, db_path: Path | None = None) -> None:
 
 def queue_send(
     person_id: int, text: str, *, conversation_id: str | None = None, to_number: str = "",
-    db_path: Path | None = None,
+    asked_in: str | None = None, db_path: Path | None = None,
 ) -> Send:
     """A text for their browser to send: in one of their conversations, or to
-    a number (a new conversation)."""
+    a number (a new conversation). ``asked_in`` is the chat whose person asked
+    for it, when one did (``errand_sent``)."""
     if not conversation_id and not digits(to_number):
         raise ValueError("a send needs a conversation or a number")
     with _connect(db_path) as conn:
         cur = conn.execute(
-            f"INSERT INTO {TEXT_SENDS_TABLE} (person_id, conversation_id, to_number, text, status, created_at) "
-            "VALUES (?,?,?,?,?,?)",
+            f"INSERT INTO {TEXT_SENDS_TABLE} "
+            "(person_id, conversation_id, to_number, text, status, created_at, asked_in) VALUES (?,?,?,?,?,?,?)",
             (
                 person_id, conversation_id or None, "" if conversation_id else _clip(to_number, 40),
-                _clip(text, MAX_SEND), PENDING, _iso(_now()),
+                _clip(text, MAX_SEND), PENDING, _iso(_now()), asked_in or None,
             ),
         )
         row = conn.execute(f"SELECT * FROM {TEXT_SENDS_TABLE} WHERE id=?", (cur.lastrowid,)).fetchone()
@@ -843,6 +844,64 @@ def settle_send(
     _settle_log(row, db_path)
     _tell(settled, db_path=db_path)
     return settled
+
+
+# A reply within this long of a text a chat asked for answers that errand.
+ERRAND_REPLY_WITHIN = timedelta(days=1)
+TEXT_TIME_SLACK = timedelta(minutes=1)
+
+
+def errand_sent(
+    conversation_id: str, before: str, *, first_id: int | None = None, db_path: Path | None = None,
+) -> bool:
+    """Whether texts arriving at ``before`` (an ISO time; ``first_id``, the
+    first of them once kept) are the first answer to a text the Executive
+    sent in this conversation because the person asked for it in a chat
+    (``asked_in``, however fast it went; never a reply a texts turn or an
+    approved card sent), within ``ERRAND_REPLY_WITHIN``. Only texts until
+    one answer is kept count: after a note of what they said back
+    (``history.heard_since``), a later text in the conversation is just a
+    text. Never raises."""
+    try:
+        until = datetime.fromisoformat(before)
+        since = _iso(until - ERRAND_REPLY_WITHIN)
+        # A text read from the phone is dated by its shown time, to the
+        # minute ("6:03 PM", "1 min"), so a reply in the minute the send went
+        # can carry a time just before it.
+        latest = _iso(until + TEXT_TIME_SLACK)
+        with _connect(db_path) as conn:
+            row = conn.execute(
+                # When it went, not when it was queued: a send can wait for
+                # the browser, and a text that came in before it went is no answer.
+                f"SELECT id, person_id, COALESCE(done_at, created_at) AS went FROM {TEXT_SENDS_TABLE} "  # noqa: S608
+                "WHERE conversation_id=? AND status=? AND asked_in IS NOT NULL "
+                "AND COALESCE(done_at, created_at) >= ? AND COALESCE(done_at, created_at) <= ? "
+                "ORDER BY went DESC LIMIT 1",
+                (conversation_id, SENT, since, latest),
+            ).fetchone()
+            if row is None:
+                return False
+            # Where the send sits among the conversation's texts (its own
+            # copy, kept when it went): the order texts were kept in, which a
+            # minute-wide time can't tell.
+            mark = conn.execute(
+                f"SELECT id FROM {TEXTS_TABLE} WHERE person_id=? AND ref=?",  # noqa: S608
+                (row["person_id"], f"send:{row['id']}"),
+            ).fetchone()
+        if first_id is not None and mark is not None and first_id < int(mark["id"]):
+            return False
+        # Answered once something they said back was kept: a holding reply
+        # ("ok let me check") keeps nothing, so the next texts can still be
+        # the answer, and after one is kept a later text is just a text.
+        from openexecutive.memory.history import heard_since
+
+        answered = heard_since(
+            int(row["person_id"]), channel="texts", conversation_ref=conversation_id, since=row["went"],
+        )
+        return not answered
+    except Exception:
+        logging.getLogger(__name__).warning("texts: couldn't tell whether a text was an errand", exc_info=True)
+        return False
 
 
 def last_send_id(person_id: int, *, db_path: Path | None = None) -> int:

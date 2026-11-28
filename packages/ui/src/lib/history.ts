@@ -75,6 +75,7 @@ const KIND_LABELS: Record<string, string> = {
   answered: "Answered",
   asked: "Asked",
   shared: "Shared",
+  heard: "Heard back",
 };
 
 export function kindLabel(kind: string): string {
@@ -89,7 +90,7 @@ export function counterpartName(counterpart: string): string {
   return trimmed.replace(/^<|>$/g, "");
 }
 
-const CHANNEL_LABELS: Record<string, string> = { email: "Email", web: "Web chat" };
+const CHANNEL_LABELS: Record<string, string> = { email: "Email", web: "Web chat", texts: "Texts", phone: "Phone call" };
 
 /** "Email with Dana Lee", or the channel alone ("Slack", "Web chat") when
  * nobody is named, as for what someone said in chat. */
@@ -97,6 +98,14 @@ export function noteWhere(note: Pick<HistoryNote, "channel" | "counterpart">): s
   const channel = CHANNEL_LABELS[note.channel] ?? note.channel.charAt(0).toUpperCase() + note.channel.slice(1);
   const who = counterpartName(note.counterpart);
   return who ? `${channel} with ${who}` : channel;
+}
+
+/** Whose words the quote is: "Your words", or "JR's words" for what
+ * someone said back (a heard note). */
+export function quoteLabel(note: Pick<HistoryNote, "kind" | "counterpart">): string {
+  if (note.kind !== "heard") return "Your words";
+  const who = counterpartName(note.counterpart);
+  return who ? `${who}'s words` : "Their words";
 }
 
 /** What the note says now: their correction when they made one. */

@@ -60,6 +60,20 @@ def test_own_memory_reads_a_correction_as_a_note() -> None:
     assert "Said Dana the venue might move." in text and "You said" not in text
 
 
+def test_what_someone_said_back_is_outside_text_not_their_note() -> None:
+    _add(1, "Promised to send Sam the venue deposit.")
+    h.add_notes(
+        1, [h.NewNote(kind="heard", summary="Heard from Sam the venue vote moved to Friday.",
+                      quote="the venue vote moved to Friday")],
+        source=h.SOURCE_ERRAND_REPLY, channel="texts", conversation_ref="t1", counterpart="Sam",
+        subject="", trust="medium", occurred_at=NOW, now=NOW,
+    )
+    text = pr.own_memory(1, "venue")
+    own, _, block = text.partition("<untrusted_content")
+    assert "venue deposit" in own and "vote moved" not in own
+    assert 'author="Sam"' in block and "vote moved to Friday" in block
+
+
 def test_own_memory_is_only_their_own() -> None:
     _add(2, "The venue is booked.")
     assert "venue" not in pr.own_memory(1, "venue")

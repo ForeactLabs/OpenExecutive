@@ -35,6 +35,7 @@ from openexecutive.memory.history import (
     KINDS,
     MAX_QUOTE_CHARS,
     MAX_SUMMARY_CHARS,
+    OWN_KINDS,
     SOURCE_APPROVED_REPLY,
     NewNote,
 )
@@ -160,8 +161,12 @@ def _mostly_theirs(summary: str, allowed: str) -> bool:
     return sum(stem(w) in said for w in content) * 2 >= len(content)
 
 
-def check_note(raw: Any, *, body: str, allowed: str) -> NewNote | None:
-    """One model note as it may be stored, or None when it fails a check."""
+def check_note(
+    raw: Any, *, body: str, allowed: str, kinds: tuple[str, ...] = OWN_KINDS,
+) -> NewNote | None:
+    """One model note as it may be stored, or None when it fails a check.
+    ``kinds`` are the kinds this pass may write: a person's own words never
+    make a ``heard`` note."""
     from openexecutive.delegation.ghostwriter import one_line
     from openexecutive.memory.episodic import _normalize_for_quote_match
     from openexecutive.orchestrator.fact_tools import _numbers_in, _same
@@ -171,7 +176,7 @@ def check_note(raw: Any, *, body: str, allowed: str) -> NewNote | None:
     kind = raw.get("kind")
     summary = one_line(str(raw.get("summary") or ""), MAX_SUMMARY_CHARS)
     quote = one_line(str(raw.get("quote") or ""), MAX_QUOTE_CHARS)
-    if kind not in KINDS or not summary or not quote:
+    if kind not in kinds or not summary or not quote:
         return None
     nq = _normalize_for_quote_match(quote)
     if len(nq.replace(" ", "")) < _QUOTE_MIN_CHARS or len(nq.split()) < _QUOTE_MIN_WORDS:

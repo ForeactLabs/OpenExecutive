@@ -14,7 +14,7 @@ import {
   type HistoryNote,
   type HistoryState,
 } from "@/lib/api";
-import { kindLabel, noteExpiry, noteText, noteWhere } from "@/lib/history";
+import { kindLabel, noteExpiry, noteText, noteWhere, quoteLabel } from "@/lib/history";
 import { EmptyState, formatDate } from "./shared";
 import { PageSpinner } from "@/components/ui/Spinner";
 
@@ -243,7 +243,7 @@ function NoteRow({
         </div>
         {note.quote && (
           <div className="text-sm text-fg-muted line-clamp-3" title={note.quote}>
-            Your words: “{note.quote}”
+            {quoteLabel(note)}: “{note.quote}”
           </div>
         )}
         <div className="text-xs text-fg-subtle">
@@ -322,12 +322,12 @@ function CorrectPanel({
             </div>
             {note.quote && (
               <div>
-                <span className="text-fg-subtle">Your words: </span>“{note.quote}”
+                <span className="text-fg-subtle">{quoteLabel(note)}: </span>“{note.quote}”
               </div>
             )}
           </div>
           <p className="text-xs text-fg-subtle">
-            The Executive uses your version from now on. Your words stay as you wrote them.
+            The Executive uses your version from now on. The words it was noted from stay as they were.
           </p>
         </div>
       )}

@@ -203,8 +203,20 @@ async def handle_send_text(tool_input: dict[str, Any]) -> str:
     settings = await asyncio.to_thread(texts.get_settings, actor)
     if not settings.active:
         return json.dumps({"error": f"Nothing went. {_OFF_NOTE}"})
+    # A chat the person is in asked for it: its first answer is kept as a
+    # heard note of theirs (``texts.errand_sent``).
+    turn = current_session.get()
+    asked_in = getattr(turn, "session_id", None)
+    if (
+        getattr(turn, "unattended", False) is True
+        or getattr(turn, "answers_a_text", False) is True
+        or not isinstance(asked_in, str)
+    ):
+        asked_in = None
     send = await asyncio.to_thread(
-        lambda: texts.queue_send(actor, text, conversation_id=conv.id if conv else None, to_number=to),
+        lambda: texts.queue_send(
+            actor, text, conversation_id=conv.id if conv else None, to_number=to, asked_in=asked_in,
+        ),
     )
     texts.wake(actor)
     settled = await _settled(send.id) if texts.connected(actor) else send

@@ -7,6 +7,7 @@ import {
   noteText,
   noteWhere,
   personRetentionChoices,
+  quoteLabel,
   retentionLabel,
 } from "../src/lib/history.ts";
 
@@ -38,6 +39,7 @@ test("a note names who it was with, never the bare address when there's a name",
   assert.equal(noteWhere({ channel: "email", counterpart: "" }), "Email");
   assert.equal(noteWhere({ channel: "web", counterpart: "" }), "Web chat");
   assert.equal(noteWhere({ channel: "slack", counterpart: "" }), "Slack");
+  assert.equal(noteWhere({ channel: "texts", counterpart: "JR" }), "Texts with JR");
 });
 
 test("their correction replaces the note's words", () => {
@@ -51,4 +53,11 @@ test("each note says when it goes", () => {
   assert.equal(noteExpiry({ pinned: false, expires_at: null }), "Kept until you forget it");
   assert.equal(noteExpiry({ pinned: false, expires_at: "2026-12-30T09:00:00+00:00" }), "Forgotten on 2026-12-30");
   assert.equal(kindLabel("promised"), "Promised");
+  assert.equal(kindLabel("heard"), "Heard back");
+});
+
+test("a heard note's quote is theirs, not the person's", () => {
+  assert.equal(quoteLabel({ kind: "answered", counterpart: "" }), "Your words");
+  assert.equal(quoteLabel({ kind: "heard", counterpart: "JR" }), "JR's words");
+  assert.equal(quoteLabel({ kind: "heard", counterpart: "" }), "Their words");
 });
