@@ -55,8 +55,5 @@
       ],
       "run_at": "document_idle"
     }
-  ],
-  "storage": {
-    "managed_schema": "managed_schema.json"
-  }
+  ]
 }
