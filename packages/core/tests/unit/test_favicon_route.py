@@ -222,3 +222,16 @@ def test_a_dozen_new_sites_at_once_all_get_looked_up(monkeypatch: pytest.MonkeyP
         return list(await asyncio.gather(*(favicon_route._icon_once("a", f"s{i}.com") for i in range(10))))
 
     assert asyncio.run(go()) == [(PNG, "image/png")] * 10
+
+
+def test_a_lookup_that_cannot_get_a_slot_soon_gives_up_for_now(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def go() -> bool:
+        favicon_route._slots = asyncio.Semaphore(0)
+        monkeypatch.setattr(favicon_route, "_SLOT_WAIT_S", 0.01)
+        try:
+            await favicon_route._look_up("example.com")
+        except favicon_route._Busy:
+            return True
+        return False
+
+    assert asyncio.run(go())

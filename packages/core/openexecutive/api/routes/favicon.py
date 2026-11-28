@@ -48,6 +48,8 @@ _CACHE_MAX_BYTES = 8_000_000
 # Lookups at once in all, and how long one may take.
 _AT_ONCE = 4
 _LOOKUP_S = 20.0
+# How long a lookup may wait for a slot before giving up for now.
+_SLOT_WAIT_S = 10.0
 # Lookups running or waiting for a turn, at most: in all, and per person.
 # Only ``_AT_ONCE`` run; the rest wait for a slot, so a timeline that opens
 # a dozen new sites gets every icon, and no one person can fill the queue.
@@ -177,12 +179,19 @@ async def find_icon(site: str) -> tuple[bytes, str] | None:
 
 
 async def _look_up(site: str) -> tuple[bytes, str] | None:
-    """``find_icon`` within the time limit and the lookups-at-once cap."""
-    async with _slots:
-        try:
-            return await asyncio.wait_for(find_icon(site), _LOOKUP_S)
-        except Exception:
-            return None
+    """``find_icon`` within the time limit and the lookups-at-once cap. A
+    lookup that can't get a slot within ``_SLOT_WAIT_S`` gives up as busy
+    (nothing kept), so no request hangs in the queue."""
+    try:
+        await asyncio.wait_for(_slots.acquire(), _SLOT_WAIT_S)
+    except TimeoutError:
+        raise _Busy from None
+    try:
+        return await asyncio.wait_for(find_icon(site), _LOOKUP_S)
+    except Exception:
+        return None
+    finally:
+        _slots.release()
 
 
 class _Busy(Exception):
