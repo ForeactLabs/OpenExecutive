@@ -345,6 +345,14 @@ def test_a_reply_in_the_minute_it_went_is_its_answer(roster: SimpleNamespace) ->
     assert tx.errand_sent("conv-8", tx._iso(went.replace(second=0))) is True
     # Two minutes earlier is still no answer.
     assert tx.errand_sent("conv-8", tx._iso(went - timedelta(minutes=2))) is False
+    # Once that reply is in, a later text is just a text.
+    with tx._connect() as conn:
+        conn.execute(
+            f"INSERT INTO {tx.TEXTS_TABLE} (person_id, conversation_id, ref, sender, text, outgoing, at, handled) "  # noqa: S608
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (roster.principal, "conv-8", "r8", "JR", "Home by 6", 0, tx._iso(went.replace(second=0)), 1),
+        )
+    assert tx.errand_sent("conv-8", tx._iso(went + timedelta(minutes=17))) is False
 
 
 def test_a_reply_to_an_errand_text_is_noted(roster: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:

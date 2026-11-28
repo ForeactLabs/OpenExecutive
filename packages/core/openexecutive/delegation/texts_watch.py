@@ -211,7 +211,7 @@ async def _note_answer(person_id: int, conv: Any, new: list[Any]) -> None:
         if not theirs or conv.is_group:
             return
         first = min(t.at for t in theirs)
-        if not await asyncio.to_thread(texts.errand_sent, conv.id, first):
+        if not await asyncio.to_thread(texts.errand_sent, conv.id, first, first_id=min(t.id for t in theirs)):
             return
         from datetime import datetime
 

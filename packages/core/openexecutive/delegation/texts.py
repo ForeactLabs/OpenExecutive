@@ -780,13 +780,16 @@ ERRAND_REPLY_WITHIN = timedelta(days=1)
 TEXT_TIME_SLACK = timedelta(minutes=1)
 
 
-def errand_sent(conversation_id: str, before: str, *, db_path: Path | None = None) -> bool:
-    """Whether texts arriving at ``before`` (an ISO time) are the first answer
-    to a text the Executive sent in this conversation because the person
-    asked for it in a chat (``asked_in``, however fast it went; never a reply
-    a texts turn or an approved card sent), within ``ERRAND_REPLY_WITHIN``. Only the first
-    texts back count: one that came in between already answered it, and a
-    later text in the conversation is just a text. Never raises."""
+def errand_sent(
+    conversation_id: str, before: str, *, first_id: int | None = None, db_path: Path | None = None,
+) -> bool:
+    """Whether texts arriving at ``before`` (an ISO time; ``first_id``, the
+    first of them once kept) are the first answer to a text the Executive
+    sent in this conversation because the person asked for it in a chat
+    (``asked_in``, however fast it went; never a reply a texts turn or an
+    approved card sent), within ``ERRAND_REPLY_WITHIN``. Only the first texts
+    back count: one that came in between already answered it, and a later
+    text in the conversation is just a text. Never raises."""
     try:
         until = datetime.fromisoformat(before)
         since = _iso(until - ERRAND_REPLY_WITHIN)
@@ -798,7 +801,7 @@ def errand_sent(conversation_id: str, before: str, *, db_path: Path | None = Non
             row = conn.execute(
                 # When it went, not when it was queued: a send can wait for
                 # the browser, and a text that came in before it went is no answer.
-                f"SELECT COALESCE(done_at, created_at) AS went FROM {TEXT_SENDS_TABLE} "  # noqa: S608
+                f"SELECT id, person_id, COALESCE(done_at, created_at) AS went FROM {TEXT_SENDS_TABLE} "  # noqa: S608
                 "WHERE conversation_id=? AND status=? AND asked_in IS NOT NULL "
                 "AND COALESCE(done_at, created_at) >= ? AND COALESCE(done_at, created_at) <= ? "
                 "ORDER BY went DESC LIMIT 1",
@@ -806,9 +809,22 @@ def errand_sent(conversation_id: str, before: str, *, db_path: Path | None = Non
             ).fetchone()
             if row is None:
                 return False
+            # Where the send sits among the conversation's texts (its own
+            # copy, kept when it went): the order texts were kept in, which a
+            # minute-wide time can't tell.
+            mark = conn.execute(
+                f"SELECT id FROM {TEXTS_TABLE} WHERE person_id=? AND ref=?",  # noqa: S608
+                (row["person_id"], f"send:{row['id']}"),
+            ).fetchone()
+            sent_id = int(mark["id"]) if mark else 0
+            if first_id is not None and first_id < sent_id:
+                return False
             answered = conn.execute(
-                f"SELECT 1 FROM {TEXTS_TABLE} WHERE conversation_id=? AND outgoing=0 AND at > ? AND at < ? LIMIT 1",  # noqa: S608
-                (conversation_id, row["went"], before),
+                f"SELECT 1 FROM {TEXTS_TABLE} WHERE conversation_id=? AND outgoing=0 AND id > ? AND at >= ? "  # noqa: S608
+                + ("AND id < ? " if first_id is not None else "AND at < ? ")
+                + "LIMIT 1",
+                (conversation_id, sent_id, _iso(datetime.fromisoformat(row["went"]) - TEXT_TIME_SLACK),
+                 first_id if first_id is not None else before),
             ).fetchone()
         return answered is None
     except Exception:
