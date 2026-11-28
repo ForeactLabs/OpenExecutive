@@ -38,3 +38,23 @@ test("texts card: sits right under How far it goes as you", () => {
   const grid = acts.slice(acts.indexOf("<ReachCard"));
   assert.ok(grid.indexOf("{texts}") > 0 && grid.indexOf("{texts}") < grid.indexOf("<CalendarSection"));
 });
+
+test("texts page: walks through setup there until Texts is ready", () => {
+  const page = readFileSync(new URL("../src/app/texts/page.tsx", import.meta.url), "utf8");
+  // One setup card, kept mounted as Texts turns on, shown wherever Texts is available.
+  assert.equal(page.split("<TextsCard setupOnly />").length - 1, 1);
+  assert.ok(page.includes("{available ? <TextsCard setupOnly /> : null}"));
+  // A failed load shows its error without hiding the walkthrough.
+  const setup = page.indexOf("<TextsCard setupOnly />");
+  assert.ok(setup > 0 && setup < page.indexOf("error && !data?.enabled ? ("));
+  // A failed look at Texts isn't "off".
+  assert.ok(page.includes("if (!ctrl.signal.aborted) setAvailable(true);"));
+  // In setup-only mode the card goes once Texts is on and paired, whether or not Chrome is open now.
+  assert.ok(card.includes("if (setupOnly && state.enabled && state.paired) return null;"));
+});
+
+test("texts in the menu: shown whenever available, so setup can be found", () => {
+  const sidebar = readFileSync(new URL("../src/components/shell/AppSidebar.tsx", import.meta.url), "utf8");
+  assert.ok(sidebar.includes(".then((t) => setOn(Boolean(t?.available)))"));
+  assert.ok(!sidebar.includes("t?.available && t.enabled"));
+});

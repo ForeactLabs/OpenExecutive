@@ -351,8 +351,9 @@ function useFoldedSections(): [NavSectionKey[], (key: NavSectionKey) => void] {
   return [folded, toggle];
 }
 
-/** Whether Texts belongs in this person's menu: on for the install and
- * turned on by them. Looked at once, then again when they flip it. */
+/** Whether Texts belongs in this person's menu: on for the company, set up
+ * or not (the Texts page walks them through setup). Looked at once, then
+ * again when they flip it. */
 function useTextsNav(): boolean {
   const [on, setOn] = useState(false);
   const [flips, setFlips] = useState(0);
@@ -364,7 +365,7 @@ function useTextsNav(): boolean {
   useEffect(() => {
     const ctl = new AbortController();
     getTexts(ctl.signal)
-      .then((t) => setOn(Boolean(t?.available && t.enabled)))
+      .then((t) => setOn(Boolean(t?.available)))
       .catch(() => {});
     return () => ctl.abort();
   }, [flips]);
