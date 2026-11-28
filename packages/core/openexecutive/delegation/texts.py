@@ -70,6 +70,9 @@ FAILED = "failed"
 # Handed to the browser, which never said how it went: it may or may not have gone.
 UNSURE = "unsure"
 SETTLED = frozenset({SENT, FAILED, UNSURE})
+# A send's ``echoed`` when its words came back marked as theirs ("You: …"),
+# not only as the same words (1): enough to say an unsure send went.
+ECHOED_AS_YOURS = 2
 
 _db = db.company_path
 
@@ -200,7 +203,7 @@ def tidy(*, db_path: Path | None = None) -> None:
         # One the browser wasn't sure of whose words came back went after all
         # (``record``), including one settled before that was looked at.
         went = [int(r["id"]) for r in conn.execute(
-            f"SELECT id FROM {TEXT_SENDS_TABLE} WHERE status=? AND echoed=1", (UNSURE,),
+            f"SELECT id FROM {TEXT_SENDS_TABLE} WHERE status=? AND echoed=?", (UNSURE, ECHOED_AS_YOURS),
         ).fetchall()]
         for send_id in went:
             conn.execute(f"UPDATE {TEXT_SENDS_TABLE} SET status=?, error='' WHERE id=?", (SENT, send_id))
@@ -338,15 +341,23 @@ def record(person_id: int, items: list[Incoming], *, db_path: Path | None = None
             outgoing = echo is not None
             ref, sender, words = _clip(item.ref, 300), _clip(item.sender, 200), _clip(item.text, MAX_TEXT)
             if echo is not None:
-                conn.execute(f"UPDATE {TEXT_SENDS_TABLE} SET echoed=1 WHERE id=?", (echo,))
-                # Its words came back as theirs: a send the browser wasn't
-                # sure of went after all.
-                cur = conn.execute(
-                    f"UPDATE {TEXT_SENDS_TABLE} SET status=?, error='' WHERE id=? AND status=?",
-                    (SENT, echo, UNSURE),
+                # Marked as theirs ("You: …", which the browser flags) too, it
+                # is ``ECHOED_AS_YOURS``: the same words from the other side
+                # alone are not (nor a first look's rows, flagged without it).
+                as_yours = bool(item.outgoing) and _LEADING_WHO.match(item.text or "") is not None
+                conn.execute(
+                    f"UPDATE {TEXT_SENDS_TABLE} SET echoed=? WHERE id=?",
+                    (ECHOED_AS_YOURS if as_yours else 1, echo),
                 )
-                if cur.rowcount == 1:
-                    went.append(echo)
+                if as_yours:
+                    # Its words came back as theirs: a send the browser
+                    # wasn't sure of went after all.
+                    cur = conn.execute(
+                        f"UPDATE {TEXT_SENDS_TABLE} SET status=?, error='' WHERE id=? AND status=?",
+                        (SENT, echo, UNSURE),
+                    )
+                    if cur.rowcount == 1:
+                        went.append(echo)
                 # A send to a new number now has its conversation.
                 conn.execute(
                     f"UPDATE {TEXT_SENDS_TABLE} SET conversation_id=? WHERE id=? AND conversation_id IS NULL",
@@ -791,7 +802,7 @@ def settle_send(
             return _send(row)
         # Its words already came back as theirs (``record``): it went, even
         # if the browser couldn't see it go.
-        if status == UNSURE and row["echoed"]:
+        if status == UNSURE and row["echoed"] == ECHOED_AS_YOURS:
             status, error = SENT, ""
         # Claimed once: a second answer for the same send (two tabs, a retry)
         # changes nothing and tells no one again.

@@ -1385,7 +1385,7 @@ def test_a_send_the_browser_wasnt_sure_of_went_once_its_words_come_back(ids: dic
     assert thread.status == tx.UNSURE and "don't know whether" in thread.note
     assert [a.status for a in list_alerts() if a.source == tx.TEXTS_SOURCE] == ["unread"]
     # Its words come back as theirs: it went.
-    assert tx.record(owner, [_item("b", text="You: Not sure yet")]) == []
+    assert tx.record(owner, [_item("b", text="You: Not sure yet", outgoing=True)]) == []
     assert tx.get_send(send.id).status == tx.SENT
     (thread,) = tx.threads(owner)
     assert thread.status == tx.SENT
@@ -1400,7 +1400,7 @@ def test_a_send_whose_words_came_back_first_is_sent_even_if_the_browser_isnt_sur
     (conv,) = tx.conversations(owner)
     send = tx.queue_send(owner, "Sounds good", conversation_id=conv.id)
     tx.take_send(owner)
-    tx.record(owner, [_item("b", text="You: Sounds good")])
+    tx.record(owner, [_item("b", text="You: Sounds good", outgoing=True)])
     assert tx.settle_send(owner, send.id, status=tx.UNSURE).status == tx.SENT
     # One that never came back stays unsure.
     other = tx.queue_send(owner, "See you", conversation_id=conv.id)
@@ -1449,6 +1449,24 @@ def test_an_unsure_send_that_came_back_before_this_is_sent_at_start(ids: dict[st
     tx.settle_send(owner, send.id, status=tx.UNSURE)
     # Kept by an earlier version: unsure, though its words came back.
     with tx._connect() as conn:
-        conn.execute(f"UPDATE {tx.TEXT_SENDS_TABLE} SET echoed=1 WHERE id=?", (send.id,))
+        conn.execute(f"UPDATE {tx.TEXT_SENDS_TABLE} SET echoed=? WHERE id=?", (tx.ECHOED_AS_YOURS, send.id))
     tx.tidy()
     assert tx.get_send(send.id).status == tx.SENT
+
+
+def test_the_same_words_from_the_other_side_never_say_an_unsure_send_went(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("a", text="Lunch at 1?")])
+    (conv,) = tx.conversations(owner)
+    send = tx.queue_send(owner, "Ok", conversation_id=conv.id)
+    tx.take_send(owner)
+    tx.settle_send(owner, send.id, status=tx.UNSURE)
+    # Dana texts "ok" on her own: not marked as theirs.
+    tx.record(owner, [_item("b", text="ok")])
+    assert tx.get_send(send.id).status == tx.UNSURE
+    # Nor the same words flagged only because they were already there.
+    tx.record(owner, [_item("c", text="Ok", outgoing=True, earlier=True)])
+    assert tx.get_send(send.id).status == tx.UNSURE
+    tx.tidy()
+    assert tx.get_send(send.id).status == tx.UNSURE
