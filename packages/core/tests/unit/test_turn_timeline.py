@@ -528,3 +528,29 @@ def test_looks_in_a_row_on_one_site_stay_one_step() -> None:
         tl.observe({"type": "step_site", "site": "papajohns.com"})
     steps = tl.finish()["steps"]
     assert [(s["label"], s.get("site")) for s in steps] == [("Looked at papajohns.com", "papajohns.com")]
+
+
+def test_two_navigations_to_different_sites_are_two_steps() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Opening the page…", "tool": "browser_navigate"})
+    tl.observe({"type": "step_site", "site": "papajohns.com"})
+    tl.observe({"type": "activity", "label": "Opening the page…", "tool": "browser_navigate"})
+    tl.observe({"type": "step_site", "site": "dominos.com"})
+    steps = tl.finish()["steps"]
+    assert [(s["label"], s.get("site")) for s in steps] == [
+        ("Opened papajohns.com", "papajohns.com"),
+        ("Opened dominos.com", "dominos.com"),
+    ]
+
+
+def test_looks_in_a_row_across_a_page_move_are_two_steps() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Looking at the page…", "tool": "browser_look"})
+    tl.observe({"type": "step_site", "site": "a.com"})
+    tl.observe({"type": "activity", "label": "Looking at the page…", "tool": "browser_look"})
+    tl.observe({"type": "step_site", "site": "login.b-idp.com"})
+    steps = tl.finish()["steps"]
+    assert [(s["label"], s.get("site")) for s in steps] == [
+        ("Looked at a.com", "a.com"),
+        ("Looked at login.b-idp.com", "login.b-idp.com"),
+    ]

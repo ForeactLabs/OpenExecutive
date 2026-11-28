@@ -245,6 +245,9 @@ class Step:
     stopped: bool = False
     # The website it was on (``step_icons.site_of``), for the site's icon.
     site: str = ""
+    # A browser line's own words before it named its site ("Looking at the
+    # page"), so the next round on that page is the same step.
+    plain: str = ""
 
     @property
     def tried(self) -> bool:
@@ -367,9 +370,13 @@ class TurnTimeline:
         # The line names the site only once the browser says this step ran
         # there (``_step_site``), never from the page an earlier step was on.
         site = self._page_site(tool, item)
-        # A step whose line now names its site still takes the same round
-        # again ("Looking at the page" after "Looking at papajohns.com").
-        if last is not None and not last.named and last.label in (label, _on_site(label, last.site)):
+        # A step whose line now names its site still takes the same round on
+        # that page again ("Looking at the page" after "Looking at
+        # papajohns.com"); a round that opens an address never merges into it.
+        again = last is not None and (
+            last.label == label or (bool(last.plain) and last.plain == label and not step_icons.opens_page(tool))
+        )
+        if last is not None and not last.named and again:
             for kind, n in reads.items():
                 last.reads[kind] = last.reads.get(kind, 0) + n
             return bool(reads)
@@ -406,9 +413,26 @@ class TurnTimeline:
         last = self.steps[-1] if self.steps else None
         if last is None or not step_icons.on_page(last.tool):
             return False
+        if last.plain and last.site and last.site != site:
+            # A merged round ran on another page (it moved on its own): it
+            # is a step of its own, named for where it ran.
+            self._add_step(
+                Step(
+                    label=_on_site(last.plain, site),
+                    kind=last.kind,
+                    at=self._now(),
+                    confirms=last.confirms,
+                    tool=last.tool,
+                    site=site,
+                    plain=last.plain,
+                )
+            )
+            return True
         label = _on_site(last.label, site)
         if last.site == site and last.label == label:
             return False
+        if label != last.label:
+            last.plain = last.label
         last.site = site
         last.label = label
         return True
