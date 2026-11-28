@@ -1492,3 +1492,20 @@ def test_an_unsure_send_to_a_new_number_went_once_it_comes_back_there(ids: dict[
     (thread,) = tx.threads(owner)
     assert thread.status == tx.SENT
     assert [(t.text, t.outgoing) for t in thread.texts] == [("Hi there", True)]
+
+
+def test_a_send_whose_words_came_back_is_sent_when_chrome_never_answers(ids: dict[str, int]) -> None:
+    from openexecutive.alerts.store import list_alerts
+
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("a", text="Lunch?")])
+    (conv,) = tx.conversations(owner)
+    send = tx.queue_send(owner, "Sounds good", conversation_id=conv.id)
+    tx.tell_later(send.id, tx.TELL_ON_CARD)
+    tx.take_send(owner)
+    tx.record(owner, [_item("b", text="You: Sounds good", outgoing=True)])
+    _age(send.id, 3)
+    tx.expire_all()
+    assert tx.get_send(send.id).status == tx.SENT
+    assert [a for a in list_alerts() if a.source == tx.TEXTS_SOURCE] == []

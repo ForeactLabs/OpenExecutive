@@ -713,9 +713,11 @@ def _expire(person_id: int, db_path: Path | None) -> None:
                 (person_id, waiting, _iso(_now() - within)),
             ).fetchall()
             for r in late:
+                # One whose words already came back as theirs went.
                 cur = conn.execute(
-                    f"UPDATE {TEXT_SENDS_TABLE} SET status=?, error=?, done_at=? WHERE id=? AND status=?",
-                    (now_status, error, _iso(_now()), r["id"], waiting),
+                    f"UPDATE {TEXT_SENDS_TABLE} SET status=CASE WHEN echoed=? THEN ? ELSE ? END, "
+                    "error=CASE WHEN echoed=? THEN '' ELSE ? END, done_at=? WHERE id=? AND status=?",
+                    (ECHOED_AS_YOURS, SENT, now_status, ECHOED_AS_YOURS, error, _iso(_now()), r["id"], waiting),
                 )
                 if cur.rowcount == 1:
                     row = conn.execute(f"SELECT * FROM {TEXT_SENDS_TABLE} WHERE id=?", (r["id"],)).fetchone()
