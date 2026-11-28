@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import logging
 import re
 import time
@@ -234,12 +235,14 @@ async def favicon(site: str, request: Request) -> Response:
     body, kind, _ = cached
     if not body:
         raise HTTPException(status_code=404, detail="No icon")
-    return Response(
-        content=body,
-        media_type=kind,
-        headers={
-            "Cache-Control": "private, max-age=86400",
-            "X-Content-Type-Options": "nosniff",
-            "Content-Security-Policy": "default-src 'none'",
-        },
-    )
+    headers = {
+        "Cache-Control": "private, max-age=86400",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'none'",
+        # The UI's proxy asks the browser to check again each time: an
+        # unchanged icon then comes back as a 304 with no body.
+        "ETag": f'"{hashlib.sha256(body).hexdigest()[:32]}"',
+    }
+    if request.headers.get("if-none-match") == headers["ETag"]:
+        return Response(status_code=304, headers=headers)
+    return Response(content=body, media_type=kind, headers=headers)

@@ -196,3 +196,10 @@ def test_links_resolve_on_the_page_served_and_its_base() -> None:
     assert favicon_route.icon_links(page, "https://www.shop.com/en-us/") == ["https://www.shop.com/en-us/img/fav-32.png"]
     page = '<head><base href="https://cdn.shop.com/s/"><link rel="icon" href="fav.png"></head>'
     assert favicon_route.icon_links(page, "https://shop.com/") == ["https://cdn.shop.com/s/fav.png"]
+
+
+def test_an_unchanged_icon_comes_back_as_not_modified(monkeypatch: pytest.MonkeyPatch) -> None:
+    _serve(monkeypatch, {"https://papajohns.com/favicon.ico": PNG})
+    first = _client().get("/favicon/papajohns.com")
+    again = _client().get("/favicon/papajohns.com", headers={"If-None-Match": first.headers["etag"]})
+    assert again.status_code == 304 and again.content == b""

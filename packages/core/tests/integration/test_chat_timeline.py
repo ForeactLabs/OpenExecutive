@@ -169,3 +169,23 @@ def test_a_step_cut_off_by_a_disconnect_is_saved_as_stopped(
     steps = json.loads(row[0])["steps"]
     assert steps[-1]["label"] == "Sending the update"
     assert steps[-1]["state"] == "stopped"
+
+
+def test_the_page_a_browser_step_ran_on_reaches_the_timeline_only(
+    temp_db: Path, patched_deps: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub(
+        monkeypatch,
+        [
+            {"type": "activity", "label": "Opening a tab…", "tool": "browser_open_tab"},
+            # What browser/tools posts once the step ran.
+            {"type": "step_site", "site": "papajohns.com"},
+            "Here are the specialty pizzas.",
+        ],
+    )
+    resp = _client().post("/chat", json={"message": "open papa johns"})
+    assert resp.status_code == 200
+    events = _events(resp.text)
+    assert all(e["type"] != "step_site" for e in events)
+    final = next(e for e in events if e["type"] == "timeline" and e["done"])
+    assert (final["steps"][0]["label"], final["steps"][0]["site"]) == ("Opened papajohns.com", "papajohns.com")
