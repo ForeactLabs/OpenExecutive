@@ -15,10 +15,10 @@ someone else's, never the person's, so the note's ``trust`` is ``medium``
 and ``counterpart`` names who said it. The words are data to the pass: it
 never follows them.
 
-Same switches as every note: the person's "Keep track of what happens",
-"Don't remember this" for the conversation, and the person's daily passes
-(``history_chat.MAX_PASSES_PER_DAY``). ``note_heard`` is the one entry point;
-it never raises and logs codes, never text.
+Same switches as every note: the person's "Keep track of what happens" and
+"Don't remember this" for the conversation. It runs only for the answer to an
+errand the person asked for. ``note_heard`` is the one entry point; it never
+raises and logs codes, never text.
 """
 from __future__ import annotations
 
@@ -110,10 +110,9 @@ async def note_heard(
 ) -> list[int]:
     """Keep what ``who`` said back to an errand run for ``person_id`` as one
     private note of theirs, when their switch is on, the conversation isn't
-    one they asked not to remember, and today's passes aren't spent. Returns
+    one they asked not to remember. Returns
     the new note ids. Never raises."""
     from openexecutive.memory import history
-    from openexecutive.memory.history_chat import MAX_PASSES_PER_DAY
 
     try:
         if not (words or "").strip() or not conversation_ref:
@@ -127,9 +126,6 @@ async def note_heard(
         if history.is_excluded(person_id, history.conversation_key(channel, conversation_ref)):
             return []
         when = said_at or datetime.now(UTC)
-        if not history.take_pass(person_id, when.date().isoformat(), MAX_PASSES_PER_DAY):
-            logger.info("history: reply note for person %s skipped, daily passes spent", person_id)
-            return []
         notes = await take_heard_note(words, who=who, channel=channel, said_on=when, model=model)
         if not notes:
             return []

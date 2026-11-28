@@ -3169,7 +3169,8 @@ memory:
       texts_watch._note_answer; a fork's phone calls can call it too). It is
       someone else's words, so trust medium and the counterpart names them;
       check_note runs on their words, their name and a few retelling words
-      (history_heard._RETOLD). Same switch, exclusions and daily passes.
+      (history_heard._RETOLD). Same switch and exclusions; no daily
+      pass count (it runs only for an answer to an errand they asked for).
     - Chat and heard notes pass skip_repeats to history.add_notes: one with
       the same quote, or the same kind and 60% of the same summary words,
       as a note from the last day (and the same due date) is not stored.
