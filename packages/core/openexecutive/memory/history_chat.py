@@ -179,7 +179,7 @@ def _two_ways(words: list[str]) -> bool:
     return False
 
 
-_THE_ASSISTANT = frozenset({"the", "their", "your", "his", "her", "my"})
+_THE_ASSISTANT = frozenset({"the", "your"})
 
 
 def errand_note(note: NewNote) -> bool:
@@ -194,8 +194,8 @@ def errand_note(note: NewNote) -> bool:
 
     summary = _normalize_for_quote_match(note.summary)
     words = [w.strip(".,;:!?\"'()") for w in summary.split()]
-    # "the assistant", "their assistant": the one they asked, never a job
-    # ("hire an executive assistant").
+    # "the assistant": the one they asked, never a job or their own staff
+    # ("hire an executive assistant", "their assistant Maria").
     for i, w in enumerate(words[1:], 1):
         if w in ("assistant", "assistant's") and words[i - 1] in _THE_ASSISTANT:
             return True
