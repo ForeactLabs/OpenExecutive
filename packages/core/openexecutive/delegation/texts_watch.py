@@ -187,10 +187,13 @@ async def look(person_id: int) -> bool:
 
 # Answer notes running in the background, held so they aren't collected.
 _NOTING: set[asyncio.Task[None]] = set()
-# The first text of each answer already noted: a turn that failed puts its
-# texts back, and the next look must not note them again.
+# Texts already read for an answer: a turn that failed puts its texts back,
+# and the next look must not read them again (a newer text with them is read).
 _NOTED: dict[int, None] = {}
 _NOTED_KEEP = 500
+# One answer pass at a time per conversation: "Yes" and "home at 6" seconds
+# apart are two looks, and the second must see the note the first kept.
+_NOTING_IN: dict[str, tuple[asyncio.Lock, list[int]]] = {}
 
 
 def _note_later(person_id: int, conv: Any, new: list[Any]) -> None:
@@ -208,31 +211,42 @@ async def _note_answer(person_id: int, conv: Any, new: list[Any]) -> None:
     """When these texts answer one the person had the Executive send from a
     chat ("text JR and ask if he's home for dinner"), keep what they said as
     a note of theirs (``memory.history_heard``). Never raises."""
-    from openexecutive.delegation import texts
-
     try:
         theirs = [t for t in new if not t.outgoing]
         if not theirs or conv.is_group:
             return
-        first = min(t.at for t in theirs)
-        first_id = min(t.id for t in theirs)
-        if first_id in _NOTED:
+        if all(t.id in _NOTED for t in theirs):
             return
-        if not await asyncio.to_thread(texts.errand_sent, conv.id, first, first_id=first_id):
-            return
-        _NOTED[first_id] = None
-        while len(_NOTED) > _NOTED_KEEP:
-            del _NOTED[next(iter(_NOTED))]
-        from datetime import datetime
+        lock, users = _NOTING_IN.setdefault(conv.id, (asyncio.Lock(), [0]))
+        users[0] += 1
+        try:
+            async with lock:
+                await _note_answer_now(person_id, conv, theirs)
+        finally:
+            users[0] -= 1
+            if not users[0]:
+                _NOTING_IN.pop(conv.id, None)
+    except Exception:
+        logger.warning("texts_watch: couldn't note the answer in conversation %s", conv.id, exc_info=True)
 
-        from openexecutive.memory.history_heard import note_heard
 
+async def _note_answer_now(person_id: int, conv: Any, theirs: list[Any]) -> None:
+    from datetime import datetime
+
+    from openexecutive.delegation import texts
+    from openexecutive.memory.history_heard import note_heard
+
+    first_id = min(t.id for t in theirs)
+    if await asyncio.to_thread(texts.errand_sent, conv.id, min(t.at for t in theirs), first_id=first_id):
         await note_heard(
             person_id, words="\n".join(t.text for t in theirs), who=conv.who, channel="texts",
             conversation_ref=conv.id, said_at=datetime.fromisoformat(max(t.at for t in theirs)),
         )
-    except Exception:
-        logger.warning("texts_watch: couldn't note the answer in conversation %s", conv.id, exc_info=True)
+    # Read once, whatever came of it: after the note is stored, never before.
+    for t in theirs:
+        _NOTED[t.id] = None
+    while len(_NOTED) > _NOTED_KEEP:
+        del _NOTED[next(iter(_NOTED))]
 
 
 def last_line(said: str) -> str:

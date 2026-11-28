@@ -384,6 +384,7 @@ def test_a_reply_to_an_errand_text_is_noted(roster: SimpleNamespace, monkeypatch
     ]
     asyncio.run(texts_watch._note_answer(roster.principal, conv, new))
     assert seen == []
+    texts_watch._NOTED.clear()
     _send(roster.principal, "conv-1", asked_in="web-1", status=tx.SENT, at=WHEN - timedelta(minutes=30))
     asyncio.run(texts_watch._note_answer(roster.principal, conv, new))
     [call] = seen
@@ -392,11 +393,36 @@ def test_a_reply_to_an_errand_text_is_noted(roster: SimpleNamespace, monkeypatch
     # A turn that failed puts the texts back: the next look doesn't note them again.
     asyncio.run(texts_watch._note_answer(roster.principal, conv, new))
     assert len(seen) == 1
+    # "Yes" and "home at 6" seconds apart: two looks at once, one pass sees
+    # the other's note, so only one is kept.
+    monkeypatch.setattr(texts_watch, "_NOTED", {})
+    seen.clear()
+    kept: list[str] = []
+
+    async def keeps(person_id: int, **kw: Any) -> list[int]:
+        await asyncio.sleep(0.01)
+        _kept_answer(person_id, "conv-1", WHEN + timedelta(minutes=2))
+        kept.append(kw["words"])
+        return [1]
+
+    monkeypatch.setattr(hh, "note_heard", keeps)
+    more = [tx.Text(id=3, conversation_id="conv-1", sender="JR", text="home at 6", outgoing=False,
+                    at=tx._iso(WHEN + timedelta(minutes=2)))]
+
+    async def both() -> None:
+        await asyncio.gather(
+            texts_watch._note_answer(roster.principal, conv, new[:1]),
+            texts_watch._note_answer(roster.principal, conv, more),
+        )
+
+    asyncio.run(both())
+    assert kept == ["Yes!"]
     # A group's texts are never someone's answer.
     group = tx.Conversation(id="conv-1", person_id=roster.principal, key="k", title="Family", number="",
                             is_group=True, updated_at="")
+    texts_watch._NOTED.clear()
     asyncio.run(texts_watch._note_answer(roster.principal, group, new))
-    assert len(seen) == 1
+    assert kept == ["Yes!"]
 
 
 # --------------------------------------------------------------------------- #
