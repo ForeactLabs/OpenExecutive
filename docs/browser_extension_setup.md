@@ -57,6 +57,20 @@ Your site must be on `https://`, or on `localhost` while you develop. A plain
 
 Settings → Browser shows whether it's connected and has a few things to try.
 
+### Connect it for everyone with Chrome policy
+
+Whoever manages the browsers can connect your site without anyone pressing
+**Connect**, for example on company laptops or in a browser your server runs.
+Set the extension's `origins` policy (its schema is `managed_schema.json`) to
+your site's address. On Linux, a file in `/etc/opt/chrome/policies/managed/`:
+
+```json
+{ "3rdparty": { "extensions": { "<extension id>": { "origins": ["https://exec.example.com"] } } } }
+```
+
+The popup lists those sites as "Set up for you", with no Disconnect: only the
+policy can take them off. The same `https://` (or `localhost`) rule applies.
+
 ## Settings
 
 | Variable | Default | What it does |

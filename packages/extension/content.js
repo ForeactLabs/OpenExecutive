@@ -18,14 +18,8 @@
   const API = "/api/backend/browser";
   let relaying = false;
 
-  async function connectedOrigins() {
-    try {
-      const { origins } = await chrome.storage.local.get("origins");
-      return Array.isArray(origins) ? origins : [];
-    } catch {
-      return [];
-    }
-  }
+  // The popup's sites and any set by the browser's administrator.
+  const connectedOrigins = () => OE.connectedOrigins();
 
   const pause = (ms) => new Promise((ok) => setTimeout(ok, ms));
 

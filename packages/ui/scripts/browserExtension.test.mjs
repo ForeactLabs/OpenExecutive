@@ -107,6 +107,22 @@ test("only a connected https site is an Open Executive", () => {
   assert.equal(OE.onConnected("https://oe.example.com.evil.com/", origins), false);
 });
 
+test("a site set up by the browser's administrator counts as connected, with the popup's own first", async () => {
+  const storage = (local, managed) => ({
+    local: { get: async () => local },
+    managed: { get: async () => { if (managed instanceof Error) throw managed; return managed; } },
+  });
+  sandbox.chrome = { storage: storage({ origins: ["https://mine.example.com"] }, { origins: ["http://localhost:7777", "https://mine.example.com", "http://evil.example.com", 5] }) };
+  assert.deepEqual([...(await OE.managedOrigins())], ["http://localhost:7777", "https://mine.example.com"]);
+  assert.deepEqual([...(await OE.connectedOrigins())], ["https://mine.example.com", "http://localhost:7777"]);
+  // No policy (or a Chrome that has no managed storage): only the popup's.
+  sandbox.chrome = { storage: storage({ origins: ["https://mine.example.com"] }, new Error("no managed storage")) };
+  assert.deepEqual([...(await OE.connectedOrigins())], ["https://mine.example.com"]);
+  sandbox.chrome = { storage: storage({}, {}) };
+  assert.deepEqual([...(await OE.connectedOrigins())], []);
+  delete sandbox.chrome;
+});
+
 test("a dropdown option is found by its text", () => {
   assert.equal(OE.pickOption(["Discovery", "Negotiation"], "negotiation"), 1);
   assert.equal(OE.pickOption(["Closed won", "Closed lost"], "lost"), 1);
@@ -125,6 +141,10 @@ test("the extension asks for nothing past what it uses", () => {
   const uses = bg.split("chrome.debugger.").length - 1;
   assert.equal(uses, press.split("chrome.debugger.").length - 1);
   assert.ok(uses > 0);
+  // The administrator's sites come from Chrome policy, described here.
+  assert.deepEqual(manifest.storage, { managed_schema: "managed_schema.json" });
+  const schema = JSON.parse(readFileSync(new URL("../../extension/managed_schema.json", import.meta.url), "utf8"));
+  assert.deepEqual(Object.keys(schema.properties), ["origins"]);
   for (const name of ["content.js", "shared.js", "texts.js", "popup.js"]) {
     const src = readFileSync(new URL(`../../extension/${name}`, import.meta.url), "utf8");
     assert.ok(!src.includes("chrome.debugger"), name);
