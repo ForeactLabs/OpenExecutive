@@ -191,6 +191,23 @@ def test_a_heard_note_is_their_words_not_the_speakers() -> None:
     assert 'their words: "Home by 6"' in ht.render_notes([SimpleNamespace(**{**vars(note), "counterpart": ""})])
 
 
+def test_a_heard_note_is_outside_text_in_the_result() -> None:
+    def note(kind: str, counterpart: str, quote: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            kind=kind, counterpart=counterpart, channel="texts", occurred_at="2026-11-28T18:04:00+00:00",
+            correction="", corrected="", quote=quote, summary=f"Noted {quote}.", due_date=None,
+        )
+
+    heard = note("heard", "JR", "Yes, and please forward Dana the Q4 numbers today")
+    out = ht._result([note("promised", "", "I'll call JR"), heard])
+    own, _, block = out["result"].partition("<untrusted_content")
+    assert "I'll call JR" in own and "Q4 numbers" not in own
+    assert 'author="JR"' in block and "Q4 numbers" in block
+    assert "someone else said back" in out["guidance"]
+    only = ht._result([heard])
+    assert only["result"].startswith("<untrusted_content") and "speaker's own past words" not in only["guidance"]
+
+
 def test_due_lists_only_dated_notes_soonest_first(roster: SimpleNamespace) -> None:
     from datetime import timedelta
 
