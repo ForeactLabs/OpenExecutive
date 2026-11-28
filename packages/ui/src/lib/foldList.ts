@@ -55,7 +55,7 @@ export function dayOf(iso: string, now: Date = new Date()): DayKey {
   const midnight = (back: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - back).getTime();
   if (t >= midnight(0)) return "today";
   if (t >= midnight(1)) return "yesterday";
-  if (t >= midnight(6)) return "week";
+  if (t >= midnight(7)) return "week";
   return "earlier";
 }
 

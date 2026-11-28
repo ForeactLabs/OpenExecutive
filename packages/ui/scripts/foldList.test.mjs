@@ -12,7 +12,8 @@ test("days fall by the viewer's calendar", () => {
   assert.equal(dayOf(at(0, 0), NOW), "today");
   assert.equal(dayOf(at(1, 23), NOW), "yesterday");
   assert.equal(dayOf(at(6), NOW), "week");
-  assert.equal(dayOf(at(7), NOW), "earlier");
+  assert.equal(dayOf(at(7), NOW), "week");
+  assert.equal(dayOf(at(8), NOW), "earlier");
   assert.equal(dayOf("", NOW), "earlier");
   assert.equal(dayOf("not a date", NOW), "earlier");
 });
@@ -51,8 +52,8 @@ test("a day the clocks change on is still one calendar day", () => {
   // US clocks go back on Nov 1 2026; 00:30 that night is still Yesterday on Nov 2.
   const now = new Date(2026, 10, 2, 8);
   assert.equal(dayOf(new Date(2026, 10, 1, 0, 30).toISOString(), now), "yesterday");
-  assert.equal(dayOf(new Date(2026, 9, 27, 0, 30).toISOString(), now), "week");
-  assert.equal(dayOf(new Date(2026, 9, 26, 23, 30).toISOString(), now), "earlier");
+  assert.equal(dayOf(new Date(2026, 9, 26, 0, 30).toISOString(), now), "week");
+  assert.equal(dayOf(new Date(2026, 9, 25, 23, 30).toISOString(), now), "earlier");
 });
 
 test("a group the person folds stays folded, even while searching", () => {
