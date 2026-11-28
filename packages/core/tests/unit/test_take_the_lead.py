@@ -2159,6 +2159,9 @@ def test_done_for_you_never_shows_words_meant_for_the_executive() -> None:
     told = json.dumps({"message": "Nothing was raised. Ask them in your reply instead."})
     assert ttl.outcome_of("create_alert", {}, told) == "Nothing was raised."
     assert ttl.outcome_of("create_alert", {}, json.dumps({"message": "Say it is on its way."})) == ""
+    # Words that only describe what happened stay.
+    tracked = json.dumps({"message": "Dana's reply is now tracked. Saved the note \"never discount\"."})
+    assert ttl.outcome_of("create_open_loop_x", {}, tracked) == "Dana's reply is now tracked. Saved the note \"never discount\"."
     both = json.dumps({"done": "Called Dana", "message": "Calling Dana now. Say the call is under way."})
     assert ttl.outcome_of("place_call", {}, both) == "Called Dana"
 

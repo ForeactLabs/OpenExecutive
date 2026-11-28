@@ -4158,7 +4158,8 @@ def outcome_of(tool: str, tool_input: dict[str, Any], result: str, *, mcp: bool 
 # next ("Say the call is under way", "Do not retry"): it is for the model,
 # never a line on Done for you.
 _TO_THE_MODEL = re.compile(
-    r"(?i)\b(?:say|tell|mention|reply|retry|do not|don't|never|carry on|you'll be told|you will be told)\b",
+    r"(?i)^\s*(?:say|tell|ask|mention|retry|do not|don't|never|carry on)\b"
+    r"|\b(?:you'll be told|you will be told|in your reply|once your reply)\b",
 )
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
