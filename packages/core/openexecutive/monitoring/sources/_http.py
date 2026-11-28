@@ -181,7 +181,20 @@ async def fetch_bounded(
     user_agent: str | None = None,
     hop_ok: Callable[[str], bool] | None = None,
 ) -> bytes:
-    """GET ``url`` with a body-size ceiling and tight redirect cap.
+    """GET ``url`` within ``max_bytes``: the body of :func:`fetch_bounded_at`."""
+    body, _final = await fetch_bounded_at(url, max_bytes, user_agent=user_agent, hop_ok=hop_ok)
+    return body
+
+
+async def fetch_bounded_at(
+    url: str,
+    max_bytes: int,
+    *,
+    user_agent: str | None = None,
+    hop_ok: Callable[[str], bool] | None = None,
+) -> tuple[bytes, str]:
+    """GET ``url`` with a body-size ceiling and tight redirect cap: the
+    body, and the address it came from after any redirects.
 
     Streams the response and stops once the cumulative read exceeds
     ``max_bytes`` so a malicious feed cannot exhaust memory. Raises
@@ -229,7 +242,7 @@ async def fetch_bounded(
                 if i == len(ips) - 1:
                     raise
         if location is None:
-            return body
+            return body, current
         try:
             current = str(target.join(location))
         except httpx.InvalidURL as exc:
@@ -245,6 +258,7 @@ __all__ = [
     "MAX_REDIRECTS",
     "USER_AGENT",
     "fetch_bounded",
+    "fetch_bounded_at",
     "strip_url_query",
     "validate_target_url",
 ]

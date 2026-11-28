@@ -19,6 +19,7 @@ queue a new site gets no icon for now.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import re
 import time
@@ -28,7 +29,7 @@ from urllib.parse import urljoin, urlsplit
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from openexecutive.api.caller import identity_key
-from openexecutive.monitoring.sources._http import fetch_bounded
+from openexecutive.monitoring.sources._http import fetch_bounded, fetch_bounded_at
 from openexecutive.orchestrator.step_icons import site_of, valid_site
 
 logger = logging.getLogger(__name__)
@@ -79,8 +80,13 @@ class _IconLinks(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self.found: list[tuple[int, str]] = []
+        # The page's first <base href>, which its relative links resolve on.
+        self.base = ""
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "base" and not self.base:
+            self.base = next((v or "" for k, v in attrs if k.lower() == "href"), "").strip()
+            return
         if tag != "link":
             return
         values = {k.lower(): (v or "") for k, v in attrs}
@@ -131,6 +137,9 @@ def icon_links(page: str, base: str) -> list[str]:
         parser.feed(head if end < 0 else head[:end])
     except Exception:
         return []
+    if parser.base:
+        with contextlib.suppress(ValueError):
+            base = urljoin(base, parser.base)
     found = (_icon_address(base, href) for _rank, href in sorted(parser.found, key=lambda x: x[0]))
     return [url for url in found if url][:3]
 
@@ -151,10 +160,12 @@ async def find_icon(site: str) -> tuple[bytes, str] | None:
         if found:
             return found
         try:
-            page = await fetch_bounded(f"https://{host}/", _PAGE_MAX_BYTES, hop_ok=allowed)
+            page, at = await fetch_bounded_at(f"https://{host}/", _PAGE_MAX_BYTES, hop_ok=allowed)
         except Exception:
             continue
-        for link in icon_links(page.decode("utf-8", "replace"), f"https://{host}/"):
+        # Links resolve against the page that was served (after any
+        # redirect), or its <base href>.
+        for link in icon_links(page.decode("utf-8", "replace"), at):
             found = await _image(link)
             if found:
                 return found

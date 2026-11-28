@@ -37,7 +37,11 @@ def _serve(monkeypatch: pytest.MonkeyPatch, pages: dict[str, bytes]) -> list[str
             raise RuntimeError("404")
         return pages[url]
 
+    async def fetch_at(url: str, max_bytes: int, **kw: object) -> tuple[bytes, str]:
+        return await fetch(url, max_bytes, **kw), url
+
     monkeypatch.setattr(favicon_route, "fetch_bounded", fetch)
+    monkeypatch.setattr(favicon_route, "fetch_bounded_at", fetch_at)
     return asked
 
 
@@ -132,7 +136,11 @@ def test_every_hop_must_be_https_on_a_public_name(monkeypatch: pytest.MonkeyPatc
         seen.append(kw.get("hop_ok"))
         raise RuntimeError("404")
 
+    async def fetch_at(url: str, max_bytes: int, **kw: object) -> tuple[bytes, str]:
+        return await fetch(url, max_bytes, **kw), url
+
     monkeypatch.setattr(favicon_route, "fetch_bounded", fetch)
+    monkeypatch.setattr(favicon_route, "fetch_bounded_at", fetch_at)
     _client().get("/favicon/example.com")
     assert seen and all(hop is favicon_route.allowed for hop in seen)
     assert favicon_route.allowed("https://cdn.example.com/i.png")
@@ -154,3 +162,10 @@ def test_each_person_has_their_own_cache(monkeypatch: pytest.MonkeyPatch) -> Non
     _client().get("/favicon/example.com")
     _client().get("/favicon/example.com")
     assert len(asked) == 2
+
+
+def test_links_resolve_on_the_page_served_and_its_base() -> None:
+    page = '<head><link rel="icon" href="img/fav-32.png"></head>'
+    assert favicon_route.icon_links(page, "https://www.shop.com/en-us/") == ["https://www.shop.com/en-us/img/fav-32.png"]
+    page = '<head><base href="https://cdn.shop.com/s/"><link rel="icon" href="fav.png"></head>'
+    assert favicon_route.icon_links(page, "https://shop.com/") == ["https://cdn.shop.com/s/fav.png"]
