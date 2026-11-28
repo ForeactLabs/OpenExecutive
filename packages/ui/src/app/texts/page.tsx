@@ -162,9 +162,12 @@ export default function TextsPage() {
     const ctrl = new AbortController();
     getTexts(ctrl.signal)
       .then((t) => setAvailable(Boolean(t?.available)))
-      .catch(() => setAvailable((now) => now ?? false));
+      // A failed look isn't "off": the setup card says what went wrong itself.
+      .catch(() => {
+        if (!ctrl.signal.aborted) setAvailable(true);
+      });
     return () => ctrl.abort();
-  }, []);
+  }, [flips]);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -226,41 +229,40 @@ export default function TextsPage() {
           <SettingsCard>
             <p className="text-[15px] text-rose-500">{error}</p>
           </SettingsCard>
-        ) : !data?.enabled ? (
-          available ? (
-            <TextsCard setupOnly />
-          ) : (
-            <SettingsCard>
-              <p className="text-[15px] text-fg">
-                Texts aren&apos;t turned on here yet.
-              </p>
-            </SettingsCard>
-          )
+        ) : !data?.enabled && !available ? (
+          <SettingsCard>
+            <p className="text-[15px] text-fg">Texts aren&apos;t turned on here yet.</p>
+          </SettingsCard>
         ) : (
           <>
-            <TextsCard setupOnly />
-            <TextSomeone />
-            <div className="flex flex-wrap gap-2">
-              {chip("all", "All")}
-              {chip("texted", "Texted for you")}
-              {chip("read", "Read for you")}
-            </div>
-            {error ? <p className="text-sm text-rose-500">{error}</p> : null}
-            {shown.length === 0 ? (
-              <SettingsCard>
-                <p className="text-[15px] text-fg-muted">
-                  {all.length === 0
-                    ? "No texts yet. New ones show here as they come in on your phone, with what the Executive did about each."
-                    : "Nothing here for this filter."}
-                </p>
-              </SettingsCard>
-            ) : (
-              <ul className="rounded-2xl border border-line bg-surface-elevated divide-y divide-line">
-                {shown.map((t) => (
-                  <ThreadItem key={t.id} thread={t} />
-                ))}
-              </ul>
-            )}
+            {/* One card for setup, kept mounted as Texts turns on. */}
+            {available ? <TextsCard setupOnly /> : null}
+            {data?.enabled ? (
+              <>
+                <TextSomeone />
+                <div className="flex flex-wrap gap-2">
+                  {chip("all", "All")}
+                  {chip("texted", "Texted for you")}
+                  {chip("read", "Read for you")}
+                </div>
+                {error ? <p className="text-sm text-rose-500">{error}</p> : null}
+                {shown.length === 0 ? (
+                  <SettingsCard>
+                    <p className="text-[15px] text-fg-muted">
+                      {all.length === 0
+                        ? "No texts yet. New ones show here as they come in on your phone, with what the Executive did about each."
+                        : "Nothing here for this filter."}
+                    </p>
+                  </SettingsCard>
+                ) : (
+                  <ul className="rounded-2xl border border-line bg-surface-elevated divide-y divide-line">
+                    {shown.map((t) => (
+                      <ThreadItem key={t.id} thread={t} />
+                    ))}
+                  </ul>
+                )}
+              </>
+            ) : null}
           </>
         )}
       </div>
