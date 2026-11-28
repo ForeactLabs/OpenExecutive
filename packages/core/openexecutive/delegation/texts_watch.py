@@ -187,6 +187,10 @@ async def look(person_id: int) -> bool:
 
 # Answer notes running in the background, held so they aren't collected.
 _NOTING: set[asyncio.Task[None]] = set()
+# The first text of each answer already noted: a turn that failed puts its
+# texts back, and the next look must not note them again.
+_NOTED: dict[int, None] = {}
+_NOTED_KEEP = 500
 
 
 def _note_later(person_id: int, conv: Any, new: list[Any]) -> None:
@@ -211,8 +215,14 @@ async def _note_answer(person_id: int, conv: Any, new: list[Any]) -> None:
         if not theirs or conv.is_group:
             return
         first = min(t.at for t in theirs)
-        if not await asyncio.to_thread(texts.errand_sent, conv.id, first, first_id=min(t.id for t in theirs)):
+        first_id = min(t.id for t in theirs)
+        if first_id in _NOTED:
             return
+        if not await asyncio.to_thread(texts.errand_sent, conv.id, first, first_id=first_id):
+            return
+        _NOTED[first_id] = None
+        while len(_NOTED) > _NOTED_KEEP:
+            del _NOTED[next(iter(_NOTED))]
         from datetime import datetime
 
         from openexecutive.memory.history_heard import note_heard

@@ -363,6 +363,7 @@ def test_a_reply_to_an_errand_text_is_noted(roster: SimpleNamespace, monkeypatch
         return [1]
 
     monkeypatch.setattr(hh, "note_heard", fake)
+    monkeypatch.setattr(texts_watch, "_NOTED", {})
     conv = tx.Conversation(id="conv-1", person_id=roster.principal, key="k", title="JR", number="",
                            is_group=False, updated_at="")
     new = [
@@ -377,6 +378,9 @@ def test_a_reply_to_an_errand_text_is_noted(roster: SimpleNamespace, monkeypatch
     [call] = seen
     assert call["person_id"] == roster.principal and call["words"] == "Yes!\nHome by 6"
     assert call["who"] == "JR" and call["channel"] == "texts" and call["conversation_ref"] == "conv-1"
+    # A turn that failed puts the texts back: the next look doesn't note them again.
+    asyncio.run(texts_watch._note_answer(roster.principal, conv, new))
+    assert len(seen) == 1
     # A group's texts are never someone's answer.
     group = tx.Conversation(id="conv-1", person_id=roster.principal, key="k", title="Family", number="",
                             is_group=True, updated_at="")
