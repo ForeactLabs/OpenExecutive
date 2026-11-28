@@ -52,7 +52,9 @@ function Step({ done, n, title, children }: { done: boolean; n: number; title: s
   );
 }
 
-export default function TextsCard() {
+/** `setupOnly`: the Texts page's walkthrough, gone once Texts is set up
+ *  (Delegate keeps the full card, switch and all, to come back to). */
+export default function TextsCard({ setupOnly = false }: { setupOnly?: boolean } = {}) {
   const [state, setState] = useState<Texts | null>(null);
   const [browser, setBrowser] = useState<BrowserStatus | null>(null);
   const [phone, setPhone] = useState<Phone>("android");
@@ -148,10 +150,11 @@ export default function TextsCard() {
 
   const extension = Boolean(browser?.connected);
   const ready = state.enabled && extension && state.paired;
+  if (setupOnly && ready) return null;
 
   return (
     <SettingsCard
-      title={<span id="texts-title">Texts</span>}
+      title={<span id="texts-title">{setupOnly ? "Set up Texts" : "Texts"}</span>}
       description="I read your texts as they arrive and can reply or text someone new, from your own number. Your Approvals decide what goes on its own. Only you see them."
       action={<Switch checked={state.enabled} disabled={busy} onChange={(next) => void toggle(next)} labelledBy="texts-title" />}
     >

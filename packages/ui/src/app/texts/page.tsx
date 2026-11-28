@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 
+import TextsCard from "@/components/delegate/TextsCard";
 import SettingsCard from "@/components/settings/SettingsCard";
 import { PageSpinner } from "@/components/ui/Spinner";
-import { getTextThreads, type TextThread, type TextThreads } from "@/lib/api";
+import { getTexts, getTextThreads, TEXTS_CHANGED_EVENT, type TextThread, type TextThreads } from "@/lib/api";
 import { remember, STORAGE_KEYS } from "@/lib/firstRun";
 
 // Texts: the person's own texts the Executive read and sent for them,
@@ -21,7 +22,8 @@ const RECHECK_MS = 15_000;
 // The home page asks at most 2000 characters; leave room for "Text <who> (<number>): ".
 const MAX_WORDS = 1600;
 const MAX_WHO = 120;
-const SETUP_HREF = "/delegate#as-you";
+// Where Texts is set later, with the rest of what the Executive does as you.
+const SETTINGS_HREF = "/delegate#as-you";
 
 type Filter = "all" | "texted" | "read";
 
@@ -145,6 +147,24 @@ export default function TextsPage() {
   const [data, setData] = useState<TextThreads | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
+  // Whether this company has Texts at all (an admin's switch), so the page
+  // walks the person through setup only where there is something to set up.
+  const [available, setAvailable] = useState<boolean | undefined>(undefined);
+  const [flips, setFlips] = useState(0);
+
+  useEffect(() => {
+    const onFlip = () => setFlips((n) => n + 1);
+    window.addEventListener(TEXTS_CHANGED_EVENT, onFlip);
+    return () => window.removeEventListener(TEXTS_CHANGED_EVENT, onFlip);
+  }, []);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    getTexts(ctrl.signal)
+      .then((t) => setAvailable(Boolean(t?.available)))
+      .catch(() => setAvailable((now) => now ?? false));
+    return () => ctrl.abort();
+  }, []);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -166,7 +186,7 @@ export default function TextsPage() {
       ctrl.abort();
       window.clearInterval(timer);
     };
-  }, []);
+  }, [flips]);
 
   const all = data?.conversations ?? [];
   const shown = all.filter((t) =>
@@ -193,22 +213,28 @@ export default function TextsPage() {
           <h1 className="text-2xl sm:text-3xl tracking-tight font-semibold">Texts</h1>
           <p className="mt-1 text-[15px] text-fg-muted">
             Texts your Executive read and sent for you from your own number, through Google Messages in Chrome.
-            Only you see them.
+            Only you see them. Change how it works in{" "}
+            <Link href={SETTINGS_HREF} className="text-accent hover:underline">
+              Delegate → As you
+            </Link>
+            .
           </p>
         </div>
-        {data === undefined ? (
+        {data === undefined || available === undefined ? (
           <PageSpinner label="Loading your texts" />
         ) : !data?.enabled ? (
-          <SettingsCard>
-            <p className="text-[15px] text-fg">
-              {error ?? "Texts are off for you."}{" "}
-              <Link href={SETUP_HREF} className="font-medium text-accent hover:underline">
-                Set up Texts
-              </Link>
-            </p>
-          </SettingsCard>
+          available ? (
+            <TextsCard setupOnly />
+          ) : (
+            <SettingsCard>
+              <p className="text-[15px] text-fg">
+                {error ?? "Texts aren't turned on for your company yet."}
+              </p>
+            </SettingsCard>
+          )
         ) : (
           <>
+            <TextsCard setupOnly />
             <TextSomeone />
             <div className="flex flex-wrap gap-2">
               {chip("all", "All")}
