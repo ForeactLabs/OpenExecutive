@@ -1,0 +1,48 @@
+// Long lists shown like Chats: what needs you first, then groups by day or person.
+import assert from "node:assert/strict";
+import { test } from "node:test";
+
+import { dayOf, foldGroups, matches, shortWhen } from "../src/lib/foldList.ts";
+
+const NOW = new Date(2026, 10, 28, 14, 30); // Sat Nov 28, 2:30 PM local
+const at = (days, hour = 10) => new Date(2026, 10, 28 - days, hour).toISOString();
+const e = (id, who, days, extra = {}) => ({ id, who, gist: `${id} gist`, at: at(days), tone: "plain", ...extra });
+
+test("days fall by the viewer's calendar", () => {
+  assert.equal(dayOf(at(0, 0), NOW), "today");
+  assert.equal(dayOf(at(1, 23), NOW), "yesterday");
+  assert.equal(dayOf(at(6), NOW), "week");
+  assert.equal(dayOf(at(7), NOW), "earlier");
+  assert.equal(dayOf("", NOW), "earlier");
+  assert.equal(dayOf("not a date", NOW), "earlier");
+});
+
+test("what needs you comes out first; the rest group by day, newest first, empty days left out", () => {
+  const items = [e("a", "Ann", 3), e("b", "Bo", 0), e("c", "Cy", 0, { needs: true }), e("d", "Di", 20), e("f", "Ann", 0)];
+  const { needs, groups } = foldGroups(items, "day", NOW);
+  assert.deepEqual(needs.map((i) => i.id), ["c"]);
+  assert.deepEqual(groups.map((g) => g.label), ["Today", "Earlier this week", "Earlier"]);
+  assert.deepEqual(groups[0].items.map((i) => i.id).sort(), ["b", "f"]);
+});
+
+test("by person groups under the person, the one heard from last first, any case", () => {
+  const items = [e("a", "Ann", 3), e("b", "Bo", 0), e("c", "ann", 1), e("d", "x", 0, { person: "Bo" })];
+  const { groups } = foldGroups(items, "person", NOW);
+  assert.deepEqual(groups.map((g) => [g.label, g.items.map((i) => i.id)]), [["Bo", ["b", "d"]], ["ann", ["c", "a"]]]);
+});
+
+test("search finds every word anywhere, in any case", () => {
+  const item = e("a", "Curt Floener", 0, { gist: "Mom's birthday plans", tag: "Not sure it went", words: "4078644111" });
+  assert.ok(matches(item, "curt birthday"));
+  assert.ok(matches(item, "407864"));
+  assert.ok(matches(item, "  "));
+  assert.ok(!matches(item, "curt dinner"));
+});
+
+test("an item's time says the day only where its group doesn't", () => {
+  const today = at(0, 9);
+  assert.equal(shortWhen(today, { now: NOW }), shortWhen(today, { now: NOW, inDay: true }));
+  assert.equal(shortWhen(at(1), { now: NOW }), "Yesterday");
+  assert.notEqual(shortWhen(at(1), { now: NOW, inDay: true }), "Yesterday");
+  assert.equal(shortWhen("", { now: NOW }), "");
+});
