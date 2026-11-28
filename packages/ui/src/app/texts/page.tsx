@@ -52,7 +52,7 @@ function textEntry(thread: TextThread): TextEntry {
     tone: status.tone,
     tag: status.words,
     needs: groupOf(thread.status) === "look",
-    words: [thread.number, ...thread.texts.map((t) => t.text)].join(" "),
+    words: [thread.number, ...thread.texts.map((t) => t.text)].join("\n"),
     thread,
   };
 }

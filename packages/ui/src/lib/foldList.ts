@@ -20,7 +20,8 @@ export interface FoldEntry {
   tag?: string;
   // Stays open at the top, above the groups.
   needs?: boolean;
-  // More words search should find (a summary, the number, what was said).
+  // More words search should find (a summary, the number, what was said),
+  // one part per line so numbers in different parts stay apart.
   words?: string;
 }
 
@@ -64,7 +65,7 @@ export function dayOf(iso: string, now: Date = new Date()): DayKey {
 export function matches(entry: FoldEntry, query: string): boolean {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return true;
-  const hay = [entry.who, entry.person, entry.gist, entry.tag, entry.words].filter(Boolean).join(" ").toLowerCase();
+  const hay = [entry.who, entry.person, entry.gist, entry.tag, entry.words].filter(Boolean).join("\n").toLowerCase();
   // A phone number matches however it is typed: 407-864-4111, (407) 864 or 4078644111.
   // Each run of digits and phone punctuation is one number; words or letters
   // between numbers keep them apart.

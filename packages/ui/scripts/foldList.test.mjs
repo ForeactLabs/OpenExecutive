@@ -74,4 +74,7 @@ test("a phone number matches however it is typed", () => {
   assert.equal(matches(texts, "1115"), false);
   assert.equal(matches(texts, "123456"), false);
   assert.equal(matches(texts, "864-4111"), true);
+  const lines = e("c", "Dana", 0, { words: "+14078644111\nSee you at 5\n123 Main St" });
+  assert.equal(matches(lines, "5123"), false);
+  assert.equal(matches(lines, "407-864"), true);
 });
