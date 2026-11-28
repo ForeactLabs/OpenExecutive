@@ -1462,11 +1462,18 @@ def test_the_same_words_from_the_other_side_never_say_an_unsure_send_went(ids: d
     send = tx.queue_send(owner, "Ok", conversation_id=conv.id)
     tx.take_send(owner)
     tx.settle_send(owner, send.id, status=tx.UNSURE)
+    # A first look shows Dana's own "Ok" in a group, flagged only as earlier.
+    tx.record(owner, [_item("b", text="Dana: Ok", outgoing=True, earlier=True)])
+    assert tx.get_send(send.id).status == tx.UNSURE
+    tx.tidy()
+    assert tx.get_send(send.id).status == tx.UNSURE
     # Dana texts "ok" on her own: not marked as theirs.
-    tx.record(owner, [_item("b", text="ok")])
+    with tx._connect() as conn:
+        conn.execute(f"UPDATE {tx.TEXT_SENDS_TABLE} SET echoed=0 WHERE id=?", (send.id,))
+    tx.record(owner, [_item("b2", text="ok")])
     assert tx.get_send(send.id).status == tx.UNSURE
     # Nor the same words flagged only because they were already there.
-    tx.record(owner, [_item("c", text="Ok", outgoing=True, earlier=True)])
+    tx.record(owner, [_item("c", text="Dana Ruiz: Ok", outgoing=True, earlier=True)])
     assert tx.get_send(send.id).status == tx.UNSURE
     tx.tidy()
     assert tx.get_send(send.id).status == tx.UNSURE

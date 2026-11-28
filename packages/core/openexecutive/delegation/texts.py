@@ -344,7 +344,7 @@ def record(person_id: int, items: list[Incoming], *, db_path: Path | None = None
                 # Marked as theirs ("You: …", which the browser flags) too, it
                 # is ``ECHOED_AS_YOURS``: the same words from the other side
                 # alone are not (nor a first look's rows, flagged without it).
-                as_yours = bool(item.outgoing) and _LEADING_WHO.match(item.text or "") is not None
+                as_yours = bool(item.outgoing) and not item.earlier and _LEADING_WHO.match(item.text or "") is not None
                 conn.execute(
                     f"UPDATE {TEXT_SENDS_TABLE} SET echoed=? WHERE id=?",
                     (ECHOED_AS_YOURS if as_yours else 1, echo),
