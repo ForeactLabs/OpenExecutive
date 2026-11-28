@@ -1521,3 +1521,16 @@ def test_an_unsure_send_to_a_new_number_never_goes_by_a_strangers_same_words(ids
     tx.record(owner, [_item("a", conv="x1", title="Pat", sender="Pat",
                             text="You: Sounds good, see you then", outgoing=True)])
     assert tx.get_send(send.id).status == tx.UNSURE
+
+
+def test_a_send_never_taken_is_never_sent_by_the_persons_own_same_words(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("a", text="Where are you?")])
+    (conv,) = tx.conversations(owner)
+    send = tx.queue_send(owner, "On my way", conversation_id=conv.id)
+    # They texted it themselves while Chrome was closed.
+    tx.record(owner, [_item("b", text="You: On my way", outgoing=True)])
+    _age(send.id, 2)
+    tx.expire_all()
+    assert tx.get_send(send.id).status == tx.FAILED
