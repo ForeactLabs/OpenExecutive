@@ -222,13 +222,17 @@ export default function TextsPage() {
         </div>
         {data === undefined || available === undefined ? (
           <PageSpinner label="Loading your texts" />
+        ) : data === null && error ? (
+          <SettingsCard>
+            <p className="text-[15px] text-rose-500">{error}</p>
+          </SettingsCard>
         ) : !data?.enabled ? (
           available ? (
             <TextsCard setupOnly />
           ) : (
             <SettingsCard>
               <p className="text-[15px] text-fg">
-                {error ?? "Texts aren't turned on for your company yet."}
+                Texts aren&apos;t turned on here yet.
               </p>
             </SettingsCard>
           )
