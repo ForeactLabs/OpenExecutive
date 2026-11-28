@@ -200,6 +200,22 @@ def test_a_changed_answer_is_not_a_repeat(roster: SimpleNamespace, kind: str, fi
     assert len(h.list_notes(roster.principal)) == 2
 
 
+def test_the_same_words_from_someone_else_or_another_source_are_kept(roster: SimpleNamespace) -> None:
+    def add(kind: str, source: str, who: str, summary: str) -> list[int]:
+        return h.add_notes(
+            roster.principal, [NewNote(kind=kind, summary=summary, quote="Yes I'll be home for dinner")],
+            source=source, channel="texts", conversation_ref=f"conv-{who}", counterpart=who, subject="",
+            trust="medium", occurred_at=WHEN, now=WHEN, skip_repeats=True,
+        )
+
+    assert add("heard", h.SOURCE_ERRAND_REPLY, "JR", "Heard from JR he'll be home for dinner.")
+    assert add("heard", h.SOURCE_ERRAND_REPLY, "Casey", "Heard from Casey she'll be home for dinner.")
+    assert add("answered", h.SOURCE_CHAT_MESSAGE, "", "Said they'll be home for dinner.")
+    # From JR again: the same answer.
+    assert add("heard", h.SOURCE_ERRAND_REPLY, "JR", "Heard from JR he'll be home for dinner.") == []
+    assert len(h.list_notes(roster.principal)) == 3
+
+
 # --------------------------------------------------------------------------- #
 # What came back from an errand
 # --------------------------------------------------------------------------- #

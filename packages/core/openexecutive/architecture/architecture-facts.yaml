@@ -3171,8 +3171,9 @@ memory:
       check_note runs on their words, their name and a few retelling words
       (history_heard._RETOLD). Same switch and exclusions; no daily
       pass count (it runs only for an answer to an errand they asked for).
-    - Chat and heard notes pass skip_repeats to history.add_notes: one with
-      the same quote, or the same kind, the same figures, date words, names
+    - Chat and heard notes pass skip_repeats to history.add_notes: against
+      notes from the same source and counterpart only, one with the same
+      kind and the same quote, or the same kind, the same figures, date words, names
       and negations (history._specifics) and 60% of the same summary words,
       as a note from the last day (and the same due date) is not stored.
       A changed answer (8 not 6, Thursday not Tuesday, "won't") is new.

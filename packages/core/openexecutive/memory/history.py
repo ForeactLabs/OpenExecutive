@@ -655,7 +655,7 @@ def add_notes(
         ).fetchone():
             conn.rollback()
             return []
-        recent = _recent_notes(conn, person_id, _now(now)) if skip_repeats else []
+        recent = _recent_notes(conn, person_id, _now(now), source=source, counterpart=counterpart[:200]) if skip_repeats else []
         for note in notes:
             if note.kind not in KINDS:
                 raise ValueError("unknown kind")
@@ -687,13 +687,17 @@ _REPEAT_OVERLAP = 0.6
 _Recent = tuple[str, str, str, str | None]
 
 
-def _recent_notes(conn: sqlite3.Connection, person_id: int, now: datetime) -> list[_Recent]:
-    """The person's notes kept in the last ``REPEAT_WITHIN``: kind, summary,
-    quote and due date."""
+def _recent_notes(
+    conn: sqlite3.Connection, person_id: int, now: datetime, *, source: str, counterpart: str,
+) -> list[_Recent]:
+    """The person's notes from the same source and with the same counterpart
+    kept in the last ``REPEAT_WITHIN``: kind, summary, quote and due date.
+    The same words from someone else, or said another way, are another note."""
     since = (now - REPEAT_WITHIN).isoformat()
     rows = conn.execute(
-        f"SELECT kind, summary, quote, due_date FROM {NOTES_TABLE} WHERE person_id = ? AND created_at > ?",  # noqa: S608 — constant table name
-        (person_id, since),
+        f"SELECT kind, summary, quote, due_date FROM {NOTES_TABLE} "  # noqa: S608 — constant table name
+        "WHERE person_id = ? AND created_at > ? AND source = ? AND counterpart = ?",
+        (person_id, since, source, counterpart),
     ).fetchall()
     return [(str(r[0]), str(r[1] or ""), str(r[2] or ""), r[3]) for r in rows]
 
@@ -749,9 +753,11 @@ def _repeats(note: NewNote, recent: list[_Recent]) -> bool:
     for kind, summary, their_quote, due in recent:
         if (due or None) != (note.due_date or None):
             continue
+        if kind != note.kind:
+            continue
         if quote and quote == _normalize_for_quote_match(their_quote):
             return True
-        if kind != note.kind or _specifics(summary) != specifics:
+        if _specifics(summary) != specifics:
             continue
         theirs = _stems(summary)
         union = mine | theirs
