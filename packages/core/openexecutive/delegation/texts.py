@@ -778,6 +778,10 @@ def settle_send(
         raise ValueError(status)
     now = _now()
     with _connect(db_path) as conn:
+        # Read and claim in one write: an echo ``record`` sees in between
+        # never leaves a send that went as unsure.
+        conn.commit()
+        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             f"SELECT * FROM {TEXT_SENDS_TABLE} WHERE id=? AND person_id=?", (send_id, person_id),
         ).fetchone()
