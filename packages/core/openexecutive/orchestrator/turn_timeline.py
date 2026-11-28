@@ -367,7 +367,9 @@ class TurnTimeline:
         # The line names the site only once the browser says this step ran
         # there (``_step_site``), never from the page an earlier step was on.
         site = self._page_site(tool, item)
-        if last is not None and not last.named and last.label == label:
+        # A step whose line now names its site still takes the same round
+        # again ("Looking at the page" after "Looking at papajohns.com").
+        if last is not None and not last.named and last.label in (label, _on_site(label, last.site)):
             for kind, n in reads.items():
                 last.reads[kind] = last.reads.get(kind, 0) + n
             return bool(reads)

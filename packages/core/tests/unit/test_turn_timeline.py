@@ -519,3 +519,12 @@ def test_a_saved_step_keeps_only_a_known_icon_and_a_real_site() -> None:
     a, b, c = saved["steps"]
     assert (a["icon"], a["site"]) == ("mail", "papajohns.com")
     assert "icon" not in b and "site" not in b and "site" not in c
+
+
+def test_looks_in_a_row_on_one_site_stay_one_step() -> None:
+    tl = TurnTimeline(Clock())
+    for _ in range(3):
+        tl.observe({"type": "activity", "label": "Looking at the page…", "tool": "browser_look"})
+        tl.observe({"type": "step_site", "site": "papajohns.com"})
+    steps = tl.finish()["steps"]
+    assert [(s["label"], s.get("site")) for s in steps] == [("Looked at papajohns.com", "papajohns.com")]
