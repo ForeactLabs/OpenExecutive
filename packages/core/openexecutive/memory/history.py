@@ -21,13 +21,15 @@ so ``trust`` is ``high``:
   adapter verified the sender (``Session.speaker_verified``)
   (``memory.history_chat``). Messages between other people are never read.
 
-And one that reads someone else's: what a person said back to a call or a
-text the Executive made for this person at their asking ("JR said he'll be
+And one that reads someone else's: what a person said back to a text the
+Executive sent for this person at their asking (``delegation.texts_watch``;
+any other channel that carries a reply, such as a call, can pass it to
+``history_heard.note_heard``) ("JR said he'll be
 home for dinner at 6"), kind ``heard``, ``trust`` ``medium``, with who said
 it as the counterpart (``memory.history_heard``).
 
 A note from chat or from what someone said back that repeats one the person
-already has from the last day (the same kind and nearly the same words, or
+already has from the last day (the same kind and the same words said another way, or
 the same quote) is not stored again (``_repeats``).
 
 **Who reads them.** A note's ``visibility`` is ``private``: its own person
@@ -684,6 +686,20 @@ def add_notes(
 
 # A note this close to one from the last day is the same note again.
 REPEAT_WITHIN = timedelta(days=1)
+def heard_since(
+    person_id: int, *, channel: str, conversation_ref: str, since: str, db_path: Path | None = None,
+) -> bool:
+    """Whether a note of what someone said back (``SOURCE_ERRAND_REPLY``) was
+    already kept from this conversation since ``since`` (an ISO time)."""
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            f"SELECT 1 FROM {NOTES_TABLE} WHERE person_id = ? AND source = ? AND conversation_key = ? "  # noqa: S608 — constant table name
+            "AND created_at >= ? LIMIT 1",
+            (person_id, SOURCE_ERRAND_REPLY, conversation_key(channel, conversation_ref), since),
+        ).fetchone()
+    return row is not None
+
+
 _Recent = tuple[str, str, str, str | None]
 
 

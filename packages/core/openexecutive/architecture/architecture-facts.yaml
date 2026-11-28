@@ -3165,7 +3165,7 @@ memory:
       which reads two ways). Rufus saw such a note, garbled, on 2026-11-28.
     - What came back is kept instead: memory.history_heard.note_heard writes
       one note, kind heard, from what the other side said (the words of a
-      text that is the first answer to one a chat asked for, texts.errand_sent and
+      text that answers one a chat asked for, until one answer is kept (history.heard_since), texts.errand_sent and
       texts_watch._note_answer; a fork's phone calls can call it too). It is
       someone else's words, so trust medium and the counterpart names them;
       check_note runs on their words, their name and a few retelling words

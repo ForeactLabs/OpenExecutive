@@ -787,9 +787,10 @@ def errand_sent(
     first of them once kept) are the first answer to a text the Executive
     sent in this conversation because the person asked for it in a chat
     (``asked_in``, however fast it went; never a reply a texts turn or an
-    approved card sent), within ``ERRAND_REPLY_WITHIN``. Only the first texts
-    back count: one that came in between already answered it, and a later
-    text in the conversation is just a text. Never raises."""
+    approved card sent), within ``ERRAND_REPLY_WITHIN``. Only texts until
+    one answer is kept count: after a note of what they said back
+    (``history.heard_since``), a later text in the conversation is just a
+    text. Never raises."""
     try:
         until = datetime.fromisoformat(before)
         since = _iso(until - ERRAND_REPLY_WITHIN)
@@ -816,17 +817,17 @@ def errand_sent(
                 f"SELECT id FROM {TEXTS_TABLE} WHERE person_id=? AND ref=?",  # noqa: S608
                 (row["person_id"], f"send:{row['id']}"),
             ).fetchone()
-            sent_id = int(mark["id"]) if mark else 0
-            if first_id is not None and first_id < sent_id:
-                return False
-            answered = conn.execute(
-                f"SELECT 1 FROM {TEXTS_TABLE} WHERE conversation_id=? AND outgoing=0 AND id > ? AND at >= ? "  # noqa: S608
-                + ("AND id < ? " if first_id is not None else "AND at < ? ")
-                + "LIMIT 1",
-                (conversation_id, sent_id, _iso(datetime.fromisoformat(row["went"]) - TEXT_TIME_SLACK),
-                 first_id if first_id is not None else before),
-            ).fetchone()
-        return answered is None
+        if first_id is not None and mark is not None and first_id < int(mark["id"]):
+            return False
+        # Answered once something they said back was kept: a holding reply
+        # ("ok let me check") keeps nothing, so the next texts can still be
+        # the answer, and after one is kept a later text is just a text.
+        from openexecutive.memory.history import heard_since
+
+        answered = heard_since(
+            int(row["person_id"]), channel="texts", conversation_ref=conversation_id, since=row["went"],
+        )
+        return not answered
     except Exception:
         logging.getLogger(__name__).warning("texts: couldn't tell whether a text was an errand", exc_info=True)
         return False

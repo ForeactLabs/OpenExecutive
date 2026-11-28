@@ -306,6 +306,14 @@ def _send(
         )
 
 
+def _kept_answer(person_id: int, conv: str, at: datetime) -> None:
+    h.add_notes(
+        person_id, [NewNote(kind="heard", summary="Heard from JR he'll be home by 6.", quote="Home by 6")],
+        source=h.SOURCE_ERRAND_REPLY, channel="texts", conversation_ref=conv, counterpart="JR", subject="",
+        trust="medium", occurred_at=at, now=at,
+    )
+
+
 def test_errand_sent_is_a_chat_asked_text_from_the_last_day(roster: SimpleNamespace) -> None:
     reply_at = tx._iso(WHEN)
     assert tx.errand_sent("conv-1", reply_at) is False
@@ -321,14 +329,17 @@ def test_errand_sent_is_a_chat_asked_text_from_the_last_day(roster: SimpleNamesp
     _send(roster.principal, "conv-1", asked_in="web-1", status=tx.SENT, at=WHEN - timedelta(hours=1))
     assert tx.errand_sent("conv-1", reply_at) is True
     assert tx.errand_sent("conv-2", reply_at) is False
-    # Once they answered, a later text in the conversation is just a text.
+    # A holding reply ("ok let me check") keeps nothing: the next texts can
+    # still be the answer.
     with tx._connect() as conn:
         conn.execute(
             f"INSERT INTO {tx.TEXTS_TABLE} (person_id, conversation_id, ref, sender, text, outgoing, at, handled) "  # noqa: S608
             "VALUES (?,?,?,?,?,?,?,?)",
-            (roster.principal, "conv-1", "r1", "JR", "Home by 6", 0, reply_at, 1),
+            (roster.principal, "conv-1", "r1", "JR", "ok let me check", 0, reply_at, 1),
         )
-    assert tx.errand_sent("conv-1", reply_at) is True
+    assert tx.errand_sent("conv-1", tx._iso(WHEN + timedelta(minutes=10))) is True
+    # Once their answer is kept, a later text in the conversation is just a text.
+    _kept_answer(roster.principal, "conv-1", WHEN + timedelta(minutes=11))
     assert tx.errand_sent("conv-1", tx._iso(WHEN + timedelta(hours=15))) is False
 
 
@@ -350,13 +361,8 @@ def test_a_reply_in_the_minute_it_went_is_its_answer(roster: SimpleNamespace) ->
     assert tx.errand_sent("conv-8", tx._iso(went.replace(second=0))) is True
     # Two minutes earlier is still no answer.
     assert tx.errand_sent("conv-8", tx._iso(went - timedelta(minutes=2))) is False
-    # Once that reply is in, a later text is just a text.
-    with tx._connect() as conn:
-        conn.execute(
-            f"INSERT INTO {tx.TEXTS_TABLE} (person_id, conversation_id, ref, sender, text, outgoing, at, handled) "  # noqa: S608
-            "VALUES (?,?,?,?,?,?,?,?)",
-            (roster.principal, "conv-8", "r8", "JR", "Home by 6", 0, tx._iso(went.replace(second=0)), 1),
-        )
+    # Once that reply is kept, a later text is just a text.
+    _kept_answer(roster.principal, "conv-8", went + timedelta(seconds=5))
     assert tx.errand_sent("conv-8", tx._iso(went + timedelta(minutes=17))) is False
 
 
