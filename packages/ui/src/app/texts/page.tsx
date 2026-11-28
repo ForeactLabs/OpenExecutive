@@ -225,11 +225,7 @@ export default function TextsPage() {
         </div>
         {data === undefined || available === undefined ? (
           <PageSpinner label="Loading your texts" />
-        ) : data === null && error ? (
-          <SettingsCard>
-            <p className="text-[15px] text-rose-500">{error}</p>
-          </SettingsCard>
-        ) : !data?.enabled && !available ? (
+        ) : !data?.enabled && !available && !error ? (
           <SettingsCard>
             <p className="text-[15px] text-fg">Texts aren&apos;t turned on here yet.</p>
           </SettingsCard>
@@ -237,6 +233,12 @@ export default function TextsPage() {
           <>
             {/* One card for setup, kept mounted as Texts turns on. */}
             {available ? <TextsCard setupOnly /> : null}
+            {/* A failed first load still leaves the walkthrough above it. */}
+            {data === null && error ? (
+              <SettingsCard>
+                <p className="text-[15px] text-rose-500">{error}</p>
+              </SettingsCard>
+            ) : null}
             {data?.enabled ? (
               <>
                 <TextSomeone />
