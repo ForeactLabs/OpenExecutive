@@ -9,8 +9,8 @@ of those but the summary; a model only writes that sentence, and the quote it
 rests on is checked word for word before anything is stored
 (``memory.history_notes``).
 
-**What writes notes.** Two things, both reading only the person's own words,
-so nothing another person wrote can become a note; that is their own word,
+**What writes notes.** Two things that read only the person's own words, so
+nothing another person wrote becomes one of these; that is their own word,
 so ``trust`` is ``high``:
 
 - a reply the Executive drafted in someone's own mailbox (Act as me), after
@@ -20,6 +20,15 @@ so ``trust`` is ``high``:
   chat signed in, their own Slack, Discord or Telegram, or any channel whose
   adapter verified the sender (``Session.speaker_verified``)
   (``memory.history_chat``). Messages between other people are never read.
+
+And one that reads someone else's: what a person said back to a call or a
+text the Executive made for this person at their asking ("JR said he'll be
+home for dinner at 6"), kind ``heard``, ``trust`` ``medium``, with who said
+it as the counterpart (``memory.history_heard``).
+
+A note from chat or from what someone said back that repeats one the person
+already has from the last day (the same kind and nearly the same words, or
+the same quote) is not stored again (``_repeats``).
 
 **Who reads them.** A note's ``visibility`` is ``private``: its own person
 alone, never the principal, and only in a conversation nobody else can read
@@ -66,10 +75,13 @@ DEFAULT_RETENTION_DAYS = 90
 # What the owner and each person may pick. None is "until forgotten".
 RETENTION_CHOICES: tuple[int | None, ...] = (30, 90, 365, None)
 
-KINDS: tuple[str, ...] = ("promised", "agreed", "declined", "answered", "asked", "shared")
+KINDS: tuple[str, ...] = ("promised", "agreed", "declined", "answered", "asked", "shared", "heard")
 TRUST_LEVELS: tuple[str, ...] = ("high", "medium", "low")
 SOURCE_APPROVED_REPLY = "approved_reply"
 SOURCE_CHAT_MESSAGE = "chat_message"
+# What someone said back to a call or text the Executive made for the person
+# (``memory.history_heard``): another person's words, so ``trust`` is medium.
+SOURCE_ERRAND_REPLY = "errand_reply"
 CHANNEL_EMAIL = "email"
 
 MAX_SUMMARY_CHARS = 240
@@ -616,9 +628,12 @@ def add_notes(
     occurred_at: datetime,
     db_path: Path | None = None,
     now: datetime | None = None,
+    skip_repeats: bool = False,
 ) -> list[int]:
     """Store checked notes as the person's own private notes. Nothing is
-    stored for an excluded conversation. Returns the new ids."""
+    stored for an excluded conversation. With ``skip_repeats``, a note that
+    says again what one from the last day says is left out (``_repeats``).
+    Returns the new ids."""
     if trust not in TRUST_LEVELS:
         raise ValueError("unknown trust level")
     key = conversation_key(channel, conversation_ref)
@@ -640,9 +655,13 @@ def add_notes(
         ).fetchone():
             conn.rollback()
             return []
+        recent = _recent_notes(conn, person_id, _now(now)) if skip_repeats else []
         for note in notes:
             if note.kind not in KINDS:
                 raise ValueError("unknown kind")
+            if skip_repeats and _repeats(note, recent):
+                continue
+            recent.append((note.kind, note.summary, note.quote, note.due_date))
             cur = conn.execute(
                 f"INSERT INTO {NOTES_TABLE} (person_id, visibility, source, channel, conversation_key, "  # noqa: S608 — constant table name
                 "counterpart, subject, kind, summary, quote, due_date, trust, occurred_at, created_at, expires_at) "
@@ -658,6 +677,57 @@ def add_notes(
     finally:
         conn.close()
     return ids
+
+
+# A note this close to one from the last day is the same note again.
+REPEAT_WITHIN = timedelta(days=1)
+_REPEAT_OVERLAP = 0.6
+
+
+_Recent = tuple[str, str, str, str | None]
+
+
+def _recent_notes(conn: sqlite3.Connection, person_id: int, now: datetime) -> list[_Recent]:
+    """The person's notes kept in the last ``REPEAT_WITHIN``: kind, summary,
+    quote and due date."""
+    since = (now - REPEAT_WITHIN).isoformat()
+    rows = conn.execute(
+        f"SELECT kind, summary, quote, due_date FROM {NOTES_TABLE} WHERE person_id = ? AND created_at > ?",  # noqa: S608 — constant table name
+        (person_id, since),
+    ).fetchall()
+    return [(str(r[0]), str(r[1] or ""), str(r[2] or ""), r[3]) for r in rows]
+
+
+def _stems(text: str) -> set[str]:
+    """A sentence's content words, cut to five letters so "dinner" and
+    "dinners" match."""
+    from openexecutive.memory.episodic import _normalize_for_quote_match
+    from openexecutive.orchestrator.fact_tools import _GLUE, _WORD, _bare
+
+    words = (_bare(w).lower() for w in _WORD.findall(_normalize_for_quote_match(text)))
+    return {w[:5] for w in words if len(w) >= 3 and w not in _GLUE}
+
+
+def _repeats(note: NewNote, recent: list[_Recent]) -> bool:
+    """Whether ``note`` says again what one of ``recent`` already says: the
+    same quote, or the same kind with most of the same words. A different
+    due date is a different note."""
+    from openexecutive.memory.episodic import _normalize_for_quote_match
+
+    quote = _normalize_for_quote_match(note.quote)
+    mine = _stems(note.summary)
+    for kind, summary, their_quote, due in recent:
+        if (due or None) != (note.due_date or None):
+            continue
+        if quote and quote == _normalize_for_quote_match(their_quote):
+            return True
+        if kind != note.kind:
+            continue
+        theirs = _stems(summary)
+        union = mine | theirs
+        if union and len(mine & theirs) / len(union) >= _REPEAT_OVERLAP:
+            return True
+    return False
 
 
 def _live_clause() -> str:

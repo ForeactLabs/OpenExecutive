@@ -12,6 +12,9 @@ instructions.
 ordinary unattended Executive turn, so each step it takes goes through
 Approvals, Your rules and In training (``orchestrator.take_the_lead``), and a
 step that waits is a card on this person's own list.
+
+Texts that answer one the person had it send from a chat are also kept as a
+note of theirs, what they heard back (``memory.history_heard``).
 """
 from __future__ import annotations
 
@@ -154,6 +157,7 @@ async def look(person_id: int) -> bool:
     failed: Exception | None = None
     for conv, t in items:
         mine = [x.id for x in new if x.conversation_id == conv.id]
+        await _note_answer(person_id, conv, [x for x in new if x.conversation_id == conv.id])
         prompt = await asyncio.to_thread(prompt_for, person, [(conv, t)], counts)
         # Every text is outside words, even one showing a teammate's number:
         # a text's number can be one its sender picked, and nothing checks it
@@ -179,6 +183,31 @@ async def look(person_id: int) -> bool:
     if failed is not None:
         raise failed
     return True
+
+
+async def _note_answer(person_id: int, conv: Any, new: list[Any]) -> None:
+    """When these texts answer one the person had the Executive send from a
+    chat ("text JR and ask if he's home for dinner"), keep what they said as
+    a note of theirs (``memory.history_heard``). Never raises."""
+    from openexecutive.delegation import texts
+
+    try:
+        theirs = [t for t in new if not t.outgoing]
+        if not theirs or conv.is_group:
+            return
+        first = min(t.at for t in theirs)
+        if not await asyncio.to_thread(texts.errand_sent, conv.id, first):
+            return
+        from datetime import datetime
+
+        from openexecutive.memory.history_heard import note_heard
+
+        await note_heard(
+            person_id, words="\n".join(t.text for t in theirs), who=conv.who, channel="texts",
+            conversation_ref=conv.id, said_at=datetime.fromisoformat(max(t.at for t in theirs)),
+        )
+    except Exception:
+        logger.warning("texts_watch: couldn't note the answer in conversation %s", conv.id, exc_info=True)
 
 
 def last_line(said: str) -> str:

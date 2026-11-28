@@ -18,7 +18,8 @@ teammate on the People list talking from a surface that verified who they are
 in force at once, as the principal's is: a teammate is a full user, and what
 the Executive may do with what it knows is Approvals' to decide, not a hold on
 the fact. A fact about the speaker alone (``about_me``: their own mailbox,
-sign-off, how they work) is kept private to them (``memory.facts``).
+sign-off, how they work, who someone is to them, a standing preference) is
+kept private to them (``memory.facts``).
 Retiring a team fact and editing the company profile stay the principal's.
 The principal's own email (their primary address, DMARC passing, not mail
 they forwarded) is checked like chat, then held: the change applies only when
@@ -69,11 +70,14 @@ REMEMBER_FACT_TOOL: dict[str, Any] = {
         "the speaker corrects a figure, name, date or status you or a document got "
         "wrong ('Maple House is 48 units, not 52'), or states one they want kept. "
         "One fact per call; correcting a listed STANDING FACT passes its id as "
-        "replaces_fact_id (the same subject also replaces it). Business facts "
-        "only, never pay, health, performance or other personal matters; the one "
-        "exception is how the speaker themselves wants their own work handled "
-        "(their mailbox, sign-off, how they like things done): pass about_me: "
-        "true and it is kept for them alone. Who may "
+        "replaces_fact_id (the same subject also replaces it). Team facts are "
+        "business facts, never anyone's pay, health or performance. Facts about "
+        "the speaker's own life and work take about_me: true and are kept for "
+        "them alone: how they want their work handled (their mailbox, sign-off), "
+        "who someone is to them ('JR is my son'), a standing preference ('I "
+        "always order one stuffed-crust pepperoni'). Keep one the first time "
+        "they say it, even in passing ('pick up my son JR'); never an errand "
+        "('call JR') or a one-off plan. Who may "
         "record one is checked when it runs: the principal from a verified "
         "conversation or by email from their own address (held until they "
         "confirm by reply); a teammate on the People list from the web app or "
@@ -103,8 +107,8 @@ REMEMBER_FACT_TOOL: dict[str, Any] = {
                 "type": "boolean",
                 "description": (
                     "True when the fact is about the speaker alone, not the team's "
-                    "business: e.g. 'emails sent from my mailbox end with my title'. "
-                    "Kept private to them."
+                    "business: e.g. 'emails sent from my mailbox end with my title', "
+                    "'JR is my son', 'I like window seats'. Kept private to them."
                 ),
             },
             "decision": {

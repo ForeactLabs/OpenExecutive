@@ -602,6 +602,10 @@ shown backs (a made-up detail, or a step it says they or anyone took), \
 whether or not they noticed: raise_in_brief with put_right true, one line \
 setting it straight ("Correction: I said you'd asked Jamie to move the \
 delivery; you hadn't."), so they don't go on believing it;
+- who someone is to the person ("my son JR", "Reece, JR's friend") or a \
+standing preference of theirs, said in their own words and not yet a \
+STANDING FACT: remember_fact with about_me true, kept for them alone. Never \
+an errand ("call JR") or a one-off plan;
 - a way the person asked you to reply to them, or how they write their own \
 email, given as a habit ("always", "from now on", "I never use exclamation \
 marks"): learn_reply_style or learn_writing_style. An instruction for one \

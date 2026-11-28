@@ -75,6 +75,7 @@ const KIND_LABELS: Record<string, string> = {
   answered: "Answered",
   asked: "Asked",
   shared: "Shared",
+  heard: "Heard back",
 };
 
 export function kindLabel(kind: string): string {
@@ -89,7 +90,7 @@ export function counterpartName(counterpart: string): string {
   return trimmed.replace(/^<|>$/g, "");
 }
 
-const CHANNEL_LABELS: Record<string, string> = { email: "Email", web: "Web chat" };
+const CHANNEL_LABELS: Record<string, string> = { email: "Email", web: "Web chat", texts: "Texts", phone: "Phone call" };
 
 /** "Email with Dana Lee", or the channel alone ("Slack", "Web chat") when
  * nobody is named, as for what someone said in chat. */

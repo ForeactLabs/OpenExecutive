@@ -6,7 +6,9 @@ the speaker turned "Keep track of what happens" on, one tool-less pass reads
 **only the words they typed this turn** (``delegation.settings.own_words``:
 no quoted backstory an adapter added, nothing when an attachment came with
 it) and writes at most three short dated notes of what they committed to,
-decided, declined, answered or shared. Never what the Executive said, never
+decided, declined, answered or shared. An errand they hand the Executive
+("call JR and ask if he's home for dinner") is not a note (``errand_note``):
+what comes back from it is (``memory.history_heard``). Never what the Executive said, never
 anyone else's message: every channel calls the Executive with the one
 speaker's message, and what other people say to each other is never read.
 
@@ -48,19 +50,25 @@ CHAT_PROMPT = """You keep a person's record of what they said. \
 <chat_message> is one message they typed to their assistant in a chat.
 
 Write at most three notes of what they committed to, decided or agreed, \
-declined, answered (a fact or answer they gave), asked someone else for, or \
-shared, as they state it. A request or instruction to the assistant is not \
-a note ("remind me…", "draft…", "what is…?"); nor are greetings, thanks, \
-questions or small talk. Most messages need no note at all.
+declined, answered (a fact or answer they gave), asked someone else for \
+themselves, or shared, as they state it. Most messages need no note at all.
+
+Never a note:
+- anything they ask the assistant to do, even when it reaches someone else: \
+"call JR and ask if he's home for dinner", "text Casey it's a test", "email \
+Dana for the deck", "remind me…", "draft…", "look up…". That is an errand; \
+what came of it is kept elsewhere.
+- questions, greetings, thanks or small talk.
 
 Each note:
 - kind: promised (they will do something), agreed (they agreed or decided \
-something), declined, answered, asked (they asked another person for \
-something), shared.
+something), declined, answered, asked (they say they themselves asked \
+another person for something: "I asked Dana for the deck"), shared.
 - summary: one short sentence in the third person, past tense, starting \
 with a verb, never naming the assistant: "Said the Q4 price list goes to \
 Dana Lee on Friday." Use only names, figures and dates that are in \
-<chat_message>.
+<chat_message>. When it is about more than one person, name each one \
+rather than "he" or "him", so it can't be misread.
 - quote: the exact words from the message the note rests on, copied \
 character for character.
 - due_date: YYYY-MM-DD only when they promised or agreed to something by a \
@@ -141,6 +149,39 @@ def render_message(text: str, *, channel: str, said_on: date) -> str:
     return f"<chat_message>\n{no_tags(chr(10).join(lines)).strip()}\n</chat_message>"
 
 
+# How a request to the assistant starts: a verb that tells it to do
+# something, or a polite ask. "Call JR and ask…" is an errand, not something
+# the person asked JR themselves.
+_ERRAND_VERBS = frozenset({
+    "ask", "call", "phone", "ring", "text", "message", "email", "mail", "tell", "let", "remind",
+    "send", "draft", "write", "book", "schedule", "find", "look", "check", "get", "set", "order",
+    "reply", "respond", "forward", "invite", "cancel", "move", "please", "go", "see", "make",
+})
+_POLITE = ("can you", "could you", "would you", "will you", "i need you", "i want you", "i'd like you")
+_PRONOUN_PAIRS = (("he", "him"), ("she", "her"))
+
+
+def errand_note(note: NewNote) -> bool:
+    """Whether a checked note is really an errand or reads two ways, and so
+    is not kept: one that names the assistant (the prompt forbids it, so it
+    is about what the assistant was asked); an ``asked`` note whose quote is
+    a request to the assistant ("ask whether to expect him home"); or a
+    summary with the same pronoun as subject and object ("he should expect
+    him"), which can't be read back."""
+    from openexecutive.memory.episodic import _normalize_for_quote_match
+
+    summary = _normalize_for_quote_match(note.summary)
+    words = [w.strip(".,;:!?\"'()") for w in summary.split()]
+    if "assistant" in words or "assistant's" in words:
+        return True
+    if note.kind == "asked":
+        quote = _normalize_for_quote_match(note.quote).lstrip("\"'( ")
+        first = quote.split(" ", 1)[0].strip(".,;:!?") if quote else ""
+        if first in _ERRAND_VERBS or quote.startswith(_POLITE):
+            return True
+    return any(a in words and b in words for a, b in _PRONOUN_PAIRS)
+
+
 async def _call_model(model: str, turn: str) -> dict[str, Any]:
     from openexecutive.memory.history_notes import record
 
@@ -164,7 +205,10 @@ async def take_chat_notes(
     raw_notes = payload.get("notes")
     if not isinstance(raw_notes, list):
         return []
-    kept = [n for n in (check_note(r, body=own, allowed=own) for r in raw_notes[:MAX_NOTES]) if n is not None]
+    kept = [
+        n for n in (check_note(r, body=own, allowed=own) for r in raw_notes[:MAX_NOTES])
+        if n is not None and not errand_note(n)
+    ]
     dropped = min(len(raw_notes), MAX_NOTES) - len(kept)
     if dropped:
         logger.info("history: dropped %d chat note(s) that failed a check", dropped)
@@ -200,7 +244,7 @@ async def note_chat_message(
             return []
         ids = history.add_notes(
             person_id, notes, source=SOURCE_CHAT_MESSAGE, channel=channel, conversation_ref=conversation_ref,
-            counterpart="", subject="", trust="high", occurred_at=when,
+            counterpart="", subject="", trust="high", occurred_at=when, skip_repeats=True,
         )
     except Exception:
         logger.warning("history: noting a chat message failed", exc_info=True)
