@@ -526,6 +526,24 @@ def set_last_check_note(
         )
 
 
+def triage_outcomes(
+    signal_ids: list[int], db_path: Path | None = None,
+) -> dict[int, tuple[str, str]]:
+    """``{id: (processed_outcome, triage_reason)}`` for these signal rows,
+    so a last-check note can say what triage made of a find it told."""
+    if not signal_ids:
+        return {}
+    marks = ", ".join("?" * len(signal_ids))
+    with _get_conn(db_path) as conn:
+        rows = conn.execute(
+            "SELECT id, processed_outcome, CASE WHEN json_valid(enrichment_json) "
+            "THEN json_extract(enrichment_json, '$.triage_reason') END AS reason "
+            f"FROM external_signals WHERE id IN ({marks})",
+            tuple(signal_ids),
+        ).fetchall()
+    return {int(r["id"]): (str(r["processed_outcome"] or ""), str(r["reason"] or "")) for r in rows}
+
+
 def mark_fired(
     item_id: int,
     at: datetime,
@@ -1516,5 +1534,6 @@ __all__ = [
     "update_signal_enrichment",
     "update_watchlist_fields",
     "upsert_page_watch_state",
+    "triage_outcomes",
     "watchlist_ids_with_held_signals",
 ]

@@ -2245,3 +2245,68 @@ def test_an_own_watchs_findings_stay_out_of_the_companys_recent_signals(db: Path
     ms.insert_signal(_make_signal(dedup_key="eggs:1").model_copy(update={"watchlist_id": own_id}), db_path=db)
     ms.insert_signal(_make_signal(dedup_key="flour:1").model_copy(update={"watchlist_id": company_id}), db_path=db)
     assert [s["watchlist_id"] for s in ms.list_recent_signals(db_path=db)] == [company_id]
+
+
+def _two_finds_scan(db: Path, install_fake_source, monkeypatch: pytest.MonkeyPatch, on_event) -> int:
+    from types import SimpleNamespace
+
+    def schedule(event: Any, *, then: Any = None, **_: Any) -> None:
+        on_event(event, lambda reason, alert_id: then(SimpleNamespace(reason_if_suppressed=reason), alert_id))
+
+    monkeypatch.setattr("openexecutive.monitoring.pipeline.schedule_evaluation", schedule)
+    _patch_settings(monkeypatch, external_monitor_enrichment_enabled=False)
+    wl_id = _insert_feed(db, "two-finds")
+    install_fake_source([
+        _make_signal(dedup_key="vendor_status:a", summary="First incident"),
+        _make_signal(dedup_key="vendor_status:b", summary="Second incident"),
+    ])
+    asyncio.run(mp.run_external_monitor_scan(db_path=db))
+    return wl_id
+
+
+def _note(db: Path, wl_id: int) -> str:
+    item = ms.get_watchlist_item(wl_id, db_path=db)
+    assert item is not None
+    return item.last_check_note or ""
+
+
+def test_a_find_triage_turns_down_during_the_check_is_not_told(
+    db: Path, install_fake_source, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Triage can finish before the check writes its note: the note reads
+    what triage recorded, so a turned-down find is not "Told you"."""
+    outcomes = iter([("not material", None), ("", 7)])
+
+    def on_event(_event: Any, finish: Any) -> None:
+        finish(*next(outcomes))
+
+    wl_id = _two_finds_scan(db, install_fake_source, monkeypatch, on_event)
+    assert _note(db, wl_id) == "Told you: Second incident."
+
+
+def test_a_late_triage_rewrites_the_note_from_every_find_told(
+    db: Path, install_fake_source, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Triage finishing after the check neither leaves a stale "Told you"
+    nor replaces two finds told with one turned down."""
+    pending: list[Any] = []
+    wl_id = _two_finds_scan(db, install_fake_source, monkeypatch, lambda _e, finish: pending.append(finish))
+    assert _note(db, wl_id) == "Told you: Second incident. And 1 more."
+
+    pending[1]("", 7)  # the second became a card
+    assert _note(db, wl_id) == "Told you: Second incident. And 1 more."
+    pending[0]("not material", None)  # the first was turned down
+    assert _note(db, wl_id) == "Told you: Second incident."
+
+
+def test_a_late_triage_turning_down_everything_says_why(
+    db: Path, install_fake_source, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pending: list[Any] = []
+    wl_id = _two_finds_scan(db, install_fake_source, monkeypatch, lambda _e, finish: pending.append(finish))
+    pending[0]("not material", None)
+    assert _note(db, wl_id) == "Told you: Second incident."
+    pending[1]("rate_limited", None)
+    assert _note(db, wl_id) == (
+        "Noticed: Second incident. It couldn't be checked this time, so it is only noted here."
+    )
