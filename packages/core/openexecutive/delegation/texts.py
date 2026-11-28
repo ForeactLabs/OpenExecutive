@@ -625,19 +625,20 @@ def _tell_on_card(send: Send, *, db_path: Path | None = None) -> None:
 
 def queue_send(
     person_id: int, text: str, *, conversation_id: str | None = None, to_number: str = "",
-    db_path: Path | None = None,
+    asked_in: str | None = None, db_path: Path | None = None,
 ) -> Send:
     """A text for their browser to send: in one of their conversations, or to
-    a number (a new conversation)."""
+    a number (a new conversation). ``asked_in`` is the chat whose person asked
+    for it, when one did (``errand_sent``)."""
     if not conversation_id and not digits(to_number):
         raise ValueError("a send needs a conversation or a number")
     with _connect(db_path) as conn:
         cur = conn.execute(
-            f"INSERT INTO {TEXT_SENDS_TABLE} (person_id, conversation_id, to_number, text, status, created_at) "
-            "VALUES (?,?,?,?,?,?)",
+            f"INSERT INTO {TEXT_SENDS_TABLE} "
+            "(person_id, conversation_id, to_number, text, status, created_at, asked_in) VALUES (?,?,?,?,?,?,?)",
             (
                 person_id, conversation_id or None, "" if conversation_id else _clip(to_number, 40),
-                _clip(text, MAX_SEND), PENDING, _iso(_now()),
+                _clip(text, MAX_SEND), PENDING, _iso(_now()), asked_in or None,
             ),
         )
         row = conn.execute(f"SELECT * FROM {TEXT_SENDS_TABLE} WHERE id=?", (cur.lastrowid,)).fetchone()
@@ -781,8 +782,8 @@ ERRAND_REPLY_WITHIN = timedelta(days=1)
 def errand_sent(conversation_id: str, before: str, *, db_path: Path | None = None) -> bool:
     """Whether texts arriving at ``before`` (an ISO time) are the first answer
     to a text the Executive sent in this conversation because the person
-    asked for it in a chat (a send told back to a chat, not a reply a texts
-    turn made on its own), within ``ERRAND_REPLY_WITHIN``. Only the first
+    asked for it in a chat (``asked_in``, however fast it went; never a reply
+    a texts turn or an approved card sent), within ``ERRAND_REPLY_WITHIN``. Only the first
     texts back count: one that came in between already answered it, and a
     later text in the conversation is just a text. Never raises."""
     try:
@@ -791,9 +792,9 @@ def errand_sent(conversation_id: str, before: str, *, db_path: Path | None = Non
         with _connect(db_path) as conn:
             row = conn.execute(
                 f"SELECT created_at FROM {TEXT_SENDS_TABLE} WHERE conversation_id=? AND status=? "  # noqa: S608
-                "AND tell_session IS NOT NULL AND tell_session != ? AND created_at >= ? AND created_at <= ? "
+                "AND asked_in IS NOT NULL AND created_at >= ? AND created_at <= ? "
                 "ORDER BY created_at DESC LIMIT 1",
-                (conversation_id, SENT, TELL_ON_CARD, since, before),
+                (conversation_id, SENT, since, before),
             ).fetchone()
             if row is None:
                 return False

@@ -1358,3 +1358,37 @@ def test_a_new_numbers_echo_moves_its_send_into_that_conversation(ids: dict[str,
     (thread,) = tx.threads(owner)
     assert thread.status == "sent" and not thread.id.startswith("send-")
     assert [(t.text, t.outgoing) for t in thread.texts] == [("Hi, it's Olivia", True)]
+
+
+def test_a_text_a_chat_asked_for_is_an_errand_however_fast_it_went(
+    ids: dict[str, int], as_turn_for: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("a")])
+    (conv,) = tx.conversations(owner)
+    tx._asked[owner] = 1e18  # Chrome is open
+
+    async def browser_sends(send_id: int) -> Any:
+        taken = tx.take_send(owner)
+        assert taken is not None
+        return tx.settle_send(owner, taken[0].id, status=tx.SENT)
+
+    monkeypatch.setattr(text_tools, "_settled", browser_sends)
+    later = tx._iso(datetime.now(UTC) + timedelta(minutes=5))
+    # A texts turn's own reply (unattended) is not an errand.
+    as_turn_for(owner, "texts-turn")
+    out = json.loads(asyncio.run(text_tools.handle_send_text({"conversation_id": conv.id, "text": "Sure."})))
+    assert out["status"] == "sent"
+    assert tx.errand_sent(conv.id, later) is False
+    # The person asks in their web chat; the browser sends it at once.
+    token = current_session.set(Session(
+        session_id="web-1", from_web_chat=True, caller_person_id=owner, web_caller_signed_in=True,
+    ))
+    try:
+        out = json.loads(asyncio.run(text_tools.handle_send_text({"conversation_id": conv.id, "text": "Home for dinner?"})))
+    finally:
+        current_session.reset(token)
+    assert out["status"] == "sent"
+    assert tx.get_send(out["send_id"]).tell_session is None
+    assert tx.errand_sent(conv.id, later) is True

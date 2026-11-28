@@ -264,28 +264,28 @@ def test_heard_notes_follow_the_persons_switches(roster: SimpleNamespace, model:
 # --------------------------------------------------------------------------- #
 
 
-def _send(person_id: int, conversation_id: str, *, tell: str | None, status: str, at: datetime) -> None:
-    send = tx.queue_send(person_id, "Home for dinner?", conversation_id=conversation_id)
+def _send(person_id: int, conversation_id: str, *, asked_in: str | None, status: str, at: datetime) -> None:
+    send = tx.queue_send(person_id, "Home for dinner?", conversation_id=conversation_id, asked_in=asked_in)
     with tx._connect() as conn:
         conn.execute(
-            f"UPDATE {tx.TEXT_SENDS_TABLE} SET status=?, tell_session=?, created_at=? WHERE id=?",  # noqa: S608
-            (status, tell, tx._iso(at), send.id),
+            f"UPDATE {tx.TEXT_SENDS_TABLE} SET status=?, created_at=? WHERE id=?",  # noqa: S608
+            (status, tx._iso(at), send.id),
         )
 
 
 def test_errand_sent_is_a_chat_asked_text_from_the_last_day(roster: SimpleNamespace) -> None:
     reply_at = tx._iso(WHEN)
     assert tx.errand_sent("conv-1", reply_at) is False
-    # A reply the texts turn sent on its own is not an errand.
-    _send(roster.principal, "conv-1", tell=tx.TELL_ON_CARD, status=tx.SENT, at=WHEN - timedelta(hours=1))
+    # A reply a texts turn or an approved card sent is not an errand.
+    _send(roster.principal, "conv-1", asked_in=None, status=tx.SENT, at=WHEN - timedelta(hours=1))
     assert tx.errand_sent("conv-1", reply_at) is False
     # One a chat asked for that never went is not either.
-    _send(roster.principal, "conv-1", tell="web-1", status=tx.FAILED, at=WHEN - timedelta(hours=1))
+    _send(roster.principal, "conv-1", asked_in="web-1", status=tx.FAILED, at=WHEN - timedelta(hours=1))
     assert tx.errand_sent("conv-1", reply_at) is False
     # Two days ago is too long ago.
-    _send(roster.principal, "conv-1", tell="web-1", status=tx.SENT, at=WHEN - timedelta(days=2))
+    _send(roster.principal, "conv-1", asked_in="web-1", status=tx.SENT, at=WHEN - timedelta(days=2))
     assert tx.errand_sent("conv-1", reply_at) is False
-    _send(roster.principal, "conv-1", tell="web-1", status=tx.SENT, at=WHEN - timedelta(hours=1))
+    _send(roster.principal, "conv-1", asked_in="web-1", status=tx.SENT, at=WHEN - timedelta(hours=1))
     assert tx.errand_sent("conv-1", reply_at) is True
     assert tx.errand_sent("conv-2", reply_at) is False
     # Once they answered, a later text in the conversation is just a text.
@@ -316,7 +316,7 @@ def test_a_reply_to_an_errand_text_is_noted(roster: SimpleNamespace, monkeypatch
     ]
     asyncio.run(texts_watch._note_answer(roster.principal, conv, new))
     assert seen == []
-    _send(roster.principal, "conv-1", tell="web-1", status=tx.SENT, at=WHEN - timedelta(minutes=30))
+    _send(roster.principal, "conv-1", asked_in="web-1", status=tx.SENT, at=WHEN - timedelta(minutes=30))
     asyncio.run(texts_watch._note_answer(roster.principal, conv, new))
     [call] = seen
     assert call["person_id"] == roster.principal and call["words"] == "Yes!\nHome by 6"
