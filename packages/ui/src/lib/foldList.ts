@@ -37,7 +37,7 @@ export type DayKey = "today" | "yesterday" | "week" | "earlier";
 const DAY_LABEL: Record<DayKey, string> = {
   today: "Today",
   yesterday: "Yesterday",
-  week: "Earlier this week",
+  week: "Previous 7 days",
   earlier: "Earlier",
 };
 const DAY_ORDER: DayKey[] = ["today", "yesterday", "week", "earlier"];

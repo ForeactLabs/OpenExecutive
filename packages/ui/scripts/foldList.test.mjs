@@ -21,7 +21,7 @@ test("what needs you comes out first; the rest group by day, newest first, empty
   const items = [e("a", "Ann", 3), e("b", "Bo", 0), e("c", "Cy", 0, { needs: true }), e("d", "Di", 20), e("f", "Ann", 0)];
   const { needs, groups } = foldGroups(items, "day", NOW);
   assert.deepEqual(needs.map((i) => i.id), ["c"]);
-  assert.deepEqual(groups.map((g) => g.label), ["Today", "Earlier this week", "Earlier"]);
+  assert.deepEqual(groups.map((g) => g.label), ["Today", "Previous 7 days", "Earlier"]);
   assert.deepEqual(groups[0].items.map((i) => i.id).sort(), ["b", "f"]);
 });
 
