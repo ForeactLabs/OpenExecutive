@@ -188,7 +188,8 @@ def forget(person_id: int, *, db_path: Path | None = None) -> None:
 
 def tidy(*, db_path: Path | None = None) -> None:
     """At start: drop what is past ``KEEP_DAYS``, and everything kept while
-    the install has texts off (each person's switch row stays)."""
+    the install has texts off (each person's switch row stays). A send
+    marked unsure whose words came back is sent."""
     with _connect(db_path) as conn:
         if not available():
             for table in (TEXTS_TABLE, TEXT_CONVERSATIONS_TABLE, TEXT_SENDS_TABLE):
@@ -196,6 +197,15 @@ def tidy(*, db_path: Path | None = None) -> None:
             return
         _prune(conn, None)
         _drop_codes(conn)
+        # One the browser wasn't sure of whose words came back went after all
+        # (``record``), including one settled before that was looked at.
+        went = [int(r["id"]) for r in conn.execute(
+            f"SELECT id FROM {TEXT_SENDS_TABLE} WHERE status=? AND echoed=1", (UNSURE,),
+        ).fetchall()]
+        for send_id in went:
+            conn.execute(f"UPDATE {TEXT_SENDS_TABLE} SET status=?, error='' WHERE id=?", (SENT, send_id))
+    for send_id in went:
+        _went_after_all(send_id, db_path)
     expire_all(db_path=db_path)
 
 

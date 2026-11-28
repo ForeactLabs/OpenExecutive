@@ -1437,3 +1437,18 @@ def test_a_send_to_a_number_with_a_conversation_counts_as_its(ids: dict[str, int
     tx.queue_send(owner, "Still on?", to_number="+1 407 555 0111")
     (thread,) = tx.threads(owner)
     assert thread.status == "sending"
+
+
+def test_an_unsure_send_that_came_back_before_this_is_sent_at_start(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("a", text="Lunch?")])
+    (conv,) = tx.conversations(owner)
+    send = tx.queue_send(owner, "Sounds good", conversation_id=conv.id)
+    tx.take_send(owner)
+    tx.settle_send(owner, send.id, status=tx.UNSURE)
+    # Kept by an earlier version: unsure, though its words came back.
+    with tx._connect() as conn:
+        conn.execute(f"UPDATE {tx.TEXT_SENDS_TABLE} SET echoed=1 WHERE id=?", (send.id,))
+    tx.tidy()
+    assert tx.get_send(send.id).status == tx.SENT
