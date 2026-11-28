@@ -2151,6 +2151,67 @@ def test_what_came_of_a_step() -> None:
     assert ttl.how_line("create_calendar_event") == "On the calendar"
 
 
+def test_done_for_you_never_shows_words_meant_for_the_executive() -> None:
+    """A result's message can tell the Executive what to say next: Done for
+    you keeps only what happened, and a tool's own "done" line wins."""
+    calling = json.dumps({"message": "Calling Dana now. Say the call is under way, never how it went."})
+    assert ttl.outcome_of("place_call", {}, calling) == "Calling Dana now."
+    told = json.dumps({"message": "Nothing was raised. Ask them in your reply instead."})
+    assert ttl.outcome_of("create_alert", {}, told) == "Nothing was raised."
+    assert ttl.outcome_of("create_alert", {}, json.dumps({"message": "Say it is on its way."})) == ""
+    # Words that only describe what happened stay.
+    tracked = json.dumps({"message": "Dana's reply is now tracked. Saved the note \"never discount\"."})
+    assert ttl.outcome_of("create_open_loop_x", {}, tracked) == "Dana's reply is now tracked. Saved the note \"never discount\"."
+    both = json.dumps({"done": "Called Dana", "message": "Calling Dana now. Say the call is under way."})
+    assert ttl.outcome_of("place_call", {}, both) == "Called Dana"
+
+
+def test_a_step_that_ends_later_says_so_on_its_row(monkeypatch: pytest.MonkeyPatch) -> None:
+    tied: list[tuple[str, int]] = []
+    monkeypatch.setitem(ttl.TIE_LATER, "place_call", lambda text, log_id: tied.append((text, log_id)))
+    log_id = ttl.record(scope=ttl.SCOPE_EXECUTIVE, source="chat", tool="place_call",
+                        summary="Call Dana", status="done", outcome="Calling Dana")
+    assert log_id is not None
+    ttl._tie_later("place_call", '{"call": "abc"}', log_id)
+    ttl._tie_later("other_tool", "{}", log_id)
+    assert tied == [('{"call": "abc"}', log_id)]
+    ttl.set_outcome(log_id, "Talked 2 min. Dana moved the review to Tuesday.")
+    with ttl._connect() as conn:
+        row = conn.execute(f"SELECT outcome FROM {ttl.LOG_TABLE} WHERE id = ?", (log_id,)).fetchone()
+    assert row["outcome"] == "Talked 2 min. Dana moved the review to Tuesday."
+
+
+def _tied_on_its_way(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    tied: list[str] = []
+    monkeypatch.setitem(ttl.TIE_LATER, "place_call", lambda text, log_id: tied.append(text))
+    return tied
+
+
+@pytest.mark.parametrize(("result", "ties"), [('{"call": "abc"}', True), ('{"error": "No number"}', False)])
+def test_a_step_that_went_ties_its_row_one_that_failed_does_not(
+    owner: Any, monkeypatch: pytest.MonkeyPatch, result: str, ties: bool,
+) -> None:
+    tied = _tied_on_its_way(monkeypatch)
+    monkeypatch.setattr(ttl, "_hit", lambda *a, **k: (None, None))
+
+    async def inner(_: dict[str, Any]) -> str:
+        return result
+
+    asyncio.run(ttl._gated("place_call", inner, {"to": "+12125550142"}, source="chat", mcp=False))
+    assert tied == ([result] if ties else [])
+
+
+@pytest.mark.parametrize(("result", "ties"), [('{"call": "abc"}', True), ('{"error": "No number"}', False)])
+def test_an_approved_step_ties_its_row_only_when_it_worked(
+    owner: Any, monkeypatch: pytest.MonkeyPatch, result: str, ties: bool,
+) -> None:
+    tied = _tied_on_its_way(monkeypatch)
+    held = {"to": "+12125550142"}
+    decision_id = ttl.hold("place_call", held, ttl.Hit("money", "it's about money"), source="chat", mcp=False)
+    ttl.resolved(decision_id, "approved", payload={"tool": "place_call", "input": held, "mcp": False}, result=result)
+    assert tied == ([result] if ties else [])
+
+
 @pytest.fixture
 def watched() -> Iterator[None]:
     ttl._WATCHED.at = None

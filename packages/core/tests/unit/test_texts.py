@@ -1365,6 +1365,30 @@ def test_a_new_numbers_echo_moves_its_send_into_that_conversation(ids: dict[str,
     assert [(t.text, t.outgoing) for t in thread.texts] == [("Hi, it's Olivia", True)]
 
 
+def test_an_unsure_text_reads_on_done_for_you_as_what_happened(
+    ids: dict[str, int], as_turn_for: Any, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    as_turn_for(owner)
+    late = tx.queue_send(owner, "Running late", to_number="5550002222")
+    tx.take_send(owner)
+    _age(late.id, 3)
+    tx.take_send(owner)
+    unsure = tx.get_send(late.id)
+    assert unsure.status == tx.UNSURE
+
+    async def settled(_: int) -> Any:
+        return unsure
+
+    monkeypatch.setattr(text_tools, "_settled", settled)
+    monkeypatch.setattr(tx, "connected", lambda *_: True)
+    result = asyncio.run(text_tools.handle_send_text({"to": "5550002222", "text": "Running late"}))
+    out = json.loads(result)
+    assert out["status"] == "unsure" and "Say exactly that" in out["message"]
+    outcome = ttl.outcome_of("send_text", {}, result)
+    assert outcome == out["done"] and "Check your phone" in outcome and "Say" not in outcome
+
 def test_a_send_the_browser_wasnt_sure_of_went_once_its_words_come_back(ids: dict[str, int]) -> None:
     from openexecutive.alerts.store import list_alerts
 
