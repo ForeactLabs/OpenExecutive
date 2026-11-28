@@ -122,7 +122,7 @@ def test_one_person_cannot_take_every_lookup(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(favicon_route, "find_icon", slow)
 
     async def go() -> list[object]:
-        mine = [asyncio.ensure_future(favicon_route._icon_once("a", f"s{i}.com")) for i in range(3)]
+        mine = [asyncio.ensure_future(favicon_route._icon_once("a", f"s{i}.com")) for i in range(favicon_route._MAX_LOOKING_EACH)]
         await asyncio.sleep(0)
         out: list[object] = []
         for who in ("a", "b"):
@@ -203,3 +203,18 @@ def test_an_unchanged_icon_comes_back_as_not_modified(monkeypatch: pytest.Monkey
     first = _client().get("/favicon/papajohns.com")
     again = _client().get("/favicon/papajohns.com", headers={"If-None-Match": first.headers["etag"]})
     assert again.status_code == 304 and again.content == b""
+
+
+def test_a_dozen_new_sites_at_once_all_get_looked_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    async def find(site: str) -> tuple[bytes, str] | None:
+        await asyncio.sleep(0.01)
+        return PNG, "image/png"
+
+    monkeypatch.setattr(favicon_route, "find_icon", find)
+
+    async def go() -> list[tuple[bytes, str] | None]:
+        return list(await asyncio.gather(*(favicon_route._icon_once("a", f"s{i}.com") for i in range(10))))
+
+    assert asyncio.run(go()) == [(PNG, "image/png")] * 10

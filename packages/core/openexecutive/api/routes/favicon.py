@@ -49,8 +49,10 @@ _CACHE_MAX_BYTES = 8_000_000
 _AT_ONCE = 4
 _LOOKUP_S = 20.0
 # Lookups running or waiting for a turn, at most: in all, and per person.
-_MAX_LOOKING = 8
-_MAX_LOOKING_EACH = 3
+# Only ``_AT_ONCE`` run; the rest wait for a slot, so a timeline that opens
+# a dozen new sites gets every icon, and no one person can fill the queue.
+_MAX_LOOKING = 32
+_MAX_LOOKING_EACH = 12
 
 _cache: dict[str, tuple[bytes | None, str, float]] = {}
 _looking: dict[str, asyncio.Future[tuple[bytes, str] | None]] = {}
