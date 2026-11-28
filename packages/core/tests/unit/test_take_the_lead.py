@@ -2178,6 +2178,37 @@ def test_a_step_that_ends_later_says_so_on_its_row(monkeypatch: pytest.MonkeyPat
     assert row["outcome"] == "Talked 2 min. Dana moved the review to Tuesday."
 
 
+def _tied_on_its_way(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    tied: list[str] = []
+    monkeypatch.setitem(ttl.TIE_LATER, "place_call", lambda text, log_id: tied.append(text))
+    return tied
+
+
+@pytest.mark.parametrize(("result", "ties"), [('{"call": "abc"}', True), ('{"error": "No number"}', False)])
+def test_a_step_that_went_ties_its_row_one_that_failed_does_not(
+    owner: Any, monkeypatch: pytest.MonkeyPatch, result: str, ties: bool,
+) -> None:
+    tied = _tied_on_its_way(monkeypatch)
+    monkeypatch.setattr(ttl, "_hit", lambda *a, **k: (None, None))
+
+    async def inner(_: dict[str, Any]) -> str:
+        return result
+
+    asyncio.run(ttl._gated("place_call", inner, {"to": "+12125550142"}, source="chat", mcp=False))
+    assert tied == ([result] if ties else [])
+
+
+@pytest.mark.parametrize(("result", "ties"), [('{"call": "abc"}', True), ('{"error": "No number"}', False)])
+def test_an_approved_step_ties_its_row_only_when_it_worked(
+    owner: Any, monkeypatch: pytest.MonkeyPatch, result: str, ties: bool,
+) -> None:
+    tied = _tied_on_its_way(monkeypatch)
+    held = {"to": "+12125550142"}
+    decision_id = ttl.hold("place_call", held, ttl.Hit("money", "it's about money"), source="chat", mcp=False)
+    ttl.resolved(decision_id, "approved", payload={"tool": "place_call", "input": held, "mcp": False}, result=result)
+    assert tied == ([result] if ties else [])
+
+
 @pytest.fixture
 def watched() -> Iterator[None]:
     ttl._WATCHED.at = None
