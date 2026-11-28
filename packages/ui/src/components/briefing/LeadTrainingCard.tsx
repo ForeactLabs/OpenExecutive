@@ -223,7 +223,7 @@ export default function LeadTrainingCard({
                 )
               }
             >
-              Do it
+              {busy ? "Working on it…" : "Do it"}
             </Button>
           </div>
         </div>
