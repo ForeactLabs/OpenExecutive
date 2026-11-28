@@ -9,6 +9,42 @@ From 0.3.0 on, entries are written by release-please from the titles of the
 merged pull requests (`feat` → Added, `fix` → Fixed). The open release PR holds
 the next entry; edit it there before merging if a line needs rewording.
 
+## [0.8.1](https://github.com/ForeactLabs/OpenExecutive/compare/v0.8.0...v0.8.1) (2026-11-28)
+
+
+### Added
+
+* **briefing:** retell only what moved and send teammates a brief ([#1015](https://github.com/ForeactLabs/OpenExecutive/issues/1015)) ([375275b](https://github.com/ForeactLabs/OpenExecutive/commit/375275b3374a25e61092f99696a0c34192f8965f))
+* **browser:** connect the extension to a site set by Chrome policy ([#1027](https://github.com/ForeactLabs/OpenExecutive/issues/1027)) ([27d41f8](https://github.com/ForeactLabs/OpenExecutive/commit/27d41f846406284a6bf21882873bde83af201d5c))
+* **chat:** show what a turn did as a tappable timeline ([#1008](https://github.com/ForeactLabs/OpenExecutive/issues/1008)) ([48a4c99](https://github.com/ForeactLabs/OpenExecutive/commit/48a4c99d8b9543b5457664bae0d1aabf76c927f0))
+* **chat:** show what each timeline step touched, with a site's own icon ([#1026](https://github.com/ForeactLabs/OpenExecutive/issues/1026)) ([1114f7f](https://github.com/ForeactLabs/OpenExecutive/commit/1114f7ffe4b5f5bcc9a4b159b2bea0ea66138b67))
+* **delegation:** keep what reaches a person's inbox as Executive context ([#1007](https://github.com/ForeactLabs/OpenExecutive/issues/1007)) ([25dbe34](https://github.com/ForeactLabs/OpenExecutive/commit/25dbe34c90f16c0f927dbd529fd1c0800fab3795))
+* **monitoring:** show watch finds by how close they are to the company ([#1020](https://github.com/ForeactLabs/OpenExecutive/issues/1020)) ([39db36e](https://github.com/ForeactLabs/OpenExecutive/commit/39db36ed54c8791ed90190c303e2a5165a53a256))
+* **ui:** add the chat mic to the Home ask box ([#1016](https://github.com/ForeactLabs/OpenExecutive/issues/1016)) ([805cf80](https://github.com/ForeactLabs/OpenExecutive/commit/805cf806d8a33c87f86ad193d088ae1758c93865))
+* **ui:** draw the chat working mark in purple and mark Home's sections ([#1009](https://github.com/ForeactLabs/OpenExecutive/issues/1009)) ([3c11079](https://github.com/ForeactLabs/OpenExecutive/commit/3c1107952c781271bef1c5b2234ee4ebe60c5e96))
+* **ui:** group the main menu into sections and add a Texts page ([#1024](https://github.com/ForeactLabs/OpenExecutive/issues/1024)) ([11f3718](https://github.com/ForeactLabs/OpenExecutive/commit/11f371824f03ecf4febb37fb60b40ff48d17cd82))
+* **ui:** group the Texts page by what needs you ([#1032](https://github.com/ForeactLabs/OpenExecutive/issues/1032)) ([6387665](https://github.com/ForeactLabs/OpenExecutive/commit/6387665d1c64b79e323eb54cddee066d88c1e8d7))
+* **ui:** put Home alone at the top of the main menu ([#1031](https://github.com/ForeactLabs/OpenExecutive/issues/1031)) ([3249bb5](https://github.com/ForeactLabs/OpenExecutive/commit/3249bb5cc63bdfe5c4a69c56772632e7ee3d05cb))
+* **ui:** walk through Texts setup on the Texts page ([#1030](https://github.com/ForeactLabs/OpenExecutive/issues/1030)) ([12ee271](https://github.com/ForeactLabs/OpenExecutive/commit/12ee271be3b902657bcc4c90415ee63872fb3423))
+
+
+### Fixed
+
+* **briefing:** count a held teammate brief as told only once it is sent ([#1018](https://github.com/ForeactLabs/OpenExecutive/issues/1018)) ([2bd763a](https://github.com/ForeactLabs/OpenExecutive/commit/2bd763aacd266d333cda31358a78ce5048e9a307))
+* **chat:** show a link with an attribute list as a plain link ([#1011](https://github.com/ForeactLabs/OpenExecutive/issues/1011)) ([f7ba9c2](https://github.com/ForeactLabs/OpenExecutive/commit/f7ba9c2f49da30a76c64f3376dfd377cd5ccddea))
+* **delegation:** keep gate, door and wifi codes, and read a long text list in full ([#1017](https://github.com/ForeactLabs/OpenExecutive/issues/1017)) ([8cd4de8](https://github.com/ForeactLabs/OpenExecutive/commit/8cd4de83c513251b4bcdd08487fc779174e48679))
+* **delegation:** press Send once the page settles, read the whole text list, keep Messages grouped ([#1014](https://github.com/ForeactLabs/OpenExecutive/issues/1014)) ([ae885f9](https://github.com/ForeactLabs/OpenExecutive/commit/ae885f9ebd538aaa1d251d11498e0e2246c16f7f))
+* **delegation:** show a text in Done for you only once it went, as sent by you ([#1012](https://github.com/ForeactLabs/OpenExecutive/issues/1012)) ([ba8c86a](https://github.com/ForeactLabs/OpenExecutive/commit/ba8c86a02674f244fd7eaafa07df4d6f8fe2a202))
+* **integrations:** bring Google Messages on screen for the Send press ([#1019](https://github.com/ForeactLabs/OpenExecutive/issues/1019)) ([359e902](https://github.com/ForeactLabs/OpenExecutive/commit/359e902008f596a2e82a12a5be0812b800c60a42))
+* **integrations:** catch codes beside a home code and say "from your phone" on sent texts ([#1023](https://github.com/ForeactLabs/OpenExecutive/issues/1023)) ([42362ce](https://github.com/ForeactLabs/OpenExecutive/commit/42362ce3e5c7092f129f7697e08823e77773970a))
+* **integrations:** harden the texts press and keep home codes ([#1022](https://github.com/ForeactLabs/OpenExecutive/issues/1022)) ([45ec8b2](https://github.com/ForeactLabs/OpenExecutive/commit/45ec8b2bf734b4c6c0da108041a5dd00b3961e6b))
+* **integrations:** press Send from the front only when the words stayed in the box ([#1021](https://github.com/ForeactLabs/OpenExecutive/issues/1021)) ([508335c](https://github.com/ForeactLabs/OpenExecutive/commit/508335c923d922d43c3a27b6afd6ac7b57419d2c))
+* **monitoring:** tell a slowly growing page count and keep the check note true ([#1025](https://github.com/ForeactLabs/OpenExecutive/issues/1025)) ([2daa56e](https://github.com/ForeactLabs/OpenExecutive/commit/2daa56e7bf5274d3e832f51d626e3acc9fefb5bd))
+* **orchestrator:** keep words meant for the Executive off Done for you ([#1037](https://github.com/ForeactLabs/OpenExecutive/issues/1037)) ([ef101c1](https://github.com/ForeactLabs/OpenExecutive/commit/ef101c14e8435025d8e28e25bf216462c836fc05))
+* **texts:** show a text as sent once it comes back as theirs ([#1035](https://github.com/ForeactLabs/OpenExecutive/issues/1035)) ([a310c76](https://github.com/ForeactLabs/OpenExecutive/commit/a310c76c52bcb3ef5f4500439291aeaba48fab81))
+* **ui:** show a card's Do it is working, then done ([#1028](https://github.com/ForeactLabs/OpenExecutive/issues/1028)) ([f5e8b82](https://github.com/ForeactLabs/OpenExecutive/commit/f5e8b827a6d6438a0e9de0915936e6834a8b7a74))
+* **workflows:** name the workflow in a run's message, not "the run" ([#1029](https://github.com/ForeactLabs/OpenExecutive/issues/1029)) ([0bb1aa6](https://github.com/ForeactLabs/OpenExecutive/commit/0bb1aa6e0b20ad096aeb9db1e708e4dbc24f0645))
+
 ## [0.8.0](https://github.com/ForeactLabs/OpenExecutive/compare/v0.7.8...v0.8.0) (2026-11-26)
 
 
