@@ -39,6 +39,11 @@ def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     monkeypatch.setattr(people_store, "DB_PATH", path)
     episodic.initialize_db(path)
     people_store.initialize_db(path)
+    # Cards land in the test's own DB, never ./episodic_memory.db.
+    from openexecutive.alerts import store as alerts_store
+
+    monkeypatch.setattr(alerts_store, "DB_PATH", path)
+    alerts_store.initialize_db(path)
     for var in ("OE_LOCAL_LOGIN", "OE_PUBLIC_DEPLOYMENT", tx.ENV_OFF, tx.BROWSER_OFF):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr("openexecutive.audit.log_event", lambda *a, **k: None)
@@ -1358,3 +1363,77 @@ def test_a_new_numbers_echo_moves_its_send_into_that_conversation(ids: dict[str,
     (thread,) = tx.threads(owner)
     assert thread.status == "sent" and not thread.id.startswith("send-")
     assert [(t.text, t.outgoing) for t in thread.texts] == [("Hi, it's Olivia", True)]
+
+
+def test_a_send_the_browser_wasnt_sure_of_went_once_its_words_come_back(ids: dict[str, int]) -> None:
+    from openexecutive.alerts.store import list_alerts
+
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("a", text="Plans for mom's birthday?")])
+    (conv,) = tx.conversations(owner)
+    # The turn's line, written when its reply waited on a card.
+    tx.save_note(owner, conv.id, "I drafted a reply. It's waiting on your Approve card.")
+    with tx._connect() as conn:
+        conn.execute(f"UPDATE {tx.TEXT_CONVERSATIONS_TABLE} SET note_at=?", (tx._iso(NOW - timedelta(minutes=1)),))
+    # Approved: it goes, but the browser can't see it go.
+    send = tx.queue_send(owner, "Not sure yet", conversation_id=conv.id)
+    tx.tell_later(send.id, tx.TELL_ON_CARD)
+    tx.take_send(owner)
+    tx.settle_send(owner, send.id, status=tx.UNSURE, error="Google Messages didn't show the text as sent")
+    (thread,) = tx.threads(owner)
+    assert thread.status == tx.UNSURE and "don't know whether" in thread.note
+    assert [a.status for a in list_alerts() if a.source == tx.TEXTS_SOURCE] == ["unread"]
+    # Its words come back as theirs: it went.
+    assert tx.record(owner, [_item("b", text="You: Not sure yet")]) == []
+    assert tx.get_send(send.id).status == tx.SENT
+    (thread,) = tx.threads(owner)
+    assert thread.status == tx.SENT
+    assert thread.note == 'Texted Dana Ruiz: "Not sure yet"'
+    assert [a.status for a in list_alerts() if a.source == tx.TEXTS_SOURCE] == ["resolved"]
+
+
+def test_a_send_whose_words_came_back_first_is_sent_even_if_the_browser_isnt_sure(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("a", text="Lunch?")])
+    (conv,) = tx.conversations(owner)
+    send = tx.queue_send(owner, "Sounds good", conversation_id=conv.id)
+    tx.take_send(owner)
+    tx.record(owner, [_item("b", text="You: Sounds good")])
+    assert tx.settle_send(owner, send.id, status=tx.UNSURE).status == tx.SENT
+    # One that never came back stays unsure.
+    other = tx.queue_send(owner, "See you", conversation_id=conv.id)
+    tx.take_send(owner)
+    assert tx.settle_send(owner, other.id, status=tx.UNSURE).status == tx.UNSURE
+
+
+def test_a_line_written_after_its_send_stays(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("a", text="Lunch?")])
+    (conv,) = tx.conversations(owner)
+    send = tx.queue_send(owner, "Sounds good", conversation_id=conv.id)
+    _age(send.id, 0.1)
+    tx.settle_send(owner, send.id, status=tx.SENT)
+    tx.save_note(owner, conv.id, "Told Dana lunch sounds good.")
+    (thread,) = tx.threads(owner)
+    assert thread.note == "Told Dana lunch sounds good."
+
+
+def test_a_send_to_a_number_with_a_conversation_counts_as_its(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    # The first try didn't go and never found its conversation; the retry did.
+    failed = tx.queue_send(owner, "Hi", to_number="4075550111")
+    tx.take_send(owner)
+    tx.settle_send(owner, failed.id, status=tx.FAILED, error="moved to another conversation")
+    ok = tx.queue_send(owner, "Hi", to_number="4075550111")
+    tx.take_send(owner)
+    tx.settle_send(owner, ok.id, status=tx.SENT, conversation_key="k1")
+    (thread,) = tx.threads(owner)
+    assert thread.status == tx.SENT and not thread.id.startswith("send-")
+    # A later loose send to that number is its latest.
+    tx.queue_send(owner, "Still on?", to_number="+1 407 555 0111")
+    (thread,) = tx.threads(owner)
+    assert thread.status == "sending"
