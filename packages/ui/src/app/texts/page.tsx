@@ -257,7 +257,7 @@ export default function TextsPage() {
             {/* One card for setup, kept mounted as Texts turns on. */}
             {available ? <TextsCard setupOnly /> : null}
             {/* A failed first load still leaves the walkthrough above it. */}
-            {data === null && error ? (
+            {error && !data?.enabled ? (
               <SettingsCard>
                 <p className="text-[15px] text-rose-500">{error}</p>
               </SettingsCard>

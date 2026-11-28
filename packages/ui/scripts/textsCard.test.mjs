@@ -46,7 +46,7 @@ test("texts page: walks through setup there until Texts is ready", () => {
   assert.ok(page.includes("{available ? <TextsCard setupOnly /> : null}"));
   // A failed load shows its error without hiding the walkthrough.
   const setup = page.indexOf("<TextsCard setupOnly />");
-  assert.ok(setup > 0 && setup < page.indexOf("data === null && error ? ("));
+  assert.ok(setup > 0 && setup < page.indexOf("error && !data?.enabled ? ("));
   // A failed look at Texts isn't "off".
   assert.ok(page.includes("if (!ctrl.signal.aborted) setAvailable(true);"));
   // In setup-only mode the card goes once Texts is on and paired, whether or not Chrome is open now.
