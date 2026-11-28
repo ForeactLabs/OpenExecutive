@@ -49,9 +49,8 @@ test("texts page: walks through setup there until Texts is ready", () => {
   assert.ok(setup > 0 && setup < page.indexOf("data === null && error ? ("));
   // A failed look at Texts isn't "off".
   assert.ok(page.includes("if (!ctrl.signal.aborted) setAvailable(true);"));
-  // In setup-only mode the card goes once ready, and waits for the browser's first answer.
-  assert.ok(card.includes("if (setupOnly && (!browserLooked || ready)) return null;"));
-  assert.ok(card.includes(".catch(() => setBrowserLooked(true));"));
+  // In setup-only mode the card goes once Texts is on and paired, whether or not Chrome is open now.
+  assert.ok(card.includes("if (setupOnly && state.enabled && state.paired) return null;"));
 });
 
 test("texts in the menu: shown whenever available, so setup can be found", () => {

@@ -57,9 +57,6 @@ function Step({ done, n, title, children }: { done: boolean; n: number; title: s
 export default function TextsCard({ setupOnly = false }: { setupOnly?: boolean } = {}) {
   const [state, setState] = useState<Texts | null>(null);
   const [browser, setBrowser] = useState<BrowserStatus | null>(null);
-  // Whether the browser has answered once (or failed to), so the Texts page's
-  // walkthrough doesn't flash for someone already set up while it's asked.
-  const [browserLooked, setBrowserLooked] = useState(false);
   const [phone, setPhone] = useState<Phone>("android");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -100,9 +97,8 @@ export default function TextsCard({ setupOnly = false }: { setupOnly?: boolean }
           if (look < browserSeen) return;
           browserSeen = look;
           setBrowser(b);
-          setBrowserLooked(true);
         })
-        .catch(() => setBrowserLooked(true));
+        .catch(() => undefined);
     };
     load();
     // Setup happens in other tabs (the store, Google Messages): keep up,
@@ -154,7 +150,8 @@ export default function TextsCard({ setupOnly = false }: { setupOnly?: boolean }
 
   const extension = Boolean(browser?.connected);
   const ready = state.enabled && extension && state.paired;
-  if (setupOnly && (!browserLooked || ready)) return null;
+  // Set up is what lasts (on and paired), not whether Chrome is open right now.
+  if (setupOnly && state.enabled && state.paired) return null;
 
   return (
     <SettingsCard
