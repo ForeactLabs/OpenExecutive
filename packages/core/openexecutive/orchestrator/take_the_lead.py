@@ -3815,7 +3815,8 @@ def resolved(
         if row is not None:
             if on_device is not None:
                 _link_device(send_id, int(row["id"]))
-            _tie_later(tool, result, int(row["id"]))
+            if not result_failed(result):
+                _tie_later(tool, result, int(row["id"]))
     except Exception:
         # Whatever else failed, the step went: it never stays "waiting".
         logger.warning("take_the_lead: couldn't update what it did", exc_info=True)
