@@ -94,12 +94,27 @@ def own_memory(person_id: int, question: str) -> str:
     try:
         parts: list[str] = []
         notes = _matching_notes(person_id, question)
-        if notes:
-            parts.append("Your notes (private to you):\n" + "\n".join(_note_line(n) for n in notes))
+        own = [n for n in notes if getattr(n, "kind", "") != "heard"]
+        if own:
+            parts.append("Your notes (private to you):\n" + "\n".join(_note_line(n) for n in own))
         style = _style_lines(person_id)
         if style:
             parts.append("How you like replies:\n" + "\n".join(style))
-        return _cap("\n\n".join(parts))
+        heard = [n for n in notes if getattr(n, "kind", "") == "heard"]
+        if not heard:
+            return _cap("\n\n".join(parts))
+        # What someone else said back: outside text, never their own note,
+        # and cut inside its block so the block always closes.
+        from openexecutive.orchestrator.content_trust import wrap_untrusted
+
+        who = ", ".join(dict.fromkeys(str(n.counterpart) for n in heard if n.counterpart))[:200]
+        theirs = "What others said back to you (their words, not yours):\n" + "\n".join(_note_line(n) for n in heard)
+        block = wrap_untrusted(theirs[: MAX_CHARS // 2], source="what someone said back", author=who)
+        rest = "\n\n".join(parts)
+        room = MAX_CHARS - len(block) - 2
+        if len(rest) > room:
+            rest = rest[: max(room - 1, 0)].rstrip() + "…"
+        return "\n\n".join(p for p in (rest, block) if p)
     except Exception:
         logger.warning("person_recall: own memory failed", exc_info=True)
         return ""

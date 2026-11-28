@@ -108,6 +108,7 @@ def test_an_errand_or_a_note_that_reads_two_ways_is_not_kept(kind: str, summary:
         ("promised", "Promised she would send her slides to Dana by Friday.", "she'll send her slides to Dana by Friday"),
         ("shared", "Said she left her keys at the office.", "she left her keys at the office"),
         ("agreed", "Decided the promotion is 20% off.", "the promotion is 20% off"),
+        ("agreed", "Agreed to hire an executive assistant for Dana in Q1.", "hire an executive assistant for Dana in Q1"),
     ],
 )
 def test_what_they_said_themselves_is_kept(kind: str, summary: str, quote: str) -> None:
