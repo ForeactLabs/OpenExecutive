@@ -76,6 +76,9 @@ DEFAULT_RETENTION_DAYS = 90
 RETENTION_CHOICES: tuple[int | None, ...] = (30, 90, 365, None)
 
 KINDS: tuple[str, ...] = ("promised", "agreed", "declined", "answered", "asked", "shared", "heard")
+# What a person's own words can be. ``heard`` is someone else's, written only
+# by ``memory.history_heard``.
+OWN_KINDS: tuple[str, ...] = tuple(k for k in KINDS if k != "heard")
 TRUST_LEVELS: tuple[str, ...] = ("high", "medium", "low")
 SOURCE_APPROVED_REPLY = "approved_reply"
 SOURCE_CHAT_MESSAGE = "chat_message"

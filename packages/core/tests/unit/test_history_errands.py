@@ -131,6 +131,15 @@ def test_the_prompt_says_an_errand_is_not_a_note() -> None:
     assert "they themselves asked" in prompt
 
 
+def test_their_own_words_never_make_a_heard_note(roster: SimpleNamespace, model: dict[str, Any]) -> None:
+    model["notes"] = [{"kind": "heard", "summary": "Heard from JR he'll be home at 6.", "quote": "JR said he'll be home at 6"}]
+    assert _chat(roster.principal, "Just so you know, JR said he'll be home at 6 tonight.") == []
+    assert hn.check_note(
+        {"kind": "heard", "summary": "Said JR is home at 6.", "quote": "JR said he'll be home at 6"},
+        body="JR said he'll be home at 6", allowed="JR said he'll be home at 6",
+    ) is None
+
+
 # --------------------------------------------------------------------------- #
 # The same note twice
 # --------------------------------------------------------------------------- #

@@ -91,7 +91,7 @@ async def take_heard_note(
     raw = raw_notes[0]
     if not isinstance(raw, dict) or raw.get("kind") != HEARD:
         return []
-    note = check_note(raw, body=theirs, allowed="\n".join([theirs, name, _RETOLD]))
+    note = check_note(raw, body=theirs, allowed="\n".join([theirs, name, _RETOLD]), kinds=(HEARD,))
     if note is None:
         logger.info("history: dropped a reply note that failed a check")
         return []
