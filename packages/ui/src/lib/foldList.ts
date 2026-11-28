@@ -66,8 +66,11 @@ export function matches(entry: FoldEntry, query: string): boolean {
   if (!words.length) return true;
   const hay = [entry.who, entry.person, entry.gist, entry.tag, entry.words].filter(Boolean).join(" ").toLowerCase();
   // A phone number matches however it is typed: 407-864-4111, (407) 864 or 4078644111.
-  const digits = hay.replace(/\D/g, "");
-  return words.every((w) => hay.includes(w) || (/^[\d()+.-]+$/.test(w) && /\d/.test(w) && digits.includes(w.replace(/\D/g, ""))));
+  // Each run of digits and phone punctuation is one number; words or letters
+  // between numbers keep them apart.
+  const numbers = (hay.match(/[\d()+.\- ]*\d[\d()+.\- ]*/g) ?? []).map((n) => n.replace(/\D/g, ""));
+  const asNumber = (w: string) => /^[\d()+.-]+$/.test(w) && /\d/.test(w) && numbers.some((n) => n.includes(w.replace(/\D/g, "")));
+  return words.every((w) => hay.includes(w) || asNumber(w));
 }
 
 function newestFirst<T extends FoldEntry>(items: T[]): T[] {

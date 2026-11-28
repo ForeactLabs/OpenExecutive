@@ -69,4 +69,9 @@ test("a phone number matches however it is typed", () => {
   const item = e("a", "Dana", 0, { words: "(407) 864-4111" });
   for (const q of ["4078644111", "407-864-4111", "(407) 864", "864-4111"]) assert.equal(matches(item, q), true, q);
   assert.equal(matches(item, "555-0000"), false);
+  // Digits from different parts don't run together.
+  const texts = e("b", "Dana", 0, { words: "(407) 864-4111 see you at 5 · Order 123 and gate 456" });
+  assert.equal(matches(texts, "1115"), false);
+  assert.equal(matches(texts, "123456"), false);
+  assert.equal(matches(texts, "864-4111"), true);
 });
