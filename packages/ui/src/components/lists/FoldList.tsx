@@ -86,7 +86,7 @@ function Row<T extends FoldEntry>({
         className="w-full flex flex-wrap sm:flex-nowrap items-center gap-x-2.5 gap-y-0.5 px-4 py-2.5 min-h-[44px] text-left hover:bg-surface-overlay transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/50"
       >
         <span className={`flex-shrink-0 h-2 w-2 rounded-full ${DOT[item.tone]}`} aria-hidden="true" />
-        <span className="min-w-0 max-w-[70%] sm:max-w-[35%] truncate text-[15px] font-semibold text-fg">{lead}</span>
+        <span className="flex-shrink-0 max-w-[70%] sm:max-w-[35%] truncate text-[15px] font-semibold text-fg">{lead}</span>
         <span className="order-last sm:order-none basis-full sm:basis-auto pl-[18px] sm:pl-0 flex-1 min-w-0 truncate text-sm text-fg-muted">
           {item.gist}
         </span>
