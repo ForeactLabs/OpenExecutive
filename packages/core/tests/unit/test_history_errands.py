@@ -264,12 +264,15 @@ def test_heard_notes_follow_the_persons_switches(roster: SimpleNamespace, model:
 # --------------------------------------------------------------------------- #
 
 
-def _send(person_id: int, conversation_id: str, *, asked_in: str | None, status: str, at: datetime) -> None:
+def _send(
+    person_id: int, conversation_id: str, *, asked_in: str | None, status: str, at: datetime,
+    queued: timedelta | None = None,
+) -> None:
     send = tx.queue_send(person_id, "Home for dinner?", conversation_id=conversation_id, asked_in=asked_in)
     with tx._connect() as conn:
         conn.execute(
-            f"UPDATE {tx.TEXT_SENDS_TABLE} SET status=?, created_at=? WHERE id=?",  # noqa: S608
-            (status, tx._iso(at), send.id),
+            f"UPDATE {tx.TEXT_SENDS_TABLE} SET status=?, created_at=?, done_at=? WHERE id=?",  # noqa: S608
+            (status, tx._iso(at - (queued or timedelta(0))), tx._iso(at), send.id),
         )
 
 
@@ -297,6 +300,16 @@ def test_errand_sent_is_a_chat_asked_text_from_the_last_day(roster: SimpleNamesp
         )
     assert tx.errand_sent("conv-1", reply_at) is True
     assert tx.errand_sent("conv-1", tx._iso(WHEN + timedelta(hours=15))) is False
+
+
+def test_a_text_from_before_the_errand_went_is_no_answer(roster: SimpleNamespace) -> None:
+    # Queued at 10:00 with Chrome closed; it went at 10:40.
+    went = WHEN
+    _send(roster.principal, "conv-9", asked_in="web-1", status=tx.SENT, at=went, queued=timedelta(minutes=40))
+    # A text JR sent at 10:20, synced in the same pass, isn't his answer...
+    assert tx.errand_sent("conv-9", tx._iso(went - timedelta(minutes=20))) is False
+    # ...but one after it went is.
+    assert tx.errand_sent("conv-9", tx._iso(went + timedelta(minutes=5))) is True
 
 
 def test_a_reply_to_an_errand_text_is_noted(roster: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:

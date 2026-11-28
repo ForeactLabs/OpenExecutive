@@ -791,16 +791,19 @@ def errand_sent(conversation_id: str, before: str, *, db_path: Path | None = Non
         since = _iso(until - ERRAND_REPLY_WITHIN)
         with _connect(db_path) as conn:
             row = conn.execute(
-                f"SELECT created_at FROM {TEXT_SENDS_TABLE} WHERE conversation_id=? AND status=? "  # noqa: S608
-                "AND asked_in IS NOT NULL AND created_at >= ? AND created_at <= ? "
-                "ORDER BY created_at DESC LIMIT 1",
+                # When it went, not when it was queued: a send can wait for
+                # the browser, and a text that came in before it went is no answer.
+                f"SELECT COALESCE(done_at, created_at) AS went FROM {TEXT_SENDS_TABLE} "  # noqa: S608
+                "WHERE conversation_id=? AND status=? AND asked_in IS NOT NULL "
+                "AND COALESCE(done_at, created_at) >= ? AND COALESCE(done_at, created_at) <= ? "
+                "ORDER BY went DESC LIMIT 1",
                 (conversation_id, SENT, since, before),
             ).fetchone()
             if row is None:
                 return False
             answered = conn.execute(
                 f"SELECT 1 FROM {TEXTS_TABLE} WHERE conversation_id=? AND outgoing=0 AND at > ? AND at < ? LIMIT 1",  # noqa: S608
-                (conversation_id, row["created_at"], before),
+                (conversation_id, row["went"], before),
             ).fetchone()
         return answered is None
     except Exception:
