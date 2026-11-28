@@ -15,7 +15,7 @@ import re
 # 4155551234) and never a year (2026).
 _NUMBER = r"(?<!\d)(?<!\d-)(?!(?:19|20)\d\d(?![\d-]))(?:\d{4,8}|\d{3}[- ]\d{3}|(?:\d ){3,7}\d)(?![\d-])"
 # A code word, not a zip, area, postal, dress, promo or discount code, and
-# not a gate, door, garage, alarm, lockbox or wifi one, which people text
+# not a gate, door, garage, alarm or lockbox one (only a Wi-Fi password, never a Wi-Fi code), which people text
 # each other and ask about later ("what's the gate code Sam sent?").
 _CODE_WORD = (
     r"(?<!zip )(?<!area )(?<!postal )(?<!dress )(?<!promo )(?<!discount )"
@@ -24,7 +24,7 @@ _CODE_WORD = (
 )
 # The code close to its word, either way round: "code is 482913", "PIN: 4821",
 # "482913 is your Bank of America code" (a number naming a place, never). A
-# gate, door or wifi code is left
+# gate or door code is left
 # out by its word (``_CODE_WORD``), so "Suite 1200, the door code is on the
 # sign" isn't one.
 # A number that names a place (apt 1402, suite 1200, room 12, #305) is not
@@ -43,7 +43,7 @@ _SIGN_IN_LINK = re.compile(
     r"tap to (?:sign|log) in|trying to sign in)\b",
     re.IGNORECASE,
 )
-# A gate, door, garage, alarm, lockbox or wifi code, however it is worded,
+# A gate, door, garage, alarm, lockbox code, or a Wi-Fi password,
 # is something people text each other and ask about later: never dropped.
 # The place word must belong to the code ("The gate entry code is 4821",
 # "The code for the gate is 4821", "Wifi: HomeNet, password 84219375",

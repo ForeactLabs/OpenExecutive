@@ -53,7 +53,7 @@
   const NOT_A_PLACE = "(?<!apt )(?<!apt\\. )(?<!apartment )(?<!suite )(?<!ste )(?<!room )(?<!rm )(?<!unit )(?<!floor )(?<!building )(?<!bldg )(?<!lot )(?<!box )(?<!#)(?<!no\\. )";
   const CODE_NEAR = new RegExp(CODE_WORD + "[^\\d\\n]{0,25}" + NUMBER + "|" + NOT_A_PLACE + NUMBER + "[^\\d\\n]{0,40}" + CODE_WORD, "i");
   const SIGN_IN_LINK = /\b(magic link|sign[- ]?in link|log[- ]?in link|is this you signing in|approve (?:this |the )?sign[- ]?in|tap to (?:sign|log) in|trying to sign in)\b/i;
-  // A gate, door or wifi code is kept, but only when the place word belongs
+  // A gate or door code, or a Wi-Fi password, is kept, but only when the place word belongs
   // to the code ("The code for the gate is 4821", "Enter 4821 at the gate").
   const PLACE = "(?:gates?|doors?|garage|alarm|lock ?box|keypad|building|lobby)";
   // The home code's own number, a few words on in the same clause (never
@@ -84,7 +84,7 @@
   T.isSignInCode = function (text) {
     let s = String(text || "");
     if (SIGN_IN_LINK.test(s)) return true;
-    // A gate, door or wifi code is left out, and only it: "Your code is
+    // A gate or door code, or a Wi-Fi password, is left out, and only it: "Your code is
     // 482913. Building code is 4821" still has a sign-in code in it.
     if (!SIGN_IN_WORD.test(s)) s = s.replace(HOME_CODE, " ");
     return ENTER_CODE.test(s) || CODE_NEAR.test(s);
