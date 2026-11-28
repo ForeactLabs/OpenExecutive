@@ -8,11 +8,13 @@ import TextsCard from "@/components/delegate/TextsCard";
 import SettingsCard from "@/components/settings/SettingsCard";
 import { PageSpinner } from "@/components/ui/Spinner";
 import { getTexts, getTextThreads, TEXTS_CHANGED_EVENT, type TextThread, type TextThreads } from "@/lib/api";
+import { textGroups, type TextGroup } from "@/lib/textGroups";
 import { remember, STORAGE_KEYS } from "@/lib/firstRun";
 
 // Texts: the person's own texts the Executive read and sent for them,
-// through Google Messages in their browser (delegation/texts.py). Each
-// conversation, latest first: who, how its latest text from them went, the
+// through Google Messages in their browser (delegation/texts.py). Grouped
+// (lib/textGroups.ts): Needs a look, Texted for you, then Just read folded
+// behind its count. Each conversation, latest first: who, how its latest text from them went, the
 // Executive's own line on what it did, and what was said. Nobody else's
 // texts show here. "Text someone" hands the ask to the Executive in a new
 // chat, as if typed there, so Approvals decide like any other send. The menu
@@ -24,8 +26,6 @@ const MAX_WORDS = 1600;
 const MAX_WHO = 120;
 // Where Texts is set later, with the rest of what the Executive does as you.
 const SETTINGS_HREF = "/delegate#as-you";
-
-type Filter = "all" | "texted" | "read";
 
 const STATUS: Record<TextThread["status"], { words: string; tone: string }> = {
   sent: { words: "Sent as you", tone: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" },
@@ -143,10 +143,48 @@ function ThreadItem({ thread }: { thread: TextThread }) {
   );
 }
 
+function GroupSection({ group }: { group: TextGroup }) {
+  const [more, setMore] = useState(false);
+  const shown = more ? group.threads : group.threads.slice(0, group.shownAtFirst);
+  const hidden = group.threads.length - shown.length;
+  const id = `texts-${group.key}`;
+  return (
+    <section aria-labelledby={id} className="rounded-2xl border border-line bg-surface-elevated overflow-hidden">
+      <h2
+        id={id}
+        className="flex items-center justify-between bg-surface px-5 py-2.5 text-xs font-semibold uppercase tracking-wide text-fg-muted"
+      >
+        <span>{group.title}</span>
+        <span className="font-medium normal-case tracking-normal">{group.threads.length}</span>
+      </h2>
+      {shown.length > 0 ? (
+        <ul className="divide-y divide-line border-t border-line">
+          {shown.map((t) => (
+            <ThreadItem key={t.id} thread={t} />
+          ))}
+        </ul>
+      ) : null}
+      {hidden > 0 || more ? (
+        <button
+          type="button"
+          onClick={() => setMore((v) => !v)}
+          aria-expanded={more}
+          className="block w-full border-t border-line px-5 py-3 text-left text-sm font-medium text-accent hover:underline"
+        >
+          {more
+            ? "Show less"
+            : shown.length === 0
+              ? `Show ${hidden} ${hidden === 1 ? "conversation" : "conversations"}`
+              : `Show ${hidden} more`}
+        </button>
+      ) : null}
+    </section>
+  );
+}
+
 export default function TextsPage() {
   const [data, setData] = useState<TextThreads | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<Filter>("all");
   // Whether this company has Texts at all (an admin's switch), so the page
   // walks the person through setup only where there is something to set up.
   const [available, setAvailable] = useState<boolean | undefined>(undefined);
@@ -192,22 +230,7 @@ export default function TextsPage() {
   }, [flips]);
 
   const all = data?.conversations ?? [];
-  const shown = all.filter((t) =>
-    filter === "all" ? true : filter === "read" ? t.status === "read" : t.status !== "read",
-  );
-  const chip = (key: Filter, label: string) => (
-    <button
-      key={key}
-      type="button"
-      onClick={() => setFilter(key)}
-      aria-pressed={filter === key}
-      className={`rounded-full border px-3 py-1 text-sm ${
-        filter === key ? "border-fg bg-fg text-fg-inverse" : "border-line text-fg-muted hover:text-fg"
-      }`}
-    >
-      {label}
-    </button>
-  );
+  const groups = textGroups(all);
 
   return (
     <main className="flex-1 min-w-0 min-h-0 overflow-y-auto">
@@ -216,7 +239,7 @@ export default function TextsPage() {
           <h1 className="text-2xl sm:text-3xl tracking-tight font-semibold">Texts</h1>
           <p className="mt-1 text-[15px] text-fg-muted">
             Texts your Executive read and sent for you from your own number, through Google Messages in Chrome.
-            Only you see them. Change how it works in{" "}
+            Only you see them, and they&apos;re kept for 30 days. Change how it works in{" "}
             <Link href={SETTINGS_HREF} className="text-accent hover:underline">
               Delegate → As you
             </Link>
@@ -242,26 +265,15 @@ export default function TextsPage() {
             {data?.enabled ? (
               <>
                 <TextSomeone />
-                <div className="flex flex-wrap gap-2">
-                  {chip("all", "All")}
-                  {chip("texted", "Texted for you")}
-                  {chip("read", "Read for you")}
-                </div>
                 {error ? <p className="text-sm text-rose-500">{error}</p> : null}
-                {shown.length === 0 ? (
+                {all.length === 0 ? (
                   <SettingsCard>
                     <p className="text-[15px] text-fg-muted">
-                      {all.length === 0
-                        ? "No texts yet. New ones show here as they come in on your phone, with what the Executive did about each."
-                        : "Nothing here for this filter."}
+                      No texts yet. New ones show here as they come in on your phone, with what the Executive did about each.
                     </p>
                   </SettingsCard>
                 ) : (
-                  <ul className="rounded-2xl border border-line bg-surface-elevated divide-y divide-line">
-                    {shown.map((t) => (
-                      <ThreadItem key={t.id} thread={t} />
-                    ))}
-                  </ul>
+                  groups.map((g) => <GroupSection key={g.key} group={g} />)
                 )}
               </>
             ) : null}

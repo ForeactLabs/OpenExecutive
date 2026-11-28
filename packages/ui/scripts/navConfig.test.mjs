@@ -41,15 +41,16 @@ test("Texts shows under Chats only while it is on for this person", () => {
   assert.ok(!links(buildDestinations()).includes("Texts → /texts"));
 });
 
-test("the sidebar groups the menu under Talk, Get things done and Your company", () => {
+test("the sidebar puts Home on top, then Talk, Get things done and Your company", () => {
   const groups = (opts) =>
     groupBySection(buildDestinations(opts)).map((g) => [g.label, g.items.map((d) => d.label)]);
   assert.deepEqual(groups({ textsEnabled: true }), [
+    ["", ["Home"]],
     ["Talk", ["Chats", "Texts"]],
-    ["Get things done", ["Home", "Work", "Delegate"]],
+    ["Get things done", ["Work", "Delegate"]],
     ["Your company", ["Company", "Knowledge", "Memory"]],
   ]);
-  assert.deepEqual(groups({ mode: "solo" })[2], ["Your company", ["You", "Knowledge", "Memory"]]);
+  assert.deepEqual(groups({ mode: "solo" })[3], ["Your company", ["You", "Knowledge", "Memory"]]);
   // Every entry lands under exactly one heading.
   const all = buildDestinations({ textsEnabled: true });
   assert.equal(groupBySection(all).flatMap((g) => g.items).length, all.length);

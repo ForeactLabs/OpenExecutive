@@ -13,6 +13,11 @@ import { buttonClass } from "@/components/ui/Button";
 
 import { SayBox, Turns } from "./CardTalk";
 
+// The key Skip runs under (an option's key is its label).
+const SKIP = "\u0000skip";
+// How long "Done" shows on the button before the card goes.
+const DONE_SHOWN_MS = 1200;
+
 export interface StepOption {
   label: string;
   // What it does beyond the step itself ("From now on: …").
@@ -45,22 +50,34 @@ export default function StepTalk({
 }) {
   const [turns, setTurns] = useState(saved);
   const [sending, setSending] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  // What was pressed and is running (an option's label, or "skip"), so that
+  // button says it's working instead of only greying out: a text can take
+  // up to half a minute to go.
+  const [running, setRunning] = useState<string | null>(null);
+  // It went: the card says so for a moment before it goes.
+  const [done, setDone] = useState(false);
+  const busy = running !== null;
   const [error, setError] = useState<string | null>(null);
   // A go that was tried and failed: what happened stays on the card until
   // they've read it.
   const [tried, setTried] = useState(false);
 
-  async function run(action: () => Promise<unknown>) {
-    setBusy(true);
+  async function run(key: string, action: () => Promise<unknown>) {
+    setRunning(key);
     setError(null);
     try {
       await action();
-      onResolved();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong. Try again.");
-      setBusy(false);
+      setRunning(null);
+      return;
     }
+    if (key === SKIP) {
+      onResolved();
+      return;
+    }
+    setDone(true);
+    setTimeout(onResolved, DONE_SHOWN_MS);
   }
 
   const off = disabled || busy || sending !== null || tried;
@@ -75,10 +92,22 @@ export default function StepTalk({
               key={o.label}
               type="button"
               disabled={off}
-              onClick={() => void run(o.run)}
-              className={`${buttonClass(i === 0 ? "primary" : "secondary", "md")} h-auto w-full flex-col items-start justify-start py-2 text-left`}
+              onClick={() => void run(o.label, o.run)}
+              aria-busy={running === o.label}
+              className={`${buttonClass(i === 0 ? "primary" : "secondary", "md")} h-auto w-full flex-col items-start justify-start py-2 text-left ${running === o.label ? "disabled:cursor-wait disabled:opacity-100" : ""}`}
             >
-              <span>{o.label}</span>
+              {running === o.label ? (
+                <span className="inline-flex items-center gap-2">
+                  {done ? (
+                    <span aria-hidden="true">✓</span>
+                  ) : (
+                    <span aria-hidden="true" className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-r-transparent" />
+                  )}
+                  <span>{done ? "Done" : "Working on it…"}</span>
+                </span>
+              ) : (
+                <span>{o.label}</span>
+              )}
               {o.detail && <span className="mt-0.5 break-words text-sm font-normal opacity-80">{o.detail}</span>}
             </button>
           ))}
@@ -111,12 +140,14 @@ export default function StepTalk({
         <button
           type="button"
           disabled={off}
-          onClick={() => void run(onSkip)}
+          onClick={() => void run(SKIP, onSkip)}
+          aria-busy={running === SKIP}
           className="text-sm text-fg-muted hover:text-fg disabled:opacity-50"
         >
-          Skip
+          {running === SKIP ? "Skipping…" : "Skip"}
         </button>
       </div>
+      <p aria-live="polite" className="sr-only">{done ? "Done" : busy ? "Working on it" : ""}</p>
       {error && <p role="alert" className="mt-2 text-sm text-red-500">{error}</p>}
     </div>
   );

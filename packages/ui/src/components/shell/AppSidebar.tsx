@@ -154,6 +154,28 @@ export default function AppSidebar({
             const holdsPage = section.items.some(isActive);
             const open = holdsPage || !folded.includes(section.key);
             const listId = `nav-section-${section.key}`;
+            const rows = (
+              <div id={listId} className="space-y-1">
+                {section.items.map((d) => {
+                  const isHome = d.key === "home";
+                  return (
+                    <NavRow
+                      key={d.key}
+                      href={isHome && home ? undefined : d.href}
+                      onClick={isHome && home ? home.onBriefing : onClose}
+                      label={d.label}
+                      icon={d.icon}
+                      description={d.description}
+                      active={isActive(d)}
+                      badge={d.badge}
+                      dot={d.key === "pulse" && memoryNews}
+                    />
+                  );
+                })}
+              </div>
+            );
+            // No heading (Home on top): its rows, always showing.
+            if (!section.label) return <div key={section.key}>{rows}</div>;
             return (
               <div key={section.key}>
                 <button
@@ -171,26 +193,7 @@ export default function AppSidebar({
                     className={`transition-transform ${open ? "rotate-90" : ""} ${holdsPage ? "opacity-0" : ""}`}
                   />
                 </button>
-                {open && (
-                  <div id={listId} className="space-y-1">
-                    {section.items.map((d) => {
-                      const isHome = d.key === "home";
-                      return (
-                        <NavRow
-                          key={d.key}
-                          href={isHome && home ? undefined : d.href}
-                          onClick={isHome && home ? home.onBriefing : onClose}
-                          label={d.label}
-                          icon={d.icon}
-                          description={d.description}
-                          active={isActive(d)}
-                          badge={d.badge}
-                          dot={d.key === "pulse" && memoryNews}
-                        />
-                      );
-                    })}
-                  </div>
-                )}
+                {open && rows}
               </div>
             );
           })}

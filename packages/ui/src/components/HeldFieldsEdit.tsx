@@ -67,7 +67,7 @@ export default function HeldFieldsEdit({
           Cancel
         </Button>
         <Button variant="primary" disabled={busy} onClick={() => onApprove(changed)}>
-          Approve
+          {busy ? "Working on it…" : "Approve"}
         </Button>
       </div>
     </div>

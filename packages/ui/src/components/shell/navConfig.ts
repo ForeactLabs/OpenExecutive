@@ -278,10 +278,12 @@ export interface Destination extends NavItem {
 }
 
 // The sidebar's headings, in order. Each folds its entries away; the one
-// holding the page you're on stays open (AppSidebar).
-export type NavSectionKey = "talk" | "do" | "company";
+// holding the page you're on stays open (AppSidebar). "top" has no heading:
+// Home sits alone above the others and never folds.
+export type NavSectionKey = "top" | "talk" | "do" | "company";
 
 export const NAV_SECTIONS: { key: NavSectionKey; label: string }[] = [
+  { key: "top", label: "" },
   { key: "talk", label: "Talk" },
   { key: "do", label: "Get things done" },
   { key: "company", label: "Your company" },
@@ -292,7 +294,7 @@ export const NAV_SECTIONS: { key: NavSectionKey; label: string }[] = [
 const SECTION_OF: Record<string, NavSectionKey> = {
   chats: "talk",
   texts: "talk",
-  home: "do",
+  home: "top",
   work: "do",
   delegate: "do",
   company: "company",
@@ -314,8 +316,8 @@ export function groupBySection(
   );
 }
 
-// The main menu, the same in the sidebar on every page: seven places (eight
-// with Texts) under three headings, then Settings at the bottom. Everything
+// The main menu, the same in the sidebar on every page: Home on top, then
+// six places (seven with Texts) under three headings, then Settings at the bottom. Everything
 // else is a tab inside one of them or a tool under Settings.
 // Texts' main-menu entry (see BuildOpts.textsEnabled).
 export const TEXTS_DESTINATION: Destination = {
