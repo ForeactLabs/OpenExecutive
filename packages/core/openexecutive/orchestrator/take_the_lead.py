@@ -3262,6 +3262,8 @@ async def _gated(name: str, inner: _Handler, tool_input: dict[str, Any], *, sour
     )
     if on_device is not None:
         _link_device(send_id, log_id)
+    if not failed:
+        _tie_later(name, text, log_id)
     return text
 
 
@@ -3534,6 +3536,7 @@ def _went_on_its_own(name: str, tool_input: dict[str, Any], result: Any, *, mcp:
         )
         if on_device is not None:
             _link_device(send_id, log_id)
+        _tie_later(name, text, log_id)
     except Exception:
         logger.warning("take_the_lead: couldn't log a step that went on its own", exc_info=True)
 
@@ -3806,11 +3809,13 @@ def resolved(
             row = conn.execute(
                 f"SELECT id FROM {LOG_TABLE} WHERE decision_id = ? ORDER BY id DESC LIMIT 1",  # noqa: S608
                 (decision_id,),
-            ).fetchone() if on_device is not None else None
+            ).fetchone() if on_device is not None or tool in TIE_LATER else None
         finally:
             conn.close()
         if row is not None:
-            _link_device(send_id, int(row["id"]))
+            if on_device is not None:
+                _link_device(send_id, int(row["id"]))
+            _tie_later(tool, result, int(row["id"]))
     except Exception:
         # Whatever else failed, the step went: it never stays "waiting".
         logger.warning("take_the_lead: couldn't update what it did", exc_info=True)
@@ -4137,12 +4142,71 @@ def outcome_of(tool: str, tool_input: dict[str, Any], result: str, *, mcp: bool 
             return ""
         parsed = json.loads(result) if result.strip().startswith("{") else None
         if isinstance(parsed, dict):
+            done = parsed.get("done")
+            if isinstance(done, str) and done.strip():
+                return _one_line(done, 160)
             message = parsed.get("message") or parsed.get("summary")
             if isinstance(message, str) and 0 < len(message.strip()) <= 120:
-                return _one_line(message, 120)
+                return _one_line(_for_the_person(message), 120)
     except Exception:
         return ""
     return ""
+
+
+# A sentence of a tool's result that tells the Executive what to say or do
+# next ("Say the call is under way", "Do not retry"): it is for the model,
+# never a line on Done for you.
+_TO_THE_MODEL = re.compile(
+    r"(?i)\b(?:say|tell|mention|reply|retry|do not|don't|never|carry on|you'll be told|you will be told)\b",
+)
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+
+
+def _for_the_person(message: str) -> str:
+    """The leading sentences of a result's message that say what happened,
+    up to the first one that speaks to the Executive ("Calling Dana now."
+    of "Calling Dana now. Say the call is under way…"); "" when the first
+    one already does."""
+    kept: list[str] = []
+    for sentence in _SENTENCE_END.split(" ".join(message.split())):
+        if _TO_THE_MODEL.search(sentence):
+            break
+        kept.append(sentence)
+    return " ".join(kept).strip()
+
+
+# A step whose result only says it started (a call placed, a job queued)
+# hears how it ended later. Its tool registers here how to tie its log row
+# to what will say so: ``(result text, log id)``, best effort. What says how
+# it ended then calls ``set_outcome``.
+TIE_LATER: dict[str, Callable[[str, int], None]] = {}
+
+
+def _tie_later(tool: str, text: str, log_id: int | None) -> None:
+    tie = TIE_LATER.get(tool)
+    if tie is None or log_id is None:
+        return
+    try:
+        tie(text, log_id)
+    except Exception:
+        logger.warning("take_the_lead: couldn't tie %s to its row", tool, exc_info=True)
+
+
+def set_outcome(log_id: int, outcome: str, *, db_path: Path | None = None) -> None:
+    """Say on a log row what came of its step, once that is known (a call
+    that ended). Best effort."""
+    try:
+        conn = _connect(db_path)
+        try:
+            conn.execute(
+                f"UPDATE {LOG_TABLE} SET outcome = ? WHERE id = ?",  # noqa: S608
+                (_one_line(outcome, 160), int(log_id)),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        logger.warning("take_the_lead: couldn't say how a step went", exc_info=True)
 
 
 def is_message_send(tool: str) -> bool:
