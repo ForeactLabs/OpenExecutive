@@ -88,7 +88,7 @@ function StepMark({ step }: { step: TimelineStep }) {
       className={`relative flex h-8 w-8 items-center justify-center rounded-full ${tone} ${dim && site ? "grayscale opacity-60" : ""}`}
       aria-hidden="true"
     >
-      {site ? <SiteIcon site={site} fallback={picture} /> : <Icon name={picture} size="h-4 w-4" />}
+      {site ? <SiteIcon key={site} site={site} fallback={picture} /> : <Icon name={picture} size="h-4 w-4" />}
       {step.state === "current" && (
         <span className="absolute -inset-[3px] rounded-full border-2 border-accent border-r-transparent animate-spin" />
       )}
