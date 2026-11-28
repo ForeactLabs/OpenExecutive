@@ -21,6 +21,26 @@ export interface TimelineStep {
   found?: string[];
   // The approval card the step waits on, when it has one.
   card_id?: number;
+  // What it touched (orchestrator/step_icons.py): the step's picture.
+  icon?: StepIcon;
+  // The website it was on: its own icon (GET /favicon/{site}) shows instead.
+  site?: string;
+}
+
+export const STEP_ICONS = [
+  "mail", "calendar", "web", "page", "click", "doc", "person", "chat",
+  "phone", "memory", "think", "task", "workflow", "card", "app",
+] as const;
+export type StepIcon = (typeof STEP_ICONS)[number];
+
+// A public domain name, as the server checks it (step_icons.valid_site):
+// never an address with a path, a port or an IP.
+const SITE = /^(?=.{1,253}$)(?!-)[a-z0-9-]{1,63}(?<!-)(?:\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/;
+
+export function validSite(site: unknown): site is string {
+  if (typeof site !== "string" || !SITE.test(site)) return false;
+  // The last name starts with a letter: never an IP in any spelling.
+  return /^[a-z]/.test(site.slice(site.lastIndexOf(".") + 1));
 }
 
 export interface TurnTimeline {
@@ -66,6 +86,8 @@ export function timelineFrom(raw: unknown): TurnTimeline | null {
       if (found.length > 0) out.found = found;
     }
     if (typeof step.card_id === "number" && Number.isInteger(step.card_id)) out.card_id = step.card_id;
+    if (STEP_ICONS.includes(step.icon as StepIcon)) out.icon = step.icon as StepIcon;
+    if (validSite(step.site)) out.site = step.site;
     steps.push(out);
   }
   if (steps.length === 0) return null;

@@ -21,6 +21,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from openexecutive.orchestrator import step_icons
 from openexecutive.orchestrator.action_chips import SIDE_EFFECTING_TOOLS
 from openexecutive.orchestrator.activity_labels import FALLBACK_LABEL
 
@@ -44,6 +45,7 @@ _PAST: dict[str, str] = {
     "Building": "Built",
     "Cancelling": "Cancelled",
     "Checking": "Checked",
+    "Clicking": "Clicked",
     "Comparing": "Compared",
     "Consulting": "Consulted",
     "Copying": "Copied",
@@ -58,8 +60,11 @@ _PAST: dict[str, str] = {
     "Messaging": "Messaged",
     "Moving": "Moved",
     "Opening": "Opened",
+    "Picking": "Picked",
     "Planning": "Planned",
+    "Pointing": "Pointed",
     "Preparing": "Prepared",
+    "Pressing": "Pressed",
     "Reading": "Read",
     "Recalling": "Recalled",
     "Replying": "Replied",
@@ -68,11 +73,14 @@ _PAST: dict[str, str] = {
     "Running": "Ran",
     "Saving": "Saved",
     "Scheduling": "Scheduled",
+    "Scrolling": "Scrolled",
     "Searching": "Searched",
     "Sending": "Sent",
     "Setting": "Set",
     "Sharing": "Shared",
     "Summarizing": "Summarized",
+    "Switching": "Switched",
+    "Typing": "Typed",
     "Updating": "Updated",
     "Working": "Worked",
     "Writing": "Wrote",
@@ -93,6 +101,20 @@ def _clean(raw: Any) -> str:
     if len(text) > MAX_LABEL_CHARS:
         text = text[: MAX_LABEL_CHARS - 1].rstrip() + "…"
     return text
+
+
+# A browser round's own words name no page; with the site known they do.
+_PAGE_WORDS = {
+    "Looking at the page": "Looking at {}",
+    "Opening the page": "Opening {}",
+    "Opening a tab": "Opening {}",
+}
+
+
+def _on_site(label: str, site: str) -> str:
+    """``label`` naming ``site`` when it is a browser round's generic line."""
+    words = _PAGE_WORDS.get(label)
+    return words.format(site) if words and site else label
 
 
 def past(label: str) -> str:
@@ -221,6 +243,11 @@ class Step:
     # The turn was stopped (or timed out) while this step ran: it never
     # finished, so it neither reads as done nor as failed.
     stopped: bool = False
+    # The website it was on (``step_icons.site_of``), for the site's icon.
+    site: str = ""
+    # A browser line's own words before it named its site ("Looking at the
+    # page"), so the next round on that page is the same step.
+    plain: str = ""
 
     @property
     def tried(self) -> bool:
@@ -259,6 +286,12 @@ class Step:
             out["found"] = list(self.found)
         if self.card_id is not None:
             out["card_id"] = self.card_id
+        icon = step_icons.icon_for(self.tool, self.kind)
+        if icon:
+            out["icon"] = icon
+        # Only a step that ran shows the site it was on.
+        if self.site and out["state"] in ("done", "current"):
+            out["site"] = self.site
         return out
 
 
@@ -277,6 +310,9 @@ class TurnTimeline:
         # running any more.
         self.writing = False
         self._found_seen: set[str] = set()
+        # The site of the page the turn last opened in the browser: the
+        # rounds after it (looking, clicking) are on that page.
+        self._site = ""
 
     def _now(self) -> int:
         return max(0, int(self._clock() - self._t0))
@@ -313,6 +349,7 @@ class TurnTimeline:
                 last.kind = kind_of(tool, label)
                 last.confirms = chip_follows(tool)
                 last.tool = tool
+                last.site = self._page_site(tool, item)
             for kind, n in reads.items():
                 last.reads[kind] = last.reads.get(kind, 0) + n
             return True
@@ -329,11 +366,20 @@ class TurnTimeline:
                 for kind, n in reads.items():
                     last.reads[kind] = last.reads.get(kind, 0) + n
             return bool(reads)
-        if last is not None and not last.named and last.label == label:
+        tool = str(item.get("tool") or "")
+        # The line names the site only once the browser says this step ran
+        # there (``_step_site``), never from the page an earlier step was on.
+        site = self._page_site(tool, item)
+        # A step whose line now names its site still takes the same round on
+        # that page again ("Looking at the page" after "Looking at
+        # papajohns.com"); a round that opens an address never merges into it.
+        again = last is not None and (
+            last.label == label or (bool(last.plain) and last.plain == label and not step_icons.opens_page(tool))
+        )
+        if last is not None and not last.named and again:
             for kind, n in reads.items():
                 last.reads[kind] = last.reads.get(kind, 0) + n
             return bool(reads)
-        tool = str(item.get("tool") or "")
         self._add_step(
             Step(
                 label=label,
@@ -342,8 +388,53 @@ class TurnTimeline:
                 reads=reads,
                 confirms=chip_follows(tool),
                 tool=tool,
+                site=site,
             )
         )
+        return True
+
+    def _page_site(self, tool: str, item: dict[str, Any]) -> str:
+        """The site a round of ``tool`` is on: the page the browser last
+        reported (``step_site``) when the round acts on the open page. A
+        round that opens a new address gets its site only once the browser
+        says it went there, never from what the model asked for."""
+        if step_icons.leaves_page(tool) or step_icons.opens_page(tool):
+            self._site = ""
+            return ""
+        return self._site if step_icons.on_page(tool) else ""
+
+    def _step_site(self, item: dict[str, Any]) -> bool:
+        """The browser ran a step on ``site``: the page the turn is on now,
+        and the site of the step that ran it, which its line then names."""
+        site = item.get("site")
+        if not (isinstance(site, str) and step_icons.valid_site(site)):
+            return False
+        self._site = site
+        last = self.steps[-1] if self.steps else None
+        if last is None or not step_icons.on_page(last.tool):
+            return False
+        if last.plain and last.site and last.site != site:
+            # A merged round ran on another page (it moved on its own): it
+            # is a step of its own, named for where it ran.
+            self._add_step(
+                Step(
+                    label=_on_site(last.plain, site),
+                    kind=last.kind,
+                    at=self._now(),
+                    confirms=last.confirms,
+                    tool=last.tool,
+                    site=site,
+                    plain=last.plain,
+                )
+            )
+            return True
+        label = _on_site(last.label, site)
+        if last.site == site and last.label == label:
+            return False
+        if label != last.label:
+            last.plain = last.label
+        last.site = site
+        last.label = label
         return True
 
     def _progress(self, item: dict[str, Any]) -> bool:
@@ -394,7 +485,7 @@ class TurnTimeline:
             # app's read keeps its group (its chip says what it looked at).
             step = last
         else:
-            step = Step(label=summary, kind=DO, at=self._now())
+            step = Step(label=summary, kind=DO, at=self._now(), tool=str(item.get("tool") or ""))
             self._add_step(step)
         step.label = summary
         step.named = True
@@ -419,6 +510,8 @@ class TurnTimeline:
                 changed = self._progress(item)
             elif kind == "action_taken":
                 changed = self._action(item)
+            elif kind == "step_site":
+                changed = self._step_site(item)
             else:
                 return None
         except Exception:
@@ -503,7 +596,7 @@ class TurnTimeline:
         return {"type": "timeline", **self.payload()}
 
 
-_STEP_KEYS = {"label", "kind", "at", "state", "detail", "found", "card_id"}
+_STEP_KEYS = {"label", "kind", "at", "state", "detail", "found", "card_id", "icon", "site"}
 _KINDS = {LOOK, WORK, DO}
 _STATES = {"done", "current", "waits", "tried", "stopped"}
 
@@ -521,6 +614,10 @@ def from_saved(raw: Any) -> dict[str, Any] | None:
             kept["kind"] = LOOK
         if kept.get("state") not in _STATES or kept.get("state") == "current":
             kept["state"] = "done"
+        if "icon" in kept and kept["icon"] not in step_icons.ICONS:
+            del kept["icon"]
+        if "site" in kept and not step_icons.valid_site(kept["site"]):
+            del kept["site"]
         steps.append(kept)
     if not steps:
         return None

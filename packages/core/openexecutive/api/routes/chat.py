@@ -2017,7 +2017,10 @@ async def _run_chat_turn(
                                 and item.get("type") in _LIVE_STEPS
                             ):
                                 chat_live.turn_event(session.session_id, live_key, item)
-                            yield f"data: {json.dumps(item)}\n\n"
+                            # The page a browser step ran on is for the
+                            # timeline only: the client sees it there.
+                            if not (isinstance(item, dict) and item.get("type") == "step_site"):
+                                yield f"data: {json.dumps(item)}\n\n"
                             timeline_evt = timeline.observe(item)
                             if timeline_evt is not None:
                                 yield f"data: {json.dumps({**timeline_evt, 'session_id': session.session_id})}\n\n"

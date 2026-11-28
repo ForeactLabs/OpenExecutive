@@ -203,3 +203,39 @@ def test_validate_target_url_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
     assert not ok and "non-public" in reason
     ok, reason = validate_target_url("ftp://feed.example.com/")
     assert not ok and "scheme" in reason
+
+
+async def test_a_hop_the_caller_refuses_is_never_fetched(server) -> None:
+    srv = server({"feed.example.com/favicon.ico": _redirect("http://feed.example.com:8080/x.ico")})
+
+    def https_no_port(url: str) -> bool:
+        parts = httpx.URL(url)
+        return parts.scheme == "https" and parts.port is None
+
+    with pytest.raises(BlockedTargetError):
+        await fetch_bounded("https://feed.example.com/favicon.ico", 10_000, hop_ok=https_no_port)
+    assert [r.url.path for r in srv.requests] == ["/favicon.ico"]
+
+
+async def test_a_first_hop_the_caller_refuses_is_never_fetched(server) -> None:
+    srv = server({})
+    with pytest.raises(BlockedTargetError):
+        await fetch_bounded("https://feed.example.com/rss", 10_000, hop_ok=lambda _u: False)
+    assert srv.requests == []
+
+
+async def test_the_final_address_comes_back(server) -> None:
+    server({
+        "feed.example.com/": _redirect("https://cdn.example.net/en-us/"),
+        "cdn.example.net/en-us/": httpx.Response(200, content=b"<html>"),
+    })
+    body, at = await _http.fetch_bounded_at("https://feed.example.com/", 10_000)
+    assert (body, at) == (b"<html>", "https://cdn.example.net/en-us/")
+
+
+async def test_a_prefix_read_keeps_the_start_of_a_long_body(server) -> None:
+    server({"feed.example.com/": httpx.Response(200, content=b"<head>" + b"x" * 5000)})
+    body, _at = await _http.fetch_bounded_at("https://feed.example.com/", 100, prefix=True)
+    assert body == (b"<head>" + b"x" * 5000)[:100]
+    with pytest.raises(_http.FetchOverflowError):
+        await fetch_bounded("https://feed.example.com/", 100)

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import socket
+from collections.abc import Callable
 from urllib.parse import urlparse
 
 import httpx
@@ -137,7 +138,7 @@ def _transport() -> httpx.AsyncBaseTransport:
 
 
 async def _get_pinned(
-    target: httpx.URL, ip: str, max_bytes: int, user_agent: str
+    target: httpx.URL, ip: str, max_bytes: int, user_agent: str, prefix: bool = False
 ) -> tuple[str | None, bytes]:
     """One GET of ``target`` sent to ``ip``: ``(location, b"")`` for a
     redirect, else ``(None, body)``."""
@@ -169,14 +170,34 @@ async def _get_pinned(
         async for chunk in resp.aiter_bytes():
             buf.extend(chunk)
             if len(buf) > max_bytes:
+                if prefix:
+                    return None, bytes(buf[:max_bytes])
                 raise FetchOverflowError()
         return None, bytes(buf)
 
 
 async def fetch_bounded(
-    url: str, max_bytes: int, *, user_agent: str | None = None
+    url: str,
+    max_bytes: int,
+    *,
+    user_agent: str | None = None,
+    hop_ok: Callable[[str], bool] | None = None,
 ) -> bytes:
-    """GET ``url`` with a body-size ceiling and tight redirect cap.
+    """GET ``url`` within ``max_bytes``: the body of :func:`fetch_bounded_at`."""
+    body, _final = await fetch_bounded_at(url, max_bytes, user_agent=user_agent, hop_ok=hop_ok)
+    return body
+
+
+async def fetch_bounded_at(
+    url: str,
+    max_bytes: int,
+    *,
+    user_agent: str | None = None,
+    hop_ok: Callable[[str], bool] | None = None,
+    prefix: bool = False,
+) -> tuple[bytes, str]:
+    """GET ``url`` with a body-size ceiling and tight redirect cap: the
+    body, and the address it came from after any redirects.
 
     Streams the response and stops once the cumulative read exceeds
     ``max_bytes`` so a malicious feed cannot exhaust memory. Raises
@@ -196,9 +217,17 @@ async def fetch_bounded(
     specific identifier — e.g. SEC EDGAR rejects/ratelimits the generic
     UA and asks callers to identify with a contact. Falls back to the
     module ``USER_AGENT`` when None.
+
+    ``prefix`` keeps the first ``max_bytes`` of a longer body (e.g. a page's
+    head) instead of raising :class:`FetchOverflowError`.
+
+    ``hop_ok``, when given, must also pass every hop's address, the first
+    included (e.g. https only), or the hop raises :class:`BlockedTargetError`.
     """
     current = url
     for _hop in range(MAX_REDIRECTS + 1):
+        if hop_ok is not None and not hop_ok(current):
+            raise BlockedTargetError(f"refused {strip_url_query(current)}: not an allowed address")
         ips, reason = await asyncio.to_thread(_resolve_public, current)
         if not ips:
             raise BlockedTargetError(f"refused {strip_url_query(current)}: {reason}")
@@ -212,14 +241,14 @@ async def fetch_bounded(
         for i, ip in enumerate(ips):
             try:
                 location, body = await _get_pinned(
-                    target, ip, max_bytes, user_agent or USER_AGENT
+                    target, ip, max_bytes, user_agent or USER_AGENT, prefix
                 )
                 break
             except httpx.ConnectError:
                 if i == len(ips) - 1:
                     raise
         if location is None:
-            return body
+            return body, current
         try:
             current = str(target.join(location))
         except httpx.InvalidURL as exc:
@@ -235,6 +264,7 @@ __all__ = [
     "MAX_REDIRECTS",
     "USER_AGENT",
     "fetch_bounded",
+    "fetch_bounded_at",
     "strip_url_query",
     "validate_target_url",
 ]
