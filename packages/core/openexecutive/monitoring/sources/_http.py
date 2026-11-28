@@ -138,7 +138,7 @@ def _transport() -> httpx.AsyncBaseTransport:
 
 
 async def _get_pinned(
-    target: httpx.URL, ip: str, max_bytes: int, user_agent: str
+    target: httpx.URL, ip: str, max_bytes: int, user_agent: str, prefix: bool = False
 ) -> tuple[str | None, bytes]:
     """One GET of ``target`` sent to ``ip``: ``(location, b"")`` for a
     redirect, else ``(None, body)``."""
@@ -170,6 +170,8 @@ async def _get_pinned(
         async for chunk in resp.aiter_bytes():
             buf.extend(chunk)
             if len(buf) > max_bytes:
+                if prefix:
+                    return None, bytes(buf[:max_bytes])
                 raise FetchOverflowError()
         return None, bytes(buf)
 
@@ -192,6 +194,7 @@ async def fetch_bounded_at(
     *,
     user_agent: str | None = None,
     hop_ok: Callable[[str], bool] | None = None,
+    prefix: bool = False,
 ) -> tuple[bytes, str]:
     """GET ``url`` with a body-size ceiling and tight redirect cap: the
     body, and the address it came from after any redirects.
@@ -215,6 +218,9 @@ async def fetch_bounded_at(
     UA and asks callers to identify with a contact. Falls back to the
     module ``USER_AGENT`` when None.
 
+    ``prefix`` keeps the first ``max_bytes`` of a longer body (e.g. a page's
+    head) instead of raising :class:`FetchOverflowError`.
+
     ``hop_ok``, when given, must also pass every hop's address, the first
     included (e.g. https only), or the hop raises :class:`BlockedTargetError`.
     """
@@ -235,7 +241,7 @@ async def fetch_bounded_at(
         for i, ip in enumerate(ips):
             try:
                 location, body = await _get_pinned(
-                    target, ip, max_bytes, user_agent or USER_AGENT
+                    target, ip, max_bytes, user_agent or USER_AGENT, prefix
                 )
                 break
             except httpx.ConnectError:

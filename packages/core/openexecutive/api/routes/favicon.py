@@ -38,7 +38,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _ICON_MAX_BYTES = 100_000
-_PAGE_MAX_BYTES = 300_000
 # Only the head names icons: the rest of a page is never parsed.
 _HEAD_MAX_CHARS = 64_000
 _HIT_TTL_S = 24 * 60 * 60
@@ -166,7 +165,8 @@ async def find_icon(site: str) -> tuple[bytes, str] | None:
         if found:
             return found
         try:
-            page, at = await fetch_bounded_at(f"https://{host}/", _PAGE_MAX_BYTES, hop_ok=allowed)
+            # Only the head names icons: read no more than that much.
+            page, at = await fetch_bounded_at(f"https://{host}/", _HEAD_MAX_CHARS, hop_ok=allowed, prefix=True)
         except Exception:
             continue
         # Links resolve against the page that was served (after any

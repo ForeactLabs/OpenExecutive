@@ -231,3 +231,11 @@ async def test_the_final_address_comes_back(server) -> None:
     })
     body, at = await _http.fetch_bounded_at("https://feed.example.com/", 10_000)
     assert (body, at) == (b"<html>", "https://cdn.example.net/en-us/")
+
+
+async def test_a_prefix_read_keeps_the_start_of_a_long_body(server) -> None:
+    server({"feed.example.com/": httpx.Response(200, content=b"<head>" + b"x" * 5000)})
+    body, _at = await _http.fetch_bounded_at("https://feed.example.com/", 100, prefix=True)
+    assert body == (b"<head>" + b"x" * 5000)[:100]
+    with pytest.raises(_http.FetchOverflowError):
+        await fetch_bounded("https://feed.example.com/", 100)
