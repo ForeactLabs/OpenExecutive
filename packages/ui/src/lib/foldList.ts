@@ -59,12 +59,15 @@ export function dayOf(iso: string, now: Date = new Date()): DayKey {
   return "earlier";
 }
 
-/** Whether `entry` has every word of `query` in it (any case, any order). */
+/** Whether `entry` has every word of `query` in it (any case, any order;
+ * a number matches by its digits). */
 export function matches(entry: FoldEntry, query: string): boolean {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return true;
   const hay = [entry.who, entry.person, entry.gist, entry.tag, entry.words].filter(Boolean).join(" ").toLowerCase();
-  return words.every((w) => hay.includes(w));
+  // A phone number matches however it is typed: 407-864-4111, (407) 864 or 4078644111.
+  const digits = hay.replace(/\D/g, "");
+  return words.every((w) => hay.includes(w) || (/^[\d()+.-]+$/.test(w) && /\d/.test(w) && digits.includes(w.replace(/\D/g, ""))));
 }
 
 function newestFirst<T extends FoldEntry>(items: T[]): T[] {

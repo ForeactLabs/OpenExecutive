@@ -64,3 +64,9 @@ test("a group the person folds stays folded, even while searching", () => {
   assert.equal(groupOpen("day:week", 1, { ...none, searching: true }), true);
   assert.equal(groupOpen("day:today", 0, { ...none, searching: true, folds: { "day:today": false } }), false);
 });
+
+test("a phone number matches however it is typed", () => {
+  const item = e("a", "Dana", 0, { words: "(407) 864-4111" });
+  for (const q of ["4078644111", "407-864-4111", "(407) 864", "864-4111"]) assert.equal(matches(item, q), true, q);
+  assert.equal(matches(item, "555-0000"), false);
+});
