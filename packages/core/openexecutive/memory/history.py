@@ -684,9 +684,6 @@ def add_notes(
 
 # A note this close to one from the last day is the same note again.
 REPEAT_WITHIN = timedelta(days=1)
-_REPEAT_OVERLAP = 0.6
-
-
 _Recent = tuple[str, str, str, str | None]
 
 
@@ -746,8 +743,9 @@ def _specifics(text: str) -> tuple[frozenset[float], frozenset[str]]:
 def _repeats(note: NewNote, recent: list[_Recent]) -> bool:
     """Whether ``note`` says again what one of ``recent`` already says: the
     same quote, or the same kind with the same figures, dates, names and
-    negations (``_specifics``) and most of the same other words. A different
-    due date is a different note."""
+    negations (``_specifics``) and the same content words, said another way
+    ("dinner" or "dinnertime"). One changed word ("late" not "home") is a
+    different note, and so is a different due date."""
     from openexecutive.memory.episodic import _normalize_for_quote_match
 
     quote = _normalize_for_quote_match(note.quote)
@@ -762,9 +760,7 @@ def _repeats(note: NewNote, recent: list[_Recent]) -> bool:
             return True
         if _specifics(summary) != specifics:
             continue
-        theirs = _stems(summary)
-        union = mine | theirs
-        if union and len(mine & theirs) / len(union) >= _REPEAT_OVERLAP:
+        if mine and _stems(summary) == mine:
             return True
     return False
 

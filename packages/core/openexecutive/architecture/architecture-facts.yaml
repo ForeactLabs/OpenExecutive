@@ -3174,9 +3174,9 @@ memory:
     - Chat and heard notes pass skip_repeats to history.add_notes: against
       notes from the same source and counterpart only, one with the same
       kind and the same quote, or the same kind, the same figures, date words, names
-      and negations (history._specifics) and 60% of the same summary words,
+      and negations (history._specifics) and the same summary content words,
       as a note from the last day (and the same due date) is not stored.
-      A changed answer (8 not 6, Thursday not Tuesday, "won't") is new.
+      A changed answer (8 not 6, Thursday not Tuesday, "won't", late not home) is new.
     - Who someone is to the person ("JR is my son") or a standing preference
       is not a note but a fact of their own: remember_fact with about_me
       true (kept for them alone), from the chat or from the review after it

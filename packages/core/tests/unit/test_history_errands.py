@@ -157,10 +157,10 @@ def test_a_note_from_the_last_day_is_not_kept_twice(roster: SimpleNamespace, mod
     assert _chat(roster.principal, text, ref="web-2") == []
     model["notes"] = [{
         "kind": "shared",
-        "summary": "Said they usually order two pizzas, one specialty and one stuffed crust pepperoni.",
-        "quote": "usually order two pizzas, one specialty and one stuffed crust pepperoni",
+        "summary": "Said they generally order two pizzas, one specialty, one stuffed crust pepperoni.",
+        "quote": "generally order two pizzas",
     }]
-    again = "Reminder: we usually order two pizzas, one specialty and one stuffed crust pepperoni."
+    again = "Reminder: we generally order two pizzas, one is a specialty, one stuffed crust pepperoni."
     assert _chat(roster.principal, again, ref="web-3") == []
     assert len(h.list_notes(roster.principal)) == 1
 
@@ -194,6 +194,11 @@ def test_a_different_note_or_an_old_one_is_kept(roster: SimpleNamespace) -> None
         ("agreed", "Agreed the launch moves to Tuesday.", "Agreed the launch moves to Thursday."),
         ("agreed", "Decided the promotion is 20% off.", "Decided the promotion is 30% off."),
         ("promised", "Said they will send the deck to Dana Lee.", "Said they will send the deck to Marcus Lee."),
+        ("heard", "Heard from JR he will be home for dinner.", "Heard from JR he will be late for dinner."),
+        ("heard", "Heard from JR he will be home for dinner.", "Heard from JR he will skip dinner."),
+        ("shared", "Said the deck goes out today.", "Said the deck goes out tomorrow."),
+        ("promised", "Agreed to send Dana the contract.", "Agreed to send Dana the invoice."),
+        ("promised", "Agreed to send Dana the signed contract.", "Agreed to send Dana the unsigned contract."),
     ],
 )
 def test_a_changed_answer_is_not_a_repeat(roster: SimpleNamespace, kind: str, first: str, then: str) -> None:
