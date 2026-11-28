@@ -158,7 +158,25 @@ _ERRAND_VERBS = frozenset({
     "reply", "respond", "forward", "invite", "cancel", "move", "please", "go", "see", "make",
 })
 _POLITE = ("can you", "could you", "would you", "will you", "i need you", "i want you", "i'd like you")
-_PRONOUN_PAIRS = (("he", "him"), ("she", "her"))
+# "her" is also the possessive ("send her slides"), so it counts as an
+# object only at the end or before one of these words ("expect her home").
+_AFTER_OBJECT = frozenset({
+    "home", "back", "up", "in", "out", "to", "for", "at", "on", "with", "about", "that", "if", "whether",
+    "know", "when", "by", "and", "or",
+})
+
+
+def _two_ways(words: list[str]) -> bool:
+    """A subject pronoun and its object form in one summary ("he should
+    expect him home"): who is who can't be told."""
+    if "he" in words and "him" in words:
+        return True
+    if "she" not in words:
+        return False
+    for i, word in enumerate(words):
+        if word == "her" and (i + 1 == len(words) or words[i + 1] in _AFTER_OBJECT):
+            return True
+    return False
 
 
 def errand_note(note: NewNote) -> bool:
@@ -167,7 +185,8 @@ def errand_note(note: NewNote) -> bool:
     is about what the assistant was asked); an ``asked`` note whose quote is
     a request to the assistant ("ask whether to expect him home"); or a
     summary with the same pronoun as subject and object ("he should expect
-    him"), which can't be read back."""
+    him", "she should expect her home"; never a possessive "her slides"),
+    which can't be read back."""
     from openexecutive.memory.episodic import _normalize_for_quote_match
 
     summary = _normalize_for_quote_match(note.summary)
@@ -179,7 +198,7 @@ def errand_note(note: NewNote) -> bool:
         first = quote.split(" ", 1)[0].strip(".,;:!?") if quote else ""
         if first in _ERRAND_VERBS or quote.startswith(_POLITE):
             return True
-    return any(a in words and b in words for a, b in _PRONOUN_PAIRS)
+    return _two_ways([w for w in words if w])
 
 
 async def _call_model(model: str, turn: str) -> dict[str, Any]:

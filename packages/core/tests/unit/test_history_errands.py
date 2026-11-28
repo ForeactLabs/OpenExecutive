@@ -91,6 +91,8 @@ def _chat(person_id: int, text: str, ref: str = "web-1") -> list[int]:
         ("asked", "Asked for the company's DUNS and EIN numbers.", "please find the DUNS and EIN numbers"),
         ("shared", "Told the assistant not to run a web search.", "don't run a web search for this"),
         ("agreed", "Said he would tell him by Friday.", "he would tell him by Friday"),
+        ("asked", "Said she should expect her home for dinner.", "she should expect her home for dinner"),
+        ("shared", "Said she will call her.", "she will call her tonight"),
     ],
 )
 def test_an_errand_or_a_note_that_reads_two_ways_is_not_kept(kind: str, summary: str, quote: str) -> None:
@@ -103,6 +105,8 @@ def test_an_errand_or_a_note_that_reads_two_ways_is_not_kept(kind: str, summary:
         ("asked", "Asked Dana Lee for the signed lease.", "I asked Dana Lee for the signed lease"),
         ("shared", "Said JR is picking them up in Marietta.", "JR is picking me up in Marietta"),
         ("promised", "Said he will send her the deck on Friday.", "he will send her the deck on Friday"),
+        ("promised", "Promised she would send her slides to Dana by Friday.", "she'll send her slides to Dana by Friday"),
+        ("shared", "Said she left her keys at the office.", "she left her keys at the office"),
         ("agreed", "Decided the promotion is 20% off.", "the promotion is 20% off"),
     ],
 )
