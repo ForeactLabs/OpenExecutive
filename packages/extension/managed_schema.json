@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "origins": {
+      "title": "Open Executive sites",
+      "description": "Open Executive sites this browser is connected to without anyone pressing Connect, such as https://exec.example.com. Each is an https origin (or http://localhost).",
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

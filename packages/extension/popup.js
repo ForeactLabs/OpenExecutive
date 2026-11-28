@@ -22,10 +22,24 @@ function protocolMismatch(site) {
 }
 
 async function render() {
-  const list = await origins();
+  const own = await origins();
+  // Sites set up by whoever runs this browser (Chrome policy): listed, but
+  // only they can take them off.
+  const managed = (await OE.managedOrigins()).filter((o) => !own.includes(o));
+  const list = [...own, ...managed];
   const ul = $("site-list");
   ul.textContent = "";
-  for (const origin of list) {
+  for (const origin of managed) {
+    const li = document.createElement("li");
+    const name = document.createElement("span");
+    name.textContent = origin.replace(/^https:\/\//, "");
+    const note = document.createElement("span");
+    note.className = "muted";
+    note.textContent = "Set up for you";
+    li.append(name, note);
+    ul.append(li);
+  }
+  for (const origin of own) {
     const li = document.createElement("li");
     const name = document.createElement("span");
     name.textContent = origin.replace(/^https:\/\//, "");

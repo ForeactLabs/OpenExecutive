@@ -129,6 +129,33 @@
     }
   }
 
+  /** The Open Executive sites set up for everyone using this browser by its
+   * administrator (Chrome policy, `managed_schema.json`): a browser an Open
+   * Executive server runs for someone is connected this way, with nobody to
+   * press Connect. Only well-formed origins count; [] when none are set. */
+  async function managedOrigins() {
+    try {
+      const { origins } = await chrome.storage.managed.get("origins");
+      return Array.isArray(origins) ? origins.map((o) => originOf(o)).filter((o, i, all) => o && all.indexOf(o) === i) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** The sites connected in the popup, then those set up by the browser's
+   * administrator. */
+  async function connectedOrigins() {
+    let own = [];
+    try {
+      const { origins } = await chrome.storage.local.get("origins");
+      own = Array.isArray(origins) ? origins : [];
+    } catch {
+      own = [];
+    }
+    const set = await managedOrigins();
+    return [...own, ...set.filter((o) => !own.includes(o))];
+  }
+
   /** Whether `url` is one of the connected Open Executive sites. */
   function onConnected(url, origins) {
     const origin = originOf(url);
@@ -211,5 +238,5 @@
     }
   }
 
-  root.OE = { sensitiveField, paymentFrame, scaledMasks, signInField, pastSignIn, sendingSite, sendingStop, blockedUrl, openableUrl, originOf, onConnected, squeeze, pickOption, pagePath, workingTab, STOP_MS, PROTOCOL };
+  root.OE = { sensitiveField, paymentFrame, scaledMasks, signInField, pastSignIn, sendingSite, sendingStop, blockedUrl, openableUrl, originOf, onConnected, managedOrigins, connectedOrigins, squeeze, pickOption, pagePath, workingTab, STOP_MS, PROTOCOL };
 })(globalThis);
