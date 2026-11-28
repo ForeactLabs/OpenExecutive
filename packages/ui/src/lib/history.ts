@@ -100,6 +100,14 @@ export function noteWhere(note: Pick<HistoryNote, "channel" | "counterpart">): s
   return who ? `${channel} with ${who}` : channel;
 }
 
+/** Whose words the quote is: "Your words", or "JR's words" for what
+ * someone said back (a heard note). */
+export function quoteLabel(note: Pick<HistoryNote, "kind" | "counterpart">): string {
+  if (note.kind !== "heard") return "Your words";
+  const who = counterpartName(note.counterpart);
+  return who ? `${who}'s words` : "Their words";
+}
+
 /** What the note says now: their correction when they made one. */
 export function noteText(note: Pick<HistoryNote, "summary" | "correction">): string {
   return note.correction?.trim() ? note.correction : note.summary;

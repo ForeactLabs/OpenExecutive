@@ -37,7 +37,9 @@ RECALL_HISTORY_TOOL: dict[str, Any] = {
     "name": RECALL_HISTORY,
     "description": (
         "Look up the speaker's own notes of what they said, by email or in chat: what "
-        "they promised, agreed, declined, answered, asked for or shared, and when. Use it when "
+        "they promised, agreed, declined, answered, asked for or shared, and when, and what someone "
+        "said back when it asked them for the speaker (a heard note: their words, not the "
+        "speaker's). Use it when "
         "they ask what they told someone, where things stand with a person or company, or "
         "what they owe whom. Pass a few words to narrow it (a name, a company, a topic); "
         "leave it empty for the most recent. Set due to list only what has a due date "
@@ -142,8 +144,10 @@ def render_notes(notes: list[Any]) -> str:
         if note.correction:
             line += f"{clean(note.corrected, 400)} (as you corrected it)"
         else:
-            # Their own words first; the summary is only how it was noted.
-            line += f'your words: "{clean(note.quote, 400)}" (noted as: {clean(note.summary, 400)})'
+            # Their own words first; the summary is only how it was noted. A
+            # heard note's quote is what someone else said back, never theirs.
+            whose = "your words" if note.kind != "heard" else (f"{who}'s words" if who else "their words")
+            line += f'{whose}: "{clean(note.quote, 400)}" (noted as: {clean(note.summary, 400)})'
         if note.due_date:
             line += f" — due {note.due_date}"
         lines.append(no_tags(line))

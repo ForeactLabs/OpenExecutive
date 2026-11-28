@@ -181,6 +181,16 @@ def test_it_returns_only_the_speakers_own_notes(roster: SimpleNamespace) -> None
     assert _recall(_web(roster.principal), "venue")["result"] == "No notes match."
 
 
+def test_a_heard_note_is_their_words_not_the_speakers() -> None:
+    note = SimpleNamespace(
+        kind="heard", counterpart="JR", channel="texts", occurred_at="2026-11-28T18:04:00+00:00",
+        correction="", corrected="", quote="Home by 6", summary="Heard from JR he'll be home by 6.", due_date=None,
+    )
+    out = ht.render_notes([note])
+    assert 'JR\'s words: "Home by 6"' in out and "your words" not in out
+    assert 'their words: "Home by 6"' in ht.render_notes([SimpleNamespace(**{**vars(note), "counterpart": ""})])
+
+
 def test_due_lists_only_dated_notes_soonest_first(roster: SimpleNamespace) -> None:
     from datetime import timedelta
 
