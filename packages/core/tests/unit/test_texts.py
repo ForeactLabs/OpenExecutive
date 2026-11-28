@@ -1477,3 +1477,18 @@ def test_the_same_words_from_the_other_side_never_say_an_unsure_send_went(ids: d
     assert tx.get_send(send.id).status == tx.UNSURE
     tx.tidy()
     assert tx.get_send(send.id).status == tx.UNSURE
+
+
+def test_an_unsure_send_to_a_new_number_went_once_it_comes_back_there(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    send = tx.queue_send(owner, "Hi there", to_number="4075550111")
+    tx.take_send(owner)
+    tx.settle_send(owner, send.id, status=tx.UNSURE)
+    tx.record(owner, [_item("a", conv="n1", title="(407) 555-0111", sender="(407) 555-0111",
+                            text="You: Hi there", outgoing=True)])
+    went = tx.get_send(send.id)
+    assert went.status == tx.SENT and went.conversation_id
+    (thread,) = tx.threads(owner)
+    assert thread.status == tx.SENT
+    assert [(t.text, t.outgoing) for t in thread.texts] == [("Hi there", True)]

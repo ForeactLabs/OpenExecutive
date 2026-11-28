@@ -408,13 +408,13 @@ def _echo_of(conn: sqlite3.Connection, person_id: int, conversation_id: str, tex
         return None
     # Only a send of the last few minutes (since the browser took it or said
     # how it went, as it can wait in the queue), in this conversation, or one
-    # to a new number still on its way: a reply an hour later in the same
+    # to a new number still on its way or unsure: a reply an hour later in the same
     # words is someone's reply.
     rows = conn.execute(
         f"SELECT id, text, conversation_id, to_number FROM {TEXT_SENDS_TABLE} WHERE person_id=? AND status<>? "
-        "AND echoed=0 AND COALESCE(done_at, created_at) >= ? AND (conversation_id=? OR (conversation_id IS NULL AND status IN (?, ?))) "
+        "AND echoed=0 AND COALESCE(done_at, created_at) >= ? AND (conversation_id=? OR (conversation_id IS NULL AND status IN (?, ?, ?))) "
         "ORDER BY id",
-        (person_id, FAILED, _iso(now - _ECHO_WITHIN), conversation_id, PENDING, HANDED),
+        (person_id, FAILED, _iso(now - _ECHO_WITHIN), conversation_id, PENDING, HANDED, UNSURE),
     ).fetchall()
     bare = _LEADING_WHO.sub("", text, count=1)
     same = [r for r in rows if _same_words(r["text"], text) or _same_words(r["text"], bare)]
