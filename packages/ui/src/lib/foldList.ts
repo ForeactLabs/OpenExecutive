@@ -51,11 +51,11 @@ function time(iso: string): number {
 export function dayOf(iso: string, now: Date = new Date()): DayKey {
   const t = time(iso);
   if (t === -Infinity) return "earlier";
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const day = 24 * 60 * 60 * 1000;
-  if (t >= start) return "today";
-  if (t >= start - day) return "yesterday";
-  if (t >= start - 6 * day) return "week";
+  // Calendar midnights, so a day the clocks change on still counts as one day.
+  const midnight = (back: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - back).getTime();
+  if (t >= midnight(0)) return "today";
+  if (t >= midnight(1)) return "yesterday";
+  if (t >= midnight(6)) return "week";
   return "earlier";
 }
 
@@ -104,6 +104,18 @@ export function foldGroups<T extends FoldEntry>(
     items: list,
   }));
   return { needs, groups };
+}
+
+/** Whether a group shows open. What the person chose wins, even while
+ * searching; otherwise a search opens every group, and without one the newest
+ * day is open and the rest are folded. */
+export function groupOpen(
+  key: string,
+  index: number,
+  state: { folds: Record<string, boolean>; searching: boolean; mode: FoldMode },
+): boolean {
+  if (key in state.folds) return state.folds[key];
+  return state.searching || (state.mode === "day" && index === 0);
 }
 
 /** The time on an item's line. Inside a day group the day is already said,

@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { dayOf, foldGroups, matches, shortWhen } from "../src/lib/foldList.ts";
+import { dayOf, foldGroups, groupOpen, matches, shortWhen } from "../src/lib/foldList.ts";
 
 const NOW = new Date(2026, 10, 28, 14, 30); // Sat Nov 28, 2:30 PM local
 const at = (days, hour = 10) => new Date(2026, 10, 28 - days, hour).toISOString();
@@ -45,4 +45,21 @@ test("an item's time says the day only where its group doesn't", () => {
   assert.equal(shortWhen(at(1), { now: NOW }), "Yesterday");
   assert.notEqual(shortWhen(at(1), { now: NOW, inDay: true }), "Yesterday");
   assert.equal(shortWhen("", { now: NOW }), "");
+});
+
+test("a day the clocks change on is still one calendar day", () => {
+  // US clocks go back on Nov 1 2026; 00:30 that night is still Yesterday on Nov 2.
+  const now = new Date(2026, 10, 2, 8);
+  assert.equal(dayOf(new Date(2026, 10, 1, 0, 30).toISOString(), now), "yesterday");
+  assert.equal(dayOf(new Date(2026, 9, 27, 0, 30).toISOString(), now), "week");
+  assert.equal(dayOf(new Date(2026, 9, 26, 23, 30).toISOString(), now), "earlier");
+});
+
+test("a group the person folds stays folded, even while searching", () => {
+  const none = { folds: {}, searching: false, mode: "day" };
+  assert.equal(groupOpen("day:today", 0, none), true);
+  assert.equal(groupOpen("day:week", 1, none), false);
+  assert.equal(groupOpen("person:ann", 0, { ...none, mode: "person" }), false);
+  assert.equal(groupOpen("day:week", 1, { ...none, searching: true }), true);
+  assert.equal(groupOpen("day:today", 0, { ...none, searching: true, folds: { "day:today": false } }), false);
 });

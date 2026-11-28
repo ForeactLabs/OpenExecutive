@@ -9,7 +9,7 @@
 import { useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 
 import Icon from "@/components/Icon";
-import { foldGroups, matches, shortWhen, type FoldEntry, type FoldMode, type FoldTone } from "@/lib/foldList";
+import { foldGroups, groupOpen, matches, shortWhen, type FoldEntry, type FoldMode, type FoldTone } from "@/lib/foldList";
 
 const DOT: Record<FoldTone, string> = {
   good: "bg-emerald-500",
@@ -146,9 +146,13 @@ export default function FoldList<T extends FoldEntry>({
       else next.add(id);
       return next;
     });
-  // Searching opens every group; otherwise the newest day is open, the rest folded.
-  const isOpen = (key: string, index: number) =>
-    searching || (key in folds ? folds[key] : mode === "day" ? index === 0 : false);
+  const isOpen = (key: string, index: number) => groupOpen(key, index, { folds, searching, mode });
+  // Starting or clearing a search starts the folds over, so a group folded
+  // while searching doesn't stay folded after.
+  const search = (next: string) => {
+    if ((next.trim().length > 0) !== searching) setFolds({});
+    setQuery(next);
+  };
 
   return (
     <div className="space-y-3">
@@ -162,7 +166,7 @@ export default function FoldList<T extends FoldEntry>({
           <input
             type="search"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => search(e.target.value)}
             placeholder={searchLabel}
             aria-label={searchLabel}
             className="w-full h-11 rounded-xl bg-surface-elevated border border-line pl-10 pr-3 text-[15px] text-fg placeholder:text-fg-subtle focus:outline-none focus:border-accent/60 focus:ring-2 focus:ring-accent/20"
