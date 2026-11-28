@@ -39,6 +39,11 @@ def db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     monkeypatch.setattr(people_store, "DB_PATH", path)
     episodic.initialize_db(path)
     people_store.initialize_db(path)
+    # Cards land in the test's own DB, never ./episodic_memory.db.
+    from openexecutive.alerts import store as alerts_store
+
+    monkeypatch.setattr(alerts_store, "DB_PATH", path)
+    alerts_store.initialize_db(path)
     for var in ("OE_LOCAL_LOGIN", "OE_PUBLIC_DEPLOYMENT", tx.ENV_OFF, tx.BROWSER_OFF):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setattr("openexecutive.audit.log_event", lambda *a, **k: None)
@@ -1383,3 +1388,173 @@ def test_an_unsure_text_reads_on_done_for_you_as_what_happened(
     assert out["status"] == "unsure" and "Say exactly that" in out["message"]
     outcome = ttl.outcome_of("send_text", {}, result)
     assert outcome == out["done"] and "Check your phone" in outcome and "Say" not in outcome
+
+def test_a_send_the_browser_wasnt_sure_of_went_once_its_words_come_back(ids: dict[str, int]) -> None:
+    from openexecutive.alerts.store import list_alerts
+
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("a", text="Plans for mom's birthday?")])
+    (conv,) = tx.conversations(owner)
+    # The turn's line, written when its reply waited on a card.
+    tx.save_note(owner, conv.id, "I drafted a reply. It's waiting on your Approve card.")
+    with tx._connect() as conn:
+        conn.execute(f"UPDATE {tx.TEXT_CONVERSATIONS_TABLE} SET note_at=?", (tx._iso(NOW - timedelta(minutes=1)),))
+    # Approved: it goes, but the browser can't see it go.
+    send = tx.queue_send(owner, "Not sure yet", conversation_id=conv.id)
+    tx.tell_later(send.id, tx.TELL_ON_CARD)
+    tx.take_send(owner)
+    tx.settle_send(owner, send.id, status=tx.UNSURE, error="Google Messages didn't show the text as sent")
+    (thread,) = tx.threads(owner)
+    assert thread.status == tx.UNSURE and "don't know whether" in thread.note
+    assert [a.status for a in list_alerts() if a.source == tx.TEXTS_SOURCE] == ["unread"]
+    # Its words come back as theirs: it went.
+    assert tx.record(owner, [_item("b", text="You: Not sure yet", outgoing=True)]) == []
+    assert tx.get_send(send.id).status == tx.SENT
+    (thread,) = tx.threads(owner)
+    assert thread.status == tx.SENT
+    assert thread.note == 'Texted Dana Ruiz: "Not sure yet"'
+    assert [a.status for a in list_alerts() if a.source == tx.TEXTS_SOURCE] == ["resolved"]
+
+
+def test_a_send_whose_words_came_back_first_is_sent_even_if_the_browser_isnt_sure(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("a", text="Lunch?")])
+    (conv,) = tx.conversations(owner)
+    send = tx.queue_send(owner, "Sounds good", conversation_id=conv.id)
+    tx.take_send(owner)
+    tx.record(owner, [_item("b", text="You: Sounds good", outgoing=True)])
+    assert tx.settle_send(owner, send.id, status=tx.UNSURE).status == tx.SENT
+    # One that never came back stays unsure.
+    other = tx.queue_send(owner, "See you", conversation_id=conv.id)
+    tx.take_send(owner)
+    assert tx.settle_send(owner, other.id, status=tx.UNSURE).status == tx.UNSURE
+
+
+def test_a_line_written_after_its_send_stays(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("a", text="Lunch?")])
+    (conv,) = tx.conversations(owner)
+    send = tx.queue_send(owner, "Sounds good", conversation_id=conv.id)
+    _age(send.id, 0.1)
+    tx.settle_send(owner, send.id, status=tx.SENT)
+    tx.save_note(owner, conv.id, "Told Dana lunch sounds good.")
+    (thread,) = tx.threads(owner)
+    assert thread.note == "Told Dana lunch sounds good."
+
+
+def test_a_send_to_a_number_with_a_conversation_counts_as_its(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    # The first try didn't go and never found its conversation; the retry did.
+    failed = tx.queue_send(owner, "Hi", to_number="4075550111")
+    tx.take_send(owner)
+    tx.settle_send(owner, failed.id, status=tx.FAILED, error="moved to another conversation")
+    ok = tx.queue_send(owner, "Hi", to_number="4075550111")
+    tx.take_send(owner)
+    tx.settle_send(owner, ok.id, status=tx.SENT, conversation_key="k1")
+    (thread,) = tx.threads(owner)
+    assert thread.status == tx.SENT and not thread.id.startswith("send-")
+    # A later loose send to that number is its latest.
+    tx.queue_send(owner, "Still on?", to_number="+1 407 555 0111")
+    (thread,) = tx.threads(owner)
+    assert thread.status == "sending"
+
+
+def test_an_unsure_send_that_came_back_before_this_is_sent_at_start(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("a", text="Lunch?")])
+    (conv,) = tx.conversations(owner)
+    send = tx.queue_send(owner, "Sounds good", conversation_id=conv.id)
+    tx.take_send(owner)
+    tx.settle_send(owner, send.id, status=tx.UNSURE)
+    # Kept by an earlier version: unsure, though its words came back.
+    with tx._connect() as conn:
+        conn.execute(f"UPDATE {tx.TEXT_SENDS_TABLE} SET echoed=? WHERE id=?", (tx.ECHOED_AS_YOURS, send.id))
+    tx.tidy()
+    assert tx.get_send(send.id).status == tx.SENT
+
+
+def test_the_same_words_from_the_other_side_never_say_an_unsure_send_went(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("a", text="Lunch at 1?")])
+    (conv,) = tx.conversations(owner)
+    send = tx.queue_send(owner, "Ok", conversation_id=conv.id)
+    tx.take_send(owner)
+    tx.settle_send(owner, send.id, status=tx.UNSURE)
+    # A first look shows Dana's own "Ok" in a group, flagged only as earlier.
+    tx.record(owner, [_item("b", text="Dana: Ok", outgoing=True, earlier=True)])
+    assert tx.get_send(send.id).status == tx.UNSURE
+    tx.tidy()
+    assert tx.get_send(send.id).status == tx.UNSURE
+    # Dana texts "ok" on her own: not marked as theirs.
+    with tx._connect() as conn:
+        conn.execute(f"UPDATE {tx.TEXT_SENDS_TABLE} SET echoed=0 WHERE id=?", (send.id,))
+    tx.record(owner, [_item("b2", text="ok")])
+    assert tx.get_send(send.id).status == tx.UNSURE
+    # Nor the same words flagged only because they were already there.
+    tx.record(owner, [_item("c", text="Dana Ruiz: Ok", outgoing=True, earlier=True)])
+    assert tx.get_send(send.id).status == tx.UNSURE
+    tx.tidy()
+    assert tx.get_send(send.id).status == tx.UNSURE
+
+
+def test_an_unsure_send_to_a_new_number_went_once_it_comes_back_there(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    send = tx.queue_send(owner, "Hi there", to_number="4075550111")
+    tx.take_send(owner)
+    tx.settle_send(owner, send.id, status=tx.UNSURE)
+    tx.record(owner, [_item("a", conv="n1", title="(407) 555-0111", sender="(407) 555-0111",
+                            text="You: Hi there", outgoing=True)])
+    went = tx.get_send(send.id)
+    assert went.status == tx.SENT and went.conversation_id
+    (thread,) = tx.threads(owner)
+    assert thread.status == tx.SENT
+    assert [(t.text, t.outgoing) for t in thread.texts] == [("Hi there", True)]
+
+
+def test_a_send_whose_words_came_back_is_sent_when_chrome_never_answers(ids: dict[str, int]) -> None:
+    from openexecutive.alerts.store import list_alerts
+
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("a", text="Lunch?")])
+    (conv,) = tx.conversations(owner)
+    send = tx.queue_send(owner, "Sounds good", conversation_id=conv.id)
+    tx.tell_later(send.id, tx.TELL_ON_CARD)
+    tx.take_send(owner)
+    tx.record(owner, [_item("b", text="You: Sounds good", outgoing=True)])
+    _age(send.id, 3)
+    tx.expire_all()
+    assert tx.get_send(send.id).status == tx.SENT
+    assert [a for a in list_alerts() if a.source == tx.TEXTS_SOURCE] == []
+
+
+def test_an_unsure_send_to_a_new_number_never_goes_by_a_strangers_same_words(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    send = tx.queue_send(owner, "Sounds good, see you then", to_number="4075550111")
+    tx.take_send(owner)
+    tx.settle_send(owner, send.id, status=tx.UNSURE)
+    # A new conversation with no number shown, in the same words.
+    tx.record(owner, [_item("a", conv="x1", title="Pat", sender="Pat",
+                            text="You: Sounds good, see you then", outgoing=True)])
+    assert tx.get_send(send.id).status == tx.UNSURE
+
+
+def test_a_send_never_taken_is_never_sent_by_the_persons_own_same_words(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    tx.record(owner, [_item("a", text="Where are you?")])
+    (conv,) = tx.conversations(owner)
+    send = tx.queue_send(owner, "On my way", conversation_id=conv.id)
+    # They texted it themselves while Chrome was closed.
+    tx.record(owner, [_item("b", text="You: On my way", outgoing=True)])
+    _age(send.id, 2)
+    tx.expire_all()
+    assert tx.get_send(send.id).status == tx.FAILED
