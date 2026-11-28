@@ -70,6 +70,9 @@ FAILED = "failed"
 # Handed to the browser, which never said how it went: it may or may not have gone.
 UNSURE = "unsure"
 SETTLED = frozenset({SENT, FAILED, UNSURE})
+# A send's ``echoed`` when its words came back marked as theirs ("You: …"),
+# not only as the same words (1): enough to say an unsure send went.
+ECHOED_AS_YOURS = 2
 
 _db = db.company_path
 
@@ -188,7 +191,8 @@ def forget(person_id: int, *, db_path: Path | None = None) -> None:
 
 def tidy(*, db_path: Path | None = None) -> None:
     """At start: drop what is past ``KEEP_DAYS``, and everything kept while
-    the install has texts off (each person's switch row stays)."""
+    the install has texts off (each person's switch row stays). A send
+    marked unsure whose words came back is sent."""
     with _connect(db_path) as conn:
         if not available():
             for table in (TEXTS_TABLE, TEXT_CONVERSATIONS_TABLE, TEXT_SENDS_TABLE):
@@ -196,6 +200,15 @@ def tidy(*, db_path: Path | None = None) -> None:
             return
         _prune(conn, None)
         _drop_codes(conn)
+        # One the browser wasn't sure of whose words came back went after all
+        # (``record``), including one settled before that was looked at.
+        went = [int(r["id"]) for r in conn.execute(
+            f"SELECT id FROM {TEXT_SENDS_TABLE} WHERE status=? AND echoed=?", (UNSURE, ECHOED_AS_YOURS),
+        ).fetchall()]
+        for send_id in went:
+            conn.execute(f"UPDATE {TEXT_SENDS_TABLE} SET status=?, error='' WHERE id=?", (SENT, send_id))
+    for send_id in went:
+        _went_after_all(send_id, db_path)
     expire_all(db_path=db_path)
 
 
@@ -301,6 +314,7 @@ def record(person_id: int, items: list[Incoming], *, db_path: Path | None = None
     if not get_settings(person_id, db_path=db_path).active:
         return []
     fresh: list[int] = []
+    went: list[int] = []
     now = _now()
     cutoff = now - timedelta(days=KEEP_DAYS)
     with _connect(db_path) as conn:
@@ -327,7 +341,23 @@ def record(person_id: int, items: list[Incoming], *, db_path: Path | None = None
             outgoing = echo is not None
             ref, sender, words = _clip(item.ref, 300), _clip(item.sender, 200), _clip(item.text, MAX_TEXT)
             if echo is not None:
-                conn.execute(f"UPDATE {TEXT_SENDS_TABLE} SET echoed=1 WHERE id=?", (echo,))
+                # Marked as theirs ("You: …", which the browser flags) too, it
+                # is ``ECHOED_AS_YOURS``: the same words from the other side
+                # alone are not (nor a first look's rows, flagged without it).
+                as_yours = bool(item.outgoing) and not item.earlier and _LEADING_WHO.match(item.text or "") is not None
+                conn.execute(
+                    f"UPDATE {TEXT_SENDS_TABLE} SET echoed=? WHERE id=?",
+                    (ECHOED_AS_YOURS if as_yours else 1, echo),
+                )
+                if as_yours:
+                    # Its words came back as theirs: a send the browser
+                    # wasn't sure of went after all.
+                    cur = conn.execute(
+                        f"UPDATE {TEXT_SENDS_TABLE} SET status=?, error='' WHERE id=? AND status=?",
+                        (SENT, echo, UNSURE),
+                    )
+                    if cur.rowcount == 1:
+                        went.append(echo)
                 # A send to a new number now has its conversation.
                 conn.execute(
                     f"UPDATE {TEXT_SENDS_TABLE} SET conversation_id=? WHERE id=? AND conversation_id IS NULL",
@@ -354,6 +384,8 @@ def record(person_id: int, items: list[Incoming], *, db_path: Path | None = None
             f"(SELECT id FROM {TEXTS_TABLE} WHERE person_id=? ORDER BY at DESC, id DESC LIMIT ?)",
             (person_id, person_id, MAX_KEPT),
         )
+    for send_id in went:
+        _went_after_all(send_id, db_path)
     return fresh
 
 
@@ -376,13 +408,13 @@ def _echo_of(conn: sqlite3.Connection, person_id: int, conversation_id: str, tex
         return None
     # Only a send of the last few minutes (since the browser took it or said
     # how it went, as it can wait in the queue), in this conversation, or one
-    # to a new number still on its way: a reply an hour later in the same
+    # to a new number still on its way or unsure: a reply an hour later in the same
     # words is someone's reply.
     rows = conn.execute(
-        f"SELECT id, text, conversation_id, to_number FROM {TEXT_SENDS_TABLE} WHERE person_id=? AND status<>? "
-        "AND echoed=0 AND COALESCE(done_at, created_at) >= ? AND (conversation_id=? OR (conversation_id IS NULL AND status IN (?, ?))) "
+        f"SELECT id, text, conversation_id, to_number, status FROM {TEXT_SENDS_TABLE} WHERE person_id=? AND status<>? "
+        "AND echoed=0 AND COALESCE(done_at, created_at) >= ? AND (conversation_id=? OR (conversation_id IS NULL AND status IN (?, ?, ?))) "
         "ORDER BY id",
-        (person_id, FAILED, _iso(now - _ECHO_WITHIN), conversation_id, PENDING, HANDED),
+        (person_id, FAILED, _iso(now - _ECHO_WITHIN), conversation_id, PENDING, HANDED, UNSURE),
     ).fetchall()
     bare = _LEADING_WHO.sub("", text, count=1)
     same = [r for r in rows if _same_words(r["text"], text) or _same_words(r["text"], bare)]
@@ -403,8 +435,13 @@ def _echo_of(conn: sqlite3.Connection, person_id: int, conversation_id: str, tex
     if len(shown) >= 7:
         # A number that isn't the one it went to: someone else's conversation.
         return None
+    # An unsure one is matched only by its number: a stranger's new
+    # conversation in the same words must never say it went.
+    going = [r for r in same if r["conversation_id"] is not None or r["status"] != UNSURE]
+    if not going:
+        return None
     earlier = conn.execute(f"SELECT 1 FROM {TEXTS_TABLE} WHERE conversation_id=? LIMIT 1", (conversation_id,)).fetchone()
-    return int(same[0]["id"]) if earlier is None else None
+    return int(going[0]["id"]) if earlier is None else None
 
 
 def _upsert_conversation(conn: sqlite3.Connection, person_id: int, item: Incoming, now: datetime) -> str:
@@ -541,6 +578,27 @@ def _settle_log(row: sqlite3.Row, db_path: Path | None = None) -> None:
         logging.getLogger(__name__).exception("texts: couldn't say on its row how send %s went", row["id"])
 
 
+def _went_after_all(send_id: int, db_path: Path | None = None) -> None:
+    """A send the browser wasn't sure of came back as theirs, so it went:
+    its log row says so, the card that said it may not have is closed, and a
+    chat that was told it may not have hears it went. Never raises."""
+    try:
+        with _connect(db_path) as conn:
+            row = conn.execute(f"SELECT * FROM {TEXT_SENDS_TABLE} WHERE id=?", (send_id,)).fetchone()
+        if row is None:
+            return
+        _settle_log(row, db_path)
+        send = _send(row)
+        if send.tell_session == TELL_ON_CARD:
+            from openexecutive.alerts.store import set_status_by_external
+
+            set_status_by_external(TEXTS_SOURCE, f"text_send:{send.id}", "resolved", db_path=db_path)
+        else:
+            _tell(send, db_path=db_path)
+    except Exception:
+        logging.getLogger(__name__).exception("texts: couldn't say send %s went after all", send_id)
+
+
 def send_who(send: Send, *, db_path: Path | None = None) -> str:
     """Who a send is to, in words."""
     if send.conversation_id:
@@ -661,9 +719,14 @@ def _expire(person_id: int, db_path: Path | None) -> None:
                 (person_id, waiting, _iso(_now() - within)),
             ).fetchall()
             for r in late:
+                # One the browser took whose words already came back as
+                # theirs went (one never taken, never: those were the
+                # person's own words).
+                went_if = ECHOED_AS_YOURS if waiting == HANDED else -1
                 cur = conn.execute(
-                    f"UPDATE {TEXT_SENDS_TABLE} SET status=?, error=?, done_at=? WHERE id=? AND status=?",
-                    (now_status, error, _iso(_now()), r["id"], waiting),
+                    f"UPDATE {TEXT_SENDS_TABLE} SET status=CASE WHEN echoed=? THEN ? ELSE ? END, "
+                    "error=CASE WHEN echoed=? THEN '' ELSE ? END, done_at=? WHERE id=? AND status=?",
+                    (went_if, SENT, now_status, went_if, error, _iso(_now()), r["id"], waiting),
                 )
                 if cur.rowcount == 1:
                     row = conn.execute(f"SELECT * FROM {TEXT_SENDS_TABLE} WHERE id=?", (r["id"],)).fetchone()
@@ -737,6 +800,10 @@ def settle_send(
         raise ValueError(status)
     now = _now()
     with _connect(db_path) as conn:
+        # Read and claim in one write: an echo ``record`` sees in between
+        # never leaves a send that went as unsure.
+        conn.commit()
+        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute(
             f"SELECT * FROM {TEXT_SENDS_TABLE} WHERE id=? AND person_id=?", (send_id, person_id),
         ).fetchone()
@@ -744,6 +811,10 @@ def settle_send(
             return None
         if row["status"] not in (PENDING, HANDED):
             return _send(row)
+        # Its words already came back as theirs (``record``): it went, even
+        # if the browser couldn't see it go.
+        if status == UNSURE and row["echoed"] == ECHOED_AS_YOURS:
+            status, error = SENT, ""
         # Claimed once: a second answer for the same send (two tabs, a retry)
         # changes nothing and tells no one again.
         claimed = conn.execute(
@@ -905,8 +976,11 @@ def _status(send_status: str | None) -> str:
 
 def threads(person_id: int, *, limit: int = 50, per: int = 20, db_path: Path | None = None) -> list[Thread]:
     """The person's own conversations for the Texts page, latest first. Each
-    one's status comes from its latest send; a send to a new number shows as
-    its own row until the browser says which conversation it went to."""
+    one's status comes from its latest send, and once that send is newer
+    than the Executive's line on it (a card they approved later), the line
+    says how that send went. A send to a new number shows as its own row
+    until the browser says which conversation it went to, or a conversation
+    with that number is there: then it counts as that conversation's."""
     out: list[Thread] = []
     with _connect(db_path) as conn:
         # Latest by whatever happened last: a text in, a send, or a note.
@@ -917,29 +991,54 @@ def threads(person_id: int, *, limit: int = 50, per: int = 20, db_path: Path | N
             ") DESC LIMIT ?",
             (person_id, limit),
         ).fetchall()
-        for c in convs:
-            last = conn.execute(
-                f"SELECT status, created_at FROM {TEXT_SENDS_TABLE} WHERE person_id=? AND conversation_id=? "
-                "ORDER BY id DESC LIMIT 1",
-                (person_id, c["id"]),
-            ).fetchone()
-            rows = conn.execute(
-                f"SELECT * FROM {TEXTS_TABLE} WHERE person_id=? AND conversation_id=? ORDER BY at DESC, id DESC LIMIT ?",
-                (person_id, c["id"], per),
-            ).fetchall()
-            at = max(str(c["updated_at"] or ""), str(last["created_at"]) if last else "", str(c["note_at"] or ""))
-            out.append(Thread(
-                id=str(c["id"]), who=_conversation(c).who, number=str(c["number"] or ""),
-                is_group=bool(c["is_group"]), at=at, note=str(c["note"] or ""),
-                status=_status(last["status"] if last else None),
-                texts=[_text(r) for r in reversed(rows)],
-            ))
         loose = conn.execute(
             f"SELECT * FROM {TEXT_SENDS_TABLE} WHERE person_id=? AND conversation_id IS NULL "
             "ORDER BY id DESC LIMIT ?",
             (person_id, limit),
         ).fetchall()
-    for r in loose:
+        # A send to a number with a conversation here belongs to it.
+        by_number: dict[str, sqlite3.Row] = {}
+        for c in convs:
+            key = digits(str(c["number"] or "") or str(c["title"] or ""))[-10:]
+            if len(key) >= 7 and not c["is_group"]:
+                by_number.setdefault(key, c)
+        folded: dict[str, list[sqlite3.Row]] = {}
+        alone: list[sqlite3.Row] = []
+        for r in loose:
+            home = by_number.get(digits(str(r["to_number"] or ""))[-10:])
+            if home is not None:
+                folded.setdefault(str(home["id"]), []).append(r)
+            else:
+                alone.append(r)
+        for c in convs:
+            last = conn.execute(
+                f"SELECT * FROM {TEXT_SENDS_TABLE} WHERE person_id=? AND conversation_id=? "
+                "ORDER BY id DESC LIMIT 1",
+                (person_id, c["id"]),
+            ).fetchone()
+            for r in folded.get(str(c["id"]), []):
+                if last is None or int(r["id"]) > int(last["id"]):
+                    last = r
+            rows = conn.execute(
+                f"SELECT * FROM {TEXTS_TABLE} WHERE person_id=? AND conversation_id=? ORDER BY at DESC, id DESC LIMIT ?",
+                (person_id, c["id"], per),
+            ).fetchall()
+            note, note_at = str(c["note"] or ""), str(c["note_at"] or "")
+            at = max(str(c["updated_at"] or ""), str(last["created_at"]) if last else "", note_at)
+            who = _conversation(c).who
+            if last is not None and note and str(last["created_at"]) > note_at:
+                # Its line was written before this send (it waited on a card):
+                # say how the send went instead, once it has.
+                send = _send(last)
+                if send.status in SETTLED:
+                    note = outcome_words(send, who)
+            out.append(Thread(
+                id=str(c["id"]), who=who, number=str(c["number"] or ""),
+                is_group=bool(c["is_group"]), at=at, note=note,
+                status=_status(last["status"] if last else None),
+                texts=[_text(r) for r in reversed(rows)],
+            ))
+    for r in alone:
         out.append(Thread(
             id=f"send-{r['id']}", who=str(r["to_number"] or "someone"), number=str(r["to_number"] or ""),
             is_group=False, at=str(r["created_at"]), note="", status=_status(str(r["status"])),
