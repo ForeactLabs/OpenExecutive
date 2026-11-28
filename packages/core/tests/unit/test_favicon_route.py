@@ -1,6 +1,7 @@
 """GET /favicon/{site}: a website's own icon for the timeline (api/routes/favicon.py)."""
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 
 import pytest
@@ -17,6 +18,9 @@ SVG = b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
 def _fresh_cache() -> Iterator[None]:
     favicon_route._cache.clear()
     favicon_route._looking.clear()
+    # Each test runs its own event loop: a semaphore binds to the first one
+    # it waits in.
+    favicon_route._slots = asyncio.Semaphore(favicon_route._AT_ONCE)
     yield
     favicon_route._cache.clear()
     favicon_route._looking.clear()
