@@ -64,6 +64,17 @@ def test_a_message_that_could_not_be_written_points_at_the_report(
     assert _write(monkeypatch, provider) == run_message.fallback_message("Daily Meeting Prep")
 
 
+def test_the_message_names_the_workflow_rather_than_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Its first line is what a Home notice shows on its own, so it says which
+    # workflow, not "The run may have stopped partway".
+    provider = _Provider("Your meeting prep found no meetings tomorrow.")
+    _write(monkeypatch, provider)
+    assert "Workflow: Daily Meeting Prep" in provider.calls[0]["messages"][0]["content"]
+    system = run_message.RUN_MESSAGE_SYSTEM
+    assert "names the workflow by what it does" in system
+    assert "never says 'the run' or 'the workflow'" in system
+
+
 def test_an_empty_report_sends_nothing() -> None:
     assert asyncio.run(run_message.message_for_run(
         title="t", description="", artifact="  ", person_id=3,
