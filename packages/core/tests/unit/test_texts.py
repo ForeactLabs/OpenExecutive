@@ -1509,3 +1509,15 @@ def test_a_send_whose_words_came_back_is_sent_when_chrome_never_answers(ids: dic
     tx.expire_all()
     assert tx.get_send(send.id).status == tx.SENT
     assert [a for a in list_alerts() if a.source == tx.TEXTS_SOURCE] == []
+
+
+def test_an_unsure_send_to_a_new_number_never_goes_by_a_strangers_same_words(ids: dict[str, int]) -> None:
+    owner = ids["principal"]
+    _on(owner)
+    send = tx.queue_send(owner, "Sounds good, see you then", to_number="4075550111")
+    tx.take_send(owner)
+    tx.settle_send(owner, send.id, status=tx.UNSURE)
+    # A new conversation with no number shown, in the same words.
+    tx.record(owner, [_item("a", conv="x1", title="Pat", sender="Pat",
+                            text="You: Sounds good, see you then", outgoing=True)])
+    assert tx.get_send(send.id).status == tx.UNSURE

@@ -411,7 +411,7 @@ def _echo_of(conn: sqlite3.Connection, person_id: int, conversation_id: str, tex
     # to a new number still on its way or unsure: a reply an hour later in the same
     # words is someone's reply.
     rows = conn.execute(
-        f"SELECT id, text, conversation_id, to_number FROM {TEXT_SENDS_TABLE} WHERE person_id=? AND status<>? "
+        f"SELECT id, text, conversation_id, to_number, status FROM {TEXT_SENDS_TABLE} WHERE person_id=? AND status<>? "
         "AND echoed=0 AND COALESCE(done_at, created_at) >= ? AND (conversation_id=? OR (conversation_id IS NULL AND status IN (?, ?, ?))) "
         "ORDER BY id",
         (person_id, FAILED, _iso(now - _ECHO_WITHIN), conversation_id, PENDING, HANDED, UNSURE),
@@ -435,8 +435,13 @@ def _echo_of(conn: sqlite3.Connection, person_id: int, conversation_id: str, tex
     if len(shown) >= 7:
         # A number that isn't the one it went to: someone else's conversation.
         return None
+    # An unsure one is matched only by its number: a stranger's new
+    # conversation in the same words must never say it went.
+    going = [r for r in same if r["conversation_id"] is not None or r["status"] != UNSURE]
+    if not going:
+        return None
     earlier = conn.execute(f"SELECT 1 FROM {TEXTS_TABLE} WHERE conversation_id=? LIMIT 1", (conversation_id,)).fetchone()
-    return int(same[0]["id"]) if earlier is None else None
+    return int(going[0]["id"]) if earlier is None else None
 
 
 def _upsert_conversation(conn: sqlite3.Connection, person_id: int, item: Incoming, now: datetime) -> str:
