@@ -20,8 +20,10 @@ const restored = chrome.storage.session
   })
   .catch(() => undefined);
 
-// The popup's sites and any set by the browser's administrator (``OE.connectedOrigins``).
-const connectedOrigins = () => OE.connectedOrigins();
+async function connectedOrigins() {
+  const { origins } = await chrome.storage.local.get("origins");
+  return Array.isArray(origins) ? origins : [];
+}
 
 // The tab the person is looking at: the active tab of the browser window
 // they used last (a popup window is not a browser window). A saved
@@ -221,7 +223,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 chrome.runtime.onStartup.addListener(() => void keepConnected().catch(() => undefined));
 chrome.storage.onChanged.addListener((changes, area) => {
-  if ((area === "local" && (changes.origins || changes.stayConnected)) || (area === "managed" && changes.origins)) void keepConnected().catch(() => undefined);
+  if (area === "local" && (changes.origins || changes.stayConnected)) void keepConnected().catch(() => undefined);
 });
 // Closed by the person: not opened again until Chrome restarts, or they turn
 // "Stay connected" back on.
