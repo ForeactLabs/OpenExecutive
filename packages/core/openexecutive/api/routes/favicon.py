@@ -12,8 +12,8 @@ are served back (PNG, ICO, GIF, JPEG, WebP, sniffed from their bytes, never
 SVG, which can carry script), with a ``default-src 'none'`` policy. An icon
 address a page names must be https on a public domain name, never an IP
 address or a port, and so must every redirect. Answers are kept in memory
-per person for a day (a miss for an hour); one lookup per site runs at a
-time, a few at once in all, each within a time limit, and past a short
+per person for a day (a miss for an hour); one lookup per person and site
+runs at a time, a few at once in all and per person, each within a time limit, and past a short
 queue a new site gets no icon for now.
 """
 from __future__ import annotations
@@ -47,8 +47,9 @@ _CACHE_MAX_BYTES = 8_000_000
 # Lookups at once in all, and how long one may take.
 _AT_ONCE = 4
 _LOOKUP_S = 20.0
-# Sites being looked up or waiting for a turn, at most.
+# Lookups running or waiting for a turn, at most: in all, and per person.
 _MAX_LOOKING = 8
+_MAX_LOOKING_EACH = 3
 
 _cache: dict[str, tuple[bytes | None, str, float]] = {}
 _looking: dict[str, asyncio.Future[tuple[bytes, str] | None]] = {}
@@ -185,17 +186,20 @@ class _Busy(Exception):
     """Too many lookups are waiting: answer no icon now, and keep nothing."""
 
 
-async def _icon_once(site: str) -> tuple[bytes, str] | None:
-    """One lookup per site at a time: a second ask waits on the first. Past
-    ``_MAX_LOOKING`` sites waiting, a new one is turned away at once."""
-    running = _looking.get(site)
+async def _icon_once(who: str, site: str) -> tuple[bytes, str] | None:
+    """One lookup per person and site at a time: a second ask waits on the
+    first, never on someone else's. Past ``_MAX_LOOKING`` lookups in all, or
+    ``_MAX_LOOKING_EACH`` of this person's, a new one is turned away at once."""
+    key = f"{who}|{site}"
+    running = _looking.get(key)
     if running is not None:
         return await asyncio.shield(running)
-    if len(_looking) >= _MAX_LOOKING:
+    mine = sum(1 for k in _looking if k.startswith(f"{who}|"))
+    if len(_looking) >= _MAX_LOOKING or mine >= _MAX_LOOKING_EACH:
         raise _Busy
     task: asyncio.Future[tuple[bytes, str] | None] = asyncio.ensure_future(_look_up(site))
-    _looking[site] = task
-    task.add_done_callback(lambda _t: _looking.pop(site, None))
+    _looking[key] = task
+    task.add_done_callback(lambda _t: _looking.pop(key, None))
     return await asyncio.shield(task)
 
 
@@ -214,12 +218,13 @@ async def favicon(site: str, request: Request) -> Response:
         raise HTTPException(status_code=404, detail="No icon")
     # Kept per person: how fast an answer comes never says which sites
     # someone else's steps were on.
-    key = f"{identity_key(request)}|{site}"
+    who = identity_key(request)
+    key = f"{who}|{site}"
     now = time.monotonic()
     cached = _cache.get(key)
     if cached is None or now - cached[2] > (_HIT_TTL_S if cached[0] else _MISS_TTL_S):
         try:
-            found = await _icon_once(site)
+            found = await _icon_once(who, site)
         except _Busy:
             raise HTTPException(status_code=404, detail="No icon") from None
         cached = (found[0], found[1], now) if found else (None, "", now)

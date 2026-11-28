@@ -364,8 +364,9 @@ class TurnTimeline:
                     last.reads[kind] = last.reads.get(kind, 0) + n
             return bool(reads)
         tool = str(item.get("tool") or "")
+        # The line names the site only once the browser says this step ran
+        # there (``_step_site``), never from the page an earlier step was on.
         site = self._page_site(tool, item)
-        label = _on_site(label, site)
         if last is not None and not last.named and last.label == label:
             for kind, n in reads.items():
                 last.reads[kind] = last.reads.get(kind, 0) + n
@@ -395,16 +396,19 @@ class TurnTimeline:
 
     def _step_site(self, item: dict[str, Any]) -> bool:
         """The browser ran a step on ``site``: the page the turn is on now,
-        and the site of the step that ran it."""
+        and the site of the step that ran it, which its line then names."""
         site = item.get("site")
         if not (isinstance(site, str) and step_icons.valid_site(site)):
             return False
         self._site = site
         last = self.steps[-1] if self.steps else None
-        if last is None or not step_icons.on_page(last.tool) or last.site == site:
+        if last is None or not step_icons.on_page(last.tool):
+            return False
+        label = _on_site(last.label, site)
+        if last.site == site and last.label == label:
             return False
         last.site = site
-        last.label = _on_site(last.label, site)
+        last.label = label
         return True
 
     def _progress(self, item: dict[str, Any]) -> bool:

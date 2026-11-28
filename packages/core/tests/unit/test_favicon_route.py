@@ -103,11 +103,38 @@ def test_one_lookup_per_site_at_a_time(monkeypatch: pytest.MonkeyPatch) -> None:
 
     async def both() -> list[tuple[bytes, str] | None]:
         return list(await asyncio.gather(
-            favicon_route._icon_once("example.com"), favicon_route._icon_once("example.com"),
+            favicon_route._icon_once("a", "example.com"), favicon_route._icon_once("a", "example.com"),
+            favicon_route._icon_once("b", "example.com"),
         ))
 
-    assert asyncio.run(both()) == [(PNG, "image/png")] * 2
-    assert calls == ["example.com"]
+    assert asyncio.run(both()) == [(PNG, "image/png")] * 3
+    # One lookup each: b never rides on a's (its timing would say a asked).
+    assert calls == ["example.com", "example.com"]
+
+
+def test_one_person_cannot_take_every_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    async def slow(site: str) -> tuple[bytes, str] | None:
+        await asyncio.sleep(0.05)
+        return None
+
+    monkeypatch.setattr(favicon_route, "find_icon", slow)
+
+    async def go() -> list[object]:
+        mine = [asyncio.ensure_future(favicon_route._icon_once("a", f"s{i}.com")) for i in range(3)]
+        await asyncio.sleep(0)
+        out: list[object] = []
+        for who in ("a", "b"):
+            try:
+                await favicon_route._icon_once(who, "next.com")
+                out.append(who)
+            except favicon_route._Busy:
+                out.append("busy")
+        await asyncio.gather(*mine)
+        return out
+
+    assert asyncio.run(go()) == ["busy", "b"]
 
 
 def test_a_slow_site_gives_up(monkeypatch: pytest.MonkeyPatch) -> None:

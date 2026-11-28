@@ -444,6 +444,7 @@ def test_a_browser_round_names_the_site_and_the_rounds_on_its_page_keep_it() -> 
     # The browser says where the step went once it ran.
     tl.observe({"type": "step_site", "site": "papajohns.com"})
     tl.observe({"type": "activity", "label": "Looking at the page…", "tool": "browser_look"})
+    tl.observe({"type": "step_site", "site": "papajohns.com"})
     tl.observe({"type": "activity", "label": "Clicking…", "tool": "browser_click"})
     tl.observe({"type": "activity", "label": "Switching tabs…", "tool": "browser_switch_tab"})
     tl.observe({"type": "activity", "label": "Looking at the page…", "tool": "browser_look"})
@@ -467,6 +468,25 @@ def test_an_address_the_model_asked_for_is_never_the_site() -> None:
     steps = tl.finish()["steps"]
     assert [s.get("site") for s in steps] == [None, None]
     assert tl.observe({"type": "step_site", "site": "127.0.0.1"}) is None
+
+
+def test_a_line_names_only_the_site_the_browser_said_the_step_ran_on() -> None:
+    tl = TurnTimeline(Clock())
+    tl.observe({"type": "activity", "label": "Opening the page…", "tool": "browser_navigate"})
+    tl.observe({"type": "step_site", "site": "a.com"})
+    # The page moved on its own (a sign-in): the next look ran elsewhere.
+    tl.observe({"type": "activity", "label": "Looking at the page…", "tool": "browser_look"})
+    tl.observe({"type": "step_site", "site": "login.b-idp.com"})
+    # A look that never ran names no site.
+    tl.observe({"type": "activity", "label": "Clicking…", "tool": "browser_click"})
+    tl.observe({"type": "activity", "label": "Looking at the page…", "tool": "browser_look"})
+    steps = tl.finish()["steps"]
+    assert [(s["label"], s.get("site")) for s in steps] == [
+        ("Opened a.com", "a.com"),
+        ("Looked at login.b-idp.com", "login.b-idp.com"),
+        ("Clicked", "login.b-idp.com"),
+        ("Looked at the page", "login.b-idp.com"),
+    ]
 
 
 def test_only_a_step_that_ran_shows_its_site() -> None:
